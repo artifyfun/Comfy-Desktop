@@ -275,7 +275,9 @@ function revealStartupRestoreDashboard(windowKey: number): void {
  * error, console/external mode, slow/absent renderer) falls back to revealing
  * the dashboard.
  */
-async function openStartupSurface(): Promise<void> {
+async function openStartupSurface(
+  opts: { deferChooserReveal?: boolean } = {}
+): Promise<void> {
   // Single auto-launch path: the user-configured `autoLaunchOnStartup`
   // dropdown is the only opt-in to "boot straight into an instance". When
   // unset (`'none'` / first-use not yet completed) we just open the
@@ -289,9 +291,13 @@ async function openStartupSurface(): Promise<void> {
       ? await resolveAutoLaunchInstall(autoLaunchValue)
       : null
 
-  // Restore opens hidden (revealed on takeover-ready / fallback); the plain
-  // dashboard boot reveals on first paint as before.
-  const chooserWindow = explicitInst
+  // ArtifyLab mode: open the chooser host hidden — the A UI window is the
+  // foreground surface; the host stays hidden until the user switches to
+  // ComfyUI (`focusComfyUI` → `openOrFocusAnyHostWindow` → `bringToFront`
+  // shows it). Restore opens hidden as before (revealed on takeover-ready
+  // or fallback); the plain dashboard boot reveals on first paint unless
+  // `deferChooserReveal` is set.
+  const chooserWindow = explicitInst || opts.deferChooserReveal
     ? openChooserHostWindow('comfy', { deferColdStartReveal: true })
     : openOrFocusChooserHostWindow()
 
@@ -2237,7 +2243,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         clearQuitReason()
         if (updateSplash && !updateSplash.isDestroyed()) updateSplash.destroy()
         mainTelemetry.emit('comfy.desktop.app_update.startup_install_backstop_recovered', {})
-        void openStartupSurface()
+        void openStartupSurface(desktopConfig ? { deferChooserReveal: true } : {})
       }, STARTUP_INSTALL_QUIT_BACKSTOP_MS)
     } else {
       app.removeListener('before-quit', onUpdateInstallQuit)
@@ -2247,8 +2253,9 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       // when launched, and the chooser host is the entry-point for
       // picking / creating installs. When the user last left an instance
       // window (and the reopen setting is on), restore that instance
-      // in-place on top of the freshly-opened chooser host.
-      void openStartupSurface()
+      // in-place on top of the freshly-opened chooser host. ArtifyLab
+      // mode defers the chooser reveal so only the A UI window shows.
+      void openStartupSurface(desktopConfig ? { deferChooserReveal: true } : {})
     }
 
     // Single subscription rebroadcasts every install-list mutation

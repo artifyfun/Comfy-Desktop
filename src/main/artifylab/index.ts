@@ -63,7 +63,11 @@ function getConfig() {
     comfy_port,
     web_root,
     server_origin,
-    server_port: port
+    server_port: port,
+    // 旧前端 A UI 的浮动按钮 v-if 依赖 comfyHost 存在（App.vue）——
+    // 新版 ComfyUI 由 install 架构动态管理，无固定 origin，给默认端口
+    // 保证按钮渲染（前端只用它做存在性判断，实际切换走 loadComfyUI IPC）
+    comfyHost: comfy_origin || `http://localhost:${comfy_port || 8188}`
   }
 }
 
@@ -116,7 +120,9 @@ function loadArtifyLab() {
     height: 900,
     webPreferences: {
       // 共享 preload：注入 window.api 与 legacy 的 window.electronAPI.ArtifyLab 桥
-      // __dirname 是 out/main，preload 构建产物在 out/preload
+      // __dirname 是 out/main，preload 构建产物在 out/preload。
+      // 该 preload 依赖 chunks/*.js 相对模块，沙箱下无法 require（同 panelView）。
+      sandbox: false,
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false

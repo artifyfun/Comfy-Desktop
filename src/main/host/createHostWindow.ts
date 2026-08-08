@@ -1215,6 +1215,12 @@ export function rebuildComfyViewIfNeeded(
     {
       nodeIntegration: false,
       contextIsolation: true,
+      // comfyPreload requires the shared chunks/*.js — a sandboxed preload
+      // can't require() relative chunks (see the sandbox: false notes on the
+      // title-bar preload, issue #521). Without the preload, neither
+      // __comfyDesktop2 nor the legacy electronAPI bridge exist in the
+      // ComfyUI view, which disables the injected artifylab switch button.
+      sandbox: false,
       preload: path.join(__dirname, '../preload/comfyPreload.js'),
       partition: expectedPartition
     },
