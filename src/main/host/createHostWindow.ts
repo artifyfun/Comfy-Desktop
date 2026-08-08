@@ -1354,6 +1354,12 @@ export function openChooserHostWindow(
     comfyWebPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      // comfyPreload requires the shared chunks/*.js (see the sandbox note on
+      // the title-bar preload) — a sandboxed preload can't require() relative
+      // chunks and the bridge dies with `module not found: ./chunks/...`,
+      // which disables `window.electronAPI` in the ComfyUI view and silently
+      // breaks comfy_inject.js (server_origin lookup / floating button).
+      sandbox: false,
       preload: path.join(__dirname, '../preload/comfyPreload.js'),
       partition: 'persist:shared'
     },

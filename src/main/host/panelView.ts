@@ -75,16 +75,23 @@ export function ensurePanelView(
   // navigations a no-op.
   panelView.webContents.on('frame-created', (_event, details) => {
     const frame = details.frame
-    if (!frame || frame === panelView.webContents.mainFrame) return
+    if (!frame || frame === panelView.webContents.mainFrame) {
+      console.log('[iframe-inject] main frame, skip')
+      return
+    }
+    console.log('[iframe-inject] frame created, url=', frame.url.slice(0, 80))
     let tries = 0
     const injectWhenReady = (): void => {
       tries++
       if (frame.url.includes('artify_playground=true')) {
         const injectJs = getComfyInjectScriptSource()
+        console.log('[iframe-inject] injecting, len=', injectJs.length)
         if (injectJs) frame.executeJavaScript(injectJs).catch(() => {})
         return
       }
-      if (tries < 20) setTimeout(injectWhenReady, 250)
+      // The full ComfyUI frontend can take a while to start serving; keep
+      // polling for up to ~30s so a slow first load still gets injected.
+      if (tries < 120) setTimeout(injectWhenReady, 250)
     }
     injectWhenReady()
   })

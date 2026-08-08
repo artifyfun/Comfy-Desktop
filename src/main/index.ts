@@ -1,4 +1,14 @@
-import { app, Menu, ipcMain, net, dialog, crashReporter, nativeTheme, shell } from 'electron'
+import {
+  app,
+  Menu,
+  ipcMain,
+  net,
+  dialog,
+  crashReporter,
+  nativeTheme,
+  shell,
+  session
+} from 'electron'
 import type { BrowserWindow, WebContentsView } from 'electron'
 import type { Tray } from 'electron'
 import path from 'path'
@@ -697,6 +707,11 @@ function onLaunch({
     comfyWebPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      // comfyPreload requires the shared chunks/*.js — sandboxed preloads
+      // can't require() relative chunks (issue #521), which kills
+      // `window.electronAPI` in the ComfyUI view and silently breaks
+      // comfy_inject.js (server_origin lookup / workflow loading).
+      sandbox: false,
       preload: path.join(__dirname, '../preload/comfyPreload.js'),
       partition: expectedPartitionFor(installation)
     },
@@ -2170,15 +2185,73 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       // openStartupSurface 在后面才打开窗口。
       setArtifyPanelMode(true)
       registerArtifyHandlers()
+      // ComfyUI 后端对带 `Origin` 头的跨源导航返回 403（CSRF 校验）。
+      // A UI 的 WorkflowModal iframe 从 http://localhost:5000 导航到
+      // ComfyUI（127.0.0.1:8188）时会带上 Origin → 403 空文档。剥掉
+      // 默认 session（panelView / A UI / iframe 所在）对 ComfyUI 请求
+      // 的 Origin/Referer，让 iframe 能加载 ComfyUI 前端画布；comfyView
+      // 走独立 partition，不受影响。
+      session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+        if (
+          details.url.startsWith('http://127.0.0.1:8188') ||
+          details.url.startsWith('http://localhost:8188')
+        ) {
+          console.log(
+            '[comfy-origin-strip]',
+            details.url.slice(0, 50),
+            JSON.stringify(details.requestHeaders)
+          )
+          const headers: Record<string, string> = {}
+          for (const [k, v] of Object.entries(details.requestHeaders ?? {})) {
+            // 剥离 Origin/Referer/Sec-Fetch-Site：ComfyUI v0.29 的 origin_only_middleware
+            // 对 Sec-Fetch-Site: cross-site 直接 403（不看 Origin），iframe 跨源导航
+            // 携带该头导致空文档；剥离后与直接 curl 等价，返回完整 index.html。
+            if (
+              k.toLowerCase() !== 'origin' &&
+              k.toLowerCase() !== 'referer' &&
+              k.toLowerCase() !== 'sec-fetch-site'
+            ) {
+              headers[k] = v
+            }
+          }
+          callback({ requestHeaders: headers })
+        } else {
+          callback({})
+        }
+      })
       // A→C 切换（单窗口）：有运行中的 install → 同窗口切到 comfy
       // 视图；无运行实例 → 面板切到 install 选择器让用户启动/安装。
       setComfyUIFocusHandler(async () => {
         for (const installationId of Array.from(_runningSessions.keys())) {
           const entry = getEntryByInstallationId(installationId)
           if (entry && !entry.window.isDestroyed()) {
+            // 单窗口闭环：A UI 面板通常还停在启动时的 chooser 窗口
+            // （installationId=null），而 comfyView 在 install 窗口——
+            // 直接 focus install 窗口会让用户看到"另一个窗口弹出来"。
+            // 把 A UI 面板迁到 install 窗口（后续 C→A 在同窗口内切回），
+            // 再关闭承载 A UI 的 chooser 窗口，切换从此只发生在同一窗口。
+            setPanelSurface(entry, 'artify')
             setActivePanel(entry.windowKey, 'comfy')
             entry.window.show()
             entry.window.focus()
+            for (const [, other] of comfyWindows) {
+              if (other !== entry && other.installationId === null && !other.window.isDestroyed()) {
+                other.window.close()
+              }
+            }
+            // 工作流重放：ComfyUI 页面可能早已加载（实例先启动），面板
+            // 切换不会重载页面——comfy_inject.js 的 loadWorkflow 只在
+            // 页面加载时跑过一次（当时 activeAppId 可能还不是本应用）。
+            // 重放 __artifyReloadWorkflow 让画布加载最新 activeAppId 的
+            // 工作流；页面未就绪时 executeJavaScript 会失败，但页面加载
+            // 完成后 loadWorkflow 自身会按当时的 activeAppId 执行一次。
+            if (!entry.comfyView.webContents.isDestroyed()) {
+              entry.comfyView.webContents
+                .executeJavaScript(
+                  'window.__artifyReloadWorkflow && window.__artifyReloadWorkflow()'
+                )
+                .catch(() => {})
+            }
             return true
           }
         }
