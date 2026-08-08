@@ -20,6 +20,7 @@ import {
 } from './registry'
 import type { BodyMode, ComfyPanelKey, ComfyWindowEntry } from './registry'
 import { getArtifyPanelUrl } from '../artifylab/panelMode'
+import { getComfyInjectScriptSource } from './comfyInject'
 
 /** Opaque panel background matching the title-bar chrome, used while the panel
  *  bundle loads for full-screen bodies so the user never sees a black flash. */
@@ -65,6 +66,28 @@ export function ensurePanelView(
   // Native right-click Copy/Paste for selectable text + inputs in panel bodies
   // (chooser, install forms, settings, etc.).
   attachContextMenu(entry.window, panelView.webContents)
+  // The A UI's workflow editor (WorkflowModal) embeds ComfyUI in an iframe
+  // (`artify_playground=true`) and drives it over postMessage. That subframe
+  // has no preload and never goes through attach.ts, so the playground-mode
+  // script never runs there on its own — inject it once the frame lands on
+  // the playground URL (frame-created fires before navigation, hence the
+  // short poll). The script's own `__artifyInjectLoaded` guard keeps repeat
+  // navigations a no-op.
+  panelView.webContents.on('frame-created', (_event, details) => {
+    const frame = details.frame
+    if (!frame || frame === panelView.webContents.mainFrame) return
+    let tries = 0
+    const injectWhenReady = (): void => {
+      tries++
+      if (frame.url.includes('artify_playground=true')) {
+        const injectJs = getComfyInjectScriptSource()
+        if (injectJs) frame.executeJavaScript(injectJs).catch(() => {})
+        return
+      }
+      if (tries < 20) setTimeout(injectWhenReady, 250)
+    }
+    injectWhenReady()
+  })
   // Insert at zero size, behind the comfy view; layoutViews handles positioning.
   panelView.setBounds({ x: 0, y: TITLEBAR_HEIGHT + 1, width: 0, height: 0 })
   panelView.setVisible(false)
