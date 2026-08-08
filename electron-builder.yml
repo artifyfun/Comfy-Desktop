@@ -29,6 +29,9 @@ npmRebuild: false
 asarUnpack:
   - node_modules/7zip-bin/**/*
   - node_modules/node-pty/**/*
+  # @ngrok/ngrok 的原生绑定（platform 包）：.node 无法从 asar 内加载，
+  # 且 pnpm 下 optionalDependencies 不会自动进产物，需显式依赖 + 解包
+  - node_modules/@ngrok/ngrok-win32-x64-msvc/**/*
 afterPack: ./scripts/afterPack.mjs
 publish:
   provider: github

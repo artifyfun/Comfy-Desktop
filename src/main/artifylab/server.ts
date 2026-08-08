@@ -3,7 +3,6 @@ import path from 'node:path'
 import dotenv from 'dotenv'
 import cookieParser from 'cookie-parser'
 import bodyParser from 'body-parser'
-import ngrok from '@ngrok/ngrok'
 import { createServer } from 'node:net'
 import type { Server as HttpServer } from 'node:http'
 import { exec } from 'node:child_process'
@@ -567,12 +566,15 @@ async function initNgrok(token: string): Promise<NgrokConfig> {
     throw new Error('server_origin and comfy_origin must be set in config')
   }
 
+  // 动态导入：原生绑定（@ngrok/ngrok-win32-x64-msvc）缺失时只影响
+  // ngrok 功能本身，不再拖崩整个 server 启动
+  const ngrokModule = await import('@ngrok/ngrok')
   try {
-    chatListener = await ngrok.forward({
+    chatListener = await ngrokModule.forward({
       addr: config.server_origin,
       authtoken: token
     })
-    comfyListener = await ngrok.forward({
+    comfyListener = await ngrokModule.forward({
       addr: config.comfy_origin,
       authtoken: token
     })

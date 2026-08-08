@@ -89,7 +89,8 @@
     "smol-toml": "^1.6.1",
     "systeminformation": "^5.31.5",
     "tar": "^7.5.11",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "@ngrok/ngrok-win32-x64-msvc": "1.7.0"
   },
   "devDependencies": {
     "@comfyorg/comfyui-desktop-bridge-types": "0.1.2",
