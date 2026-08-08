@@ -1,6 +1,5 @@
 import { app, ipcMain } from 'electron'
 import semver from 'semver'
-import todesktop from '@todesktop/runtime'
 import { autoUpdater as electronAutoUpdater } from 'electron-updater'
 import * as settings from '../settings'
 import { clearQuitReason, isSessionEnding, setQuitReason } from './quit-state'
@@ -92,7 +91,7 @@ function _setUpdateState(next: AppUpdateState): void {
 }
 
 const NO_UPDATE_AVAILABLE_MESSAGE = 'No update available. Try checking for updates first.'
-const UPDATER_UNAVAILABLE_MESSAGE = 'ToDesktop auto-updater is unavailable.'
+const UPDATER_UNAVAILABLE_MESSAGE = 'Auto-updater is unavailable.'
 
 /** Issue #488 — single source of truth for the auto-install flag.
  *  Default-on: any non-`false` value (including missing) is treated as
@@ -325,7 +324,7 @@ function emitDesktopUpdateError(
     stage: operation === 'apply_restart' ? 'install' : operation,
     running_version: app.getVersion(),
     target_version: targetVersion,
-    updater_provider: 'todesktop',
+    updater_provider: 'github',
     error_source: options.source,
     setting_use_chinese_mirrors: settings.get('useChineseMirrors') === true,
     ...buildErrorFields(errorObject ?? message),
@@ -334,8 +333,16 @@ function emitDesktopUpdateError(
   })
 }
 
+/**
+ * The app-update source. Artify publishes via GitHub Releases
+ * (electron-builder `publish` config) and updates through
+ * electron-updater — not the ToDesktop runtime, whose update channel
+ * is bound to the official appId and is unusable for our own releases.
+ * The ToDesktop init in main still runs with `autoUpdater: false` so
+ * its updater never activates.
+ */
 function getAutoUpdater() {
-  return todesktop.autoUpdater
+  return electronAutoUpdater
 }
 
 function bindUpdaterEvents(): void {
@@ -532,10 +539,7 @@ async function checkForUpdate(
       return { available: false, error: UPDATER_UNAVAILABLE_MESSAGE }
     }
     bindUpdaterEvents()
-    const result = await updater.checkForUpdates({
-      source,
-      disableUpdateReadyAction: true
-    })
+    const result = await updater.checkForUpdates()
     const version = versionFromPayload(result)
     // A non-newer surfaced version is not an available update.
     if (version && shouldIgnoreNonNewerVersion(version, 'check')) {
@@ -700,7 +704,7 @@ export function installUpdate(userInitiated = true): void {
     // `isSilent: false` shows the NSIS progress window during the install (see
     // `isInstallerUIEnabled` — Windows-only, default on). Forced silent on
     // macOS/Linux, where `isSilent` has no effect anyway.
-    updater.restartAndInstall({ isSilent: !isInstallerUIEnabled() })
+    updater.quitAndInstall(!isInstallerUIEnabled())
   } catch (err) {
     _activeUpdateOperation = null
     clearQuitReason()
