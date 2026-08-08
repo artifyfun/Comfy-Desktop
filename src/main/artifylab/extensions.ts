@@ -6,7 +6,8 @@ import type { InstallationRecord } from '../installations'
 import { getFrontendPath } from './utils/resourcePaths'
 
 const EXTENSION_FILE = 'artify_inject.js'
-const SOURCE_FILE = 'comfy_inject.js'
+// 构建产物只保留 terser 压缩版（build 脚本会删除明文 comfy_inject.js）
+const SOURCE_FILE = 'comfy_inject.min.js'
 
 /** 读文件文本，缺失/不可读返回 null。 */
 async function readTextIfExists(filePath: string): Promise<string | null> {
