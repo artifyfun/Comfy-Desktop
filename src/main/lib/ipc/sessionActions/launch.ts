@@ -90,6 +90,7 @@ import { recoverInterruptedComfyOp } from '../../opMarker'
 import { waitLaunchSpawnHold } from '../../e2eOverrides'
 import { migrateEnvLayout } from '../../../sources/standalone/install'
 import { writeComfyEnvironment } from '../../../sources/standalone/envPaths'
+import { syncArtifyExtension } from '../../../artifylab/extensions'
 import type { PersistedTorchStack } from '../../../sources/standalone/torchStackTypes'
 import type { WriteStream } from 'fs'
 
@@ -534,6 +535,8 @@ async function runLaunch(
       }
     }
     await writeComfyEnvironment(path.join(inst.installPath, 'ComfyUI'))
+    // 同步 A UI 注入扩展（幂等；升级/重装 ComfyUI 后自动恢复）
+    await syncArtifyExtension(inst)
   }
   // The standalone prep above (recovery, migration, torch repair) is the
   // longest pre-spawn stretch; a restart clicked during it must not spawn.
