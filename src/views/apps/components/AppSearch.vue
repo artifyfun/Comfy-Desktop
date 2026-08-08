@@ -183,7 +183,7 @@ const searchSuggestions = computed(() => {
       suggestions.add(app.name)
     }
     // 添加匹配的类别
-    if (app.category.toLowerCase().includes(query)) {
+    if (app.category && app.category.toLowerCase().includes(query)) {
       suggestions.add(app.category)
     }
   })
@@ -195,7 +195,7 @@ const searchSuggestions = computed(() => {
 const availableCategories = computed(() => {
   const categories = new Set()
   props.apps.forEach(app => {
-    categories.add(app.category)
+    if (app.category) categories.add(app.category)
   })
   return Array.from(categories).sort()
 })

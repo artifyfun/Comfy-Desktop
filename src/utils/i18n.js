@@ -171,7 +171,8 @@ const translations = {
 
     // 关于页面
     aboutArtifyWorkshop: '关于Artify工坊',
-    aboutIntro: '专注AI绘画工作流研究与精品应用分享！我计划每日发布一款有趣的AI绘画App，并详解其核心工作流。无论你是设计师、创作者还是技术爱好者，这里都能帮你提升AI绘画效率，玩出专业级效果。',
+    aboutIntro:
+      '专注AI绘画工作流研究与精品应用分享！我计划每日发布一款有趣的AI绘画App，并详解其核心工作流。无论你是设计师、创作者还是技术爱好者，这里都能帮你提升AI绘画效率，玩出专业级效果。',
     dailyUpdates: '每日更新AI绘画工具与技巧',
     workflowAnalysis: '深度解析核心工作流原理',
     professionalEffects: '专业级艺术效果实现方案',
@@ -417,7 +418,8 @@ const translations = {
     or: '或者',
     enterManualValue: '请输入手动值',
     setValue: '设置值',
-    typeMismatchError: '类型不匹配：字段 "{fieldName}" 的类型为 {fieldType}，但目标输入需要 {inputType} 类型',
+    typeMismatchError:
+      '类型不匹配：字段 "{fieldName}" 的类型为 {fieldType}，但目标输入需要 {inputType} 类型',
     valueConversionError: '值转换失败：无法将 "{value}" 转换为 {targetType} 类型。错误：{error}',
     autoShutdown: '自动关闭计算机',
     autoShutdownDescription: '批量处理完成后自动关闭计算机，节省能源',
@@ -621,7 +623,7 @@ const translations = {
     shutdownSuccess: '计算机将在30秒后关闭',
     shutdownCountdown: '计算机将在 {seconds} 秒后关闭',
     cancelShutdown: '取消关闭',
-    shutdownCancelledSuccess: '已取消自动关闭'
+    shutdownCancelledSuccess: '已取消自动关闭',
   },
   en: {
     // 通用操作
@@ -673,7 +675,8 @@ const translations = {
     noSavedTemplates: 'No saved templates',
     loadTemplate: 'Load Template',
     deleteConfirmTitle: 'Confirm Delete',
-    deleteConfirmMessage: 'Are you sure you want to delete this template? This action cannot be undone.',
+    deleteConfirmMessage:
+      'Are you sure you want to delete this template? This action cannot be undone.',
 
     // 操作结果
     copySuccess: 'Copy successful',
@@ -737,7 +740,8 @@ const translations = {
     presetStyles: 'Preset Styles',
     fetchStyleError: 'Failed to fetch styles',
     selectAppStyle: 'Select App Style',
-    styleSelectionDescription: 'Please select an app style, this will affect the generated app interface style',
+    styleSelectionDescription:
+      'Please select an app style, this will affect the generated app interface style',
     loadingStyles: 'Loading styles...',
     pleaseSelectStyle: 'Please select an app style',
     noDescription: 'No description',
@@ -779,7 +783,8 @@ const translations = {
 
     // 关于页面
     aboutArtifyWorkshop: 'About ArtifyLab',
-    aboutIntro: 'Focus on AI painting workflow research and quality application sharing! We publish one efficient and interesting AI painting App daily, and explain its core workflow in detail. Whether you are a designer, creator or technology enthusiast, here you can help improve AI painting efficiency and achieve professional-level effects.',
+    aboutIntro:
+      'Focus on AI painting workflow research and quality application sharing! We publish one efficient and interesting AI painting App daily, and explain its core workflow in detail. Whether you are a designer, creator or technology enthusiast, here you can help improve AI painting efficiency and achieve professional-level effects.',
     dailyUpdates: 'Daily updates of AI painting tools and techniques',
     workflowAnalysis: 'In-depth analysis of core workflow principles',
     professionalEffects: 'Professional-level art effect implementation solutions',
@@ -788,9 +793,11 @@ const translations = {
     scanToFollow: 'Follow Me',
     getAIWorkflowResources: 'Get workflows and Apps',
     aiPaintingWorkflowPlatform: 'AI Workflow Platform',
-    exploreAICreationPossibilities: 'Explore unlimited possibilities of AI art creation, experience the perfect fusion of cutting-edge technology and art',
+    exploreAICreationPossibilities:
+      'Explore unlimited possibilities of AI art creation, experience the perfect fusion of cutting-edge technology and art',
     followOfficialAccountForWorkflows: 'Follow me for AI workflows',
-    copyright: '© 2025 ArtifyFun. This software is licensed under the {license} open source license',
+    copyright:
+      '© 2025 ArtifyFun. This software is licensed under the {license} open source license',
     gplv3: 'GPLv3',
 
     // 历史记录
@@ -888,7 +895,8 @@ const translations = {
     noAppsAvailable: 'No AI apps available',
     noAppsFoundWithQuery: 'No apps found containing "{query}", please try other keywords',
     noAppsInCategory: 'No apps found in "{category}" category',
-    addFirstAppTip: 'Click the "Add New App" button in the top left to add your first AI app, or install apps from the app market',
+    addFirstAppTip:
+      'Click the "Add New App" button in the top left to add your first AI app, or install apps from the app market',
     clearSearch: 'Clear Search',
     clearFilter: 'Clear Filter',
     editApp: 'Edit App',
@@ -1013,7 +1021,8 @@ const translations = {
     stopExecutionFailed: 'Failed to stop execution',
     itemProcessedSuccessfully: 'Item {index} processed successfully',
     itemProcessingFailed: 'Item {index} processing failed',
-    batchExecutionCompleted: 'Batch execution completed, processed {total} items, {success} successful, {failed} failed',
+    batchExecutionCompleted:
+      'Batch execution completed, processed {total} items, {success} successful, {failed} failed',
     openOutputDirectory: 'Open Output Directory',
     outputDirectoryOpened: 'Output directory opened',
     openOutputDirectoryFailed: 'Failed to open output directory',
@@ -1025,11 +1034,14 @@ const translations = {
     or: 'Or',
     enterManualValue: 'Please enter manual value',
     setValue: 'Set Value',
-    typeMismatchError: 'Type mismatch: the type of field "{fieldName}" is {fieldType}, but the target input requires {inputType} type',
-    valueConversionError: 'Value conversion failed: cannot convert "{value}" to {targetType} type. Error: {error}',
+    typeMismatchError:
+      'Type mismatch: the type of field "{fieldName}" is {fieldType}, but the target input requires {inputType} type',
+    valueConversionError:
+      'Value conversion failed: cannot convert "{value}" to {targetType} type. Error: {error}',
     autoShutdown: 'Auto Shutdown Computer',
     autoShutdownDescription: 'Computer will be shut down automatically after execution',
-    autoShutdownNote: 'Note: macOS requires administrator privileges to perform shutdown operations',
+    autoShutdownNote:
+      'Note: macOS requires administrator privileges to perform shutdown operations',
     shutdownInProgress: 'Shutting down computer...',
     shutdownSuccess: 'Computer will shut down in 30 seconds',
     shutdownFailed: 'Failed to shut down computer',
@@ -1057,24 +1069,29 @@ const translations = {
     // 自动关闭计算机相关
     autoShutdown: 'Auto Shutdown Computer',
     autoShutdownDescription: 'Computer will be shut down automatically after execution',
-    autoShutdownNote: 'Note: macOS requires administrator privileges to perform shutdown operations',
+    autoShutdownNote:
+      'Note: macOS requires administrator privileges to perform shutdown operations',
     autoShutdownEnabled: 'Auto Shutdown Enabled',
     autoShutdownDisabled: 'Auto Shutdown Disabled',
     shutdownAfterCompletion: 'Shutdown Computer After Completion',
     shutdownConfirmation: 'Confirm Shutdown',
-    shutdownConfirmationMessage: 'Computer will be shut down automatically after batch processing. Continue?',
+    shutdownConfirmationMessage:
+      'Computer will be shut down automatically after batch processing. Continue?',
     shutdownCancelled: 'Auto Shutdown Cancelled',
     shutdownInProgress: 'Shutting down computer...',
     shutdownFailed: 'Failed to shut down computer',
     shutdownSuccess: 'Computer will shut down in 30 seconds',
     shutdownCountdown: 'Computer will shut down in {seconds} seconds',
     cancelShutdown: 'Cancel Shutdown',
-    shutdownCancelledSuccess: 'Auto Shutdown Cancelled'
-  }
+    shutdownCancelledSuccess: 'Auto Shutdown Cancelled',
+  },
 }
 
 // 获取翻译文本 - 重构后的版本，不需要传递lang参数
 export function t(key, params = {}) {
+  // 防御：调用方可能传入 undefined（如 app.category 缺失时），
+  // 直接返回空串，避免渲染函数崩溃导致整页卡死。
+  if (!key) return ''
   const lang = currentLang.value
   const keys = key.split('.')
   let value = translations[lang] || translations.zh
@@ -1092,7 +1109,7 @@ export function t(key, params = {}) {
 
   // 替换参数
   if (typeof result === 'string' && Object.keys(params).length > 0) {
-    Object.keys(params).forEach(param => {
+    Object.keys(params).forEach((param) => {
       result = result.replace(new RegExp(`{${param}}`, 'g'), params[param])
     })
   }
@@ -1118,7 +1135,7 @@ export function tWithLang(key, lang = 'zh', params = {}) {
 
   // 替换参数
   if (typeof result === 'string' && Object.keys(params).length > 0) {
-    Object.keys(params).forEach(param => {
+    Object.keys(params).forEach((param) => {
       result = result.replace(new RegExp(`{${param}}`, 'g'), params[param])
     })
   }
@@ -1137,7 +1154,7 @@ export function useI18n() {
     t,
     setLanguage,
     getCurrentLanguage,
-    currentLang: computed(() => currentLang.value)
+    currentLang: computed(() => currentLang.value),
   }
 }
 
@@ -1158,5 +1175,5 @@ export default {
   setLanguage,
   getCurrentLanguage,
   useI18n,
-  useI18nInComponent
+  useI18nInComponent,
 }
