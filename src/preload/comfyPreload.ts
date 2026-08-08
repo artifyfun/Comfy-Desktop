@@ -11,6 +11,7 @@ import type {
 } from '@comfyorg/comfyui-desktop-bridge-types'
 import type { ComfyDesktop2TelemetryBridge } from '../types/comfyDesktopBridge'
 import { startLocalFirebaseAuthMonitor } from './localFirebaseAuthMonitor'
+import { electronAPI } from './electronAPI'
 
 type LegacyTerminalBridge = ComfyDesktop2TerminalBridge & {
   restore(): Promise<TerminalRestore>
@@ -137,3 +138,6 @@ const bridge = {
 } satisfies ComfyDesktop2RuntimeBridge
 
 contextBridge.exposeInMainWorld('__comfyDesktop2', bridge)
+// Legacy bridge for the injected artifylab floating switch button
+// (comfy_inject.min.js reads `window.electronAPI.ArtifyLab`).
+contextBridge.exposeInMainWorld('electronAPI', electronAPI)

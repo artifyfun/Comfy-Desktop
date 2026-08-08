@@ -20,7 +20,7 @@ export function registerArtifyHandlers() {
   })
 
   ipcMain.handle('artify-loadComfyUI', async (_event, _data) => {
-    artifyUtils.loadComfyUI()
+    await artifyUtils.focusComfyUI()
   })
 
   ipcMain.handle('artify-loadArtifyLab', async (_event, _data) => {

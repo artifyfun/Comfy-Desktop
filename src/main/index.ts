@@ -104,6 +104,8 @@ import { initUserTier } from './lib/userTier'
 import { DesktopConfig } from './artifylab/store/desktopConfig'
 import { registerArtifyHandlers } from './artifylab/handlers'
 import { startServer } from './artifylab/server'
+import { setComfyUIFocusHandler } from './artifylab'
+import artifylab from './artifylab'
 
 import {
   claimAttachHost,
@@ -2162,9 +2164,28 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     const desktopConfig = await DesktopConfig.load(shell)
     if (desktopConfig) {
       registerArtifyHandlers()
-      void startServer().catch((err) => {
-        console.error('ArtifyLab server failed to start:', err)
+      // A→C 切换：聚焦运行中的 ComfyUI install 窗口；无运行实例时
+      // 打开 dashboard 让用户选择/安装。
+      setComfyUIFocusHandler(async () => {
+        for (const installationId of Array.from(_runningSessions.keys())) {
+          const entry = getEntryByInstallationId(installationId)
+          if (entry && !entry.window.isDestroyed()) {
+            entry.window.show()
+            entry.window.focus()
+            return true
+          }
+        }
+        openOrFocusAnyHostWindow()
+        return false
       })
+      await startServer()
+        .then(() => {
+          // 启动即进入 A UI（与旧版行为一致）
+          artifylab.loadArtifyLab()
+        })
+        .catch((err) => {
+          console.error('ArtifyLab server failed to start:', err)
+        })
     }
     // Forward updater state transitions to every host window's
     // title-bar webContents. Subscribed once at startup; the helper

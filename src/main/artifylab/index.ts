@@ -87,6 +87,24 @@ function loadComfyUI() {
 /** artifylab 前端窗口（懒创建，复用单例） */
 let artifyWindow: BrowserWindow | null = null
 
+/**
+ * A→C 切换回调：由 main/index.ts 注入（聚焦运行中的 ComfyUI install，
+ * 无实例时打开 dashboard）。handlers 的 artify-loadComfyUI 调用它。
+ */
+let comfyUIFocusHandler: (() => Promise<boolean>) | null = null
+
+export function setComfyUIFocusHandler(handler: () => Promise<boolean>): void {
+  comfyUIFocusHandler = handler
+}
+
+/** 切到 ComfyUI：优先聚焦运行中的实例窗口，无实例时回退打开 dashboard */
+export async function focusComfyUI(): Promise<boolean> {
+  if (comfyUIFocusHandler) {
+    return comfyUIFocusHandler()
+  }
+  return false
+}
+
 function loadArtifyLab() {
   const server = getServer()
   if (!server) {
@@ -128,6 +146,7 @@ export default {
   setServerArgs,
   loadComfyUI,
   loadArtifyLab,
+  focusComfyUI,
   appWindow,
   serverArgs
 }
