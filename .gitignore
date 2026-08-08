@@ -40,3 +40,4 @@ docs/telemetry.md
 __pycache__/
 *.pyc
 coverage/
+src/main/artifylab/public/frontend/

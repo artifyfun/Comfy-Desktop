@@ -1,6 +1,5 @@
 import express from 'express'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import cookieParser from 'cookie-parser'
 import bodyParser from 'body-parser'
@@ -15,6 +14,7 @@ import history from 'connect-history-api-fallback'
 import { CONFIG, HTTP_STATUS } from './config/constants'
 import { logger } from './utils/logger'
 import { handleApiError, createErrorResponse, createSuccessResponse } from './utils/errorHandler'
+import { getFrontendPath } from './utils/resourcePaths'
 // import { rateLimitMiddleware } from './middleware/rateLimit';
 import { memoryCache } from './services/cache'
 import { fetchWithRetry, createOpenAIRequestOptions, handleStreamResponse } from './utils/fetch'
@@ -25,8 +25,6 @@ import artifyUtils from '.'
 dotenv.config()
 
 const app = express()
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
 
 let server: HttpServer | null = null
 
@@ -78,7 +76,7 @@ app.use((req, res, next) => {
 
 // 静态文件中间件
 const setupStaticFiles = () => {
-  const staticPath = path.join(__dirname, 'public', 'frontend')
+  const staticPath = getFrontendPath()
 
   logger.info('Setting up static file paths', {
     staticPath
@@ -811,7 +809,7 @@ app.get('*', (req, res) => {
   }
 
   // 对于所有其他请求，返回index.html以支持前端路由
-  const indexPath = path.join(__dirname, 'public/frontend', 'index.html')
+  const indexPath = path.join(getFrontendPath(), 'index.html')
   res.sendFile(indexPath)
 })
 

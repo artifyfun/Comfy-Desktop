@@ -342,7 +342,9 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     // writes `autoInstallOnAppQuit` onto it, so the tests below assert on the
     // same object the module mutates (mirroring the old split where
     // electron-updater was mocked separately from the ToDesktop runtime).
-    vi.doMock('electron-updater', () => ({ autoUpdater: Object.assign(electronUpdaterMock, fakeUpdater) }))
+    vi.doMock('electron-updater', () => ({
+      autoUpdater: Object.assign(electronUpdaterMock, fakeUpdater)
+    }))
     vi.doMock('./telemetry', () => ({ emit: emitMock, bucketError: (s: string) => s }))
     vi.doMock('./quit-state', () => ({
       clearQuitReason: vi.fn(),

@@ -1572,9 +1572,7 @@ export interface ElectronApi {
     getAppInfo(): Promise<{ version: string; name: string; repository: string }>
     openOutputFolder(): Promise<{ success: boolean; path?: string; error?: string }>
     getOutputPath(): Promise<{ success: boolean; path?: string; error?: string }>
-    scanFolder(
-      folderPath: string
-    ): Promise<
+    scanFolder(folderPath: string): Promise<
       {
         fullPath: string
         fileName: string
@@ -1585,9 +1583,7 @@ export interface ElectronApi {
         relativePath: string
       }[]
     >
-    openRootFolder(
-      folderName: string
-    ): Promise<{
+    openRootFolder(folderName: string): Promise<{
       success: boolean
       path?: string
       openedFolder?: string

@@ -17,6 +17,10 @@ files:
 extraResources:
   - from: lib
     to: lib
+  # artifylab 前端产物（artifylab-frontend 的 build:copy 写入源码目录，
+  # server.ts 的 getFrontendPath() 在生产环境从这里读取）
+  - from: src/main/artifylab/public/frontend
+    to: frontend
 # Skip the node-gyp rebuild pass: node-pty (the only native dependency)
 # ships N-API prebuilds for win32-x64 that are ABI-agnostic across
 # Electron versions, and its winpty git-submodule sources are not fully
