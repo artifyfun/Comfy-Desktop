@@ -104,8 +104,8 @@ import { initUserTier } from './lib/userTier'
 import { DesktopConfig } from './artifylab/store/desktopConfig'
 import { registerArtifyHandlers } from './artifylab/handlers'
 import { startServer } from './artifylab/server'
-import { setComfyUIFocusHandler } from './artifylab'
-import artifylab from './artifylab'
+import { setArtifyPanelMode, setArtifyPanelPort } from './artifylab/panelMode'
+import { setArtifyLabFocusHandler, setComfyUIFocusHandler } from './artifylab'
 
 import {
   claimAttachHost,
@@ -156,7 +156,8 @@ import {
   refreshComfyTabBody,
   registerPanelViewIpc,
   sendToPanelDeferred,
-  setActivePanel
+  setActivePanel,
+  setPanelSurface
 } from './host/panelView'
 
 export type { ComfyPanelKey } from './host/registry'
@@ -275,9 +276,7 @@ function revealStartupRestoreDashboard(windowKey: number): void {
  * error, console/external mode, slow/absent renderer) falls back to revealing
  * the dashboard.
  */
-async function openStartupSurface(
-  opts: { deferChooserReveal?: boolean } = {}
-): Promise<void> {
+async function openStartupSurface(): Promise<void> {
   // Single auto-launch path: the user-configured `autoLaunchOnStartup`
   // dropdown is the only opt-in to "boot straight into an instance". When
   // unset (`'none'` / first-use not yet completed) we just open the
@@ -291,13 +290,10 @@ async function openStartupSurface(
       ? await resolveAutoLaunchInstall(autoLaunchValue)
       : null
 
-  // ArtifyLab mode: open the chooser host hidden — the A UI window is the
-  // foreground surface; the host stays hidden until the user switches to
-  // ComfyUI (`focusComfyUI` → `openOrFocusAnyHostWindow` → `bringToFront`
-  // shows it). Restore opens hidden as before (revealed on takeover-ready
-  // or fallback); the plain dashboard boot reveals on first paint unless
-  // `deferChooserReveal` is set.
-  const chooserWindow = explicitInst || opts.deferChooserReveal
+  // Restore opens hidden (revealed on takeover-ready / fallback); the plain
+  // dashboard boot reveals on first paint as before. In single-window mode
+  // the host's panelView hosts the A UI, so boot lands on ArtifyLab.
+  const chooserWindow = explicitInst
     ? openChooserHostWindow('comfy', { deferColdStartReveal: true })
     : openOrFocusChooserHostWindow()
 
@@ -2169,25 +2165,43 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // in which case we skip the service — the app is about to exit anyway.
     const desktopConfig = await DesktopConfig.load(shell)
     if (desktopConfig) {
+      // 单窗口模式：A UI 作为 host 窗口 panelView 的内容（与 ComfyUI
+      // comfyView 同窗口切换）。必须在任何 host 窗口创建前启用——
+      // openStartupSurface 在后面才打开窗口。
+      setArtifyPanelMode(true)
       registerArtifyHandlers()
-      // A→C 切换：聚焦运行中的 ComfyUI install 窗口；无运行实例时
-      // 打开 dashboard 让用户选择/安装。
+      // A→C 切换（单窗口）：有运行中的 install → 同窗口切到 comfy
+      // 视图；无运行实例 → 面板切到 install 选择器让用户启动/安装。
       setComfyUIFocusHandler(async () => {
         for (const installationId of Array.from(_runningSessions.keys())) {
           const entry = getEntryByInstallationId(installationId)
           if (entry && !entry.window.isDestroyed()) {
+            setActivePanel(entry.windowKey, 'comfy')
             entry.window.show()
             entry.window.focus()
             return true
           }
         }
-        openOrFocusAnyHostWindow()
+        const host = openOrFocusAnyHostWindow()
+        const entry = findEntryByHostWindow(host)
+        if (entry && entry.panelSurface === 'artify') setPanelSurface(entry, 'chooser')
         return false
       })
+      // C→A 切换（单窗口）：面板切回 A UI 并显示 host 窗口。
+      setArtifyLabFocusHandler(async () => {
+        const host = openOrFocusAnyHostWindow()
+        const entry = findEntryByHostWindow(host)
+        if (!entry || entry.window.isDestroyed()) return false
+        setPanelSurface(entry, 'artify')
+        setActivePanel(entry.windowKey, 'chooser')
+        entry.window.show()
+        entry.window.focus()
+        return true
+      })
       await startServer()
-        .then(() => {
-          // 启动即进入 A UI（与旧版行为一致）
-          artifylab.loadArtifyLab()
+        .then((server) => {
+          const address = server.address()
+          if (address && typeof address !== 'string') setArtifyPanelPort(address.port)
         })
         .catch((err) => {
           console.error('ArtifyLab server failed to start:', err)
@@ -2243,7 +2257,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         clearQuitReason()
         if (updateSplash && !updateSplash.isDestroyed()) updateSplash.destroy()
         mainTelemetry.emit('comfy.desktop.app_update.startup_install_backstop_recovered', {})
-        void openStartupSurface(desktopConfig ? { deferChooserReveal: true } : {})
+        void openStartupSurface()
       }, STARTUP_INSTALL_QUIT_BACKSTOP_MS)
     } else {
       app.removeListener('before-quit', onUpdateInstallQuit)
@@ -2251,11 +2265,12 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       // The install-less chooser host is the primary surface. Each
       // install gets its own ComfyUI window via openComfyWindow()
       // when launched, and the chooser host is the entry-point for
-      // picking / creating installs. When the user last left an instance
-      // window (and the reopen setting is on), restore that instance
-      // in-place on top of the freshly-opened chooser host. ArtifyLab
-      // mode defers the chooser reveal so only the A UI window shows.
-      void openStartupSurface(desktopConfig ? { deferChooserReveal: true } : {})
+      // picking / creating installs. In single-window mode the host's
+      // panelView hosts the A UI instead of the chooser, so boot lands
+      // on ArtifyLab. When the user last left an instance window (and
+      // the reopen setting is on), restore that instance in-place on
+      // top of the freshly-opened host.
+      void openStartupSurface()
     }
 
     // Single subscription rebroadcasts every install-list mutation

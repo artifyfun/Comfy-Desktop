@@ -24,6 +24,11 @@ export type ComfyPanelKey =
   | 'track'
   | 'load-snapshot'
   | 'quick-install'
+  /** Single-window mode: the panel body hosts the A UI / install picker
+   *  ("Comfy pill → chooser" is the install-less mapping; this is the same
+   *  surface as an explicit panel key so `setActivePanel` can flip back to
+   *  the A UI from an install-backed window). */
+  | 'chooser'
   /** Forces "panel visible, comfy hidden" while a picker-driven ProgressModal
    *  is mounted; survives `_runningSessions` flips during update→relaunch. Not
    *  a title-bar pill — set programmatically. */
@@ -36,7 +41,8 @@ export const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set([
   'track',
   'load-snapshot',
   'quick-install',
-  'progress'
+  'progress',
+  'chooser'
 ])
 
 /**
@@ -115,6 +121,10 @@ export interface ComfyWindowEntry {
   /** Symmetric undo for `attachInstall()` (set by attach, called by the close
    *  handler and `detachInstall()`). `null` when not install-backed. */
   _installCleanup: (() => void) | null
+  /** What the panelView currently hosts: the A UI (artifylab frontend, single-
+   *  window mode) or the native chooser/panel app. `setPanelSurface` navigates
+   *  between them; `ensurePanelView` (re)builds to whichever is current. */
+  panelSurface: 'artify' | 'chooser'
   /** Flip this host in place to install-less (chooser) mode via
    *  `_detachInstallImpl`. No-op when already install-less; always populated. */
   detachInstall: () => void

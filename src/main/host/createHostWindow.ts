@@ -32,6 +32,7 @@ import {
   resolveTheme
 } from '../lib/ipc/shared'
 import * as mainTelemetry from '../lib/telemetry'
+import { isArtifyPanelMode } from '../artifylab/panelMode'
 import { getUserTier } from '../lib/userTier'
 import { trackFirebaseAuthReporter } from '../lib/firebaseAuthIdentity'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
@@ -1013,6 +1014,9 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     previewInstallationId: null,
     coldStartPendingReveal: false,
     _installCleanup: null,
+    // Single-window mode hosts the A UI in the panelView from the start;
+    // native mode keeps the chooser surface.
+    panelSurface: isArtifyPanelMode() ? 'artify' : 'chooser',
     // Bound below so it can self-reference the freshly-created entry.
     detachInstall: () => {}
   }

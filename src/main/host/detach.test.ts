@@ -57,7 +57,8 @@ function makeEntry(window: FakeWindow): ComfyWindowEntry {
     previewInstallationId: null,
     coldStartPendingReveal: false,
     _installCleanup: null,
-    detachInstall: () => {}
+    detachInstall: () => {},
+    panelSurface: 'chooser'
   }
 }
 

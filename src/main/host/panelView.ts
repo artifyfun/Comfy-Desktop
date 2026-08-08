@@ -19,6 +19,7 @@ import {
   VALID_PANELS
 } from './registry'
 import type { BodyMode, ComfyPanelKey, ComfyWindowEntry } from './registry'
+import { getArtifyPanelUrl } from '../artifylab/panelMode'
 
 /** Opaque panel background matching the title-bar chrome, used while the panel
  *  bundle loads for full-screen bodies so the user never sees a black flash. */
@@ -97,20 +98,60 @@ export function ensurePanelView(
   if (process.env['E2E'] === '1') {
     panelQuery['e2e'] = '1'
   }
-  const isDev = !!process.env['ELECTRON_RENDERER_URL']
-  const loadPromise = isDev
-    ? panelView.webContents.loadURL(
-        `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/panel.html?${new URLSearchParams(panelQuery).toString()}`
-      )
-    : panelView.webContents.loadFile(path.join(__dirname, '../renderer/panel.html'), {
-        query: panelQuery
-      })
-  // Loads can reject if the window closes mid-load; swallow to avoid noisy forwarding.
-  void loadPromise.catch(() => {})
+  loadPanelContent(panelView.webContents, entry, panelQuery)
 
   _registerExtraBroadcastTarget(panelView.webContents)
   entry.panelView = panelView
   return panelView
+}
+
+/**
+ * Load the panel body for `entry.panelSurface`: the A UI frontend in
+ * single-window mode, otherwise the native panel app. Shared by
+ * `ensurePanelView` (first build) and `setPanelSurface` (surface switch)
+ * so both always agree on what the panelView hosts. Loads can reject if
+ * the window closes mid-load; swallowed to avoid noisy forwarding.
+ */
+function loadPanelContent(
+  wc: Electron.WebContents,
+  entry: ComfyWindowEntry,
+  panelQuery: Record<string, string>
+): void {
+  const artifyUrl = entry.panelSurface === 'artify' ? getArtifyPanelUrl() : null
+  if (artifyUrl) {
+    void wc.loadURL(artifyUrl).catch(() => {})
+    return
+  }
+  const isDev = !!process.env['ELECTRON_RENDERER_URL']
+  if (isDev) {
+    void wc
+      .loadURL(
+        `${(process.env['ELECTRON_RENDERER_URL'] as string).replace(/\/$/, '')}/panel.html?${new URLSearchParams(panelQuery).toString()}`
+      )
+      .catch(() => {})
+  } else {
+    void wc.loadFile(path.join(__dirname, '../renderer/panel.html'), { query: panelQuery }).catch(() => {})
+  }
+}
+
+/**
+ * Switch what the panelView hosts — the A UI frontend or the native
+ * chooser/panel app. Navigates the live panelView in place; a destroyed
+ * (or not-yet-built) panelView picks the new surface up on the next
+ * `ensurePanelView`. No-op when the surface is already current.
+ */
+export function setPanelSurface(entry: ComfyWindowEntry, surface: 'artify' | 'chooser'): void {
+  if (entry.panelSurface === surface) return
+  entry.panelSurface = surface
+  if (!entry.panelView || entry.panelView.webContents.isDestroyed()) return
+  const panelQuery: Record<string, string> = {
+    installationId: entry.installationId ?? '',
+    // The native chooser app keys its surface on the `panel` query; the
+    // install-less chooser body is `'chooser'`, not the active pill key.
+    panel: surface === 'chooser' ? 'chooser' : entry.activePanel,
+    firstUseCompleted: String(getSetting('firstUseCompleted') === true)
+  }
+  loadPanelContent(entry.panelView.webContents, entry, panelQuery)
 }
 
 /**

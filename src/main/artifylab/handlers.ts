@@ -24,7 +24,7 @@ export function registerArtifyHandlers() {
   })
 
   ipcMain.handle('artify-loadArtifyLab', async (_event, _data) => {
-    artifyUtils.loadArtifyLab()
+    await artifyUtils.showArtifyLab()
   })
 
   /**

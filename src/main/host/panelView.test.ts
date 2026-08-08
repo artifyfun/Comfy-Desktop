@@ -93,7 +93,8 @@ function makeEntry(
     previewInstallationId: null,
     coldStartPendingReveal: false,
     _installCleanup: null,
-    detachInstall: () => {}
+    detachInstall: () => {},
+    panelSurface: 'chooser'
   }
   return {
     entry,

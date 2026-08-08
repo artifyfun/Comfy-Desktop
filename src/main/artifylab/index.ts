@@ -1,7 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { BrowserWindow } from 'electron'
 import { getAppResourcesPath } from './utils/resourcePaths'
 import { getServer, startServer, getServerPort } from './server'
 
@@ -91,12 +90,9 @@ function loadComfyUI() {
   appWindow.loadComfyUI(serverArgs)
 }
 
-/** artifylab 前端窗口（懒创建，复用单例） */
-let artifyWindow: BrowserWindow | null = null
-
 /**
- * A→C 切换回调：由 main/index.ts 注入（聚焦运行中的 ComfyUI install，
- * 无实例时打开 dashboard）。handlers 的 artify-loadComfyUI 调用它。
+ * A→C 切换回调：由 main/index.ts 注入（同窗口内切到 ComfyUI 视图，
+ * 无运行实例时面板切到 install 选择器）。handlers 的 artify-loadComfyUI 调用它。
  */
 let comfyUIFocusHandler: (() => Promise<boolean>) | null = null
 
@@ -104,7 +100,7 @@ export function setComfyUIFocusHandler(handler: () => Promise<boolean>): void {
   comfyUIFocusHandler = handler
 }
 
-/** 切到 ComfyUI：优先聚焦运行中的实例窗口，无实例时回退打开 dashboard */
+/** 切到 ComfyUI：优先同窗口切 comfy 视图，无实例时回退选择器 */
 export async function focusComfyUI(): Promise<boolean> {
   if (comfyUIFocusHandler) {
     return comfyUIFocusHandler()
@@ -112,45 +108,22 @@ export async function focusComfyUI(): Promise<boolean> {
   return false
 }
 
-function loadArtifyLab() {
-  if (artifyWindow && !artifyWindow.isDestroyed()) {
-    artifyWindow.focus()
-    return
+/**
+ * C→A 切换回调：由 main/index.ts 注入（同窗口内把面板切回 A UI）。
+ * handlers 的 artify-loadArtifyLab 调用它。
+ */
+let artifyLabFocusHandler: (() => Promise<boolean>) | null = null
+
+export function setArtifyLabFocusHandler(handler: () => Promise<boolean>): void {
+  artifyLabFocusHandler = handler
+}
+
+/** 切回 A UI：同窗口内显示 A UI 面板 */
+export async function showArtifyLab(): Promise<boolean> {
+  if (artifyLabFocusHandler) {
+    return artifyLabFocusHandler()
   }
-
-  artifyWindow = new BrowserWindow({
-    width: 1280,
-    height: 900,
-    webPreferences: {
-      // 共享 preload：注入 window.api 与 legacy 的 window.electronAPI.ArtifyLab 桥
-      // __dirname 是 out/main，preload 构建产物在 out/preload。
-      // 该 preload 依赖 chunks/*.js 相对模块，沙箱下无法 require（同 panelView）。
-      sandbox: false,
-      preload: path.join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  })
-
-  if (DEV_MODE) {
-    // dev：直接加载 artifylab-frontend 的 vite dev server（无需 build:copy）
-    artifyWindow.loadURL(DEV_ORIGIN)
-  } else {
-    // prod：加载本地 express server（静态托管 frontend 产物）
-    const server = getServer()
-    if (!server) {
-      throw new Error('Server is not running')
-    }
-    const address = server.address()
-    if (!address || typeof address === 'string') {
-      throw new Error('Invalid server address')
-    }
-    artifyWindow.loadURL(`http://localhost:${address.port}`)
-  }
-
-  artifyWindow.on('closed', () => {
-    artifyWindow = null
-  })
+  return false
 }
 
 export default {
@@ -162,7 +135,7 @@ export default {
   setAppWindow,
   setServerArgs,
   loadComfyUI,
-  loadArtifyLab,
+  showArtifyLab,
   focusComfyUI,
   appWindow,
   serverArgs
