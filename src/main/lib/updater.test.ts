@@ -27,12 +27,8 @@ vi.mock('electron', () => ({
   }
 }))
 
-vi.mock('@todesktop/runtime', () => ({
-  default: { autoUpdater: null }
-}))
-
 vi.mock('electron-updater', () => ({
-  autoUpdater: { autoInstallOnAppQuit: true }
+  autoUpdater: null
 }))
 
 vi.mock('../settings', () => ({
@@ -174,7 +170,7 @@ describe('app-update telemetry dedup (volume regression)', () => {
       }) as unknown as typeof vi.fn,
       checkForUpdates: vi.fn(async () => ({ updateInfo: { version: 'unused' } }))
     }
-    vi.doMock('@todesktop/runtime', () => ({ default: { autoUpdater: fakeUpdater } }))
+    vi.doMock('electron-updater', () => ({ autoUpdater: fakeUpdater }))
     vi.doMock('./telemetry', () => ({
       emit: emitTelemetryMock,
       bucketError: (s: string) => s
@@ -300,7 +296,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
   let fakeUpdater: {
     on: ReturnType<typeof vi.fn>
     checkForUpdates: ReturnType<typeof vi.fn>
-    restartAndInstall: ReturnType<typeof vi.fn>
+    quitAndInstall: ReturnType<typeof vi.fn>
   }
   let electronUpdaterMock: { autoInstallOnAppQuit: boolean }
   let emitMock: ReturnType<typeof vi.fn>
@@ -337,13 +333,16 @@ describe('startup update install + session-end guard (issue #1065)', () => {
         }
         return { updateInfo: null }
       }),
-      restartAndInstall: vi.fn()
+      quitAndInstall: vi.fn()
     }
     electronUpdaterMock = { autoInstallOnAppQuit: true }
     emitMock = vi.fn()
 
-    vi.doMock('@todesktop/runtime', () => ({ default: { autoUpdater: fakeUpdater } }))
-    vi.doMock('electron-updater', () => ({ autoUpdater: electronUpdaterMock }))
+    // The mocked autoUpdater IS the assertion object: syncInstallOnQuitPolicy
+    // writes `autoInstallOnAppQuit` onto it, so the tests below assert on the
+    // same object the module mutates (mirroring the old split where
+    // electron-updater was mocked separately from the ToDesktop runtime).
+    vi.doMock('electron-updater', () => ({ autoUpdater: Object.assign(electronUpdaterMock, fakeUpdater) }))
     vi.doMock('./telemetry', () => ({ emit: emitMock, bucketError: (s: string) => s }))
     vi.doMock('./quit-state', () => ({
       clearQuitReason: vi.fn(),
@@ -395,7 +394,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     expect(electronUpdaterMock.autoInstallOnAppQuit).toBe(true)
     expect(updater.hasPendingStartupUpdate()).toBe(false)
     expect(await updater.applyPendingUpdateOnStartup()).toBe(false)
-    expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+    expect(fakeUpdater.quitAndInstall).not.toHaveBeenCalled()
   })
 
   it('suppressInstallOnQuit() disables install-on-quit for the session-end guard', async () => {
@@ -413,7 +412,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     const updater = await bootUpdater()
     expect(updater.hasPendingStartupUpdate()).toBe(false)
     expect(await updater.applyPendingUpdateOnStartup()).toBe(false)
-    expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+    expect(fakeUpdater.quitAndInstall).not.toHaveBeenCalled()
   })
 
   // Issue #1104 — auto-install off: the update still downloads, but it must
@@ -437,7 +436,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     updater.register()
     expect(updater.hasPendingStartupUpdate()).toBe(false)
     expect(await updater.applyPendingUpdateOnStartup()).toBe(false)
-    expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+    expect(fakeUpdater.quitAndInstall).not.toHaveBeenCalled()
     // Intentional user choice, not an anomaly — no canary telemetry.
     expect(findEmitCalls('comfy.desktop.app_update.startup_install_skipped')).toHaveLength(0)
   })
@@ -448,7 +447,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     updater.register()
     updater.installUpdate()
     // The manual path is the whole point of auto-install off — it must work.
-    expect(fakeUpdater.restartAndInstall).toHaveBeenCalled()
+    expect(fakeUpdater.quitAndInstall).toHaveBeenCalled()
   })
 
   it('does not mislabel a later check failure as applying the staged update', async () => {
@@ -464,7 +463,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
       stage: 'check',
       running_version: '1.0.0',
       target_version: null,
-      updater_provider: 'todesktop',
+      updater_provider: 'github',
       error_source: 'updater_event',
       setting_use_chinese_mirrors: false,
       error_message: 'release feed unavailable',
@@ -472,7 +471,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     })
   })
 
-  it('attributes an updater error after restartAndInstall to apply_restart', async () => {
+  it('attributes an updater error after quitAndInstall to apply_restart', async () => {
     const updater = await bootUpdater()
     for (const cb of listeners['update-downloaded'] || []) cb({ version: '1.0.1' })
     updater.installUpdate()
@@ -599,20 +598,20 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     sessionEnding = true
     const updater = await bootUpdater()
     updater.installUpdate()
-    expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+    expect(fakeUpdater.quitAndInstall).not.toHaveBeenCalled()
   })
 
   it('installUpdate() shows the NSIS installer UI by default on Windows', async () => {
     const updater = await bootUpdater()
     updater.installUpdate()
-    expect(fakeUpdater.restartAndInstall).toHaveBeenCalledWith({ isSilent: false })
+    expect(fakeUpdater.quitAndInstall).toHaveBeenCalledWith(false)
   })
 
   it('installUpdate() installs silently when showInstallerUI is opted out', async () => {
     settingsStore['showInstallerUI'] = false
     const updater = await bootUpdater()
     updater.installUpdate()
-    expect(fakeUpdater.restartAndInstall).toHaveBeenCalledWith({ isSilent: true })
+    expect(fakeUpdater.quitAndInstall).toHaveBeenCalledWith(true)
   })
 
   it('installUpdate() ignores showInstallerUI off Windows (isSilent stays true)', async () => {
@@ -620,7 +619,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     settingsStore['showInstallerUI'] = true
     const updater = await bootUpdater()
     updater.installUpdate()
-    expect(fakeUpdater.restartAndInstall).toHaveBeenCalledWith({ isSilent: true })
+    expect(fakeUpdater.quitAndInstall).toHaveBeenCalledWith(true)
   })
 
   it('hasPendingStartupUpdate() reflects the staged-update markers', async () => {
@@ -649,7 +648,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     const installing = await updater.applyPendingUpdateOnStartup()
 
     expect(installing).toBe(true)
-    expect(fakeUpdater.restartAndInstall).toHaveBeenCalledTimes(1)
+    expect(fakeUpdater.quitAndInstall).toHaveBeenCalledTimes(1)
     expect(settingsStore['lastStartupUpdateAttemptVersion']).toBe('1.0.1')
   })
 
@@ -666,12 +665,12 @@ describe('startup update install + session-end guard (issue #1065)', () => {
 
       // Let the (instant) ready check settle, but stay short of the floor.
       await vi.advanceTimersByTimeAsync(4000)
-      expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+      expect(fakeUpdater.quitAndInstall).not.toHaveBeenCalled()
 
       // Cross the floor — the install now fires.
       await vi.advanceTimersByTimeAsync(1200)
       expect(await pending).toBe(true)
-      expect(fakeUpdater.restartAndInstall).toHaveBeenCalledTimes(1)
+      expect(fakeUpdater.quitAndInstall).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
     }
@@ -680,7 +679,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
   it('applyPendingUpdateOnStartup() does nothing when no update is staged', async () => {
     const updater = await bootUpdater()
     expect(await updater.applyPendingUpdateOnStartup()).toBe(false)
-    expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+    expect(fakeUpdater.quitAndInstall).not.toHaveBeenCalled()
   })
 
   it('applyPendingUpdateOnStartup() does not install when the check cannot confirm a ready update', async () => {
@@ -696,7 +695,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
       // timeout so the check settles regardless of event-loop boundary timing.
       await vi.advanceTimersByTimeAsync(5100)
       expect(await pending).toBe(false)
-      expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+      expect(fakeUpdater.quitAndInstall).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()
     }
@@ -708,7 +707,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     readyVersion = '1.0.1'
     const updater = await bootUpdater()
     expect(await updater.applyPendingUpdateOnStartup()).toBe(false)
-    expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+    expect(fakeUpdater.quitAndInstall).not.toHaveBeenCalled()
   })
 
   it('emits startup_install_skipped with the loop_breaker reason', async () => {
@@ -779,7 +778,7 @@ describe('version guard: reject non-newer offers (issue #1161)', () => {
       }) as ReturnType<typeof vi.fn>,
       checkForUpdates: vi.fn(async () => ({ updateInfo: null }))
     }
-    vi.doMock('@todesktop/runtime', () => ({ default: { autoUpdater: fakeUpdater } }))
+    vi.doMock('electron-updater', () => ({ autoUpdater: fakeUpdater }))
     vi.doMock('./telemetry', () => ({ emit: emitMock, bucketError: (s: string) => s }))
     vi.doMock('../settings', () => ({
       get: vi.fn((key: string) =>
