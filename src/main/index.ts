@@ -2223,6 +2223,25 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
           callback({})
         }
       })
+      // 批量任务跨源 POST /prompt：ComfyUI 未启用 --enable-cors-header，
+      // 预检与实际响应都缺 Access-Control-Allow-* 头 → 浏览器抛
+      // "Failed to fetch"。给 8188 的全部响应注入允许头（non-simple
+      // 跨源请求的响应也必须带 ACAO 才通过 CORS 检查；请求侧的 Origin
+      // 已被上方的剥离逻辑去掉，安全边界不变）。
+      session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+        if (
+          details.url.startsWith('http://127.0.0.1:8188') ||
+          details.url.startsWith('http://localhost:8188')
+        ) {
+          const headers = details.responseHeaders ?? {}
+          headers['Access-Control-Allow-Origin'] = ['*']
+          headers['Access-Control-Allow-Methods'] = ['POST, GET, DELETE, PUT, OPTIONS, PATCH']
+          headers['Access-Control-Allow-Headers'] = ['Content-Type, Authorization']
+          callback({ responseHeaders: headers })
+        } else {
+          callback({})
+        }
+      })
       // A→C 切换（单窗口）：有运行中的 install → 同窗口切到 comfy
       // 视图；无运行实例 → 面板切到 install 选择器让用户启动/安装。
       setComfyUIFocusHandler(async () => {
