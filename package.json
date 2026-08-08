@@ -1,15 +1,15 @@
 {
-  "name": "comfyui-desktop-2",
+  "name": "artify-desktop",
   "version": "1.0.37",
-  "description": "Comfy Desktop",
+  "description": "Artify Desktop - Make AI easier to use.",
   "author": {
-    "name": "Comfy Org",
-    "email": "support@comfy.org",
-    "url": "https://www.comfy.org"
+    "name": "ArtifyFun",
+    "email": "artifyfun@artify.fun",
+    "url": "https://artify.fun"
   },
-  "repository": "github:Comfy-Org/Comfy-Desktop",
+  "repository": "github:artifyfun/Comfy-Desktop",
   "license": "SEE LICENSE IN LICENSE",
-  "homepage": "https://github.com/Comfy-Org/Comfy-Desktop",
+  "homepage": "https://github.com/artifyfun/Comfy-Desktop",
   "engines": {
     "node": ">=22",
     "pnpm": ">=10"

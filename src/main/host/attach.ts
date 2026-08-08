@@ -182,7 +182,7 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
   const refreshOsWindowTitle = (): void => {
     if (comfyWindow.isDestroyed()) return
     const suffix = currentPageTitle ? ` — ${currentPageTitle}` : ''
-    comfyWindow.setTitle(`${currentInstallName}${suffix} — Comfy Desktop v${APP_VERSION}`)
+    comfyWindow.setTitle(`${currentInstallName}${suffix} — Artify v${APP_VERSION}`)
   }
   refreshOsWindowTitle()
 

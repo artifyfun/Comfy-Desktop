@@ -4,7 +4,7 @@ import type * as UpdaterModule from './updater'
 let mockPlatform = 'linux'
 let mockAppImage: string | undefined
 let mockIsPackaged = true
-let mockExePath = '/opt/Comfy Desktop/comfyui-desktop-2'
+let mockExePath = '/opt/Artify/comfyui-desktop-2'
 let mockAppVersion = '1.0.0'
 
 vi.mock('electron', () => ({
@@ -71,7 +71,7 @@ describe('isSystemPackageInstall (via get-update-capabilities)', () => {
     mockPlatform = 'linux'
     mockAppImage = undefined
     mockIsPackaged = true
-    mockExePath = '/opt/Comfy Desktop/comfyui-desktop-2'
+    mockExePath = '/opt/Artify/comfyui-desktop-2'
 
     delete process.env.APPIMAGE
     Object.defineProperty(process, 'platform', { value: mockPlatform, configurable: true })
@@ -98,7 +98,7 @@ describe('isSystemPackageInstall (via get-update-capabilities)', () => {
   }
 
   it('detects .deb install under /opt/', async () => {
-    mockExePath = '/opt/Comfy Desktop/comfyui-desktop-2'
+    mockExePath = '/opt/Artify/comfyui-desktop-2'
     const caps = await getCapabilities()
     expect(caps).toEqual({ canAutoUpdate: false, systemManaged: true })
   })

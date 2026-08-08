@@ -486,7 +486,7 @@ button.looks-disabled {
 
 /* ================================================================
  * Brand takeover primitives — shared across brand-wrapped screens
- * (cloud-vs-local pick, Configure Comfy Desktop, future migrate /
+ * (cloud-vs-local pick, Configure Artify, future migrate /
  * progress screens). All rules consume --brand-surface-* tokens so
  * palette tweaks land in one place.
  * ================================================================ */

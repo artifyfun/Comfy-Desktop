@@ -97,7 +97,7 @@ export interface ComfyWindowEntry {
   /** Current first-use takeover step, cached so `buildTitlePopupMenuItems` can
    *  read it synchronously on file-menu click. See `src/shared/firstUseMode.ts`. */
   firstUseMode: FirstUseMode
-  /** Current title-bar pill label (install name, or `'Comfy Desktop'` for
+  /** Current title-bar pill label (install name, or `'Artify'` for
    *  install-less). Stored on the entry so the `title-bar-ready` handshake and
    *  attach/detach can re-push without closure capture. */
   titleBarText: string

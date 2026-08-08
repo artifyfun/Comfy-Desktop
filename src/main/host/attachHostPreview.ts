@@ -52,7 +52,7 @@ export async function applyAttachHostPreview(
   entry.sourceCategory = sourceMap[installation.sourceId]?.category ?? null
   // Mirror attachInstall's OS-title format so a preview reads identically to
   // a live attach outside the title bar's Vue chrome.
-  entry.window.setTitle(`${installation.name} — Comfy Desktop v${APP_VERSION}`)
+  entry.window.setTitle(`${installation.name} — Artify v${APP_VERSION}`)
   if (!entry.titleBarView.webContents.isDestroyed()) {
     entry.titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
     entry.titleBarView.webContents.send(

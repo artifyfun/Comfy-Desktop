@@ -362,9 +362,9 @@ describe('TitleBarApp', () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
-    bridgeState.titleChangedCallbacks.forEach((cb) => cb('Comfy Desktop'))
+    bridgeState.titleChangedCallbacks.forEach((cb) => cb('Artify'))
     await flushPromises()
-    expect(wrapper.find('.title-install-name').text()).toBe('Comfy Desktop')
+    expect(wrapper.find('.title-install-name').text()).toBe('Artify')
   })
 
   it('suppresses menu re-open immediately after a menu close (click-to-toggle dismiss)', async () => {

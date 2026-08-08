@@ -18,18 +18,18 @@ export type LegalDocId = 'eula' | 'tos' | 'privacy' | 'notices'
 
 export const EULA: LegalDoc = {
   effectiveDate: '2026-05-19',
-  appliesTo: 'Comfy Desktop',
+  appliesTo: 'Artify',
   blocks: [
     {
       kind: 'p',
-      text: 'This End-User License Agreement is a binding agreement between you and Comfy Org governing your installation and use of the Comfy Desktop application. By installing or using the Desktop App, you accept this EULA. If you do not agree, do not install or use the Desktop App.'
+      text: 'This End-User License Agreement is a binding agreement between you and Comfy Org governing your installation and use of the Artify application. By installing or using the Desktop App, you accept this EULA. If you do not agree, do not install or use the Desktop App.'
     },
 
     { kind: 'h2', text: '1. Definitions' },
     {
       kind: 'ul',
       items: [
-        '**"Desktop App"** — the Comfy Desktop application, including all binaries, installers, signed packages, scripts, configuration, and bundled assets we distribute under the name "Comfy Desktop," "ComfyUI Desktop," "ComfyUI Desktop 2.0," "Comfy Desktop 2," or any successor naming.',
+        '**"Desktop App"** — the Artify application, including all binaries, installers, signed packages, scripts, configuration, and bundled assets we distribute under the name "Artify," "ComfyUI Desktop," "ComfyUI Desktop 2.0," "Artify 2," or any successor naming.',
         '**"Comfy Org," "we," "us," "our"** — the publisher of the Desktop App.',
         '**"You"** — the individual or entity installing or using the Desktop App.',
         '**"Source Code"** — the open-source source code published at github.com/Comfy-Org/Comfy-Desktop.',
@@ -71,7 +71,7 @@ export const EULA: LegalDoc = {
         "Use the Desktop App to generate or distribute content that is illegal in your jurisdiction, including but not limited to child sexual abuse material (CSAM), non-consensual intimate imagery, or material that infringes another person's intellectual property.",
         "Remove, alter, or obscure any copyright, trademark, or other proprietary notices in the Desktop App's user interface.",
         'Use the Comfy Org name, logo, or branding to imply endorsement or affiliation that does not exist (see Section 8, Trademarks).',
-        'Distribute modified compiled binaries under our trademarks (you may modify and redistribute the **Source Code** under the MIT License, but the resulting binaries must not be branded as "ComfyUI Desktop," "Comfy Desktop," or any confusingly similar name).'
+        'Distribute modified compiled binaries under our trademarks (you may modify and redistribute the **Source Code** under the MIT License, but the resulting binaries must not be branded as "ComfyUI Desktop," "Artify," or any confusingly similar name).'
       ]
     },
 
@@ -144,7 +144,7 @@ export const EULA: LegalDoc = {
     { kind: 'h2', text: '8. Trademarks' },
     {
       kind: 'p',
-      text: '"Comfy," "ComfyUI," "Comfy Desktop," "Comfy Cloud," and the Comfy logo are trademarks of Comfy Org. Nothing in this EULA grants you a license to use those marks. You may make non-commercial, descriptive references to the Desktop App in articles, tutorials, and reviews.'
+      text: '"Comfy," "ComfyUI," "Artify," "Comfy Cloud," and the Comfy logo are trademarks of Comfy Org. Nothing in this EULA grants you a license to use those marks. You may make non-commercial, descriptive references to the Desktop App in articles, tutorials, and reviews.'
     },
 
     { kind: 'h2', text: '9. Disclaimer of warranty' },
@@ -215,17 +215,17 @@ export const EULA: LegalDoc = {
 
 export const TOS: LegalDoc = {
   effectiveDate: '2026-05-19',
-  appliesTo: 'Comfy Desktop',
+  appliesTo: 'Artify',
   blocks: [
     {
       kind: 'p',
-      text: 'These Terms of Service govern your use of the Comfy Desktop application. They apply alongside the End-User License Agreement (EULA), which grants your license to install and run the Desktop App binary. The EULA covers the technical license; these Terms cover usage.'
+      text: 'These Terms of Service govern your use of the Artify application. They apply alongside the End-User License Agreement (EULA), which grants your license to install and run the Desktop App binary. The EULA covers the technical license; these Terms cover usage.'
     },
 
     { kind: 'h2', text: '1. Acceptance' },
     {
       kind: 'p',
-      text: 'By installing or using Comfy Desktop (the "Desktop App"), you agree to these Terms of Service and the EULA. If you don\'t agree, don\'t install or use the Desktop App.'
+      text: 'By installing or using Artify (the "Desktop App"), you agree to these Terms of Service and the EULA. If you don\'t agree, don\'t install or use the Desktop App.'
     },
 
     { kind: 'h2', text: '2. Acceptable use' },
@@ -317,17 +317,17 @@ export const TOS: LegalDoc = {
 
 export const PRIVACY_POLICY: LegalDoc = {
   effectiveDate: '2026-06-03',
-  appliesTo: 'Comfy Desktop',
+  appliesTo: 'Artify',
   blocks: [
     {
       kind: 'p',
-      text: 'This Privacy Policy describes the personal data we process when you use Comfy Desktop, the purposes and lawful bases for that processing, the recipients of the data, and the rights available to you.'
+      text: 'This Privacy Policy describes the personal data we process when you use Artify, the purposes and lawful bases for that processing, the recipients of the data, and the rights available to you.'
     },
 
     { kind: 'h2', text: 'Controller' },
     {
       kind: 'p',
-      text: 'Comfy Organization Inc ("Comfy Org", "we", "us") is the data controller for personal data processed in connection with your use of Comfy Desktop. We are established in San Francisco, USA. For privacy enquiries: **support@comfy.org**.'
+      text: 'Comfy Organization Inc ("Comfy Org", "we", "us") is the data controller for personal data processed in connection with your use of Artify. We are established in San Francisco, USA. For privacy enquiries: **support@comfy.org**.'
     },
 
     { kind: 'h2', text: 'Personal data we process' },
@@ -443,7 +443,7 @@ export const PRIVACY_POLICY: LegalDoc = {
     { kind: 'h2', text: 'Children' },
     {
       kind: 'p',
-      text: 'Comfy Desktop is not intended for, and we do not knowingly collect personal data from, individuals under 13 years of age.'
+      text: 'Artify is not intended for, and we do not knowingly collect personal data from, individuals under 13 years of age.'
     },
 
     { kind: 'h2', text: 'Changes' },
@@ -462,12 +462,12 @@ export const PRIVACY_POLICY: LegalDoc = {
 
 export const THIRD_PARTY_NOTICES: LegalDoc = {
   effectiveDate: '2026-05-19',
-  appliesTo: 'Comfy Desktop',
+  appliesTo: 'Artify',
   blocks: [
     { kind: 'h2', text: 'About this document' },
     {
       kind: 'p',
-      text: 'Comfy Desktop is built on top of, and bundles, third-party open-source software. This document lists the major components, their licenses, and the required attribution notices. A complete auto-generated list (including transitive dependencies) is produced as part of the build pipeline before GA.'
+      text: 'Artify is built on top of, and bundles, third-party open-source software. This document lists the major components, their licenses, and the required attribution notices. A complete auto-generated list (including transitive dependencies) is produced as part of the build pipeline before GA.'
     },
     {
       kind: 'p',
@@ -548,7 +548,7 @@ export const THIRD_PARTY_NOTICES: LegalDoc = {
     { kind: 'h2', text: 'Components Desktop installs but does NOT bundle' },
     {
       kind: 'p',
-      text: 'Comfy Desktop is a **shell** that installs and manages ComfyUI environments. The following components are downloaded and set up on your machine at runtime (per your action). They are **not part of the Comfy Desktop binary** and are governed by their own licenses, which apply directly between you and the respective authors:'
+      text: 'Artify is a **shell** that installs and manages ComfyUI environments. The following components are downloaded and set up on your machine at runtime (per your action). They are **not part of the Artify binary** and are governed by their own licenses, which apply directly between you and the respective authors:'
     },
     {
       kind: 'ul',

@@ -31,7 +31,7 @@ export interface CopyLinkBannerLabels {
   dismiss: string
 }
 
-// Values mirror the Comfy Desktop brand tokens defined in
+// Values mirror the Artify brand tokens defined in
 // `src/renderer/src/assets/main.css` — CSS vars don't cross into the
 // cloud webview, so we inline the resolved hex/rgba so this banner
 // reads as Desktop chrome on top of whatever cloud is rendering. Key

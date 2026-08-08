@@ -32,7 +32,7 @@ beforeEach(() => {
   homePath = path.join(tmpRoot, 'home')
   userDataPath = path.join(tmpRoot, 'user-data')
   programDataPath = path.join(tmpRoot, 'program-data')
-  oemRoot = path.join(programDataPath, 'Comfy Desktop', 'OEM')
+  oemRoot = path.join(programDataPath, 'Artify', 'OEM')
 
   fs.mkdirSync(homePath, { recursive: true })
   // Home-root footprint → existing install, so Windows large-data defaults use

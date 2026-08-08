@@ -260,7 +260,7 @@ export async function confirmAndCloseAllHostWindows(
  * The same Close / Cancel prompt is shown for every local install window, including the last
  * one — confirming it tears the window down and the app quits via `window-all-closed`.
  * `isLastWindow` and `stopsLocalComfy` only tailor the copy (a stopped / cloud window has no
- * local process to stop; the last window's close quits Comfy Desktop). Returning to the
+ * local process to stop; the last window's close quits Artify). Returning to the
  * dashboard is a deliberate action via the title pill, not a close-time option.
  */
 export async function confirmCloseInstanceWindow(
@@ -271,8 +271,8 @@ export async function confirmCloseInstanceWindow(
 ): Promise<CloseWindowChoice> {
   const message = isLastWindow
     ? stopsLocalComfy
-      ? 'Close this window? This stops ComfyUI and quits Comfy Desktop.'
-      : 'Close this window? This quits Comfy Desktop.'
+      ? 'Close this window? This stops ComfyUI and quits Artify.'
+      : 'Close this window? This quits Artify.'
     : stopsLocalComfy
       ? 'Close this window? This stops the running ComfyUI instance.'
       : 'Close this window?'

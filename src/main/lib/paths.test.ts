@@ -40,7 +40,7 @@ function stubPlatform(platform: NodeJS.Platform): void {
 describe('drive-aware defaults', () => {
   it('redirects data dirs to the app drive when the app is on a non-home drive (win32)', async () => {
     stubPlatform('win32')
-    exePath = 'D:\\Programs\\Comfy Desktop\\Comfy Desktop.exe'
+    exePath = 'D:\\Programs\\Artify\\Artify.exe'
     const p = await loadPaths()
 
     const dataRoot = path.join('D:\\', 'Comfy-Desktop')
@@ -59,7 +59,7 @@ describe('drive-aware defaults', () => {
     process.env.LOCALAPPDATA = 'C:\\Users\\me\\AppData\\Local'
     try {
       stubPlatform('win32')
-      exePath = 'C:\\Program Files\\Comfy Desktop\\Comfy Desktop.exe'
+      exePath = 'C:\\Program Files\\Artify\\Artify.exe'
       const p = await loadPaths()
 
       // HOME (/mock/home) parses to a non-C: drive; the old home-anchored logic
@@ -76,7 +76,7 @@ describe('drive-aware defaults', () => {
 
   it('never redirects on non-Windows platforms', async () => {
     stubPlatform('linux')
-    exePath = '/opt/Comfy Desktop/comfy-desktop'
+    exePath = '/opt/Artify/comfy-desktop'
     const p = await loadPaths()
 
     expect(p.defaultDataRoot()).toBe(HOME)
@@ -98,7 +98,7 @@ describe('windows system-drive defaults', () => {
   beforeEach(() => {
     homeDir = fs.mkdtempSync(path.join(tmpRoot, 'home-'))
     userDataDir = fs.mkdtempSync(path.join(tmpRoot, 'userdata-'))
-    exePath = path.join(driveRoot, 'Program Files', 'Comfy Desktop', 'Comfy Desktop.exe')
+    exePath = path.join(driveRoot, 'Program Files', 'Artify', 'Artify.exe')
     prevLocalAppData = process.env.LOCALAPPDATA
     process.env.LOCALAPPDATA = LOCAL
     vi.stubGlobal('process', { ...process, platform: 'win32' })
