@@ -58,16 +58,19 @@ function getConfig() {
   }
   const port = address.port
   const server_origin = `http://localhost:${port}`
+  // 新版 ComfyUI 由 install 架构动态管理，comfy_origin 无固定值（旧版
+  // 由 getUrl 设置，已弃用）——给默认端口兜底：appStore 的 config
+  // 依赖 comfy_origin 非空（App.vue 浮动按钮 v-if），stopExecution 的
+  // interrupt 请求也用它拼 URL
+  const effectiveComfyOrigin = comfy_origin || `http://localhost:${comfy_port || 8188}`
   return {
-    comfy_origin,
+    comfy_origin: effectiveComfyOrigin,
     comfy_port,
     web_root,
     server_origin,
     server_port: port,
-    // 旧前端 A UI 的浮动按钮 v-if 依赖 comfyHost 存在（App.vue）——
-    // 新版 ComfyUI 由 install 架构动态管理，无固定 origin，给默认端口
-    // 保证按钮渲染（前端只用它做存在性判断，实际切换走 loadComfyUI IPC）
-    comfyHost: comfy_origin || `http://localhost:${comfy_port || 8188}`
+    // 旧前端 A UI 的浮动按钮 v-if 依赖 comfyHost 存在（App.vue）
+    comfyHost: effectiveComfyOrigin
   }
 }
 
