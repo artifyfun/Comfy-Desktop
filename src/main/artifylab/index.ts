@@ -116,7 +116,8 @@ function loadArtifyLab() {
     height: 900,
     webPreferences: {
       // 共享 preload：注入 window.api 与 legacy 的 window.electronAPI.ArtifyLab 桥
-      preload: path.join(__dirname, '../../preload/index.js'),
+      // __dirname 是 out/main，preload 构建产物在 out/preload
+      preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false
     }
