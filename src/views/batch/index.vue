@@ -1275,6 +1275,21 @@ function getPrompt(data) {
   return prompt
 }
 
+// 将任意异常转为可读文本（Event/Error/字符串等），避免日志显示 "[object Event]"
+function toErrorMessage(err) {
+  if (err instanceof Error) return err.message || String(err)
+  if (err && typeof err === 'object') {
+    if (typeof err.message === 'string') return err.message
+    if (typeof err.type === 'string') return `${err.type} 事件错误`
+    try {
+      return JSON.stringify(err)
+    } catch {
+      return '未知错误'
+    }
+  }
+  return String(err)
+}
+
 const getOutputs = async (prompt) => {
   try {
     const client = getClient()
@@ -1358,7 +1373,7 @@ async function executeBatch() {
           isSuccess = true
         }
       } catch (err) {
-        errorErrorMsg = err
+        errorErrorMsg = toErrorMessage(err)
       }
       const itemDuration = Math.max(0, nowMs() - itemStart)
       executionTimeStats.totalMs += itemDuration
