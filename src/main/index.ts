@@ -2194,7 +2194,11 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
         if (
           details.url.startsWith('http://127.0.0.1:8188') ||
-          details.url.startsWith('http://localhost:8188')
+          details.url.startsWith('http://localhost:8188') ||
+          // ws 握手同样被 origin_only_middleware 校验（Host vs Origin 不匹配 → 403），
+          // 批量任务（3008 页面）连 ComfyUI ws 必须剥头；http:// 前缀不匹配 ws://。
+          details.url.startsWith('ws://127.0.0.1:8188') ||
+          details.url.startsWith('ws://localhost:8188')
         ) {
           console.log(
             '[comfy-origin-strip]',
