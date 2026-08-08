@@ -17,6 +17,11 @@ files:
 extraResources:
   - from: lib
     to: lib
+# Skip the node-gyp rebuild pass: node-pty (the only native dependency)
+# ships N-API prebuilds for win32-x64 that are ABI-agnostic across
+# Electron versions, and its winpty git-submodule sources are not fully
+# present in the npm package, so a forced rebuild fails locally.
+npmRebuild: false
 asarUnpack:
   - node_modules/7zip-bin/**/*
   - node_modules/node-pty/**/*
