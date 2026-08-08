@@ -3,7 +3,7 @@ import { getAppVersion } from '../lib/ipc'
 import fs from 'node:fs'
 import path from 'node:path'
 import { attachSessionDownloadHandler } from '../lib/comfyDownloadManager'
-import { getFrontendPath } from '../artifylab/utils/resourcePaths'
+import { getFrontendPath, isDevMode } from '../artifylab/utils/resourcePaths'
 import { getModelDownloadContentScript } from '../lib/comfyContentScript'
 import { getComfyTerminalContentScript } from '../lib/comfyTerminalContentScript'
 import { closeInstallPopouts } from '../lib/popoutWindows'
@@ -413,14 +413,25 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
   const onDomReady = (): void => {
     comfyContents.executeJavaScript(COMFY_THEME_OBSERVER_JS).catch(() => {})
     comfyContents.executeJavaScript(getModelDownloadContentScript()).catch(() => {})
-    // Inject the artifylab floating switch button (comfy_inject.min.js,
-    // built by the artifylab-frontend repo) so the user can flip back
-    // from the ComfyUI view to the ArtifyLab UI. Reads the built bundle
-    // from the frontend resources — missing in dev until `build:copy`.
-    const comfyInjectPath = path.join(getFrontendPath(), 'comfy_inject.min.js')
-    if (fs.existsSync(comfyInjectPath)) {
-      const comfyInjectJs = fs.readFileSync(comfyInjectPath, 'utf-8')
-      comfyContents.executeJavaScript(comfyInjectJs).catch(() => {})
+    // Inject the artifylab floating switch button so the user can flip
+    // back from the ComfyUI view to the ArtifyLab UI. Prod reads the
+    // built bundle (comfy_inject.min.js) from the frontend resources;
+    // dev loads the source version from the vite dev server directly —
+    // no build:copy needed, mirroring the legacy DEV_MODE behavior.
+    if (isDevMode) {
+      comfyContents
+        .executeJavaScript(
+          `(function(){var s=document.createElement('script');` +
+            `s.src='http://localhost:5000/comfy_inject.js?rand='+Math.random();` +
+            `document.head.appendChild(s)})()`
+        )
+        .catch(() => {})
+    } else {
+      const comfyInjectPath = path.join(getFrontendPath(), 'comfy_inject.min.js')
+      if (fs.existsSync(comfyInjectPath)) {
+        const comfyInjectJs = fs.readFileSync(comfyInjectPath, 'utf-8')
+        comfyContents.executeJavaScript(comfyInjectJs).catch(() => {})
+      }
     }
     // Inject the Terminal bottom-panel entry on local managed installs.
     //

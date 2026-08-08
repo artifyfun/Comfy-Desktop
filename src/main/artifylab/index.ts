@@ -106,15 +106,6 @@ export async function focusComfyUI(): Promise<boolean> {
 }
 
 function loadArtifyLab() {
-  const server = getServer()
-  if (!server) {
-    throw new Error('Server is not running')
-  }
-  const address = server.address()
-  if (!address || typeof address === 'string') {
-    throw new Error('Invalid server address')
-  }
-
   if (artifyWindow && !artifyWindow.isDestroyed()) {
     artifyWindow.focus()
     return
@@ -130,7 +121,23 @@ function loadArtifyLab() {
       nodeIntegration: false
     }
   })
-  artifyWindow.loadURL(`http://localhost:${address.port}`)
+
+  if (DEV_MODE) {
+    // dev：直接加载 artifylab-frontend 的 vite dev server（无需 build:copy）
+    artifyWindow.loadURL(DEV_ORIGIN)
+  } else {
+    // prod：加载本地 express server（静态托管 frontend 产物）
+    const server = getServer()
+    if (!server) {
+      throw new Error('Server is not running')
+    }
+    const address = server.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Invalid server address')
+    }
+    artifyWindow.loadURL(`http://localhost:${address.port}`)
+  }
+
   artifyWindow.on('closed', () => {
     artifyWindow = null
   })
