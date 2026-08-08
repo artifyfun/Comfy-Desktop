@@ -1561,6 +1561,41 @@ export interface ElectronApi {
       successChoice?: boolean
     }) => void
   ): Unsubscribe
+
+  // ArtifyLab (AI agent surface) — bridged from the legacy artifylab
+  // service layer via `artify-*` IPC channels (see registerArtifyHandlers).
+  artify: {
+    selectFile(data: Record<string, unknown>): Promise<string | undefined>
+    getConfig(data: Record<string, unknown>): Promise<Record<string, unknown>>
+    loadComfyUI(data: Record<string, unknown>): Promise<void>
+    loadArtifyLab(data: Record<string, unknown>): Promise<void>
+    getAppInfo(): Promise<{ version: string; name: string; repository: string }>
+    openOutputFolder(): Promise<{ success: boolean; path?: string; error?: string }>
+    getOutputPath(): Promise<{ success: boolean; path?: string; error?: string }>
+    scanFolder(
+      folderPath: string
+    ): Promise<
+      {
+        fullPath: string
+        fileName: string
+        extension: string
+        size: number
+        isDirectory: boolean
+        lastModified: Date
+        relativePath: string
+      }[]
+    >
+    openRootFolder(
+      folderName: string
+    ): Promise<{
+      success: boolean
+      path?: string
+      openedFolder?: string
+      message?: string
+      error?: string
+    }>
+    openCMD(type: string): Promise<{ success: boolean; cmd?: string; error?: string }>
+  }
 }
 
 /** Action IDs that auto-relaunch ComfyUI after completing (stop→op→launch).

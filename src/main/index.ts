@@ -1,4 +1,4 @@
-import { app, Menu, ipcMain, net, dialog, crashReporter, nativeTheme } from 'electron'
+import { app, Menu, ipcMain, net, dialog, crashReporter, nativeTheme, shell } from 'electron'
 import type { BrowserWindow, WebContentsView } from 'electron'
 import type { Tray } from 'electron'
 import path from 'path'
@@ -101,6 +101,9 @@ import { recoverPendingIdentityRotation } from './lib/pendingIdentityMerge'
 import { initExperiments } from './lib/experiments'
 import { initCloudFreeRuns } from './lib/cloudFreeRuns'
 import { initUserTier } from './lib/userTier'
+import { DesktopConfig } from './artifylab/store/desktopConfig'
+import { registerArtifyHandlers } from './artifylab/handlers'
+import { startServer } from './artifylab/server'
 
 import {
   claimAttachHost,
@@ -2150,6 +2153,19 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       onThemeChanged: applyChooserHostThemeToAll
     })
     updater.register()
+    // ArtifyLab service bootstrap: load the desktop-config store (artify
+    // handlers read the install `basePath` from it), register the `artify-*`
+    // IPC handlers, and start the express server (AI agent + ComfyUI API
+    // proxy) backing the Artify surfaces. `DesktopConfig.load` returns
+    // `undefined` when the user chose to quit from the config-repair prompt,
+    // in which case we skip the service — the app is about to exit anyway.
+    const desktopConfig = await DesktopConfig.load(shell)
+    if (desktopConfig) {
+      registerArtifyHandlers()
+      void startServer().catch((err) => {
+        console.error('ArtifyLab server failed to start:', err)
+      })
+    }
     // Forward updater state transitions to every host window's
     // title-bar webContents. Subscribed once at startup; the helper
     // iterates `comfyWindows` so newly-opened windows pick up live

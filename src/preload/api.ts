@@ -475,6 +475,21 @@ export function buildElectronApi(): ElectronApi {
         )
       ipcRenderer.on('panel-trigger-overlay', handler)
       return () => ipcRenderer.removeListener('panel-trigger-overlay', handler)
+    },
+
+    // ArtifyLab (AI agent surface) — mirrors the legacy preload bridge
+    // (`window.electronAPI.artify.*`) on the new `window.api` surface.
+    artify: {
+      selectFile: (data) => ipcRenderer.invoke('artify-selectFile', data),
+      getConfig: (data) => ipcRenderer.invoke('artify-getConfig', data),
+      loadComfyUI: (data) => ipcRenderer.invoke('artify-loadComfyUI', data),
+      loadArtifyLab: (data) => ipcRenderer.invoke('artify-loadArtifyLab', data),
+      getAppInfo: () => ipcRenderer.invoke('artify-getAppInfo'),
+      openOutputFolder: () => ipcRenderer.invoke('artify-openOutputFolder'),
+      getOutputPath: () => ipcRenderer.invoke('artify-getOutputPath'),
+      scanFolder: (folderPath) => ipcRenderer.invoke('artify-scanFolder', folderPath),
+      openRootFolder: (folderName) => ipcRenderer.invoke('artify-openRootFolder', folderName),
+      openCMD: (type) => ipcRenderer.invoke('artify-openCMD', type)
     }
   }
 }

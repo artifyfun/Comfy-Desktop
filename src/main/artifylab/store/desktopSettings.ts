@@ -1,12 +1,12 @@
-export type GpuType = 'nvidia' | 'amd' | 'mps' | 'unsupported';
-export type TorchDeviceType = GpuType | 'cpu';
+export type GpuType = 'nvidia' | 'amd' | 'mps' | 'unsupported'
+export type TorchDeviceType = GpuType | 'cpu'
 
-export type DesktopInstallState = 'started' | 'installed' | 'upgraded';
+export type DesktopInstallState = 'started' | 'installed' | 'upgraded'
 
-export type DesktopWindowStyle = 'custom' | 'default';
+export type DesktopWindowStyle = 'custom' | 'default'
 
 export type DesktopSettings = {
-  basePath?: string;
+  basePath?: string
   /**
    * The state of the installation.
    * - `started`: The installation has started.
@@ -14,26 +14,26 @@ export type DesktopSettings = {
    * - `upgraded`: An upgrade from a previous version that stores the base path
    * in the yaml config.
    */
-  installState?: DesktopInstallState;
+  installState?: DesktopInstallState
   /**
    * The path to the migration installation to migrate custom nodes from
    */
-  migrateCustomNodesFrom?: string;
+  migrateCustomNodesFrom?: string
   /**
    * The last GPU that was detected during hardware validation.
    * Allows manual override of some install behaviour.
    */
-  detectedGpu?: GpuType;
+  detectedGpu?: GpuType
   /** The pytorch device that the user selected during installation. */
-  selectedDevice?: TorchDeviceType;
+  selectedDevice?: TorchDeviceType
   /**
    * Controls whether to use a custom window on linux/win32
    * - `custom`: Modern, theme-reactive, feels like an integral part of the UI
    * - `default`: Impersonal, static, plain - default window title bar
    */
-  windowStyle?: DesktopWindowStyle;
+  windowStyle?: DesktopWindowStyle
   /** The version of comfyui-electron on which the user last consented to metrics. */
-  versionConsentedMetrics?: string;
+  versionConsentedMetrics?: string
   /** Whether the user has generated an image successfully. */
-  hasGeneratedSuccessfully?: boolean;
-};
+  hasGeneratedSuccessfully?: boolean
+}

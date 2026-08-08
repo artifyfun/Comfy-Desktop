@@ -71,10 +71,20 @@ function setServerArgs(args: any) {
 }
 
 function loadComfyUI() {
+  if (!appWindow) {
+    throw new Error(
+      'loadComfyUI is not available — ComfyUI views are managed by the new install architecture'
+    )
+  }
   appWindow.loadComfyUI(serverArgs)
 }
 
 function loadArtifyLab() {
+  if (!appWindow) {
+    throw new Error(
+      'loadArtifyLab is not available — window switching is managed by the new install architecture'
+    )
+  }
   appWindow.loadArtifyLab(serverArgs)
 }
 
