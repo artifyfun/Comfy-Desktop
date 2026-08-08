@@ -130,7 +130,9 @@ function loadPanelContent(
       )
       .catch(() => {})
   } else {
-    void wc.loadFile(path.join(__dirname, '../renderer/panel.html'), { query: panelQuery }).catch(() => {})
+    void wc
+      .loadFile(path.join(__dirname, '../renderer/panel.html'), { query: panelQuery })
+      .catch(() => {})
   }
 }
 
