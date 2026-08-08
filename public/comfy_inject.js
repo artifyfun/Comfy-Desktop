@@ -190,6 +190,13 @@ window.addEventListener('load', function () {
   checkComfyUIReady()
 })
 
+// 兜底：本脚本由桌面端动态注入（async script），可能在 window load 事件
+// 之后才执行，上面的 load 监听器会错过——load 已触发则手动派发一次，
+// 启动 ready 轮询（checkComfyUIReady 自带 20s 轮询窗口）。
+if (document.readyState === 'complete') {
+  window.dispatchEvent(new Event('load'))
+}
+
 function uuidv4() {
   return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (a) =>
     (a ^ ((Math.random() * 16) >> (a / 4))).toString(16),
