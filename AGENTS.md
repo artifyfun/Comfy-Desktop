@@ -1,5 +1,11 @@
 This repository has a zero tolerance policy for flaky tests.
 
+## Runtime logs
+
+- **Desktop app + ComfyUI server runtime log** (includes Python tracebacks from nodes): `C:\Users\Administrator\AppData\Roaming\artify-desktop\logs\app.log` (current run), rotated backups as `app.log_<timestamp>.log` in the same dir.
+- **Dev run output** (vite/electron stdout when run via `pnpm dev`): `D:\artifyfun\comfy-desktop-dev.log`.
+- When debugging a runtime error, read the tail of `app.log` first; per-install ComfyUI logs also land in `<installPath>/logs/comfyui.log` (see `src/main/lib/logRotation.ts`).
+
 ## ComfyUI-Manager is v4 (not the legacy v3 layout)
 
 Installs launched by this app run **Manager v4**: the `comfyui_manager` Python package inside the standalone env, enabled through ComfyUI's `--enable-manager` flag. Do not reason about Manager from the v3 codebase.
