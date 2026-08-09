@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const { mockFromId, mockGetInjectSource } = vi.hoisted(() => ({
+  mockFromId: vi.fn(),
+  mockGetInjectSource: vi.fn(() => 'window.__artifyTest = 1')
+}))
+
 vi.mock('electron', () => ({
   app: {
     isPackaged: false,
@@ -12,12 +17,17 @@ vi.mock('electron', () => ({
   shell: {},
   WebContentsView: class {},
   BrowserWindow: { getAllWindows: () => [] },
-  nativeTheme: { on: vi.fn(), shouldUseDarkColors: false }
+  nativeTheme: { on: vi.fn(), shouldUseDarkColors: false },
+  webFrameMain: { fromId: mockFromId }
+}))
+
+vi.mock('./comfyInject', () => ({
+  getComfyInjectScriptSource: mockGetInjectSource
 }))
 
 import { _runningSessions } from '../lib/ipc/shared'
 import { comfyWindows, indexInstallationId, nextWindowKey, type ComfyWindowEntry } from './registry'
-import { refreshComfyTabBody, setActivePanel } from './panelView'
+import { injectPlaygroundScriptIfMatch, refreshComfyTabBody, setActivePanel } from './panelView'
 
 interface FakeWindow {
   destroyed: boolean
@@ -134,6 +144,48 @@ describe('setActivePanel', () => {
     setActivePanel(fixture.entry.windowKey, 'feedback')
     expect(fixture.layoutCalls).toBe(0)
     expect(fixture.entry.activePanel).toBe('comfy')
+  })
+})
+
+describe('injectPlaygroundScriptIfMatch', () => {
+  const playgroundUrl = 'http://localhost:8188/?artify_inject=readonly&artify_playground=true'
+
+  beforeEach(() => {
+    mockFromId.mockReset()
+    mockGetInjectSource.mockClear()
+  })
+
+  it('ignores non-playground URLs without resolving the frame', () => {
+    injectPlaygroundScriptIfMatch('about:blank', 1, 2)
+    expect(mockFromId).not.toHaveBeenCalled()
+  })
+
+  it('no-ops when the frame no longer resolves (disposed cross-process swap)', () => {
+    mockFromId.mockReturnValue(undefined)
+    expect(() => injectPlaygroundScriptIfMatch(playgroundUrl, 1, 2)).not.toThrow()
+  })
+
+  it('no-ops when the resolved frame is already detached', () => {
+    const executeJavaScript = vi.fn()
+    mockFromId.mockReturnValue({ detached: true, executeJavaScript })
+    injectPlaygroundScriptIfMatch(playgroundUrl, 1, 2)
+    expect(executeJavaScript).not.toHaveBeenCalled()
+  })
+
+  it('injects the playground script into a live subframe', () => {
+    const executeJavaScript = vi.fn().mockResolvedValue(undefined)
+    mockFromId.mockReturnValue({ detached: false, executeJavaScript })
+    injectPlaygroundScriptIfMatch(playgroundUrl, 7, 9)
+    expect(mockFromId).toHaveBeenCalledWith(7, 9)
+    expect(executeJavaScript).toHaveBeenCalledWith('window.__artifyTest = 1')
+  })
+
+  it('swallows a synchronous throw from a frame that dies mid-call', () => {
+    const executeJavaScript = vi.fn(() => {
+      throw new Error('Render frame was disposed before WebFrameMain could be accessed')
+    })
+    mockFromId.mockReturnValue({ detached: false, executeJavaScript })
+    expect(() => injectPlaygroundScriptIfMatch(playgroundUrl, 1, 2)).not.toThrow()
   })
 })
 

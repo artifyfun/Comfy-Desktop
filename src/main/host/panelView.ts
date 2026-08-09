@@ -1,4 +1,4 @@
-import { WebContentsView, ipcMain } from 'electron'
+import { WebContentsView, ipcMain, webFrameMain } from 'electron'
 import path from 'path'
 import { attachContextMenu } from '../lib/contextMenu'
 import { resolveTheme } from '../lib/ipc/shared'
@@ -39,6 +39,31 @@ function isOpaqueBodyMode(mode: BodyMode): boolean {
 }
 
 /**
+ * Inject the playground script into a just-navigated subframe when its URL is the
+ * A UI's embedded ComfyUI (`artify_playground=true`). The frame is re-resolved by
+ * (processId, routingId) at navigate-commit time — never held across ticks — so a
+ * frame that died in a cross-process swap simply resolves to undefined / detached
+ * and is skipped. Exported for unit tests.
+ */
+export function injectPlaygroundScriptIfMatch(
+  url: string,
+  frameProcessId: number,
+  frameRoutingId: number
+): void {
+  if (!url.includes('artify_playground=true')) return
+  const frame = webFrameMain.fromId(frameProcessId, frameRoutingId)
+  if (!frame || frame.detached) return
+  const injectJs = getComfyInjectScriptSource()
+  if (!injectJs) return
+  console.log('[iframe-inject] injecting, len=', injectJs.length)
+  try {
+    void frame.executeJavaScript(injectJs).catch(() => {})
+  } catch {
+    // Frame died between the navigate event and the call; nothing to inject into.
+  }
+}
+
+/**
  * Lazily create the panel WebContentsView for a comfy window. The URL params are only an
  * initial hint; `did-finish-load` always re-pushes the current `activePanel` to guard
  * against a mid-load race where the user clicks between buttons before the first load ends.
@@ -69,32 +94,21 @@ export function ensurePanelView(
   // The A UI's workflow editor (WorkflowModal) embeds ComfyUI in an iframe
   // (`artify_playground=true`) and drives it over postMessage. That subframe
   // has no preload and never goes through attach.ts, so the playground-mode
-  // script never runs there on its own — inject it once the frame lands on
-  // the playground URL (frame-created fires before navigation, hence the
-  // short poll). The script's own `__artifyInjectLoaded` guard keeps repeat
-  // navigations a no-op.
-  panelView.webContents.on('frame-created', (_event, details) => {
-    const frame = details.frame
-    if (!frame || frame === panelView.webContents.mainFrame) {
-      console.log('[iframe-inject] main frame, skip')
-      return
+  // script never runs there on its own — inject it once the frame commits its
+  // navigation to the playground URL. This is deliberately event-driven: the
+  // WebFrameMain handed over by `frame-created` is routinely disposed by the
+  // about:blank -> http cross-process swap (and by React rebuilding the
+  // iframe), so dereferencing it from a deferred tick throws "Render frame
+  // was disposed before WebFrameMain could be accessed" in the main process.
+  // The script's own `__artifyInjectLoaded` guard keeps repeat navigations a
+  // no-op.
+  panelView.webContents.on(
+    'did-frame-navigate',
+    (_event, url, _httpResponseCode, _httpStatusText, isMainFrame, frameProcessId, frameRoutingId) => {
+      if (isMainFrame) return
+      injectPlaygroundScriptIfMatch(url, frameProcessId, frameRoutingId)
     }
-    console.log('[iframe-inject] frame created, url=', frame.url.slice(0, 80))
-    let tries = 0
-    const injectWhenReady = (): void => {
-      tries++
-      if (frame.url.includes('artify_playground=true')) {
-        const injectJs = getComfyInjectScriptSource()
-        console.log('[iframe-inject] injecting, len=', injectJs.length)
-        if (injectJs) frame.executeJavaScript(injectJs).catch(() => {})
-        return
-      }
-      // The full ComfyUI frontend can take a while to start serving; keep
-      // polling for up to ~30s so a slow first load still gets injected.
-      if (tries < 120) setTimeout(injectWhenReady, 250)
-    }
-    injectWhenReady()
-  })
+  )
   // Insert at zero size, behind the comfy view; layoutViews handles positioning.
   panelView.setBounds({ x: 0, y: TITLEBAR_HEIGHT + 1, width: 0, height: 0 })
   panelView.setVisible(false)
