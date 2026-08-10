@@ -28,7 +28,12 @@ describe('buildAppToolInputSchema', () => {
       renderComponent: 'slider',
       selectedWidget: { name: 'cfg', type: 'slider', options: { min: 0, max: 20, step: 0.5 } }
     }
-    expect(schemaProps([node]).cfg).toMatchObject({ type: 'number', minimum: 0, maximum: 20, multipleOf: 0.5 })
+    expect(schemaProps([node]).cfg).toMatchObject({
+      type: 'number',
+      minimum: 0,
+      maximum: 20,
+      multipleOf: 0.5
+    })
   })
 
   it('select → string enum from widget options', () => {
@@ -54,10 +59,10 @@ describe('buildAppToolInputSchema', () => {
     expect(schemaProps([node]).img.type).toBe('string')
   })
 
-  it('注入公共参数 seed / randomize_seed(默认 true)', () => {
+  it('注入公共参数 seed / randomize_seed(默认 false,显式 seed 优先)', () => {
     const props = schemaProps([])
     expect(props.seed).toBeDefined()
-    expect(props.randomize_seed).toMatchObject({ type: 'boolean', default: true })
+    expect(props.randomize_seed).toMatchObject({ type: 'boolean', default: false })
   })
 
   it('output 节点不进入 inputSchema', () => {

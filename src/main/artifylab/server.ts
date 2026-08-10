@@ -40,6 +40,10 @@ interface NgrokConfig {
   server_origin: string
 }
 
+// MCP server（暴露 A UI app 为 MCP 工具，供 AI 客户端调用）
+// 必须挂在 history() 之前：否则 GET /mcp（Accept */*）会被改写成 index.html（M5）
+app.use('/mcp', createMcpRouter())
+
 // 中间件配置
 app.use(history())
 app.use(bodyParser.json({ limit: CONFIG.BODY_LIMIT }))
@@ -47,9 +51,6 @@ app.use(bodyParser.urlencoded({ limit: CONFIG.BODY_LIMIT, extended: true }))
 app.use(bodyParser.raw({ limit: CONFIG.BODY_LIMIT }))
 app.use(bodyParser.text({ limit: CONFIG.BODY_LIMIT }))
 app.use(cookieParser())
-
-// MCP server（暴露 A UI app 为 MCP 工具，供 AI 客户端调用）
-app.use('/mcp', createMcpRouter())
 
 // CORS 中间件 - 使用配置的域名
 app.use((req, res, next) => {

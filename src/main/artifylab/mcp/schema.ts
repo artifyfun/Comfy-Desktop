@@ -8,13 +8,17 @@ import type { ParamNode } from '../appStore'
 
 type JsonSchema = Record<string, unknown>
 
-/** 注入到每个 app 工具的公共入参（决策 #2：显式 seed + randomize_seed） */
+/** 注入到每个 app 工具的公共入参（决策 #2：显式 seed + randomize_seed；M2：显式 seed 优先） */
 const COMMON_INPUT_PARAMS: Record<string, JsonSchema> = {
-  seed: { type: 'number', description: '随机种子。省略则按 randomize_seed 自动随机。' },
+  seed: {
+    type: 'number',
+    description: '随机种子。显式传入即生效；未传入时按 randomize_seed 自动随机。'
+  },
   randomize_seed: {
     type: 'boolean',
-    default: true,
-    description: 'true（默认）时覆盖 seed 为随机值，复刻 A UI 现有强制随机行为。'
+    default: false,
+    description:
+      'false（默认）时显式 seed 生效；true 时强制覆盖为随机值，复刻 A UI 现有强制随机行为。'
   }
 }
 

@@ -18,13 +18,15 @@ export interface ExecutionResult {
 }
 
 /** 提交后记录 prompt_id → app，供 getExecutionStatus 做输出过滤（M2） */
-const promptAppMap = new Map<string, App>()
+const promptAppMap = new Map<string, ParamNode[]>()
+const MAX_PROMPT_ENTRIES = 500
 
 /** 15 位随机整数（首位非 0），移植自 artifylab-frontend/src/utils/index.js:523-533 */
 export function getSeed(n = 15): number {
   let num = ''
   for (let i = 0; i < n; i++) {
-    num += i === 0 ? String(Math.floor(Math.random() * 9 + 1)) : String(Math.floor(Math.random() * 10))
+    num +=
+      i === 0 ? String(Math.floor(Math.random() * 9 + 1)) : String(Math.floor(Math.random() * 10))
   }
   return Number(num)
 }
@@ -40,6 +42,25 @@ function fetchTimeout(url: string, init: RequestInit = {}, ms = 60000): Promise<
   return fetch(url, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(timer))
 }
 
+/** 媒体来源白名单（H1：阻断 SSRF）——仅 data: URL 或本机 http(s) */
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+const MAX_MEDIA_BYTES = 200 * 1024 * 1024
+
+export function assertSafeMediaUrl(url: string): void {
+  if (url.startsWith('data:')) return
+  if (/^https?:/i.test(url)) {
+    let u: URL
+    try {
+      u = new URL(url)
+    } catch {
+      throw new Error('invalid media URL')
+    }
+    if (!LOCAL_HOSTS.has(u.hostname)) throw new Error(`media URL host not allowed: ${u.hostname}`)
+    return
+  }
+  throw new Error('media must be a data: URL or a localhost http(s) URL')
+}
+
 function mimeToExt(mime: string): string {
   if (mime.includes('png')) return 'png'
   if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg'
@@ -51,7 +72,11 @@ function mimeToExt(mime: string): string {
 }
 
 /** POST /prompt → prompt_id */
-export async function queuePrompt(comfyOrigin: string, prompt: ComfyPrompt, clientId: string): Promise<string> {
+export async function queuePrompt(
+  comfyOrigin: string,
+  prompt: ComfyPrompt,
+  clientId: string
+): Promise<string> {
   const res = await fetchTimeout(`${comfyOrigin}/prompt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -84,14 +109,23 @@ export async function uploadMedia(
   comfyOrigin: string,
   dataUrl: string
 ): Promise<{ name: string; subfolder: string; type: string }> {
+  assertSafeMediaUrl(dataUrl)
   const blobRes = await fetchTimeout(dataUrl)
+  if (!blobRes.ok) throw new Error(`fetch media HTTP ${blobRes.status}`)
   const blob = await blobRes.blob()
+  if (blob.size > MAX_MEDIA_BYTES)
+    throw new Error(`media too large: ${blob.size} bytes (max ${MAX_MEDIA_BYTES})`)
   const form = new FormData()
   form.append('image', blob, `upload.${mimeToExt(blob.type)}`)
   form.append('overwrite', 'true')
   const res = await fetchTimeout(`${comfyOrigin}/upload/image`, { method: 'POST', body: form })
   if (!res.ok) throw new Error(`uploadMedia HTTP ${res.status}`)
-  const json = (await res.json()) as { name: string; subfolder: string; type: string; error?: unknown }
+  const json = (await res.json()) as {
+    name: string
+    subfolder: string
+    type: string
+    error?: unknown
+  }
   if (json.error) throw new Error(`uploadMedia error: ${JSON.stringify(json.error)}`)
   // ComfyUI LoadImage 等 widget 期望 "subfolder/filename" 或 "filename"
   const filepath = json.subfolder ? `${json.subfolder}/${json.name}` : json.name
@@ -108,14 +142,17 @@ export async function executeApp(
   comfyOrigin: string
 ): Promise<ExecutionResult> {
   const template = app.template
-  if (!template?.prompt) throw new Error(`app ${app.id} (${app.name}) 缺少 template.prompt，无法执行`)
+  if (!template?.prompt)
+    throw new Error(`app ${app.id} (${app.name}) 缺少 template.prompt，无法执行`)
   const prompt: ComfyPrompt = structuredClone(template.prompt)
   const clientId = randomUUID()
   const inputs: ParamNode[] = (template.paramsNodes ?? []).filter((n) => n.category === 'input')
 
-  // 1. seed（M1：检测与赋值一致——用户 seed 应用到所有 seed 字段；randomize=false 未传则保留原值）
-  const randomize = args.randomize_seed ?? true
-  const seedArg = args.seed != null ? Number(args.seed) : null
+  // 1. seed（M2：显式 seed 生效——传了 seed 且未强制 randomize 时用 seed；NaN 拒绝）
+  const hasSeed = args.seed != null
+  const randomize = args.randomize_seed ?? !hasSeed
+  const seedArg = hasSeed ? Number(args.seed) : null
+  if (seedArg != null && !Number.isFinite(seedArg)) throw new Error('seed must be a finite number')
   for (const node of Object.values(prompt)) {
     for (const k of Object.keys(node.inputs)) {
       const isSeedField = k.toLowerCase().includes('seed') && typeof node.inputs[k] === 'number'
@@ -147,9 +184,13 @@ export async function executeApp(
     }
   }
 
-  // 4. 提交 + 记录 app 映射（M2）
+  // 4. 提交 + 记录 app 映射（只存 paramsNodes，带上限淘汰最旧条目；H2）
   const promptId = await queuePrompt(comfyOrigin, prompt, clientId)
-  promptAppMap.set(promptId, app)
+  promptAppMap.set(promptId, template.paramsNodes ?? [])
+  if (promptAppMap.size > MAX_PROMPT_ENTRIES) {
+    const oldest = promptAppMap.keys().next().value
+    if (oldest != null) promptAppMap.delete(oldest)
+  }
   return { prompt_id: promptId, status: 'queued' }
 }
 
@@ -158,7 +199,19 @@ export async function executeApp(
  * 404/无 entry → running；entry.status.status_str==='error' → error；
  * 否则 success（M2：用 extractOutputs 过滤为 app 声明的输出节点）。
  */
-export async function getExecutionStatus(comfyOrigin: string, promptId: string): Promise<ExecutionResult> {
+export async function getExecutionStatus(
+  comfyOrigin: string,
+  promptId: string
+): Promise<ExecutionResult> {
+  // H3：本进程未提交过的 prompt_id（拼错/重启后历史丢失）直接报错，避免永久 running 轮询死循环
+  const paramsNodes = promptAppMap.get(promptId)
+  if (!paramsNodes) {
+    return {
+      prompt_id: promptId,
+      status: 'error',
+      error: 'unknown prompt_id: not submitted by this process (ComfyUI may have restarted)'
+    }
+  }
   const entry = await getHistory(comfyOrigin, promptId)
   if (!entry) return { prompt_id: promptId, status: 'running' }
   const status = entry.status as { status_str?: string; messages?: unknown[] } | undefined
@@ -170,8 +223,7 @@ export async function getExecutionStatus(comfyOrigin: string, promptId: string):
     }
   }
   const rawOutputs = (entry.outputs as Record<string, unknown>) ?? {}
-  const app = promptAppMap.get(promptId)
-  const outputs = app ? extractOutputs(app, rawOutputs) : rawOutputs
+  const outputs = extractOutputs(paramsNodes, rawOutputs)
   return { prompt_id: promptId, status: 'success', outputs }
 }
 
@@ -180,11 +232,12 @@ export async function stopExecution(comfyOrigin: string): Promise<void> {
   await fetchTimeout(`${comfyOrigin}/interrupt`, { method: 'POST' })
 }
 
-/** 抽取 app 声明的 output 节点结果（移植 useWorkflow.js:189-207 handleResult） */
-export function extractOutputs(app: App, outputs: Record<string, unknown> = {}): Record<string, unknown> {
-  const outputIds = (app.template?.paramsNodes ?? [])
-    .filter((n) => n.category === 'output')
-    .map((n) => String(n.id))
+/** 抽取 app 声明的 output 节点结果（移植 useWorkflow.js:189-207 handleResult；M6：回退分支不再 join 对象数组） */
+export function extractOutputs(
+  paramsNodes: ParamNode[],
+  outputs: Record<string, unknown> = {}
+): Record<string, unknown> {
+  const outputIds = paramsNodes.filter((n) => n.category === 'output').map((n) => String(n.id))
   const response: Record<string, unknown> = {}
   for (const key of Object.keys(outputs)) {
     if (!outputIds.includes(key)) continue
@@ -192,7 +245,8 @@ export function extractOutputs(app: App, outputs: Record<string, unknown> = {}):
     for (const item of Object.values(nodeOut)) {
       if (Array.isArray(item)) {
         const hit = item.find(
-          (it) => typeof it === 'object' && it !== null && (it as { type?: string }).type === 'output'
+          (it) =>
+            typeof it === 'object' && it !== null && (it as { type?: string }).type === 'output'
         )
         if (hit) {
           response[key] = hit
@@ -202,7 +256,11 @@ export function extractOutputs(app: App, outputs: Record<string, unknown> = {}):
     }
     if (response[key] == null) {
       const arr = Object.values(nodeOut).find((v) => Array.isArray(v)) as unknown[] | undefined
-      if (arr) response[key] = arr.join('\n')
+      if (arr) {
+        response[key] = arr
+          .map((it) => (typeof it === 'string' ? it : JSON.stringify(it)))
+          .join('\n')
+      }
     }
   }
   return response
