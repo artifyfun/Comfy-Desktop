@@ -1,6 +1,6 @@
 import Store from 'electron-store'
 import { EventEmitter } from 'events'
-import artifyUtils from '.'
+import { getServerPort } from './server'
 
 /** A UI app 参数节点 —— 对应 ComfyUI 工作流里被挑出来的 widget（MCP 工具入参来源） */
 export interface ParamNode {
@@ -43,10 +43,11 @@ export interface AppStore {
 }
 
 const getDefaultConfig = () => {
-  const { comfy_origin, server_origin } = artifyUtils.getConfig()
+  // 直接读 server 端口，不再经 index.ts 聚合导出——切断 appStore→index→server→mcp→appStore 循环依赖
+  const port = getServerPort() ?? 8188
   return {
-    comfyHost: comfy_origin,
-    serverHost: server_origin,
+    comfyHost: 'http://localhost:8188',
+    serverHost: `http://localhost:${port}`,
     lang: 'zh',
     theme: 'dark',
     activeAppId: '',
