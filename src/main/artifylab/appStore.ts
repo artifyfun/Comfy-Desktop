@@ -1,5 +1,32 @@
 import Store from 'electron-store'
+import { EventEmitter } from 'events'
 import artifyUtils from '.'
+
+/** A UI app 参数节点 —— 对应 ComfyUI 工作流里被挑出来的 widget（MCP 工具入参来源） */
+export interface ParamNode {
+  id: number
+  category: 'input' | 'output'
+  type: string
+  name: string
+  description?: string
+  selectedWidget?: {
+    name?: string
+    type?: string
+    options?: { values?: unknown[]; min?: number; max?: number; step?: number; precision?: number }
+  }
+  renderComponent?: string
+  color?: string
+  key?: string
+}
+
+/** ComfyUI API 格式 prompt: { [nodeId]: { class_type, inputs } } */
+export type ComfyPrompt = Record<string, { class_type: string; inputs: Record<string, unknown> }>
+
+export interface AppTemplate {
+  workflow?: unknown
+  prompt?: ComfyPrompt
+  paramsNodes?: ParamNode[]
+}
 
 export interface App {
   id: string
@@ -7,6 +34,8 @@ export interface App {
   description?: string
   createdAt: number
   updatedAt: number
+  /** A UI 生成的完整模板（前端透传，服务端此前未声明类型） */
+  template?: AppTemplate
 }
 
 export interface AppStore {
@@ -31,10 +60,11 @@ const getDefaultConfig = () => {
   }
 }
 
-class AppStoreManager {
+class AppStoreManager extends EventEmitter {
   private store: Store<AppStore>
 
   constructor() {
+    super()
     this.store = new Store<AppStore>({
       name: 'artify-apps',
       defaults: {
@@ -66,6 +96,7 @@ class AppStoreManager {
 
     apps.unshift(newApp)
     this.store.set('apps', apps)
+    this.emit('change')
     return newApp
   }
 
@@ -87,6 +118,7 @@ class AppStoreManager {
 
     apps[appIndex] = updatedApp
     this.store.set('apps', apps)
+    this.emit('change')
     return updatedApp
   }
 
@@ -100,6 +132,7 @@ class AppStoreManager {
     }
 
     this.store.set('apps', filteredApps)
+    this.emit('change')
     return true
   }
 
@@ -122,6 +155,7 @@ class AppStoreManager {
     // 保证顺序：新apps在前，旧apps在后
     const mergedApps = Array.from(appMap.values())
     this.store.set('apps', mergedApps)
+    this.emit('change')
   }
 
   // 获取config

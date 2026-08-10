@@ -19,6 +19,7 @@ import { memoryCache } from './services/cache'
 import { fetchWithRetry, createOpenAIRequestOptions, handleStreamResponse } from './utils/fetch'
 import appStoreManager from './appStore'
 import artifyUtils from '.'
+import { createMcpRouter } from './mcp'
 
 // Load environment variables from .env file
 dotenv.config()
@@ -46,6 +47,9 @@ app.use(bodyParser.urlencoded({ limit: CONFIG.BODY_LIMIT, extended: true }))
 app.use(bodyParser.raw({ limit: CONFIG.BODY_LIMIT }))
 app.use(bodyParser.text({ limit: CONFIG.BODY_LIMIT }))
 app.use(cookieParser())
+
+// MCP server（暴露 A UI app 为 MCP 工具，供 AI 客户端调用）
+app.use('/mcp', createMcpRouter())
 
 // CORS 中间件 - 使用配置的域名
 app.use((req, res, next) => {
