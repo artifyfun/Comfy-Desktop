@@ -154,12 +154,19 @@
     }
 
     let counter = 0
+    // 扩展注册完成度检测：节点类型数量连续稳定（不再增长）即视为就绪。
+    // 不用固定阈值——核心节点本身就有上百个，但将来精简到不足 50 个
+    // 也不影响，只要数量非零且稳定即可。
+    let lastNodeTypesCount = -1
+    let stableNodeTypesCount = 0
 
     function checkComfyUIReady() {
       counter++
       clearTimeout(timer)
 
-      if (counter > 200) {
+      // 冷启动时几十个扩展的 JS 逐个动态加载，节点类型注册可能耗时数十秒
+      // （曾因 20s 超时导致 onload 永不发出，画布停在默认工作流）
+      if (counter > 600) {
         console.warn('[ArtifyInject] Timeout waiting for ComfyUI')
         return
       }
@@ -173,8 +180,17 @@
       const nodeTypesCount = hasLiteGraph
         ? Object.keys(window.LiteGraph.registered_node_types || {}).length
         : 0
-      // Wait for at least 50 node types (standard ComfyUI has many more once extensions load)
-      const isFullyReady = hasVersion || (hasLiteGraph && nodeTypesCount > 50)
+      // hasVersion 在 main bundle 执行时即置位，若用它短路，onload 会在扩展
+      // 尚未注册（nodeTypes=0）时发出——父页面 loadGraphData 因缺少自定义
+      // 节点类型而失败，画布停留在 ComfyUI 默认工作流。必须等到节点类型
+      // 数量非零且连续 5 次轮询（500ms）不再增长，才认为扩展注册完成。
+      if (nodeTypesCount > 0 && nodeTypesCount === lastNodeTypesCount) {
+        stableNodeTypesCount++
+      } else {
+        stableNodeTypesCount = 0
+        lastNodeTypesCount = nodeTypesCount
+      }
+      const isFullyReady = hasVersion && hasLiteGraph && stableNodeTypesCount >= 5
 
       if (isFullyReady && window.app && window.app.graph) {
         if (artify_inject === 'readonly' || isIframe || artify_playground) {
@@ -862,7 +878,37 @@
               data.extra_data.workflow_name = workflowName
             }
 
-            await app.loadGraphData(data)
+            // 冷启动时扩展仍在注册：loadGraphData 遇到未注册的自定义节点
+            // 可能抛错，也可能被 LiteGraph 静默丢弃（节点数不足）——画布
+            // 停在默认工作流。两种情况都重试几次兜底，每次 clean 画布，
+            // 保证重试不残留上次半加载的节点。
+            let lastLoadError = null
+            for (let attempt = 0; attempt < 4; attempt++) {
+              try {
+                await app.loadGraphData(data, true, true)
+                // 静默丢弃检测：工作流本应有节点但画布为空 → 视为失败重试
+                if (data?.nodes?.length && !app.graph?._nodes?.length) {
+                  throw new Error('workflow loaded but no nodes on canvas')
+                }
+                lastLoadError = null
+                break
+              } catch (err) {
+                lastLoadError = err
+                console.warn(
+                  `[ArtifyInject] loadGraphData attempt ${attempt + 1} failed:`,
+                  err?.message ?? err,
+                )
+                await new Promise((r) => setTimeout(r, 3000))
+              }
+            }
+            // 重试耗尽仍失败：不抛错，继续走回传，保证 A UI 的
+            // loadGraphData Promise 不会永久挂起（模态框卡 loading）
+            if (lastLoadError) {
+              console.warn(
+                '[ArtifyInject] loadGraphData failed after retries, canvas may be incomplete:',
+                lastLoadError?.message ?? lastLoadError,
+              )
+            }
             colorizeLinks()
             colorizeCanvas()
 
