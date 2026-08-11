@@ -390,6 +390,9 @@
         const { app: retryApp, LiteGraph: retryLiteGraph } = getComfyUIApp()
         if (!retryApp || !retryLiteGraph) {
           console.warn('[ArtifyInject] Could not find ComfyUI app instance after retry')
+          // 仍回调 onReady，避免父页面（如工作流编辑器 modal）因等不到 onload 而永久转圈；
+          // app 缺失会在后续交互中自然暴露，warn 已记录原因。
+          onReady()
           return
         }
         doHandleComfyuiContext(retryApp, retryLiteGraph, onReady)
@@ -1272,6 +1275,9 @@
         app.last_loaded_file = workflowName
         if (standaloneNamingAttempts >= 20) clearInterval(standaloneNamingInterval)
       }, 500)
+    } catch (e) {
+      // getConfig/getAppById/apiRequest/loadGraphData 任一失败原本会变成 unhandled rejection。
+      console.error('[ArtifyInject] loadWorkflow failed:', e)
     } finally {
       isArtifyLoading = false
     }
