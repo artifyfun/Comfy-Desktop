@@ -4,6 +4,7 @@ import path from 'node:path'
 import { useDesktopConfig } from './store/desktopConfig'
 import artifyUtils from '.'
 import { fetchWithRetry } from './utils/fetch'
+import { get as getSetting } from '../settings'
 
 export function registerArtifyHandlers() {
   ipcMain.handle('artify-selectFile', async (_event, _data) => {
@@ -59,12 +60,13 @@ export function registerArtifyHandlers() {
    */
   ipcMain.handle('artify-openOutputFolder', async (_event) => {
     try {
-      const basePath = useDesktopConfig().get('basePath')
-      if (!basePath) {
-        throw new Error('Base path not configured')
+      // ComfyUI 通过 `--output-directory` 启动（见 launch.ts），实际输出目录
+      // 是 settings 的 `outputDir`（默认 <dataRoot>/ComfyUI-Shared/output，
+      // 可被用户/per-install 覆盖）。basePath/output 并非真实输出位置。
+      const outputPath = getSetting('outputDir')
+      if (!outputPath) {
+        throw new Error('Output directory not configured')
       }
-
-      const outputPath = path.join(basePath, 'output')
 
       // 检查目录是否存在，如果不存在则创建
       if (!fs.existsSync(outputPath)) {
@@ -87,12 +89,10 @@ export function registerArtifyHandlers() {
    */
   ipcMain.handle('artify-getOutputPath', async (_event) => {
     try {
-      const basePath = useDesktopConfig().get('basePath')
-      if (!basePath) {
-        throw new Error('Base path not configured')
+      const outputPath = getSetting('outputDir')
+      if (!outputPath) {
+        throw new Error('Output directory not configured')
       }
-
-      const outputPath = path.join(basePath, 'output')
       return { success: true, path: outputPath }
     } catch (error) {
       console.error('Error getting output path:', error)
