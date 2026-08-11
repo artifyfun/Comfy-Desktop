@@ -621,7 +621,9 @@ async function ensureHistoryLoaded() {
     historyRecords.value.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))
     historyLoadedKey.value = historyKey.value
   } catch (error) {
-    historyRecords.value = []
+    // 读取失败时不清空已有列表（避免把「读不到」伪装成「无记录」），仅记录并提示。
+    console.error('加载历史记录失败:', error)
+    showError('historyLoadFailed')
   }
 }
 
@@ -629,7 +631,10 @@ async function saveHistory() {
   if (!historyKey.value) return
   try {
     await localforage.setItem(historyKey.value, JSON.parse(JSON.stringify(historyRecords.value)))
-  } catch (_) {}
+  } catch (error) {
+    console.error('保存历史记录失败:', error)
+    showError('historySaveFailed')
+  }
 }
 
 function deepClone(obj) {
@@ -678,7 +683,10 @@ async function upsertHistoryRecord(update) {
   const rec = historyRecords.value[idx]
   const merged = { ...rec, ...update }
   if (typeof update.processed === 'number') {
-    merged.lastIndexProcessed = Math.max(rec.lastIndexProcessed || 0, update.processed + (rec.startFromIndex ? (rec.startFromIndex - 1) : 0))
+    // update.processed 已包含跳过前缀（init 为 startFromIndex-1），其值即 1-based
+    // currentIndex；之前额外 +(startFromIndex-1) 会重复叠加，导致断点续跑时
+    // lastIndexProcessed 偏大、再次续跑跳过未处理项（数据丢失）。
+    merged.lastIndexProcessed = Math.max(rec.lastIndexProcessed || 0, update.processed)
   }
   if (Array.isArray(update.logs) && update.logs.length) {
     merged.logs = [...update.logs, ...(rec.logs || [])]
@@ -715,8 +723,9 @@ function restoreFromRecord(rec) {
   batchData.value = Array.isArray(rec.batchData) ? deepClone(rec.batchData) : []
   state.inputs = Array.isArray(rec.inputsMapping) ? deepClone(rec.inputsMapping) : state.inputs
   updateAvailableFields()
-  // 继续索引
-  const nextIndex = Math.min((rec.lastIndexProcessed || 0), batchData.value.length)
+  // 继续索引：lastIndexProcessed 是 1-based 已完成项，续跑应从「下一项」开始，
+  // 否则会重跑最后一项（固定 seed 工作流会产生重复输出）。
+  const nextIndex = Math.min((rec.lastIndexProcessed || 0) + 1, batchData.value.length)
   startFromIndex.value = Math.max(1, nextIndex)
   currentStep.value = 2
   showHistoryDialog.value = false
@@ -855,6 +864,12 @@ async function init() {
   await appStore.initConfig()
   const app = await appStore.getAppById(appStore.config.activeAppId)
   currentApp.value = app
+  if (!app) {
+    // activeAppId 失效（应用被删除等）：避免 genMeta(null) 解构抛错导致整页白屏。
+    console.error('当前应用不存在: activeAppId =', appStore.config.activeAppId)
+    showError('currentAppNotFound')
+    return
+  }
   const inputs = genMeta(currentApp.value).components.children.filter(node => ['form-item'].includes(node.componentName)).map(node => {
     return {
       id: node.id,
@@ -923,7 +938,9 @@ function generateBatchDataFromFiles() {
     fileSize: file.size,
     fileType: file.type,
     fileExtension: file.extension,
-    fileNameWithoutExt: file.extension ? file.name.slice(0, -(file.extension.length + 1)) : file.name,
+    // file.extension 来自 path.extname，含前导点（'.jpg'），按其本身长度截断即可，
+    // 之前用 length+1 会多砍一个字符（photo.jpg → phot）。
+    fileNameWithoutExt: file.extension ? file.name.slice(0, -file.extension.length) : file.name,
     isDirectory: file.isDirectory,
     lastModified: file.lastModified,
     relativePath: file.relativePath
@@ -1449,9 +1466,12 @@ async function executeBatch() {
         currentItem: ''
       })
 
-      unloadModel()
-
-      // 检查是否需要自动关闭计算机
+      // 卸载模型属清理动作：失败不应把已显示的成功翻成异常，但必须显式记录（Fail Loud）。
+      try {
+        await unloadModel()
+      } catch (e) {
+        console.error('卸载模型失败:', e)
+      }
       if (autoShutdownEnabled.value) {
         await handleAutoShutdown()
       }
@@ -1476,8 +1496,17 @@ async function executeBatch() {
 
 // 停止执行
 async function stopExecution() {
-  interrupt()
-  unloadModel()
+  // 停止动作各自隔离捕获：一个失败不能掩盖另一个，且 interrupt/unload 失败要可见。
+  try {
+    await interrupt()
+  } catch (e) {
+    console.error('interrupt 失败:', e)
+  }
+  try {
+    await unloadModel()
+  } catch (e) {
+    console.error('卸载模型失败:', e)
+  }
   // 立即设置停止状态，防止继续执行
   isExecuting.value = false
 
@@ -1663,9 +1692,14 @@ onBeforeUnmount(() => {
     executionProgress.strokeColor = '#ef4444'
     executionProgress.currentItem = ''
 
-    // 如果有electronAPI，尝试停止后端执行
+    // 如果有electronAPI，尝试停止后端执行。后端失败时返回 {success:false}（不会 reject），
+    // 需显式检查 result.success，否则离开页面后端仍在跑却被当成已停止。
     if (window.electronAPI) {
-      window.electronAPI.ArtifyLab.stopExecution().catch(error => {
+      window.electronAPI.ArtifyLab.stopExecution().then(result => {
+        if (result && result.success === false) {
+          console.error('页面离开时停止执行失败:', result.error)
+        }
+      }).catch(error => {
         console.error('页面离开时停止执行失败:', error)
       })
     }

@@ -1196,7 +1196,8 @@
         workflow.extra.workflow_name = workflowName
       }
 
-      await app.loadGraphData(workflow)
+      // 与 iframe 路径一致：clean=true 清掉上一应用的残留节点，避免切换 App 后画布新旧节点混合。
+      await app.loadGraphData(workflow, true, true)
       colorizeLinks()
       colorizeCanvas()
 
