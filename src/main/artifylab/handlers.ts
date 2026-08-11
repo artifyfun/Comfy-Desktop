@@ -213,6 +213,8 @@ export function registerArtifyHandlers() {
           cmd: pythonInterpreterPath
         }
       }
+      // 未知的 type：之前落穿返回 undefined，前端 `const { cmd } = await ...` 解构会抛错。
+      return { success: false, error: 'Unknown cmd type: ' + type }
     } catch (error) {
       console.error('Error opening cmd:', error)
       return { success: false, error: (error as Error).message }
