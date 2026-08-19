@@ -1,6 +1,7 @@
 import Store from 'electron-store'
 import { EventEmitter } from 'events'
 import { getServerPort } from './server'
+import { normalizeAppForStorage, serializeApp, snapshotAppVersion } from './appAssets'
 
 /** A UI app 参数节点 —— 对应 ComfyUI 工作流里被挑出来的 widget（MCP 工具入参来源） */
 export interface ParamNode {
@@ -74,8 +75,17 @@ class AppStoreManager extends EventEmitter {
     })
   }
 
-  // 获取所有apps
+  // 获取所有apps（出口序列化：app-asset:// → HTTP URL）
   getAllApps(): App[] {
+    const serverOrigin = `http://localhost:${getServerPort() ?? ''}`
+    return this.getAllRawApps().map(
+      (app) =>
+        serializeApp(app as unknown as Record<string, unknown>, serverOrigin) as unknown as App
+    )
+  }
+
+  // 获取所有apps（存储态，未序列化）
+  private getAllRawApps(): App[] {
     return this.store.get('apps', [])
   }
 
@@ -87,7 +97,8 @@ class AppStoreManager extends EventEmitter {
 
   // 创建app
   createApp(appData: Omit<App, 'id' | 'createdAt' | 'updatedAt'>): App {
-    const apps = this.getAllApps()
+    const apps = this.getAllRawApps()
+    normalizeAppForStorage(appData as Record<string, unknown>)
     const newApp: App = {
       ...appData,
       id: this.generateId(),
@@ -103,7 +114,7 @@ class AppStoreManager extends EventEmitter {
 
   // 更新app
   updateApp(id: string, appData: Partial<Omit<App, 'id' | 'createdAt'>>): App | null {
-    const apps = this.getAllApps()
+    const apps = this.getAllRawApps()
     const appIndex = apps.findIndex((app) => app.id === id)
 
     if (appIndex === -1) {
@@ -111,6 +122,9 @@ class AppStoreManager extends EventEmitter {
     }
 
     const existingApp = apps[appIndex]!
+    // 覆盖前快照旧版本（版本历史，gallery.db），失败不阻塞
+    snapshotAppVersion(existingApp as unknown as Record<string, unknown>)
+    normalizeAppForStorage(appData as Record<string, unknown>)
     const updatedApp: App = {
       ...existingApp,
       ...appData,
@@ -125,7 +139,7 @@ class AppStoreManager extends EventEmitter {
 
   // 删除app
   removeApp(id: string): boolean {
-    const apps = this.getAllApps()
+    const apps = this.getAllRawApps()
     const filteredApps = apps.filter((app) => app.id !== id)
 
     if (filteredApps.length === apps.length) {
@@ -139,7 +153,10 @@ class AppStoreManager extends EventEmitter {
 
   // 导入apps（unshift到原apps，id相同则覆盖）
   importApps(apps: App[]): void {
-    const oldApps = this.getAllApps()
+    for (const app of apps) {
+      normalizeAppForStorage(app as unknown as Record<string, unknown>)
+    }
+    const oldApps = this.getAllRawApps()
     // 用Map去重，优先保留新导入的
     const appMap = new Map<string, App>()
     // 先插入新apps（顺序反转保证unshift效果）

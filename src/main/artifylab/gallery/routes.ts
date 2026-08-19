@@ -5,6 +5,7 @@ import { get as getSetting } from '../../settings'
 import { assetFromRow, getGalleryDb, getGalleryThumbDir } from './db'
 import { makeThumb, scanOutputDir } from './scanner'
 import { createErrorResponse, createSuccessResponse } from '../utils/errorHandler'
+import { APP_ASSETS_ROUTE, getAppAssetsDir, getAppVersion, listAppVersions } from '../appAssets'
 
 /**
  * /api/gallery/* 路由 + 缩略图静态服务。
@@ -139,6 +140,42 @@ export function createGalleryRouter(): express.Router {
         if (outputDir) makeThumb(outputDir, subfolder, filename)
       }
       res.json(createSuccessResponse({ ids }))
+    } catch (e) {
+      res.status(500).json(createErrorResponse((e as Error).message))
+    }
+  })
+
+  // App 附件（图标）静态服务（带目录穿越防护）
+  router.use(APP_ASSETS_ROUTE, (req, res) => {
+    const rel = decodeURIComponent(req.path.replace(/^\//, ''))
+    const dir = getAppAssetsDir()
+    const full = path.resolve(dir, rel)
+    if (!full.startsWith(dir + path.sep) || rel.includes('..')) {
+      return res.status(403).end()
+    }
+    if (!fs.existsSync(full)) return res.status(404).end()
+    res.sendFile(full)
+  })
+
+  // App 版本历史（gallery.db 快照）
+  router.post('/api/apps/versions', (req, res) => {
+    try {
+      const { id } = req.body ?? {}
+      if (!id) return res.status(400).json(createErrorResponse('id is required'))
+      res.json(createSuccessResponse(listAppVersions(String(id))))
+    } catch (e) {
+      res.status(500).json(createErrorResponse((e as Error).message))
+    }
+  })
+
+  router.post('/api/apps/version-detail', (req, res) => {
+    try {
+      const { id, version } = req.body ?? {}
+      if (!id || !version)
+        return res.status(400).json(createErrorResponse('id and version are required'))
+      const app = getAppVersion(String(id), Number(version))
+      if (!app) return res.status(404).json(createErrorResponse('version not found'))
+      res.json(createSuccessResponse(app))
     } catch (e) {
       res.status(500).json(createErrorResponse((e as Error).message))
     }
