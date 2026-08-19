@@ -31,8 +31,8 @@
                 <EditOutlined class="operation-icon" @click.stop="editRowEvent(row)" />
               </a-tooltip>
               <a-tooltip placement="top" :title="t('delete')">
-              <DeleteOutlined class="operation-icon" @click.stop="removeParams(row)" />
-            </a-tooltip>
+                <DeleteOutlined class="operation-icon" @click.stop="removeParams(row)" />
+              </a-tooltip>
             </template>
           </template>
           <template v-else-if="['name'].includes(item.field)">
@@ -56,7 +56,7 @@
               v-model:value="row.renderComponent"
               :options="options"
               size="small"
-              style="width: 100%;"
+              style="width: 100%"
             ></a-select>
           </template>
           <span v-else>{{ row[item.field] }}</span>
@@ -67,14 +67,22 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { CheckOutlined, CloseOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import { t } from '@/utils/i18n'
+
+// vxe-table 按需引入（替代全局注册，减小主包体积）
+import { VxeUI, VxeTable, VxeColumn, VxeColgroup } from 'vxe-table'
+import { VxeInput } from 'vxe-pc-ui'
+import 'vxe-table/lib/style.css'
+import 'vxe-pc-ui/lib/style.css'
+// 行编辑依赖的输入组件，需显式注册到 VxeUI 才能被 editRender 解析
+VxeUI.component(VxeInput)
 
 const props = defineProps({
   paramsNodes: {
     type: Array,
-    default: () => []
+    default: () => [],
   },
 })
 

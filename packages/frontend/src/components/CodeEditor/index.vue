@@ -5,9 +5,12 @@
 </template>
 
 <script setup>
-import { debounce } from 'lodash'
-const monaco = ref(null)
+import { useDebounceFn } from '@vueuse/core'
 import { ref, toRaw, onMounted, onBeforeUnmount, watch } from 'vue'
+
+// 按需加载 monaco：只引入核心 editor.api + 用到的语言 contribution，
+// 不再走 vite-plugin-monaco-editor（避免全量打包 ~170MB 的 monaco 及全部 worker）。
+const MONACO_EDITOR_API = 'monaco-editor/esm/vs/editor/editor.api'
 
 const emit = defineEmits(['change'])
 
@@ -27,9 +30,38 @@ const props = defineProps({
 const editorContainerRef = ref(null)
 const editor = ref(null)
 
+// 只加载项目实际使用的语言，避免引入其余语言的 tokenizer/worker
+// 注意：monaco 的 json 是内置语言（不在 basic-languages），无需引入
+async function loadLanguageContribution(lang) {
+  switch (lang) {
+    case 'markdown':
+      await import('monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js')
+      break
+    case 'javascript':
+    case 'typescript':
+      await import('monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution.js')
+      break
+    case 'css':
+      await import('monaco-editor/esm/vs/basic-languages/css/css.contribution.js')
+      break
+    case 'html':
+    default:
+      await import('monaco-editor/esm/vs/basic-languages/html/html.contribution.js')
+  }
+}
+
 onMounted(async () => {
-  monaco.value = await import('monaco-editor/esm/vs/editor/editor.main.js')
-  editor.value = monaco.value.editor.create(editorContainerRef.value, {
+  // 配置 editor worker（语法高亮等后台任务），只挂一个 editor worker 即可
+  const editorWorker = (await import('monaco-editor/esm/vs/editor/editor.worker?worker')).default
+  self.MonacoEnvironment = {
+    getWorker: () => new editorWorker(),
+  }
+
+  // 核心编辑器 API（不含语言服务）
+  const monaco = await import(MONACO_EDITOR_API)
+  await loadLanguageContribution(props.language)
+
+  editor.value = monaco.editor.create(editorContainerRef.value, {
     value: props.value,
     readOnly: props.readOnly,
     language: props.language,
@@ -45,20 +77,23 @@ onMounted(async () => {
 })
 
 // 监听 value 属性变化
-watch(() => props.value, (newValue) => {
-  if (editor.value && newValue !== getEditorValue()) {
-    setEditorValue(newValue)
-    if (props.readOnly) {
-      scrollToBottom()
+watch(
+  () => props.value,
+  (newValue) => {
+    if (editor.value && newValue !== getEditorValue()) {
+      setEditorValue(newValue)
+      if (props.readOnly) {
+        scrollToBottom()
+      }
     }
-  }
-})
+  },
+)
 
 function getEditorValue() {
   return toRaw(editor.value).getValue()
 }
 
-const debounceSetValue = debounce(setEditorValue, 500)
+const debounceSetValue = useDebounceFn(setEditorValue, 500)
 
 function setEditorValue(code) {
   toRaw(editor.value).setValue(code)

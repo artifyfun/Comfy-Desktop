@@ -1,8 +1,14 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import { VxeUI } from 'vxe-table'
 import { useDark, useToggle } from '@vueuse/core'
-import { showError, getElectronConfig, isElectron, APP_CATEGORIES, APP_POWER_LEVELS, getQueryParam } from '@/utils'
+import {
+  showError,
+  getElectronConfig,
+  isElectron,
+  APP_CATEGORIES,
+  APP_POWER_LEVELS,
+  getQueryParam,
+} from '@/utils'
 import defaultStyles from '@/utils/styles/styles.json'
 
 const LOCAL_CONFIG_KEY = 'LOCAL_CONFIG_KEY'
@@ -14,11 +20,10 @@ const isDark = useDark({
   valueLight: 'light',
 })
 
-// 设置暗色模式
+// 设置暗色模式（vxe-table 主题随 ParamsManager 局部按需引入，此处不再全量 import）
 const setDarkMode = (darkMode) => {
   isDark.value = darkMode
   useToggle(darkMode)
-  VxeUI.setTheme(darkMode ? 'dark' : 'light')
 }
 
 setDarkMode(true)
@@ -33,7 +38,7 @@ const getDefaultConfig = () => {
     max_tokens: 64000,
     temperature: 0,
     api_key: '',
-    base_url: "https://api.deepseek.com/v1",
+    base_url: 'https://api.deepseek.com/v1',
     model: 'deepseek-reasoner',
     provider: 'deepseek', // 新增供应商字段
     buildStyleId: 'tech', // 新增构建风格ID
@@ -86,7 +91,7 @@ export const useAppStore = defineStore('app', () => {
     try {
       if (isElectron) {
         const response = await apiRequest('/api/config', {
-          method: 'post'
+          method: 'post',
         })
         if (response.ok && response.data) {
           let updatedConfig = { ...response.data }
@@ -133,13 +138,13 @@ export const useAppStore = defineStore('app', () => {
   const updateConfig = async (newConfig = {}) => {
     const updatedConfig = {
       ...config.value,
-      ...newConfig
+      ...newConfig,
     }
     try {
       if (isElectron) {
         await apiRequest('/api/config/update', {
           method: 'POST',
-          body: JSON.stringify(updatedConfig)
+          body: JSON.stringify(updatedConfig),
         })
       } else {
         localStorage.setItem(LOCAL_CONFIG_KEY, JSON.stringify(updatedConfig))
@@ -157,10 +162,10 @@ export const useAppStore = defineStore('app', () => {
     isLoading.value = true
     try {
       const response = await apiRequest('/api/apps', {
-        method: 'post'
+        method: 'post',
       })
       if (response.ok) {
-        apps.value = (response.data || []).filter(app => isElectron ? true : !!app.code)
+        apps.value = (response.data || []).filter((app) => (isElectron ? true : !!app.code))
       } else {
         throw new Error(response.message || '应用列表加载失败')
       }
@@ -177,7 +182,7 @@ export const useAppStore = defineStore('app', () => {
     isLoading.value = true
     try {
       const response = await apiRequest('/api/market/apps', {
-        method: 'post'
+        method: 'post',
       })
       if (response.ok) {
         marketApps.value = response.data || []
@@ -197,7 +202,7 @@ export const useAppStore = defineStore('app', () => {
     isLoading.value = true
     try {
       const response = await apiRequest('/api/build/styles', {
-        method: 'post'
+        method: 'post',
       })
       if (response.ok) {
         buildStyles.value = response.data || []
@@ -221,7 +226,7 @@ export const useAppStore = defineStore('app', () => {
       const newApp = { ...getAppSchema(), ...appData }
       const response = await apiRequest('/api/apps/create', {
         method: 'POST',
-        body: JSON.stringify(newApp)
+        body: JSON.stringify(newApp),
       })
 
       if (response.ok) {
@@ -245,7 +250,7 @@ export const useAppStore = defineStore('app', () => {
     try {
       const response = await apiRequest('/api/apps/remove', {
         method: 'POST',
-        body: JSON.stringify({ id: appId })
+        body: JSON.stringify({ id: appId }),
       })
 
       if (response.ok) {
@@ -270,8 +275,8 @@ export const useAppStore = defineStore('app', () => {
       const response = await apiRequest('/api/apps/update', {
         method: 'POST',
         body: JSON.stringify({
-          ...updates
-        })
+          ...updates,
+        }),
       })
 
       if (response.ok) {
@@ -295,7 +300,7 @@ export const useAppStore = defineStore('app', () => {
     try {
       const response = await apiRequest('/api/apps/import', {
         method: 'POST',
-        body: JSON.stringify({ apps: newApps })
+        body: JSON.stringify({ apps: newApps }),
       })
 
       if (response.ok) {
@@ -320,8 +325,8 @@ export const useAppStore = defineStore('app', () => {
       const response = await apiRequest(`/api/apps/detail`, {
         method: 'post',
         body: JSON.stringify({
-          id: appId
-        })
+          id: appId,
+        }),
       })
       if (response.ok) {
         return response.data
