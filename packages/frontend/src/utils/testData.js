@@ -83,7 +83,7 @@ export const performanceTest = {
         start: Math.floor(Math.random() * apps.length),
         end: Math.min(apps.length, Math.floor(Math.random() * apps.length) + 10)
       }
-      const visibleApps = apps.slice(visibleRange.start, visibleRange.end)
+      apps.slice(visibleRange.start, visibleRange.end)
     }
 
     const endTime = performance.now()

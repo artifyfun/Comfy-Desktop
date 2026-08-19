@@ -166,22 +166,20 @@ export default function useWorkflow() {
     state.running = res.queue_running.length
   }
 
-  const getOutputs = (prompt) => {
-    return new Promise(async (resolve, reject) => {
-      try {
-        const client = getClient()
-        await client.connect()
-        const result = await client.getResult(fetchOption, prompt)
-        resolve(result)
-        await client.disconnect()
-      } catch (error) {
-        console.log(error)
-        reject(error)
-      }
-    })
+  const getOutputs = async (prompt) => {
+    const client = getClient()
+    try {
+      await client.connect()
+      return await client.getResult(fetchOption, prompt)
+    } catch (error) {
+      console.log(error)
+      throw error
+    } finally {
+      await client.disconnect().catch(() => {})
+    }
   }
 
-  const handleSaveState = (e) => {
+  const handleSaveState = () => {
     const lastState = JSON.parse(JSON.stringify(state))
     localforage.setItem(LAST_STATE_KEY, lastState)
   }

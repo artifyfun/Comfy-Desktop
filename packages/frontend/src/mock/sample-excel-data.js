@@ -45,9 +45,7 @@ const sampleData = [
 ]
 
 // 导出数据供其他模块使用
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = sampleData
-} else if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined') {
   window.sampleExcelData = sampleData
 }
 

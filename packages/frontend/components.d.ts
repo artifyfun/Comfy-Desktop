@@ -39,7 +39,6 @@ declare module 'vue' {
     ComfyuiWorkflowEditor: typeof import('./src/components/ComfyuiWorkflowEditor/index.vue')['default']
     Config: typeof import('./src/components/Config/index.vue')['default']
     HistoryModal: typeof import('./src/components/HistoryModal/index.vue')['default']
-    MessageDemo: typeof import('./src/components/MessageDemo/index.vue')['default']
     ParamsManager: typeof import('./src/components/ParamsManager/index.vue')['default']
     PostImage: typeof import('./src/components/PostImage/index.vue')['default']
     Preview: typeof import('./src/components/preview/index.vue')['default']

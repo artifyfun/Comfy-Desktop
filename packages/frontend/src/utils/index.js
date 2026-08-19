@@ -5,7 +5,7 @@ export async function getElectronConfig() {
   let config
   try {
     config = await window.electronAPI.ArtifyLab.getConfig()
-  } catch (_e) {
+  } catch {
     // console.log(_e)
   }
   return config
@@ -17,7 +17,7 @@ export const getAppInfo = async () => {
   let appInfo
   try {
     appInfo = await window.electronAPI.ArtifyLab.getAppInfo()
-  } catch (_e) {
+  } catch {
     // console.log(_e)
   }
   return appInfo
@@ -543,13 +543,17 @@ export function postFile(url, filename) {
 export async function fetchFile({ url, filename, method }) {
   try {
     // 1. 使用fetch发送POST请求
-    const response = await fetch(url, {
+    const options = {
       method,
       headers: {
         'Content-Type': 'application/json' // 根据实际API调整
-      },
-      body: method === 'POST' ? JSON.stringify({}) : undefined // 如果API需要参数，在此处添加
-    });
+      }
+    }
+    if (method === 'POST') {
+      // 如果API需要参数，在此处添加
+      options.body = JSON.stringify({})
+    }
+    const response = await fetch(url, options);
 
     // 2. 检查请求是否成功
     if (!response.ok) {

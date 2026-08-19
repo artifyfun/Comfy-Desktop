@@ -647,7 +647,7 @@ function genHtml(app, code, config) {
 }
 
 // 本地生成HTML的核心渲染函数
-function renderComponent(item, meta) {
+function renderComponent(item) {
   // 只处理常见类型，后续可扩展
   if (item.componentName === 'form-item') {
     const child = item.children[0]
@@ -856,7 +856,7 @@ function renderComponent(item, meta) {
   return ''
 }
 
-function genLocalHtml(app, config) {
+function genLocalHtml(app) {
   const meta = genMeta(app)
   // CDN变量
   const VUE_CDN = CDN_URLS.VUE

@@ -258,7 +258,7 @@ const handleChange = async ({ file }) => {
   } else {
     // Clone existing template but inject new workflow
     activeTemplate.value = {
-      ...(JSON.parse(JSON.stringify(currentApp.value.template)) || {}),
+      ...JSON.parse(JSON.stringify(currentApp.value.template)),
       workflow: workflow
     }
     showWorkflowModal.value = true
