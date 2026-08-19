@@ -62,6 +62,52 @@ pnpm dev        # 主进程 + 渲染层
 
 前端位于 `packages/frontend`（pnpm workspace），本分支新增代码集中在 `src/main/artifylab/`（主进程）与 `packages/frontend/src/`（界面）。
 
+### 开发调试
+
+```bash
+pnpm dev              # 一键起：前端 vite (5000) + electron-vite 主进程（DEV_MODE=true）
+```
+
+`pnpm dev` 实际执行 `pnpm --filter artifylab-frontend dev & cross-env DEV_MODE=true electron-vite dev`——A UI 前端跑在 vite dev server（热更新），Electron 窗口加载它；C UI（ComfyUI 画布）部分由 electron-vite dev 处理。
+
+常用调试手段：
+
+- **日志**：桌面运行日志在 `<userData>/logs/app.log`（含 ComfyUI Python traceback，排查节点报错先看它）；dev 模式下 vite/electron stdout 直接在终端。`<userData>` 即 `AppData/Roaming/artify-desktop`（win）或 `~/Library/Application Support/artify-desktop`（mac）
+- **artifylab server**：主进程内置 Express（`src/main/artifylab/server.ts`），开发时端口自动选择；所有 `/api/*` 可直接 curl 调试
+- **画廊/版本数据库**：`<userData>/gallery.db`（`node:sqlite`，可用任意 SQLite 工具直接打开，WAL 模式）
+- **单独跑前端**：`pnpm --filter artifylab-frontend dev`（不启 Electron，浏览器访问 localhost:5000，需 `?server_origin=&comfy_origin=` query 指向已运行的桌面端）
+
+### 校验
+
+```bash
+pnpm typecheck   # node/web/e2e/integration 四套
+pnpm lint        # eslint（不含 frontend，frontend 用其自身 lint）
+pnpm --filter artifylab-frontend lint
+pnpm test        # vitest（注意：上游遗留 70 个失败为已知基线）
+```
+
+### 打包
+
+```bash
+pnpm build            # 前端产出到 src/main/artifylab/public/frontend + typecheck + electron-vite build
+pnpm build:unpack     # build + electron-builder --dir（不装包，快速本地验证）
+```
+
+打包链路说明：
+
+1. `build:frontend` → `pnpm --filter artifylab-frontend run build:desktop`：vite 构建 A UI 前端，**直接输出到 `src/main/artifylab/public/frontend/`**（并 minify `comfy_inject.js` 注入脚本）——A UI 前端作为主进程静态资源随包分发，不走 electron-builder 的额外文件声明（`electron-builder.yml` 与上游一致，未改）
+2. `electron-vite build` 构建主进程/预加载
+3. `electron-builder --dir` 出未安装目录结构（`dist/`），本地双击即可运行验证
+
+正式发布走 ToDesktop 云构建（`todesktop:*` 脚本，与上游一致）；本地一般 `build:unpack` 验证即可。
+
+前端库模式（发布 `ArtifyLib` 给生成代码使用）：
+
+```bash
+pnpm --filter artifylab-frontend build:lib    # dist/lib
+pnpm --filter artifylab-frontend publish:lib  # 构建 + npm publish
+```
+
 ## 与上游的关系
 
 - 上游 0 差距：本分支 HEAD 的 merge-base 即 upstream/main 最新，可随时合并上游更新
