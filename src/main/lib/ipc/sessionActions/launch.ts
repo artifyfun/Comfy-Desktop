@@ -40,7 +40,7 @@ import {
   syncCustomModelFolders,
   discoverExtraModelFolders,
   instanceModelPathsYaml,
-  isSamePath,
+  resolveLauncherModelDirs,
   createSessionPath,
   buildLaunchEnv,
   checkRebootMarker,
@@ -52,6 +52,7 @@ import {
   _broadcastToRenderer
 } from '../shared'
 import type { ChildProcess, InstallationRecord, LaunchCmd } from '../shared'
+import type { LaunchCommand } from '../../../types/sources'
 import { randomUUID } from 'node:crypto'
 import { displayLaunchUrl } from '../../cloudUrl'
 import type { ModelPathsOptions } from '../../models'
@@ -71,6 +72,7 @@ import {
   awaitTemplateDownloadSettled
 } from '../../../sources/standalone/templateDownloadTask'
 import { isTerminal as isTemplateDownloadTerminal } from '../../../sources/standalone/templateDownloadCore'
+import { initializeModelDownloads } from '../../comfyDownloadManager'
 import type { PreLaunchPhase } from '../../launchPhases'
 import { scanCustomNodes } from '../../nodes'
 import type { LaunchProgressTracker } from '../../launchProgress'
@@ -112,6 +114,89 @@ export function desktopFeatureFlags(
     flags.enable_telemetry = 'true'
   }
   return flags
+}
+
+export interface StorageLaunchState {
+  preLaunchExtras: string[]
+  manageModelFolders: boolean
+  modelDirsForLaunch: string[] | undefined
+  modelSyncOptions: ModelPathsOptions
+}
+
+export function applyStorageLaunchArgs(
+  inst: InstallationRecord,
+  installationId: string,
+  launchCmd: LaunchCommand
+): StorageLaunchState {
+  // Shared models and shared input/output are independent flags.
+  const argsAvailable = !launchCmd.skipSharedPaths && !!launchCmd.args
+  let preLaunchExtras: string[] = []
+  // Model dirs whose extra-folder changes drive auto-relaunch, plus the sync
+  // options (target YAML + which dir is `is_default`). Shared and per-install
+  // dirs are additive: the global settings dirs (unless the install excludes
+  // them via `useSharedModels: false`) plus the install's own `modelDirs`.
+  let modelDirsForLaunch: string[] | undefined
+  let modelSyncOptions: ModelPathsOptions = {}
+  let manageModelFolders = false
+  if (argsAvailable) {
+    const sharedDirs = (settings.get('modelsDirs') as string[] | undefined) ?? []
+    const { dirs, primaryDir } = resolveLauncherModelDirs(inst, sharedDirs)
+    if (dirs.length > 0) {
+      manageModelFolders = true
+      modelDirsForLaunch = dirs
+      // Always the per-install YAML: the effective dir set is install-specific
+      // now that shared and per-install dirs combine.
+      modelSyncOptions = { yamlPath: instanceModelPathsYaml(installationId), primaryDir }
+    }
+  }
+  if (manageModelFolders) {
+    const { config } = syncCustomModelFolders(
+      inst.installPath,
+      modelDirsForLaunch,
+      [],
+      modelSyncOptions
+    )
+    if (config) {
+      launchCmd.args!.push('--extra-model-paths-config', config.yamlPath)
+    }
+    const installExtras = discoverExtraModelFolders(inst.installPath)
+    const baselineSet = new Set([...(config?.extraFolders ?? []), ...installExtras])
+    preLaunchExtras = [...baselineSet].sort()
+  }
+  if (argsAvailable) {
+    // Input and output are independent per-folder choices: shared (global
+    // settings) or the per-install path. A per-install path is omitted when
+    // unset so ComfyUI falls back to its own <installPath>/{input,output}
+    // defaults (e.g. adopted-from-legacy records pin these fields).
+    const useSharedInput = (inst.useSharedInput as boolean | undefined) !== false
+    const useSharedOutput = (inst.useSharedOutput as boolean | undefined) !== false
+    if (useSharedInput) {
+      const inputDir =
+        (settings.get('inputDir') as string | undefined) || settings.defaults.inputDir
+      fs.mkdirSync(inputDir, { recursive: true })
+      launchCmd.args!.push('--input-directory', inputDir)
+    } else {
+      const perInstallInput = inst.inputDir as string | undefined
+      if (perInstallInput) {
+        fs.mkdirSync(perInstallInput, { recursive: true })
+        launchCmd.args!.push('--input-directory', perInstallInput)
+      }
+    }
+    if (useSharedOutput) {
+      const outputDir =
+        (settings.get('outputDir') as string | undefined) || settings.defaults.outputDir
+      fs.mkdirSync(outputDir, { recursive: true })
+      launchCmd.args!.push('--output-directory', outputDir)
+    } else {
+      const perInstallOutput = inst.outputDir as string | undefined
+      if (perInstallOutput) {
+        fs.mkdirSync(perInstallOutput, { recursive: true })
+        launchCmd.args!.push('--output-directory', perInstallOutput)
+      }
+    }
+  }
+
+  return { preLaunchExtras, manageModelFolders, modelDirsForLaunch, modelSyncOptions }
 }
 
 // A clean exit is code 0 with no signal; anything else (non-zero code or a
@@ -281,6 +366,30 @@ async function runLaunch(
   _operationAborts.set(installationId, abort)
   // Drop retained crash detail so the lifecycle view doesn't resurface it.
   clearCrash(installationId)
+  // The startup model-download pass (migrate legacy final-path partials,
+  // hydrate staged `.part` downloads) runs to completion before ComfyUI can
+  // scan the model dirs, so a truncated file cannot masquerade as a loadable
+  // model (#1322). Memoized - normally already done long before the first
+  // launch. An UNSAFE result (a known-incomplete file is still visible under
+  // a final model name, or the pass could not certify the roots) NEVER blocks
+  // the launch: at worst ComfyUI sees a file that fails to load, which is
+  // strictly better than refusing to start. The per-file warning rows in
+  // Downloads carry the details, and an unsafe pass is not memoized, so the
+  // next launch retries the quarantine.
+  try {
+    const modelStartup = await initializeModelDownloads()
+    if (!modelStartup.safe) {
+      console.warn(
+        'Model download startup pass could not certify all model roots; launching anyway.' +
+          (modelStartup.unsafePaths.length > 0
+            ? ` Still-visible incomplete files: ${modelStartup.unsafePaths.join(', ')}`
+            : '')
+      )
+    }
+  } catch (err) {
+    console.warn('Model download startup pass failed; launching anyway:', err)
+  }
+  if (abort.signal.aborted) return { ok: false, cancelled: true }
   const source = sourceMap[inst.sourceId]
   if (!source) return { ok: false, message: i18n.t('errors.unknownSource') }
   if (!source.skipInstall) {
@@ -610,74 +719,8 @@ async function runLaunch(
     return { ok: false, message: i18n.t('errors.managerConfigWriteFailed') }
   }
 
-  // Shared models and shared input/output are independent flags.
-  const argsAvailable = !launchCmd.skipSharedPaths && !!launchCmd.args
-  const useSharedModels = argsAvailable && (inst.useSharedModels as boolean | undefined) !== false
-  const useSharedInputOutput =
-    argsAvailable && (inst.useSharedInputOutput as boolean | undefined) !== false
-  let preLaunchExtras: string[] = []
-  // Model dirs whose extra-folder changes drive auto-relaunch, plus the sync
-  // options (target YAML + which dir is `is_default`). Sourced from the global
-  // settings when this install uses shared models, or from its per-install list
-  // when it opts out.
-  let modelDirsForLaunch: string[] | undefined
-  let modelSyncOptions: ModelPathsOptions = {}
-  let manageModelFolders = false
-  if (useSharedModels) {
-    manageModelFolders = true
-    modelDirsForLaunch = settings.get('modelsDirs') as string[] | undefined
-    // Global shared: first dir is default (the omitted-primaryDir default).
-  } else if (argsAvailable) {
-    const instanceDirs = inst.modelDirs as string[] | undefined
-    if (instanceDirs && instanceDirs.length > 0) {
-      manageModelFolders = true
-      modelDirsForLaunch = instanceDirs
-      // The install's own models dir is the default unless the user promoted a
-      // valid external dir; `null` leaves ComfyUI's built-in default in place.
-      const primaryRaw = inst.modelDirsPrimary as string | undefined
-      const primaryDir =
-        typeof primaryRaw === 'string' && instanceDirs.some((d) => isSamePath(d, primaryRaw))
-          ? primaryRaw
-          : null
-      modelSyncOptions = { yamlPath: instanceModelPathsYaml(installationId), primaryDir }
-    }
-  }
-  if (manageModelFolders) {
-    const { config } = syncCustomModelFolders(
-      inst.installPath,
-      modelDirsForLaunch,
-      [],
-      modelSyncOptions
-    )
-    if (config) {
-      launchCmd.args!.push('--extra-model-paths-config', config.yamlPath)
-    }
-    const installExtras = discoverExtraModelFolders(inst.installPath)
-    const baselineSet = new Set([...(config?.extraFolders ?? []), ...installExtras])
-    preLaunchExtras = [...baselineSet].sort()
-  }
-  if (useSharedInputOutput) {
-    const inputDir = (settings.get('inputDir') as string | undefined) || settings.defaults.inputDir
-    const outputDir =
-      (settings.get('outputDir') as string | undefined) || settings.defaults.outputDir
-    fs.mkdirSync(inputDir, { recursive: true })
-    fs.mkdirSync(outputDir, { recursive: true })
-    launchCmd.args!.push('--input-directory', inputDir)
-    launchCmd.args!.push('--output-directory', outputDir)
-  } else if (argsAvailable) {
-    // Per-install paths (e.g. adopted-from-legacy); omitted when unset so
-    // ComfyUI falls back to its own <installPath>/{input,output} defaults.
-    const perInstallInput = inst.inputDir as string | undefined
-    const perInstallOutput = inst.outputDir as string | undefined
-    if (perInstallInput) {
-      fs.mkdirSync(perInstallInput, { recursive: true })
-      launchCmd.args!.push('--input-directory', perInstallInput)
-    }
-    if (perInstallOutput) {
-      fs.mkdirSync(perInstallOutput, { recursive: true })
-      launchCmd.args!.push('--output-directory', perInstallOutput)
-    }
-  }
+  const { preLaunchExtras, manageModelFolders, modelDirsForLaunch, modelSyncOptions } =
+    applyStorageLaunchArgs(inst, installationId, launchCmd)
 
   /** Pipe a spawned process's output to the log file, renderer, execution tap,
    *  and the launch tracker (ANSI-stripped); returns a bounded stderr tail for

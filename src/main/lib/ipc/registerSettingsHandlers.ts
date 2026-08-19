@@ -86,6 +86,13 @@ export function buildSettingsSections(
           value: s.confirmBeforeClosingWindow === true,
           tooltip: i18n.t('settings.confirmBeforeClosingWindowDescription')
         },
+        {
+          id: 'warnBeforeRunningMultipleInstances',
+          label: i18n.t('settings.warnBeforeRunningMultipleInstances'),
+          type: 'boolean',
+          value: s.warnBeforeRunningMultipleInstances !== false,
+          tooltip: i18n.t('settings.warnBeforeRunningMultipleInstancesDescription')
+        },
 
         // Cloud opt-out — pure visibility toggle, doesn't affect any
         // running behavior. Kept after the window-behavior block so
@@ -146,7 +153,15 @@ export function buildSettingsSections(
           value: s.pypiMirror || '',
           placeholder: i18n.t('settings.pypiMirrorPlaceholder')
         },
-        ...(!isChinese ? [chineseMirrorsField] : [])
+        ...(!isChinese ? [chineseMirrorsField] : []),
+        {
+          id: 'hardwareAcceleration',
+          label: i18n.t('settings.hardwareAcceleration'),
+          type: 'boolean',
+          value: s.hardwareAcceleration !== false,
+          description: i18n.t('settings.hardwareAccelerationDescription'),
+          tooltip: i18n.t('settings.hardwareAccelerationDescription')
+        }
       ]
     }
   ]

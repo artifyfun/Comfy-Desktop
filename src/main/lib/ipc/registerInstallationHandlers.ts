@@ -43,11 +43,11 @@ import { restoreSnapshotIntoInstallation } from '../standaloneMigration'
 import * as mainTelemetry from '../telemetry'
 import { buildErrorFields } from '../../../shared/errorEvent'
 import { appendLog } from '../logsBroadcast'
+import { invalidateModelDownloadStartupPass } from '../comfyDownloadManager'
 import {
   startTemplateDownload,
   abortTemplateDownload,
-  requestSkipTemplateDownload,
-  stopTemplateTrayMirror
+  requestSkipTemplateDownload
 } from '../../sources/standalone/templateDownloadTask'
 import { recordIpcInvocation } from '../e2eOverrides'
 import { DEFAULT_INSTALL_NAME } from '../../../shared/defaultInstallName'
@@ -141,8 +141,19 @@ export function enrichInstallationsForRenderer(allInstalls: InstallationRecord[]
             : source.getStatusTag
               ? source.getStatusTag(inst)
               : undefined
+    // A comfybuilder install's raw `version` is its DISTRIBUTION version, not a
+    // ComfyUI one (see `installedDistributionVersions`), so it gets its own
+    // field — otherwise a bare "7" lands where every other tile shows "v0.28.2".
+    const isFromDistribution = inst.sourceId === 'comfybuilder'
+    const distributionVersion = isFromDistribution
+      ? (inst.version as string | undefined)
+      : undefined
     const cv = inst.comfyVersion as ComfyVersion | undefined
-    const rawVersion = cv ? formatComfyVersion(cv, 'short') : (inst.version as string | undefined)
+    const rawVersion = cv
+      ? formatComfyVersion(cv, 'short')
+      : isFromDistribution
+        ? undefined
+        : (inst.version as string | undefined)
     const version = rawVersion === inst.sourceId ? undefined : rawVersion
     return {
       ...inst,
@@ -150,6 +161,7 @@ export function enrichInstallationsForRenderer(allInstalls: InstallationRecord[]
       sourceLabel: source.label,
       sourceCategory: source.category,
       hasConsole: source.hasConsole !== false,
+      ...(distributionVersion ? { distributionVersion } : {}),
       ...(listPreview != null ? { listPreview } : {}),
       ...(statusTag ? { statusTag } : {})
     }
@@ -180,7 +192,6 @@ export function registerInstallationHandlers(): void {
     // indicator appears/clears as drives go offline/online. Single-flight +
     // broadcasts only on change, so a dashboard refresh can't loop.
     void refreshInstallDirStates()
-
     return enriched
   })
 
@@ -316,6 +327,14 @@ export function registerInstallationHandlers(): void {
       const abort = new AbortController()
       _operationAborts.set(installationId, abort)
 
+      // This installation's model dirs were not part of the startup
+      // migration/scan pass (the install may reuse a pre-existing dir holding
+      // legacy download artifacts from an affected release). Mark the pass
+      // stale so the next `initializeModelDownloads` await - the template
+      // task's first managed job runs one - re-covers the current roots
+      // before any model is admitted or reported already-present.
+      invalidateModelDownloadStartupPass()
+
       // A pending snapshot restore that fails after a successful base install
       // must not fail the install itself — the env is bootable (#1255).
       let snapshotRestoreError: string | null = null
@@ -388,11 +407,13 @@ export function registerInstallationHandlers(): void {
         if (!snapshotRestoreError) sendProgress('done', { percent: 100, status: 'Complete' })
       } catch (err) {
         _operationAborts.delete(installationId)
-        // Install failed or was cancelled — tear down the background template
-        // download too (the models would have nowhere to land) and drop its
-        // tray rows, since no comfy window will ever attach to clean them up.
+        // Install failed or was cancelled - tear down the background template
+        // download too (the models would have nowhere to land). This releases
+        // this install's leases on the managed model jobs: a job no other
+        // caller holds is PARKED (network stops; staged bytes + sidecar kept,
+        // resumable from Downloads), and a job shared with another caller
+        // keeps transferring for its other holders.
         abortTemplateDownload(installationId)
-        stopTemplateTrayMirror(installationId)
         if (abort.signal.aborted) {
           if (isComfyUpdate) {
             mainTelemetry.emit('comfy.desktop.comfyui.update.applied', {

@@ -6,6 +6,7 @@ import {
   dialog,
   crashReporter,
   nativeTheme,
+  powerMonitor,
   shell,
   session
 } from 'electron'
@@ -32,6 +33,7 @@ import { flushLastSessionSync, recordDashboardSurface } from './lib/lastSession'
 import { registerProcessErrorHandlers } from './lib/processErrorHandlers'
 import { initAppLog, flushOperationOutput } from './lib/appLog'
 import { pruneCrashDumps } from './lib/crashDumps'
+import { createStartupReentryGate } from './lib/startupReentryGate'
 import { registerTitleTooltipIpc } from './popups/titleTooltip'
 import { registerTitleCoachmarkIpc } from './popups/titleCoachmark'
 import {
@@ -59,7 +61,12 @@ import type { InstallationRecord } from './installations'
 import {
   cleanupTempDownloads,
   downloadEvents,
-  getDownloadsTrayState
+  getDownloadsTrayState,
+  hasActiveModelTransfers,
+  initializeModelDownloads,
+  resumeModelDownloadsAfterWake,
+  suspendActiveModelDownloadsForQuit,
+  suspendActiveModelDownloadsForSleep
 } from './lib/comfyDownloadManager'
 import {
   hasActiveTemplateDownloads,
@@ -69,6 +76,7 @@ import { isTerminal as isTemplateDownloadTerminal } from './sources/standalone/t
 import { registerAssetDownloadHandlers } from './lib/ipc/registerAssetDownloadHandlers'
 import { registerDownloadHandlers } from './lib/ipc/registerDownloadHandlers'
 import { emitInstanceStartedTelemetry } from './lib/ipc/sessionStartTelemetry'
+import { emitStorageTelemetry } from './lib/ipc/storageTelemetry'
 import {
   get as getInstallation,
   installationEvents,
@@ -179,6 +187,10 @@ try {
   crashReporter.start({ uploadToServer: false })
 } catch {
   // Never let crash-reporter setup block app startup.
+}
+
+if (settings.get('hardwareAcceleration') === false) {
+  app.disableHardwareAcceleration()
 }
 
 todesktop.init({ autoUpdater: false })
@@ -1302,15 +1314,19 @@ function findInstallationIdForWindow(win: BrowserWindow): string | undefined {
   return undefined
 }
 
+// Startup gate for OS-driven window reentry (`second-instance`, `activate`);
+// see `createStartupReentryGate` for why reentry is held until recovery settles.
+const hostReentryGate = createStartupReentryGate()
+
 if (app.isPackaged && !app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   if (app.isPackaged) {
     app.on('second-instance', () => {
-      // OS-level "open another instance" attempt — focus an existing
+      // OS-level "open another instance" attempt - focus an existing
       // host window (chooser or install-backed) instead of stacking
-      // a duplicate.
-      openOrFocusAnyHostWindow()
+      // a duplicate. Queued until startup recovery settles.
+      hostReentryGate.runOrQueue(() => openOrFocusAnyHostWindow())
     })
   }
 
@@ -2140,7 +2156,8 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         if (panelView.webContents.isDestroyed()) return
         sendToPanelDeferred(panelView, 'panel-trigger-overlay', {
           kind: 'picker-pick-install',
-          installationId
+          installationId,
+          isRestart: true
         })
       }
     })
@@ -2151,7 +2168,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // lazily on each invoke, but registering this side first wouldn't
     // change behaviour, only ordering. Place it next to the existing
     // popup IPC registration for grouping.
-    registerPickerSettingsIpc()
+    registerPickerSettingsIpc({ quitForRelaunch: quitApp })
     registerDownloadHandlers()
     registerAssetDownloadHandlers({ findInstallationIdForWindow })
     cleanupTempDownloads()
@@ -2161,6 +2178,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       onComfyExited,
       onInstanceStarted: (info) => {
         void emitInstanceStartedTelemetry(info)
+        void emitStorageTelemetry(info.installationId)
       },
       onComfyRestarted,
       onModelFolderRelaunch,
@@ -2170,6 +2188,12 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       // theme observer (see `applyComfyTheme` in openComfyWindow), so
       // they don't need this hook.
       onThemeChanged: applyChooserHostThemeToAll
+    })
+    // Recovery above can move ComfyBuilder model trees and migrate their
+    // storage mode. Scan only after it settles so the memoized startup pass
+    // sees the final roots and filesystem state.
+    initializeModelDownloads().catch((err) => {
+      console.warn('Model download startup pass failed at app startup:', err)
     })
     updater.register()
     // ArtifyLab service bootstrap: load the desktop-config store (artify
@@ -2354,6 +2378,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
         if (updateSplash && !updateSplash.isDestroyed()) updateSplash.destroy()
         mainTelemetry.emit('comfy.desktop.app_update.startup_install_backstop_recovered', {})
         void openStartupSurface()
+        hostReentryGate.open()
       }, STARTUP_INSTALL_QUIT_BACKSTOP_MS)
     } else {
       app.removeListener('before-quit', onUpdateInstallQuit)
@@ -2367,6 +2392,10 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       // the reopen setting is on), restore that instance in-place on
       // top of the freshly-opened host.
       void openStartupSurface()
+      // Startup recovery (awaited inside `ipc.register()` above) has settled
+      // and we've committed to opening the normal UI, so OS-driven reentry
+      // (second-instance / dock activate) can open windows directly again.
+      hostReentryGate.open()
     }
 
     // Single subscription rebroadcasts every install-list mutation
@@ -2414,24 +2443,29 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   })
 
   app.on('activate', () => {
-    // macOS dock click — raise ALL open host windows to the front
+    // macOS dock click - raise ALL open host windows to the front
     // (standard macOS behaviour: clicking the dock icon brings every
     // window of the app forward, not just one). The preferred host is
     // left frontmost. Falls back to spawning a fresh chooser host when
     // none are open. The single-window `openOrFocusAnyHostWindow` path
     // remains for non-darwin platforms / the `second-instance` hook.
-    if (process.platform === 'darwin') {
-      raiseAllHostWindows()
-    } else {
-      openOrFocusAnyHostWindow()
-    }
+    // Queued until startup recovery settles.
+    hostReentryGate.runOrQueue(() => {
+      if (process.platform === 'darwin') {
+        raiseAllHostWindows()
+      } else {
+        openOrFocusAnyHostWindow()
+      }
+    })
   })
 
   app.on('before-quit', (event) => {
-    // Template models are still downloading in the background: quitting drops
-    // them (no resume). Warn once and let the user back out. Synchronous dialog
-    // fits before-quit's sync teardown; only gate a real user quit (not an
-    // in-progress relaunch/update quit) and skip once already confirmed.
+    // Template models are still downloading in the background: quitting pauses
+    // them (they restore as resumable rows in Downloads next launch), but the
+    // template setup itself stops until the user resumes them. Confirm once and
+    // let the user back out. Synchronous dialog fits before-quit's sync
+    // teardown; only gate a real user quit (not an in-progress relaunch/update
+    // quit) and skip once already confirmed.
     if (!isQuitInProgress() && hasActiveTemplateDownloads()) {
       const choice = dialog.showMessageBoxSync({
         type: 'warning',
@@ -2472,6 +2506,33 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     flushLastSessionSync()
     flushOperationOutput()
     cleanupTempDownloads()
+  })
+
+  // Deferred-quit suspension for managed model downloads: stop each active
+  // transfer's network request and let its stream flush the staged `.part` +
+  // sidecar, then continue quitting. The staged state hydrates back into
+  // paused Downloads rows on the next launch (`initializeModelDownloads`).
+  // `will-quit` (after every window closed) is the Electron-sanctioned spot
+  // for async teardown; a bounded timeout inside the suspend call keeps a
+  // wedged stream from hanging shutdown. Applies to every quit reason -
+  // user quit, relaunch, and updates all preserve resumable state.
+  let modelDownloadsSuspended = false
+  app.on('will-quit', (event) => {
+    if (modelDownloadsSuspended || !hasActiveModelTransfers()) return
+    modelDownloadsSuspended = true
+    event.preventDefault()
+    void suspendActiveModelDownloadsForQuit().finally(() => app.quit())
+  })
+
+  // System sleep can kill a download socket without emitting anything on
+  // wake, leaving an in-flight transfer waiting on its idle timeout. Park
+  // active model jobs before sleep and auto-resume (Range continuation) once
+  // the network is back; user-paused jobs stay paused.
+  powerMonitor.on('suspend', () => {
+    suspendActiveModelDownloadsForSleep()
+  })
+  powerMonitor.on('resume', () => {
+    void resumeModelDownloadsAfterWake()
   })
 
   app.on('window-all-closed', () => {

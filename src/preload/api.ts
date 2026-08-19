@@ -84,7 +84,8 @@ export function buildElectronApi(): ElectronApi {
     closeCurrentPanel: () => ipcRenderer.send('comfy-window:close-current-panel'),
     resolveStartupRestoreReveal: (result) =>
       ipcRenderer.send('comfy-window:startup-restore-reveal', { result }),
-    openGlobalSettings: () => ipcRenderer.send('comfy-titlepopup:open-global-settings'),
+    openGlobalSettings: (tab) =>
+      ipcRenderer.send('comfy-titlepopup:open-global-settings', tab ? { tab } : undefined),
     openInstancePicker: (opts) =>
       ipcRenderer.send('comfy-window:open-instance-picker-for-install', {
         installationId: opts?.installationId ?? null,
@@ -199,14 +200,36 @@ export function buildElectronApi(): ElectronApi {
     getInstallsInventory: () => ipcRenderer.invoke('get-installs-inventory'),
     getDeviceId: () => ipcRenderer.invoke('get-device-id'),
 
+    // Dev platform (cloud auth + comfy-builder). Tokens never cross IPC; these
+    // only ever carry AuthStatus / Workspace / distribution display rows.
+    comfybuilder: {
+      signIn: () => ipcRenderer.invoke('comfybuilder:signIn'),
+      signOut: () => ipcRenderer.invoke('comfybuilder:signOut'),
+      getAuthStatus: () => ipcRenderer.invoke('comfybuilder:getAuthStatus'),
+      onAuthChanged: (callback) => {
+        const handler = (_event: IpcRendererEvent, status: unknown) =>
+          callback(status as Parameters<typeof callback>[0])
+        ipcRenderer.on('comfybuilder:authChanged', handler)
+        return () => ipcRenderer.removeListener('comfybuilder:authChanged', handler)
+      },
+      listWorkspaces: () => ipcRenderer.invoke('comfybuilder:listWorkspaces'),
+      switchWorkspace: (workspaceId) =>
+        ipcRenderer.invoke('comfybuilder:switchWorkspace', workspaceId),
+      listDistributions: () => ipcRenderer.invoke('comfybuilder:listDistributions'),
+      installDistribution: (distributionId) =>
+        ipcRenderer.invoke('comfybuilder:installDistribution', distributionId)
+    },
+
     // Model downloads
     listModelDownloads: () => ipcRenderer.invoke('model-download-list'),
-    pauseModelDownload: (url) => ipcRenderer.invoke('model-download-pause', { url }),
-    resumeModelDownload: (url) => ipcRenderer.invoke('model-download-resume', { url }),
-    cancelModelDownload: (url) => ipcRenderer.invoke('model-download-cancel', { url }),
-    dismissModelDownload: (url) => ipcRenderer.invoke('model-download-dismiss', { url }),
+    // Controls take a download ref: the row's stable job id, or its URL for
+    // rows that predate ids. Main resolves either.
+    pauseModelDownload: (ref) => ipcRenderer.invoke('model-download-pause', { ref }),
+    resumeModelDownload: (ref) => ipcRenderer.invoke('model-download-resume', { ref }),
+    cancelModelDownload: (ref) => ipcRenderer.invoke('model-download-cancel', { ref }),
+    dismissModelDownload: (ref) => ipcRenderer.invoke('model-download-dismiss', { ref }),
     clearFinishedModelDownloads: () => ipcRenderer.invoke('model-download-clear-finished'),
-    retryModelDownload: (url) => ipcRenderer.invoke('model-download-retry', { url }),
+    retryModelDownload: (ref) => ipcRenderer.invoke('model-download-retry', { ref }),
     showDownloadInFolder: (savePath) => ipcRenderer.invoke('show-download-in-folder', { savePath }),
     getDownloadThumbnail: (savePath) => ipcRenderer.invoke('download-thumbnail', { savePath }),
 
@@ -469,7 +492,7 @@ export function buildElectronApi(): ElectronApi {
             installationId?: string
             actionId?: string
             version?: string | null
-            settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global'
+            settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global' | 'global-storage'
             startupRestore?: boolean
           }
         )

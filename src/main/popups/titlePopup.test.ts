@@ -1,4 +1,16 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const devPlatformMocks = vi.hoisted(() => ({
+  isSignedInToCloud: vi.fn(() => false),
+  signInToCloud: vi.fn(async () => ({ signedIn: true }))
+}))
+
+// The file menu decides on sign-in state and starts sign-ins from main. Stub
+// both so the menu tests drive that state directly instead of opening a browser.
+vi.mock('../lib/ipc/registerDevPlatformHandlers', () => ({
+  isSignedInToCloud: devPlatformMocks.isSignedInToCloud,
+  signInToCloud: devPlatformMocks.signInToCloud
+}))
 
 // shared.ts (via registry.ts) loads electron at import, so mock it first.
 vi.mock('electron', () => ({
@@ -20,7 +32,14 @@ vi.mock('electron', () => ({
 // stub it so the dispatch tests stay pure and don't bootstrap the SDK.
 vi.mock('../lib/telemetry', () => ({ emit: vi.fn() }))
 
+vi.mock('../lib/ipc/registerSettingsHandlers', async () => ({
+  ...(await vi.importActual('../lib/ipc/registerSettingsHandlers')),
+  applySettingSet: vi.fn()
+}))
+
 import {
+  _test_deleteTitlePopupEntry,
+  _test_setTitlePopupEntry,
   activateTitlePopupMenuItem,
   buildInstancePickerSnapshot,
   resolvePickerSelectedInstallId,
@@ -28,11 +47,22 @@ import {
   computePopupHeight,
   decideFlowMenuItemTarget,
   isFlowMenuItemId,
+  registerTitlePopupIpc,
+  requiresPerOpenConfigSync,
   type FlowMenuItemId,
   type InstancePickerInstall,
+  type TitlePopupEntry,
   type TitlePopupHostBindings
 } from './titlePopup'
 import { comfyWindows, nextWindowKey, type ComfyWindowEntry } from '../host/registry'
+import { applySettingSet } from '../lib/ipc/registerSettingsHandlers'
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  // Signed out is the default: every assertion that does not say otherwise
+  // describes a user who has not logged in yet.
+  devPlatformMocks.isSignedInToCloud.mockReturnValue(false)
+})
 
 afterEach(() => {
   comfyWindows.clear()
@@ -148,7 +178,47 @@ describe('buildTitlePopupMenuItems', () => {
     expect(quit?.label).toBe('Quit Desktop')
   })
 
-  it('chooser host matches the canonical order including Close Window', () => {
+  it('chooser host matches the canonical order, signed out', () => {
+    const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
+    const ids = items.map((i) => i.id ?? null).filter((id) => id !== null)
+    expect(ids).toEqual([
+      'new-window',
+      'new-install',
+      'track',
+      'load-snapshot',
+      'sign-in',
+      'settings',
+      'feedback',
+      'exit-window',
+      'close-all-windows'
+    ])
+    const signIn = items.find((i) => i.id === 'sign-in')
+    expect(signIn?.label).toBe('Log in')
+    expect(signIn?.labelKey).toBe('fileMenu.signIn')
+  })
+
+  it('install host matches the canonical order with Close Window between Send Feedback and Quit Desktop', () => {
+    const items = buildTitlePopupMenuItems(makeEntry({ installationId: 'inst-1' }))
+    const ids = items.map((i) => i.id ?? null).filter((id) => id !== null)
+    expect(ids).toEqual([
+      'new-window',
+      'new-install',
+      'track',
+      'load-snapshot',
+      'sign-in',
+      'settings',
+      'feedback',
+      'exit-window',
+      'close-all-windows'
+    ])
+    const closeWindow = items.find((i) => i.id === 'exit-window')
+    expect(closeWindow?.label).toBe('Close Window')
+    const quit = items.find((i) => i.id === 'close-all-windows')
+    expect(quit?.label).toBe('Quit Desktop')
+  })
+
+  it('chooser host matches the canonical order once signed in', () => {
+    devPlatformMocks.isSignedInToCloud.mockReturnValue(true)
     const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
     const ids = items.map((i) => i.id ?? null).filter((id) => id !== null)
     expect(ids).toEqual([
@@ -163,23 +233,34 @@ describe('buildTitlePopupMenuItems', () => {
     ])
   })
 
-  it('install host matches the canonical order with Close Window between Send Feedback and Quit Desktop', () => {
-    const items = buildTitlePopupMenuItems(makeEntry({ installationId: 'inst-1' }))
+  it('install host keeps Log in ahead of Reset Zoom when both are live', () => {
+    const items = buildTitlePopupMenuItems(makeEntry({ installationId: 'inst-1', zoomLevel: 2 }))
     const ids = items.map((i) => i.id ?? null).filter((id) => id !== null)
     expect(ids).toEqual([
       'new-window',
       'new-install',
       'track',
       'load-snapshot',
+      'sign-in',
       'settings',
       'feedback',
+      'reset-zoom',
       'exit-window',
       'close-all-windows'
     ])
-    const closeWindow = items.find((i) => i.id === 'exit-window')
-    expect(closeWindow?.label).toBe('Close Window')
-    const quit = items.find((i) => i.id === 'close-all-windows')
-    expect(quit?.label).toBe('Quit Desktop')
+  })
+
+  // Login is the precondition for the account-scoped Comfy Builder rollout, so
+  // it is never gated on that rollout — only on whether you are already in.
+  it('omits Log in once the user is signed in', () => {
+    devPlatformMocks.isSignedInToCloud.mockReturnValue(true)
+    const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
+    expect(items.find((i) => i.id === 'sign-in')).toBeUndefined()
+  })
+
+  it('keeps the post-consent menu to Skip Onboarding, with no Log in item', () => {
+    const items = buildTitlePopupMenuItems(makeEntry({ firstUseMode: 'post-consent' }))
+    expect(items.map((i) => i.id ?? null)).toEqual(['skip-onboarding'])
   })
 
   it('install host omits Return to Dashboard — picker Home is the canonical dashboard escape', () => {
@@ -212,6 +293,21 @@ describe('buildTitlePopupMenuItems', () => {
     const ids = items.map((i) => i.id ?? null)
     expect(ids[0]).toBe('new-window')
     expect(ids[ids.length - 1]).toBe('close-all-windows')
+  })
+
+  it('separates Log in from Desktop Settings while signed out', () => {
+    const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
+    const signInIdx = items.findIndex((i) => i.id === 'sign-in')
+    expect(items[signInIdx + 1]?.kind).toBe('separator')
+    expect(items[signInIdx + 2]?.id).toBe('settings')
+  })
+
+  it('does not leave a doubled separator above Desktop Settings once signed in', () => {
+    devPlatformMocks.isSignedInToCloud.mockReturnValue(true)
+    const items = buildTitlePopupMenuItems(makeEntry({ installationId: null }))
+    const settingsIdx = items.findIndex((i) => i.id === 'settings')
+    expect(items[settingsIdx - 1]?.kind).toBe('separator')
+    expect(items[settingsIdx - 2]?.kind).not.toBe('separator')
   })
 
   it('separators bracket the install-creation block on both hosts', () => {
@@ -268,6 +364,37 @@ describe('activateTitlePopupMenuItem', () => {
 
     expect(bindings.resetComfyZoom).not.toHaveBeenCalled()
   })
+
+  // The shared primitive, not `session.login()` — it carries the sign-out race
+  // guard the `comfybuilder:signIn` IPC relies on.
+  it('routes Log in through the shared login primitive', () => {
+    const host = makeEntry({ installationId: null })
+    comfyWindows.set(host.windowKey, host)
+
+    activateTitlePopupMenuItem(
+      makePopupEntry(host.windowKey),
+      'sign-in',
+      {} as unknown as TitlePopupHostBindings
+    )
+
+    expect(devPlatformMocks.signInToCloud).toHaveBeenCalledOnce()
+  })
+
+  it('swallows a cancelled or failed sign-in handoff', async () => {
+    const host = makeEntry({ installationId: null })
+    comfyWindows.set(host.windowKey, host)
+    devPlatformMocks.signInToCloud.mockRejectedValueOnce(new Error('user closed the browser'))
+
+    expect(() =>
+      activateTitlePopupMenuItem(
+        makePopupEntry(host.windowKey),
+        'sign-in',
+        {} as unknown as TitlePopupHostBindings
+      )
+    ).not.toThrow()
+    // Let the rejected promise settle so an unhandled rejection would surface.
+    await Promise.resolve()
+  })
 })
 
 describe('decideFlowMenuItemTarget', () => {
@@ -294,6 +421,33 @@ describe('isFlowMenuItemId', () => {
     expect(isFlowMenuItemId('settings')).toBe(false)
     expect(isFlowMenuItemId('feedback')).toBe(false)
     expect(isFlowMenuItemId('')).toBe(false)
+  })
+})
+
+describe('requiresPerOpenConfigSync', () => {
+  // A deep-linked global-settings open (e.g. the instance pane's "Manage
+  // Shared Directories" -> Storage tab) must bypass the identical-config
+  // fast path: the cached popup may sit on another tab even though the
+  // config JSON is unchanged, so the snapshot must be re-pushed for the
+  // view's tab-retarget watch to fire.
+  it('forces a config re-send for a global-settings open with a requested tab', () => {
+    expect(
+      requiresPerOpenConfigSync({ kind: 'global-settings', snapshot: { initialTab: 'storage' } })
+    ).toBe(true)
+  })
+
+  it('keeps the fast path for a global-settings open without a requested tab', () => {
+    expect(
+      requiresPerOpenConfigSync({ kind: 'global-settings', snapshot: { initialTab: null } })
+    ).toBe(false)
+  })
+
+  it('keeps the fast path for non-global-settings kinds', () => {
+    expect(requiresPerOpenConfigSync({ kind: 'menu' })).toBe(false)
+    expect(requiresPerOpenConfigSync({ kind: 'downloads' })).toBe(false)
+    expect(
+      requiresPerOpenConfigSync({ kind: 'instance-picker', snapshot: { initialTab: 'storage' } })
+    ).toBe(false)
   })
 })
 
@@ -495,5 +649,110 @@ describe('buildInstancePickerSnapshot', () => {
       storage: EMPTY_STORAGE
     })
     expect(snap.pickerSelectionEpoch).toBe(7)
+  })
+})
+
+describe('global settings IPC handlers', () => {
+  type IpcHandler = (
+    event: Electron.IpcMainInvokeEvent,
+    payload?: Record<string, unknown>
+  ) => unknown
+
+  let updateField: IpcHandler
+  let setModelsDirs: IpcHandler
+
+  const eventFor = (id: number): Electron.IpcMainInvokeEvent =>
+    ({ sender: { id } }) as unknown as Electron.IpcMainInvokeEvent
+
+  beforeAll(async () => {
+    const { ipcMain } = await import('electron')
+    registerTitlePopupIpc({} as TitlePopupHostBindings)
+    const handlerFor = (channel: string): IpcHandler => {
+      const call = vi.mocked(ipcMain.handle).mock.calls.find(([name]) => name === channel)
+      if (!call) throw new Error(`IPC handler not registered: ${channel}`)
+      return call[1] as IpcHandler
+    }
+    updateField = handlerFor('comfy-titlepopup:global-settings-update-field')
+    setModelsDirs = handlerFor('comfy-titlepopup:global-settings-set-models-dirs')
+    _test_setTitlePopupEntry(101, { kind: 'global-settings' } as TitlePopupEntry)
+    _test_setTitlePopupEntry(102, { kind: 'instance-picker' } as TitlePopupEntry)
+    _test_setTitlePopupEntry(103, { kind: 'downloads' } as TitlePopupEntry)
+  })
+
+  beforeEach(() => {
+    vi.mocked(applySettingSet).mockReset()
+  })
+
+  afterAll(() => {
+    _test_deleteTitlePopupEntry(101)
+    _test_deleteTitlePopupEntry(102)
+    _test_deleteTitlePopupEntry(103)
+  })
+
+  it('updates a field for a global-settings sender', () => {
+    expect(updateField(eventFor(101), { fieldId: 'inputDir', value: '/shared/in' })).toEqual({
+      ok: true
+    })
+    expect(applySettingSet).toHaveBeenCalledExactlyOnceWith('inputDir', '/shared/in')
+  })
+
+  it('updates a field for an instance-picker sender', () => {
+    expect(updateField(eventFor(102), { fieldId: 'theme', value: 'dark' })).toEqual({ ok: true })
+    expect(applySettingSet).toHaveBeenCalledExactlyOnceWith('theme', 'dark')
+  })
+
+  it('rejects an unknown sender updating a field', () => {
+    expect(updateField(eventFor(999), { fieldId: 'inputDir', value: '/shared/in' })).toEqual({
+      ok: false,
+      message: 'Global Settings popup not active.'
+    })
+    expect(applySettingSet).not.toHaveBeenCalled()
+  })
+
+  it('rejects a non-settings popup updating a field', () => {
+    expect(updateField(eventFor(103), { fieldId: 'inputDir', value: '/shared/in' })).toEqual({
+      ok: false,
+      message: 'Global Settings popup not active.'
+    })
+    expect(applySettingSet).not.toHaveBeenCalled()
+  })
+
+  it.each([undefined, ''])('rejects invalid field id %j', (fieldId) => {
+    expect(updateField(eventFor(101), { fieldId })).toEqual({
+      ok: false,
+      message: 'Invalid field id.'
+    })
+    expect(applySettingSet).not.toHaveBeenCalled()
+  })
+
+  it('returns an applySettingSet error when updating a field', () => {
+    vi.mocked(applySettingSet).mockImplementationOnce(() => {
+      throw new Error('boom')
+    })
+    expect(updateField(eventFor(101), { fieldId: 'inputDir', value: '/shared/in' })).toEqual({
+      ok: false,
+      message: 'boom'
+    })
+  })
+
+  it('sets models directories for a settings sender', () => {
+    const dirs = ['/a', '/b']
+    expect(setModelsDirs(eventFor(101), { dirs })).toEqual({ ok: true })
+    expect(applySettingSet).toHaveBeenCalledExactlyOnceWith('modelsDirs', dirs)
+  })
+
+  it.each(['/a', undefined])('rejects non-array models directories %j', (dirs) => {
+    expect(setModelsDirs(eventFor(101), { dirs })).toEqual({ ok: false })
+    expect(applySettingSet).not.toHaveBeenCalled()
+  })
+
+  it('rejects models directories containing a non-string', () => {
+    expect(setModelsDirs(eventFor(101), { dirs: ['/a', 5] })).toEqual({ ok: false })
+    expect(applySettingSet).not.toHaveBeenCalled()
+  })
+
+  it('rejects an unknown sender setting models directories', () => {
+    expect(setModelsDirs(eventFor(999), { dirs: ['/a'] })).toEqual({ ok: false })
+    expect(applySettingSet).not.toHaveBeenCalled()
   })
 })

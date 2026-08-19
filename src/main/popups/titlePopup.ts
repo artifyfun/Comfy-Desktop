@@ -35,6 +35,7 @@ import {
   buildModelsPayload,
   buildInstallLocationFields
 } from '../lib/ipc/registerSettingsHandlers'
+import { isSignedInToCloud, signInToCloud } from '../lib/ipc/registerDevPlatformHandlers'
 import { globalSettingsEvents } from '../lib/globalSettingsEvents'
 import * as installations from '../installations'
 import { getCachedGithubStarCount, getGithubStarCount } from '../lib/githubStars'
@@ -195,12 +196,19 @@ export interface GlobalSettingsModelsDir {
   isPrimary: boolean
 }
 
+/** Tabs of the Global Settings popup a caller can deep-link into. */
+export type GlobalSettingsTab = 'general' | 'updates' | 'storage' | 'advanced' | 'logs'
+
 /** Snapshot pushed to the global-settings popup on open and on every
  *  settings-changed / app-update-state / app-update-progress /
  *  installations-changed broadcast. Field shapes use the loose
  *  `Record<string, unknown>` to keep the preload boundary type-safe
  *  without dragging renderer types into main. */
 export interface GlobalSettingsSnapshot {
+  /** Tab the popup should land on. Non-null only on the snapshot pushed
+   *  at open; live rebroadcasts carry null so a data refresh can never
+   *  retarget a tab the user has since navigated away from. */
+  initialTab: GlobalSettingsTab | null
   languageFields: Record<string, unknown>[]
   generalFields: Record<string, unknown>[]
   telemetryFields: Record<string, unknown>[]
@@ -231,6 +239,7 @@ export interface GlobalSettingsSnapshot {
     storage: string
     models: string
     advanced: string
+    logs: string
     sharedDirectories: string
   }
 }
@@ -408,7 +417,7 @@ type TitlePopupConfig =
  * `comfy-titlebar:menu-closed` for the reopen-suppression guard)
  * can route without their own per-open context.
  */
-interface TitlePopupEntry {
+export interface TitlePopupEntry {
   view: EmbeddedPopupView
   /** Numeric `windowKey` of the parent host entry, updated on every
    *  open. `0` is a sentinel for "no popup has been opened yet" since
@@ -739,6 +748,7 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
   //   Add Existing Install
   //   Load Snapshot
   //   ── separator ──
+  //   (Log in — while signed out, followed by its own separator)
   //   Desktop Settings
   //   Send Beta Feedback
   //   (Reset Zoom — on install-backed hosts when zoom level != 0)
@@ -762,6 +772,12 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
   //   - "Return to Dashboard" is absent: the picker's Home icon is
   //     the canonical dashboard escape (opens a fresh chooser window
   //     instead of detaching, so the running ComfyUI stays alive).
+  //   - "Log in" sits in its own group above Desktop Settings while
+  //     signed out, and is the app's ONLY sign-in affordance. Deliberately
+  //     NOT behind the Comfy Builder rollout flag: that flag gates
+  //     what a signed-in account may do, and gating login itself
+  //     would put it behind a decision that cannot be made until the
+  //     user has logged in.
   const items: TitlePopupMenuItem[] = [
     { id: 'new-window', label: 'Open Dashboard', labelKey: 'fileMenu.newWindow' },
     { kind: 'separator' },
@@ -772,14 +788,22 @@ export function buildTitlePopupMenuItems(entry: ComfyWindowEntry): TitlePopupMen
       labelKey: 'fileMenu.addExistingInstall'
     },
     { id: 'load-snapshot', label: 'Load Snapshot', labelKey: 'fileMenu.loadSnapshot' },
-    { kind: 'separator' },
+    { kind: 'separator' }
+  ]
+  if (!isSignedInToCloud()) {
+    items.push(
+      { id: 'sign-in', label: 'Log in', labelKey: 'fileMenu.signIn' },
+      { kind: 'separator' }
+    )
+  }
+  items.push(
     {
       id: 'settings',
       label: 'Desktop Settings',
       labelKey: 'fileMenu.globalSettings'
     },
     { id: 'feedback', label: 'Send Beta Feedback', labelKey: 'fileMenu.sendFeedback' }
-  ]
+  )
   // Reset Zoom — discoverable recovery path for users who zoom the live
   // ComfyUI view too far to read. Dashboard hosts do not expose zoom controls.
   if (entry.installationId !== null && !entry.comfyView.webContents.isDestroyed()) {
@@ -1370,6 +1394,18 @@ type OpenTitlePopupOpts = {
   | { kind: typeof POPUP_KIND.globalSettings; snapshot: GlobalSettingsSnapshot }
 )
 
+/** Whether an open must re-send its config even when it matches the last
+ *  synced one, bypassing `openTitlePopup`'s identical-config fast path.
+ *  A non-null global-settings `initialTab` is a per-open command, not
+ *  state: the renderer may have navigated off that tab since the last
+ *  identical push, so the snapshot must be re-sent for the view's
+ *  tab-retarget watch to fire. */
+export function requiresPerOpenConfigSync(
+  opts: Pick<OpenTitlePopupOpts, 'kind'> & { snapshot?: { initialTab?: unknown } }
+): boolean {
+  return opts.kind === POPUP_KIND.globalSettings && opts.snapshot?.initialTab != null
+}
+
 function openTitlePopup(opts: OpenTitlePopupOpts): void {
   // Dismiss any in-flight title-bar tooltip — the popup will obscure
   // the same area, and the renderer's pointer-leave on the trigger
@@ -1486,7 +1522,11 @@ function openTitlePopup(opts: OpenTitlePopupOpts): void {
   // changes). Skip the set-config IPC + render-ack roundtrip and show
   // immediately — eliminates ~1 frame + 2 IPC hops of perceived
   // open latency on the common case.
-  if (entry.lastSyncedConfigJson === configJson && !entry.view.popup.webContents.isDestroyed()) {
+  if (
+    !requiresPerOpenConfigSync(opts) &&
+    entry.lastSyncedConfigJson === configJson &&
+    !entry.view.popup.webContents.isDestroyed()
+  ) {
     showTitlePopupNow(entry)
     return
   }
@@ -1690,7 +1730,8 @@ function openGlobalSettingsForHost(
   parentEntry: ComfyWindowEntry,
   parentEntryId: number,
   bindings: TitlePopupHostBindings,
-  titleBarSender: Electron.WebContents
+  titleBarSender: Electron.WebContents,
+  initialTab: GlobalSettingsTab | null = null
 ): void {
   if (parentEntry.window.isDestroyed()) return
   // Open instantly off the cached snapshot — like the instance picker — so the
@@ -1700,7 +1741,7 @@ function openGlobalSettingsForHost(
     parent: parentEntry.window,
     parentEntryId,
     kind: 'global-settings',
-    snapshot: buildGlobalSettingsSnapshot(),
+    snapshot: buildGlobalSettingsSnapshot(undefined, initialTab),
     anchor: { x: 0, y: TITLEBAR_HEIGHT },
     theme: parentEntry.lastTheme,
     titleBarSender
@@ -1975,6 +2016,15 @@ export function activateTitlePopupMenuItem(
     // via `comfy-window:click-feedback`; `source` distinguishes the
     // two entry points in the telemetry payload.
     bindings.triggerOpenFeedback(entry.parentEntryId, 'menu')
+  } else if (id === 'sign-in') {
+    // No renderer in this loop — the popup is its own WebContentsView — so the
+    // menu calls the same primitive `comfybuilder:signIn` does, which is what
+    // keeps the sign-out race guard shared instead of forked. Fire-and-forget:
+    // the browser handoff can take minutes and every surface repaints off the
+    // `authChanged` broadcast the primitive sends, not off this call.
+    void signInToCloud().catch(() => {
+      // Cancelled or failed handoff: the menu item re-arms on the next open.
+    })
   } else if (id === 'reset-zoom') {
     // Route through the shared reset so the title-bar pill picks up the
     // `comfy-titlebar:zoom-changed` push (that event fires only for
@@ -2077,7 +2127,8 @@ function findSettingsFields(
 }
 
 function buildGlobalSettingsSnapshot(
-  installs?: Pick<{ id: string; name: string }, 'id' | 'name'>[]
+  installs?: Pick<{ id: string; name: string }, 'id' | 'name'>[],
+  initialTab: GlobalSettingsTab | null = null
 ): GlobalSettingsSnapshot {
   const settingsSections = buildSettingsSections(installs)
   const mediaSections = buildMediaSections()
@@ -2103,6 +2154,7 @@ function buildGlobalSettingsSnapshot(
   const githubStars = getCachedGithubStarCount('comfy-org/ComfyUI')
   const githubStarsLoading = githubStars == null && !githubStarsFetchAttempted
   return {
+    initialTab,
     languageFields,
     generalFields,
     telemetryFields,
@@ -2137,6 +2189,7 @@ function buildGlobalSettingsSnapshot(
       storage: i18n.t('settings.storageTab'),
       models: i18n.t('settings.models'),
       advanced: i18n.t('settings.advanced'),
+      logs: i18n.t('settings.logs'),
       sharedDirectories: i18n.t('settings.sharedDirectories')
     }
   }
@@ -2297,31 +2350,39 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   // Per-entry download action dispatched from the popup's downloads view.
   // Routes pause / resume / cancel / dismiss through the existing
   // download-manager APIs and `show-in-folder` through Electron's shell.
-  // `clear-finished` is the only action that doesn't carry a url.
+  // `clear-finished` is the only action that doesn't carry a reference.
+  // Entries are addressed by stable job id (`ref`) with the download URL as a
+  // compatibility fallback for older popup bundles.
   ipcMain.on(
     'comfy-titlepopup:downloads-action',
-    (_event, payload: { action?: unknown; url?: unknown; savePath?: unknown }) => {
-      const { action, url, savePath } = payload ?? {}
+    (_event, payload: { action?: unknown; ref?: unknown; url?: unknown; savePath?: unknown }) => {
+      const { action, ref: rawRef, url, savePath } = payload ?? {}
       if (action === 'clear-finished') {
         clearFinishedDownloads()
         return
       }
-      if (typeof url !== 'string' || url.length === 0) return
+      const ref =
+        typeof rawRef === 'string' && rawRef.length > 0
+          ? rawRef
+          : typeof url === 'string' && url.length > 0
+            ? url
+            : null
+      if (ref === null) return
       switch (action) {
         case 'pause':
-          pauseModelDownload(url)
+          pauseModelDownload(ref)
           return
         case 'resume':
-          resumeModelDownload(url)
+          resumeModelDownload(ref)
           return
         case 'cancel':
-          cancelModelDownload(url)
+          cancelModelDownload(ref)
           return
         case 'dismiss':
-          dismissRecentDownload(url)
+          dismissRecentDownload(ref)
           return
         case 'retry':
-          retryDownload(url)
+          retryDownload(ref)
           return
         case 'show-in-folder':
           if (typeof savePath === 'string' && savePath.length > 0) {
@@ -2341,7 +2402,15 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
     const popupEntry = titlePopupsByWebContents.get(event.sender.id)
     if (!popupEntry) return
     const tab = payload?.tab
-    if (tab !== 'comfy' && tab !== 'directories' && tab !== 'downloads' && tab !== 'global') return
+    if (
+      tab !== 'comfy' &&
+      tab !== 'directories' &&
+      tab !== 'downloads' &&
+      tab !== 'global' &&
+      tab !== 'global-storage'
+    ) {
+      return
+    }
     const parentEntry = comfyWindows.get(popupEntry.parentEntryId)
     if (!parentEntry) return
     hideTitlePopup(popupEntry, { releaseFocusToParent: false })
@@ -2894,7 +2963,7 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
   // Panel renderer → open the Global Settings popup for the sender's
   // host window. Used by the panel-side file-menu "Settings" item and
   // the `comfy://open-settings?tab=global` deep link.
-  ipcMain.on('comfy-titlepopup:open-global-settings', (event) => {
+  ipcMain.on('comfy-titlepopup:open-global-settings', (event, payload?: { tab?: unknown }) => {
     recordIpcInvocation('comfy-titlepopup:open-global-settings')
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win || win.isDestroyed()) return
@@ -2908,11 +2977,21 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       }
     }
     if (parentEntryId === undefined || !parentEntry) return
+    const rawTab = payload?.tab
+    const initialTab: GlobalSettingsTab | null =
+      rawTab === 'general' ||
+      rawTab === 'updates' ||
+      rawTab === 'storage' ||
+      rawTab === 'advanced' ||
+      rawTab === 'logs'
+        ? rawTab
+        : null
     openGlobalSettingsForHost(
       parentEntry,
       parentEntryId,
       bindings,
-      parentEntry.titleBarView.webContents
+      parentEntry.titleBarView.webContents,
+      initialTab
     )
   })
 
@@ -3125,6 +3204,15 @@ export function notifyGlobalSettingsDownloadProgress(progress: Record<string, un
   lastAppUpdateProgress = progress
   if (!activeBindings) return
   void broadcastGlobalSettingsSnapshotToTitlePopups(activeBindings)
+}
+
+/** Test seam: register/remove a popup entry for IPC sender gating. */
+export function _test_setTitlePopupEntry(webContentsId: number, entry: TitlePopupEntry): void {
+  titlePopupsByWebContents.set(webContentsId, entry)
+}
+
+export function _test_deleteTitlePopupEntry(webContentsId: number): void {
+  titlePopupsByWebContents.delete(webContentsId)
 }
 
 /**

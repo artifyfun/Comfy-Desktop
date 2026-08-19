@@ -5,12 +5,81 @@ import type { FirstUseMode } from '../shared/firstUseMode'
 import type { GpuTier } from '../shared/gpuTier'
 export type { FirstUseMode }
 
+// Dev-platform (cloud auth + comfy-builder) renderer-safe types. Re-exported
+// from the cloud library so the renderer imports them from one place; tokens
+// are never part of these shapes.
+import type { AuthStatus, Workspace } from '../main/cloud/types'
+export type { AuthStatus, Workspace }
+
+/** Every state a distribution tile can be in. The first four are pre-install;
+ *  the last two are local (renderer-owned via de-dup against installs). */
+export type DevPlatformDistributionState =
+  | 'installable'
+  | 'no-build'
+  | 'platform-mismatch'
+  | 'needs-desktop-update'
+  | 'installed'
+  | 'update-available'
+
+/** One distribution as a renderer-safe display row. The install-decision fields
+ *  (artifact id / download ref) stay main-side; the renderer installs by id. */
+export interface DevPlatformDistribution {
+  id: string
+  name: string
+  description?: string
+  version?: string
+  /** The ComfyUI version this distribution bundles, for the card's facts line.
+   *  TODO(builder-backend): not yet populated by `listDistributionRows` — the
+   *  build metadata needs to carry it through. Absent renders as unknown. */
+  comfyuiVersion?: string
+  /** ISO 8601 finish stamp of the latest complete build. */
+  finishedAt?: string
+  sizeBytes?: number
+  numCustomNodes?: number
+  state: DevPlatformDistributionState
+  /** i18n suffix explaining a blocking state (see `devPlatform.distribution.blockedReason.*`). */
+  blockedReason?: string
+  /** On `platform-mismatch`, the OSes this build DOES target (`windows` / `mac`
+   *  / `linux`). The card names them instead of saying "not for this machine". */
+  targetOs?: string[]
+  minDesktopVersion?: string
+  /** Local-only: present for installed / update-available. A distribution
+   *  version is an integer, matching how the row builder sets it. */
+  installedVersion?: number
+}
+
+/** Kickoff result of `installDistribution`: mirrors `addInstallation` so the
+ *  renderer drives the same `installInstance` + progress flow. */
+export interface InstallDistributionResult {
+  ok: boolean
+  message?: string
+  entry?: { id: string; name: string }
+}
+
 // Unsubscribe function returned by event listeners
 export type Unsubscribe = () => void
 
 // Theme identifiers
 export type Theme = 'system' | 'dark' | 'light'
 export type ResolvedTheme = Exclude<Theme, 'system'>
+
+/** One row of a `version-stats` field's table. */
+export interface VersionStatRow {
+  id: string
+  label: string
+  value: string
+  title?: string
+  highlight?: boolean
+}
+
+/** Payload of a `version-stats` field: the Update tab's version summary. */
+export interface VersionStatsValue {
+  headline: string
+  headlineHighlight?: boolean
+  badge?: string | null
+  badgeTone?: 'current' | 'update'
+  rows: VersionStatRow[]
+}
 
 /** Signed-in user's Comfy Cloud subscription tier. `'unknown'` means signed
  *  out or no fetch has succeeded yet this lifetime. See `userTier.ts`. */
@@ -143,7 +212,7 @@ export interface ComfyArgDef {
 export interface DetailField {
   id: string
   label: string
-  value: string | boolean | number | string[] | Record<string, string> | null
+  value: string | boolean | number | string[] | Record<string, string> | VersionStatsValue | null
   editable?: boolean
   editType?:
     | 'select'
@@ -152,6 +221,9 @@ export interface DetailField {
     | 'number'
     | 'path'
     | 'channel-cards'
+    /** Read-only version summary: headline + badge over a table of facts. The
+     *  source supplies the wording; the renderer only lays it out. */
+    | 'version-stats'
     | 'args-builder'
     | 'env-vars'
     | 'model-dirs'
@@ -605,6 +677,9 @@ export type ModelDownloadStatus =
   | 'cancelled'
 
 export interface ModelDownloadProgress {
+  /** Stable per-job identifier assigned by main. Control APIs accept it in
+   *  place of the URL; optional only for snapshots predating the field. */
+  id?: string
   url: string
   filename: string
   directory?: string
@@ -1111,8 +1186,9 @@ export interface ElectronApi {
   /** Open the Global Settings popup for the panel's host window. Used
    *  by the panel-side file-menu "Settings" item and the
    *  `comfy://open-settings?tab=global` deep link. Main reuses the
-   *  same helper the hamburger Settings entry calls. */
-  openGlobalSettings(): void
+   *  same helper the hamburger Settings entry calls. `tab` lands the
+   *  popup on that tab instead of its remembered one. */
+  openGlobalSettings(tab?: 'general' | 'updates' | 'storage' | 'advanced' | 'logs'): void
   /** Open the instance-picker popup for the panel's host window with
    *  `installationId` seeded as the picker's right-pane selection.
    *  Used by chooser-card "Manage…" (and future per-install entry
@@ -1325,6 +1401,20 @@ export interface ElectronApi {
   getInstallsInventory(): Promise<InstallsInventory>
   getDeviceId(): Promise<string>
 
+  // Dev platform (cloud auth + comfy-builder): the only renderer<->main bridge
+  // for this flow. Access/refresh tokens never cross IPC: every method returns
+  // or observes a renderer-safe AuthStatus / Workspace / distribution row.
+  comfybuilder: {
+    signIn(): Promise<AuthStatus>
+    signOut(): Promise<AuthStatus>
+    getAuthStatus(): Promise<AuthStatus>
+    onAuthChanged(callback: (status: AuthStatus) => void): Unsubscribe
+    listWorkspaces(): Promise<Workspace[]>
+    switchWorkspace(workspaceId: string): Promise<AuthStatus>
+    listDistributions(): Promise<DevPlatformDistribution[]>
+    installDistribution(distributionId: string): Promise<InstallDistributionResult>
+  }
+
   // Updates
   checkForUpdate(): Promise<{ available: boolean; version?: string; error?: string }>
   downloadUpdate(): Promise<void>
@@ -1339,23 +1429,24 @@ export interface ElectronApi {
    */
   getAppUpdateState(): Promise<AppUpdateState>
 
-  // Model downloads
+  // Model downloads. Every control accepts a download ref: the row's stable
+  // job `id` or its source URL (kept for compatibility).
   listModelDownloads(): Promise<ModelDownloadProgress[]>
-  pauseModelDownload(url: string): Promise<boolean>
-  resumeModelDownload(url: string): Promise<boolean>
-  cancelModelDownload(url: string): Promise<boolean>
+  pauseModelDownload(ref: string): Promise<boolean>
+  resumeModelDownload(ref: string): Promise<boolean>
+  cancelModelDownload(ref: string): Promise<boolean>
   /** Drop a single terminal (completed / error / cancelled) entry
    *  from main's recent-downloads buffer; broadcasts a
    *  `model-download-removed` event so every renderer surface drops
    *  the entry from its store in lockstep. */
-  dismissModelDownload(url: string): Promise<boolean>
+  dismissModelDownload(ref: string): Promise<boolean>
   /** Bulk-dismiss every terminal entry from main's recent buffer.
    *  Returns the number of entries removed. */
   clearFinishedModelDownloads(): Promise<number>
   /** Re-dispatch a terminal (error) download from main's captured
    *  original params. Returns false if it's still in flight or the
    *  params were evicted from the recent buffer. */
-  retryModelDownload(url: string): Promise<boolean>
+  retryModelDownload(ref: string): Promise<boolean>
   showDownloadInFolder(savePath: string): Promise<void>
   /** Downscaled `data:` URL preview of a completed image download, or null for
    *  non-images / unreadable files. */
@@ -1436,11 +1527,13 @@ export interface ElectronApi {
   onModelDownloadProgress(callback: (progress: ModelDownloadProgress) => void): Unsubscribe
   /** Fires when main drops a single terminal entry from its recent
    *  buffer (via `dismissModelDownload`). */
-  onModelDownloadRemoved(callback: (data: { url: string }) => void): Unsubscribe
+  onModelDownloadRemoved(callback: (data: { url: string; id?: string }) => void): Unsubscribe
   /** Fires when main bulk-dismisses every terminal entry. The payload
-   *  carries the URLs that were removed so listeners can drop them in
-   *  one pass instead of re-listing. */
-  onModelDownloadsClearedFinished(callback: (data: { urls: string[] }) => void): Unsubscribe
+   *  carries the removed rows' URLs plus `refs` (stable job id when the row
+   *  had one, else its URL) so listeners can drop them in one pass. */
+  onModelDownloadsClearedFinished(
+    callback: (data: { urls: string[]; refs?: string[] }) => void
+  ): Unsubscribe
   /**
    * Forward a renderer-originated telemetry event to main, which captures it
    * via PostHog Node under the current distinct_id and consent state.
@@ -1543,7 +1636,7 @@ export interface ElectronApi {
       actionId?: string
       actionData?: Record<string, unknown>
       version?: string | null
-      settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global'
+      settingsTab?: 'comfy' | 'directories' | 'downloads' | 'global' | 'global-storage'
       title?: string
       cancellable?: boolean
       /** Picker-only (`picker-pick-install`): set on boot-time restore. The

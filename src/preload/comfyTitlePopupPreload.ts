@@ -91,6 +91,10 @@ export interface PopupGlobalSettingsModelsDir {
 /** Snapshot for the global-settings popup; field arrays are loose-typed (the
  *  renderer casts to `DetailField` on receipt). */
 export interface PopupGlobalSettingsSnapshot {
+  /** Tab to land on; non-null only on the open push (rebroadcasts carry
+   *  null so live data refreshes never retarget the user's tab). */
+  initialTab: 'general' | 'updates' | 'storage' | 'advanced' | 'logs' | null
+  languageFields: Record<string, unknown>[]
   generalFields: Record<string, unknown>[]
   telemetryFields: Record<string, unknown>[]
   desktopUpdateFields: Record<string, unknown>[]
@@ -118,6 +122,7 @@ export interface PopupGlobalSettingsSnapshot {
     storage: string
     models: string
     advanced: string
+    logs: string
     sharedDirectories: string
   }
 }
@@ -139,6 +144,9 @@ export type TitlePopupConfig =
 
 /** Mirrors `DownloadProgress` in `src/main/lib/comfyDownloadManager.ts`. */
 export interface PopupDownloadEntry {
+  /** Stable per-job identifier. The download-action IPC accepts it in place
+   *  of the URL (the `url` action fields remain supported). */
+  id?: string
   url: string
   filename: string
   directory?: string
@@ -162,17 +170,21 @@ export interface PopupDownloadsState {
   recent: PopupDownloadEntry[]
 }
 
+/** Per-entry actions address a download by stable job id (`ref`), falling
+ *  back to the URL for entries that predate ids. `url` rides along for
+ *  compatibility with older mains that only understand URL keys. */
 export type PopupDownloadAction =
-  | { action: 'pause'; url: string }
-  | { action: 'resume'; url: string }
-  | { action: 'cancel'; url: string }
-  | { action: 'show-in-folder'; url: string; savePath: string }
-  | { action: 'dismiss'; url: string }
-  | { action: 'retry'; url: string }
+  | { action: 'pause'; ref?: string; url: string }
+  | { action: 'resume'; ref?: string; url: string }
+  | { action: 'cancel'; ref?: string; url: string }
+  | { action: 'show-in-folder'; ref?: string; url: string; savePath: string }
+  | { action: 'dismiss'; ref?: string; url: string }
+  | { action: 'retry'; ref?: string; url: string }
   | { action: 'clear-finished' }
 
-/** Settings tabs the popup can deep-link the host's panelView into. */
-export type PopupSettingsTab = 'comfy' | 'directories' | 'downloads' | 'global'
+/** Settings tabs the popup can deep-link the host's panelView into.
+ *  `'global-storage'` opens Global Desktop Settings on its Storage tab. */
+export type PopupSettingsTab = 'comfy' | 'directories' | 'downloads' | 'global' | 'global-storage'
 
 export interface ComfyTitlePopupBridge {
   /** Host OS, for OS-conditional copy without IPC. */
@@ -414,6 +426,18 @@ function isPopupConfig(value: unknown): value is TitlePopupConfig {
 function isGlobalSettingsSnapshot(value: unknown): value is PopupGlobalSettingsSnapshot {
   if (!value || typeof value !== 'object') return false
   const v = value as Record<string, unknown>
+  const tab = v['initialTab']
+  if (
+    tab !== null &&
+    tab !== 'general' &&
+    tab !== 'updates' &&
+    tab !== 'storage' &&
+    tab !== 'advanced' &&
+    tab !== 'logs'
+  ) {
+    return false
+  }
+  if (!Array.isArray(v['languageFields'])) return false
   if (!Array.isArray(v['generalFields'])) return false
   if (!Array.isArray(v['telemetryFields'])) return false
   if (!Array.isArray(v['desktopUpdateFields'])) return false

@@ -20,7 +20,8 @@
     "cloud": "云端",
     "legacyDesktop": "旧版桌面端",
     "remote": "远程",
-    "unknown": "未知"
+    "unknown": "未知",
+    "distribution": "分发版"
   },
   "chooser": {
     "title": "选择一个实例",
@@ -38,6 +39,7 @@
     "filterRemote": "远程",
     "updatePill": "更新",
     "migratePill": "迁移",
+    "workspaceShelf": "工作区",
     "openInstall": "打开",
     "manageInstall": "管理",
     "moreActions": "更多操作",
@@ -98,11 +100,12 @@
     "diskUsage": "磁盘占用",
     "envVarsCount": "已定义 {n} 个",
     "emptyInstallLess": "打开一个 ComfyUI 实例以查看其设置。",
-    "storageGlobalNote": "这里的更改会应用到你的所有 ComfyUI 实例。",
     "storageRestartNote": "重启应用（或关闭后重新打开）以使这些更改生效。",
     "dirMissingTitle": "找不到文件夹 —— {dir}",
     "viewCustomPathDetails": "查看自定义路径详情",
     "yamlTag": "YAML",
+    "includeSharedDirs": "包含共享目录",
+    "manageSharedDirs": "在桌面设置中管理共享目录",
     "refreshCustomPaths": "刷新状态",
     "extraModelPathsModalTitle": "自定义模型路径",
     "extraModelPathsModalNote": "只读 —— ComfyUI 会搜索这些目录，但启动器不会管理它们。请编辑 extra_model_paths.yaml 以更改它们。",
@@ -189,8 +192,8 @@
   },
   "media": {
     "sharedDirs": "媒体",
-    "inputDir": "输入目录",
-    "outputDir": "输出目录"
+    "inputDir": "共享输入",
+    "outputDir": "共享输出"
   },
   "directories": {
     "title": "目录"
@@ -198,7 +201,7 @@
   "models": {
     "directories": "模型",
     "directoriesDesc": "所有实例共享的模型目录。放在这里的模型可供每个 ComfyUI 实例使用，避免重复下载。新下载的模型会保存到下载目录。",
-    "addDir": "添加目录",
+    "addDir": "添加共享目录",
     "removeDir": "移除",
     "primary": "下载",
     "default": "默认",
@@ -245,8 +248,10 @@
     "download": "下载",
     "extract": "解压",
     "default": "默认",
-    "useSharedModels": "使用共享模型",
-    "useSharedInputOutput": "使用共享输入/输出文件夹",
+    "useSharedModels": "包含共享模型目录",
+    "useSharedInput": "使用共享输入文件夹",
+    "useSharedOutput": "使用共享输出文件夹",
+    "useSharedFolder": "使用共享文件夹",
     "perInstallModelDirs": "模型目录",
     "perInstallInputDir": "输入目录",
     "perInstallOutputDir": "输出目录",
@@ -283,6 +288,25 @@
     "managerNetworkMode_personal_cloud_desc": "将此机器视为你自己信任的远程主机：解除 --listen 对安装节点包的阻止（所选安全级别仍然生效）。仅在你控制的个人机器上使用 - 它会放宽为共享或公共主机设计的保护。",
     "copyError": "复制错误详情",
     "clear": "清除"
+  },
+  "comfybuilder": {
+    "stageModels": "下载模型",
+    "distribution": "分发版",
+    "distributionVersion": "分发版版本",
+    "comfyuiVersion": "ComfyUI 版本",
+    "distributionVersionTitle": "分发版版本",
+    "installedVersion": "已安装",
+    "latestVersion": "最新发布",
+    "errorNoDistribution": "此安装未关联到分发版。",
+    "updateAvailable": "有可用更新",
+    "upToDate": "已是最新",
+    "lastChecked": "上次检查",
+    "updateToVersion": "更新到 v{version}",
+    "updatingTo": "正在更新到 v{version}",
+    "updateConfirmTitle": "更新分发版",
+    "updateConfirmMessage": "将此实例从 {from} 更新到 {to}？\n\n环境将就地替换，工作流与已暂存的模型会保留。",
+    "errorNoVersion": "未指定目标版本。",
+    "errorVersionUnavailable": "版本 v{version} 没有适用于此设备的构建。"
   },
   "list": {
     "loadSnapshot": "加载快照",
@@ -349,7 +373,7 @@
   },
   "templateQuit": {
     "title": "模板模型仍在下载",
-    "message": "现在退出将停止下载，且无法续传。你可以等其完成后再退出。",
+    "message": "现在退出将暂停下载。下次启动时它会以已暂停状态出现在“下载”中，你可以继续或取消。",
     "quit": "仍然退出",
     "cancel": "继续下载"
   },
@@ -504,6 +528,10 @@
     "autoLaunchOnStartupLast": "上次使用的实例",
     "confirmBeforeClosingWindow": "关闭窗口前确认",
     "confirmBeforeClosingWindowDescription": "关闭正在运行本地安装的窗口前请求确认。",
+    "warnBeforeRunningMultipleInstances": "运行多个实例前发出警告",
+    "warnBeforeRunningMultipleInstancesDescription": "当一个本地 ComfyUI 实例正在运行或启动时，在启动另一个实例前显示警告。",
+    "hardwareAcceleration": "使用硬件加速",
+    "hardwareAccelerationDescription": "使用 GPU 渲染 Comfy Desktop. 更改将在重启 Comfy Desktop 后生效.",
     "hideCloudFromPicker": "在实例选择器中隐藏云端",
     "hideCloudFromPickerDescription": "面向仅使用本地的用户——从仪表板隐藏云端卡片（以及试用云端 CTA）。云端功能仍完全可用；你可以随时重新启用。",
     "checkForUpdates": "检查更新",
@@ -513,11 +541,13 @@
     "models": "共享模型",
     "modelDirectories": "模型目录",
     "modelStorage": "模型",
-    "inputOutputStorage": "输入和输出",
+    "inputStorage": "输入",
+    "outputStorage": "输出",
     "cache": "缓存",
     "cacheDir": "缓存目录",
     "open": "打开",
     "advanced": "高级",
+    "logs": "日志",
     "pypiMirror": "PyPI 镜像 URL",
     "pypiMirrorPlaceholder": "例如 https://mirrors.aliyun.com/pypi/simple/",
     "useChineseMirrors": "使用中国镜像（Git 和 PyPI）",
@@ -1180,6 +1210,7 @@
     "portBusyUsing": "端口 {old} 被占用——改用端口 {new}…",
     "instanceRunningTitle": "已有实例正在运行",
     "instanceRunningMessage": "选择“关闭并启动”将停止下方列出的实例。",
+    "instanceRunningPreferencesHint": "你可以在偏好设置中关闭此警告。",
     "instanceRunningListLabel": "将被停止",
     "instanceRunningProceed": "全部运行",
     "instanceRunningReplace": "关闭并启动",
@@ -1201,6 +1232,41 @@
       "nodes": "正在加载自定义节点…"
     },
     "viewLogs": "查看日志"
+  },
+  "devPlatform": {
+    "signIn": {
+      "cta": "登录"
+    },
+    "account": {
+      "signOut": "退出登录",
+      "signedInAs": "已登录为 {email}",
+      "signOutConfirmTitle": "退出 ComfyBuilder？",
+      "signOutConfirmBody": "已安装的分发版本会保留并仍可运行，只是在重新登录前不再接收更新。",
+      "signOutConfirmCta": "退出登录"
+    },
+    "workspace": {
+      "personalLabel": "个人",
+      "switchLabel": "工作区",
+      "loadError": "无法加载工作区，请重试"
+    },
+    "distribution": {
+      "menuInstall": "安装",
+      "distVersion": "分发版 v{version}",
+      "notInstalled": "未安装",
+      "emptyTitle": "此工作区尚未发布任何分发版本。",
+      "loadError": "无法加载分发版本，请重试",
+      "installFailed": "无法开始安装，请重试。",
+      "states": {
+        "noBuild": "无构建",
+        "platformMismatch": "不适用于此设备",
+        "updateAvailable": "更新"
+      },
+      "blockedReason": {
+        "buildFailed": "此分发版本尚无成功的构建。",
+        "buildInProgress": "最新构建仍在进行中。",
+        "noArtifactForMachine": "最新构建没有适用于此操作系统和 GPU 的制品。"
+      }
+    }
   },
   "errors": {
     "invalidUrl": "请输入有效 URL（例如 http://localhost:8188）。",
@@ -1266,16 +1332,19 @@
     "launchMode": "选择 ComfyUI 的运行方式：在自己的应用窗口中运行，或仅作为控制台进程运行。",
     "browserPartition": "控制此实例是与其他实例共享浏览器缓存（cookies、本地存储），还是保留独立缓存。",
     "sharedDirs": "所有实例共享的输入和输出目录。",
-    "sharedModels": "所有实例共享的模型文件夹，避免重复下载模型。新下载的模型会保存到下载文件夹。系统默认文件夹会始终保留且无法移除；下载文件夹在使用中时也无法移除——请先选择其他文件夹。",
+    "sharedModels": "所有实例共享的模型文件夹，避免重复下载模型。新下载的模型会保存到下载文件夹；下载文件夹在使用中时无法移除，请先选择其他下载文件夹。所有实例默认包含这些目录；每个实例也可以在自己的存储设置中添加仅属于自己的目录。",
+    "sharedDirectories": "全局输入和输出文件夹，在此处的修改对所有实例生效。每个实例可在自己的存储设置中独立选择使用共享输入文件夹、共享输出文件夹，还是自己的文件夹。",
     "modelsPrimary": "新下载的模型会保存在这里。",
     "instanceOwnModelsDir": "此实例自己的模型文件夹。它始终会被使用，且不会与其他实例共享。",
     "sharedDir": "在你所有的 ComfyUI 实例之间共享。",
+    "instanceModels": "此实例读取的所有模型目录：它包含的共享目录、专为此实例添加的目录，以及它自己的内部 models 文件夹。",
     "extraModelPathsInstance": "来自此实例 extra_model_paths.yaml 的自定义模型路径。ComfyUI 会搜索它；启动器以只读方式显示。点击查看详情。",
     "extraModelPathsDefault": "此基础路径在 extra_model_paths.yaml 中标记为 is_default，因此 ComfyUI 会优先用于这些模型类型。对于共享模型类型，启动器的下载目录加载更晚，会优先生效。",
-    "modelsDefault": "系统默认目录。此路径会自动创建，无法移除。",
-    "useSharedModels": "启用后，此实例可看到全局共享模型文件夹中的所有模型。禁用后会隐藏这些模型——大多数用户应保持开启。",
-    "useSharedInputOutput": "启用后，此实例会从全局共享文件夹读取和写入输入/输出文件。禁用后可在下方指定此实例自己的文件夹。",
-    "perInstallModelDirs": "仅供此实例使用的额外模型目录，在关闭共享模型时使用。第一个目录用于保存新下载的模型。",
+    "modelsDefault": "系统默认目录。此路径会自动创建。",
+    "useSharedModels": "启用后，此实例除了下方为其单独添加的目录外，还能看到全局共享模型文件夹中的所有模型。禁用会隐藏共享模型 - 大多数用户应保持开启。",
+    "useSharedInput": "启用后，此实例从全局共享输入文件夹读取输入文件。禁用后可在下方为此实例指定单独的输入文件夹。",
+    "useSharedOutput": "启用后，此实例将生成的输出写入全局共享输出文件夹。禁用后可在下方为此实例指定单独的输出文件夹。",
+    "perInstallModelDirs": "仅用于此实例的额外模型目录，会与共享模型目录一同被搜索。",
     "perInstallInputDir": "此实例读取输入文件的文件夹。留空则使用此实例自己的内部输入文件夹。",
     "perInstallOutputDir": "此实例写入生成输出文件的文件夹。留空则使用此实例自己的内部输出文件夹。",
     "inputDir": "所有实例均可访问的输入文件共享文件夹（图像、遮罩等）。",
@@ -1310,7 +1379,8 @@
     "cut": "剪切",
     "copy": "复制",
     "paste": "粘贴",
-    "selectAll": "全选"
+    "selectAll": "全选",
+    "addToDictionary": "添加到词典"
   },
   "statusFactPanel": {
     "editName": "编辑实例名称",
@@ -1322,6 +1392,7 @@
     "newInstall": "新建实例",
     "addExistingInstall": "添加现有实例",
     "loadSnapshot": "加载快照",
+    "signIn": "登录",
     "globalSettings": "桌面端设置",
     "sendFeedback": "发送反馈",
     "returnToDashboard": "返回仪表板",
@@ -1423,5 +1494,47 @@
     "progressWorking": "正在处理…",
     "progressError": "出现了问题",
     "progressCancelled": "已取消"
+  },
+  "installShowcase": {
+    "cloud": {
+      "title": "完全跳过配置",
+      "body": "Cloud 已就绪。无需安装、驱动或 GPU。"
+    },
+    "cloudCta": "免费试用 Cloud",
+    "gpu": {
+      "title": "RTX 6000 Pro，96GB 显存",
+      "body": "比多数工作站更快，任何设备可用。"
+    },
+    "models": {
+      "title": "900+ 模型已预装",
+      "body": "Wan 2.2、Flux、Qwen、LTX，无需下载。"
+    },
+    "license": {
+      "title": "已获商用授权",
+      "body": "每个模型均可用于商业用途。"
+    },
+    "partner": {
+      "title": "本地无法运行的模型",
+      "body": "Nano Banana Pro、Seedance、Grok Video。"
+    },
+    "nodes": {
+      "title": "你常用的自定义节点",
+      "body": "约 90% 本地工作流所用，已预装并保持更新。"
+    },
+    "loras": {
+      "title": "导入你自己的 LoRA",
+      "body": "从 CivitAI 或 Hugging Face 导入，保持风格。"
+    },
+    "queue": {
+      "title": "一次排队 100 个",
+      "body": "排好任务，继续工作。"
+    },
+    "idle": {
+      "title": "只为运行付费，闲置不计费",
+      "body": "仅在 GPU 运行时消耗积分。"
+    },
+    "label": "等待期间",
+    "cloudFailedTitle": "无法打开 Comfy Cloud",
+    "cloudFailedMessage": "请检查网络连接，然后从主面板重试。"
   }
 }
