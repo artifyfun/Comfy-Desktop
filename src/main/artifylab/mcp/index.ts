@@ -36,7 +36,10 @@ export function createMcpRouter(): Router {
     s.setRequestHandler(CallToolRequestSchema, async (req) => {
       const { name, arguments: args } = req.params
       try {
-        return (await registry.handle(name, args ?? {})) as { content: unknown[]; isError?: boolean }
+        return (await registry.handle(name, args ?? {})) as {
+          content: unknown[]
+          isError?: boolean
+        }
       } catch (e) {
         return { content: [{ type: 'text', text: `Error: ${String(e)}` }], isError: true }
       }

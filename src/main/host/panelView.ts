@@ -104,7 +104,15 @@ export function ensurePanelView(
   // no-op.
   panelView.webContents.on(
     'did-frame-navigate',
-    (_event, url, _httpResponseCode, _httpStatusText, isMainFrame, frameProcessId, frameRoutingId) => {
+    (
+      _event,
+      url,
+      _httpResponseCode,
+      _httpStatusText,
+      isMainFrame,
+      frameProcessId,
+      frameRoutingId
+    ) => {
       if (isMainFrame) return
       injectPlaygroundScriptIfMatch(url, frameProcessId, frameRoutingId)
     }

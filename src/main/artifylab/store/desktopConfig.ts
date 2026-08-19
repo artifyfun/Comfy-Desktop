@@ -1,47 +1,47 @@
-import { app, dialog } from 'electron';
-import log from 'electron-log/main';
-import ElectronStore from 'electron-store';
-import fs from 'node:fs/promises';
-import path from 'node:path';
+import { app, dialog } from 'electron'
+import log from 'electron-log/main'
+import ElectronStore from 'electron-store'
+import fs from 'node:fs/promises'
+import path from 'node:path'
 
-import type { DesktopSettings } from './desktopSettings';
+import type { DesktopSettings } from './desktopSettings'
 
 /** Backing ref for the singleton config instance. */
-let current: DesktopConfig;
+let current: DesktopConfig
 
 /** Temporary service locator. DesktopConfig.load() must be called before access. */
 export function useDesktopConfig() {
-  if (!current) throw new Error('Cannot access store before initialization.');
-  return current;
+  if (!current) throw new Error('Cannot access store before initialization.')
+  return current
 }
 
 /** Handles loading of electron-store config, pre-window errors, and provides a non-null interface for the store. */
 export class DesktopConfig {
-  readonly #store: ElectronStore<DesktopSettings>;
+  readonly #store: ElectronStore<DesktopSettings>
 
   private constructor(store: ElectronStore<DesktopSettings>) {
-    this.#store = store;
+    this.#store = store
   }
 
   /** @inheritdoc {@link ElectronStore.get} */
   get<Key extends keyof DesktopSettings>(key: Key, defaultValue?: Required<DesktopSettings>[Key]) {
-    log.verbose('Getting config:', key);
-    return defaultValue === undefined ? this.#store.get(key) : this.#store.get(key, defaultValue);
+    log.verbose('Getting config:', key)
+    return defaultValue === undefined ? this.#store.get(key) : this.#store.get(key, defaultValue)
   }
 
   /** @inheritdoc {@link ElectronStore.set} */
   set<Key extends keyof DesktopSettings>(key: Key, value: Required<DesktopSettings>[Key]) {
-    log.verbose('Saving config:', key, '->', value);
-    return value === undefined ? this.#store.delete(key) : this.#store.set(key, value);
+    log.verbose('Saving config:', key, '->', value)
+    return value === undefined ? this.#store.delete(key) : this.#store.set(key, value)
   }
 
   /** @inheritdoc {@link ElectronStore.delete} */
   delete<Key extends keyof DesktopSettings>(key: Key) {
-    this.#store.delete(key);
+    this.#store.delete(key)
   }
 
   async permanentlyDeleteConfigFile() {
-    await fs.rm(path.join(app.getPath('userData'), 'config.json'));
+    await fs.rm(path.join(app.getPath('userData'), 'config.json'))
   }
 
   /**
@@ -56,41 +56,41 @@ export class DesktopConfig {
     options?: ConstructorParameters<typeof ElectronStore<DesktopSettings>>[0]
   ): Promise<DesktopConfig | undefined> {
     try {
-      const store = new ElectronStore<DesktopSettings>(options);
-      current = new DesktopConfig(store);
+      const store = new ElectronStore<DesktopSettings>(options)
+      current = new DesktopConfig(store)
 
-      return current;
+      return current
     } catch (error) {
-      const configFilePath = path.join(getUserDataOrQuit(), `${options?.name ?? 'config'}.json`);
+      const configFilePath = path.join(getUserDataOrQuit(), `${options?.name ?? 'config'}.json`)
 
       if (error instanceof SyntaxError) {
         // The .json file is invalid.  Prompt user to reset.
-        const { response } = await showResetPrompt(configFilePath);
+        const { response } = await showResetPrompt(configFilePath)
 
         if (response === 1) {
           // Open dir with file selected
-          shell.showItemInFolder(configFilePath);
+          shell.showItemInFolder(configFilePath)
         } else if (response === 0) {
           // Reset - you sure?
-          const { response } = await showConfirmReset(configFilePath);
+          const { response } = await showConfirmReset(configFilePath)
 
           if (response === 0) {
             // Open dir with file selected
-            shell.showItemInFolder(configFilePath);
+            shell.showItemInFolder(configFilePath)
           } else if (response === 1) {
             // Delete all settings
-            await tryDeleteConfigFile(configFilePath);
+            await tryDeleteConfigFile(configFilePath)
 
             // Causing a stack overflow from this recursion would take immense patience.
-            return DesktopConfig.load(shell, options);
+            return DesktopConfig.load(shell, options)
           }
         }
 
         // User chose to exit
-        app.quit();
+        app.quit()
       } else {
         // Crash: Unknown filesystem error, permission denied on user data folder, etc
-        log.error(`Unknown error whilst loading configuration file: ${configFilePath}`, error);
+        log.error(`Unknown error whilst loading configuration file: ${configFilePath}`, error)
       }
     }
   }
@@ -101,17 +101,20 @@ export class DesktopConfig {
    * @param value The value to be saved.  Must be valid.
    * @returns A promise that resolves on successful save, or rejects with the first caught error.
    */
-  async setAsync<Key extends keyof DesktopSettings>(key: Key, value: DesktopSettings[Key]): Promise<void> {
+  async setAsync<Key extends keyof DesktopSettings>(
+    key: Key,
+    value: DesktopSettings[Key]
+  ): Promise<void> {
     return new Promise((resolve) => {
-      log.info(`Saving setting: [${key}]`, value);
-      this.#store.set(key, value);
-      resolve();
-    });
+      log.info(`Saving setting: [${key}]`, value)
+      this.#store.set(key, value)
+      resolve()
+    })
   }
 
   /** @inheritdoc {@link ElectronStore.get} */
   async getAsync<Key extends keyof DesktopSettings>(key: Key): Promise<DesktopSettings[Key]> {
-    return new Promise((resolve) => resolve(this.#store.get(key)));
+    return new Promise((resolve) => resolve(this.#store.get(key)))
   }
 }
 
@@ -123,8 +126,8 @@ function showResetPrompt(configFilePath: string): Promise<Electron.MessageBoxRet
     buttons: ['&Reset desktop configuration', 'Show the &file (and quit)', '&Quit'],
     defaultId: 0,
     cancelId: 2,
-    normalizeAccessKeys: true,
-  });
+    normalizeAccessKeys: true
+  })
 }
 
 function showConfirmReset(configFilePath: string): Promise<Electron.MessageBoxReturnValue> {
@@ -135,27 +138,33 @@ function showConfirmReset(configFilePath: string): Promise<Electron.MessageBoxRe
     buttons: ['Show the &file (and quit)', '&Yes, delete all settings', '&Quit'],
     defaultId: 0,
     cancelId: 2,
-    normalizeAccessKeys: true,
-  });
+    normalizeAccessKeys: true
+  })
 }
 
 async function tryDeleteConfigFile(configFilePath: string): Promise<void> {
   try {
-    await fs.rm(configFilePath);
+    await fs.rm(configFilePath)
   } catch (error) {
-    log.error(`Unable to delete configuration file: ${configFilePath}`, error);
-    dialog.showErrorBox('Delete Failed', `Unknown error whilst attempting to delete config file:\n\n${configFilePath}`);
+    log.error(`Unable to delete configuration file: ${configFilePath}`, error)
+    dialog.showErrorBox(
+      'Delete Failed',
+      `Unknown error whilst attempting to delete config file:\n\n${configFilePath}`
+    )
   }
 }
 
 function getUserDataOrQuit(): string {
   try {
-    return app.getPath('userData');
+    return app.getPath('userData')
   } catch (error) {
     // Crash: Can't even find the user userData folder
-    log.error('Cannot find user data folder.', error);
-    dialog.showErrorBox('User Data', 'Unknown error whilst attempting to determine user data folder.');
-    app.quit();
-    throw error;
+    log.error('Cannot find user data folder.', error)
+    dialog.showErrorBox(
+      'User Data',
+      'Unknown error whilst attempting to determine user data folder.'
+    )
+    app.quit()
+    throw error
   }
 }

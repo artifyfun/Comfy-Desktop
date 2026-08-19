@@ -41,7 +41,9 @@ export function createToolRegistry(): ToolRegistry {
     },
     async () =>
       text(
-        appStoreManager.getAllApps().map((a) => ({ id: a.id, name: a.name, description: a.description }))
+        appStoreManager
+          .getAllApps()
+          .map((a) => ({ id: a.id, name: a.name, description: a.description }))
       )
   )
   add(
@@ -116,7 +118,9 @@ export function createToolRegistry(): ToolRegistry {
         name,
         description: app.description || app.name || '执行 app',
         // schema.ts 用宽 JsonSchema 类型（properties 值 unknown），MCP Tool 要求 object；结构匹配，cast 安抚类型检查
-        inputSchema: buildAppToolInputSchema(app.template?.paramsNodes) as unknown as Tool['inputSchema']
+        inputSchema: buildAppToolInputSchema(
+          app.template?.paramsNodes
+        ) as unknown as Tool['inputSchema']
       }
       const fn: ToolHandler = async (args) => text(await executeApp(app, args, comfyOrigin()))
       handlers.set(name, { tool, fn })
