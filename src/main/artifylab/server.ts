@@ -20,6 +20,7 @@ import { fetchWithRetry, createOpenAIRequestOptions, handleStreamResponse } from
 import appStoreManager from './appStore'
 import artifyUtils from '.'
 import { createMcpRouter } from './mcp'
+import { createGalleryRouter } from './gallery/routes'
 
 // Load environment variables from .env file
 dotenv.config()
@@ -43,6 +44,9 @@ interface NgrokConfig {
 // MCP server（暴露 A UI app 为 MCP 工具，供 AI 客户端调用）
 // 必须挂在 history() 之前：否则 GET /mcp（Accept */*）会被改写成 index.html（M5）
 app.use('/mcp', createMcpRouter())
+
+// Gallery 资产库（同样必须在 history() 之前，GET /api/gallery/thumbs 不能被改写）
+app.use(createGalleryRouter())
 
 // 中间件配置
 app.use(history())
@@ -911,6 +915,15 @@ export function startServer(): Promise<HttpServer> {
       server = app.listen(port, () => {
         logger.info(`Server is running on port ${port}`)
         resolve(server!)
+        // 启动后后台扫描 output 目录，增量补录存量图片到 gallery.db
+        setTimeout(() => {
+          import('./gallery/scanner')
+            .then((m) => m.scanOutputDir())
+            .then((r) =>
+              logger.info(`gallery scan done: ${r.added}/${r.scanned} in ${r.outputDir}`)
+            )
+            .catch((e) => logger.warn(`gallery scan failed: ${(e as Error).message}`))
+        }, 5000)
       })
 
       server.on('error', (err: NodeJS.ErrnoException) => {

@@ -24,6 +24,13 @@
             <i class="mr-2 fas fa-store"></i>
             {{ t('market') }}
           </router-link>
+          <router-link
+            to="/gallery"
+            class="px-3 py-2 text-sm font-medium rounded-lg transition-all duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
+          >
+            <i class="mr-2 fas fa-images"></i>
+            {{ t('gallery') }}
+          </router-link>
         </nav>
         <!-- 语言切换 -->
         <button

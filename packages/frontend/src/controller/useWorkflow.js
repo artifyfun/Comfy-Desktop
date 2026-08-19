@@ -246,6 +246,25 @@ export default function useWorkflow() {
     )
     state.history.unshift(newItem)
 
+    // 上报 Gallery 资产库：参数/工作流快照 + 输出文件（失败静默，不影响主流程）
+    try {
+      const outputsFlat = Object.values(response)
+        .filter(item => item && typeof item === 'object' && item.filename)
+        .map(item => ({ filename: item.filename, subfolder: item.subfolder || '', type: item.type || 'output' }))
+      if (outputsFlat.length && state.config.serverHost) {
+        fetch(`${state.config.serverHost}/api/gallery/record`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            app: { id: app.id, name: app.name },
+            inputs: state.inputs,
+            prompt: app.template.prompt,
+            outputs: outputsFlat
+          })
+        }).catch(() => {})
+      }
+    } catch (e) { console.warn('gallery record failed', e) }
+
     if (Object.keys(response).length) {
       Object.assign(state.outputs, response)
       state.progress = 100

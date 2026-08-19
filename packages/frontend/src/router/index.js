@@ -21,6 +21,10 @@ export const constantRoutes = [
     component: () => import("@/views/batch/index.vue"),
   },
   {
+    path: "/gallery",
+    component: () => import("@/views/gallery/index.vue"),
+  },
+  {
     path: "/about",
     component: () => import("@/views/about/index.vue"),
   },

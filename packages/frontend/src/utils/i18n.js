@@ -219,6 +219,7 @@ const translations = {
 
     // 应用市场
     market: '应用市场',
+    gallery: '资产库',
     myApps: '我的应用',
     exploreMarketApps: '探索丰富的AI应用市场，发现优质工具和解决方案',
     tryOtherKeywords: '尝试其他关键词',
@@ -814,6 +815,7 @@ const translations = {
 
     // 应用市场
     market: 'App Market',
+    gallery: 'Gallery',
     myApps: 'My Apps',
     exploreMarketApps: 'Explore rich AI app market, discover quality tools and solutions',
     tryOtherKeywords: 'Try other keywords',
