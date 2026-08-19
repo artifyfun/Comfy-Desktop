@@ -18,6 +18,7 @@ import { createAppsRouter } from './routes/apps'
 import { createAiRouter } from './routes/ai'
 import { createConfigRouter } from './routes/config'
 import { createProxyRouter } from './routes/proxy'
+import { createModelsRouter } from './routes/models'
 
 // Load environment variables from .env file
 dotenv.config()
@@ -38,6 +39,8 @@ app.use(createAppsRouter())
 app.use(createAiRouter())
 app.use(createConfigRouter())
 app.use(createProxyRouter())
+// 模型管理（GET /api/models/file 需在 history() 之前挂载）
+app.use(createModelsRouter())
 
 // 中间件配置
 app.use(history())
