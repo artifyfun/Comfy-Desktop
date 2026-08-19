@@ -49,6 +49,12 @@
                   </span>
                 </a-tooltip>
                 <a-tooltip>
+                  <template #title>{{ t('versionHistory') }}</template>
+                  <span class="ml-2 text-xs cursor-pointer text-tech-blue" @click="showVersions = true">
+                    <i class="fas fa-solid fa-clock-rotate-left"></i>
+                  </span>
+                </a-tooltip>
+                <a-tooltip>
                   <template #title>{{ t('delete') }}</template>
                   <span class="ml-2 text-xs text-red-500 cursor-pointer" @click="handleDelete">
                     <i class="fas fa-solid fa-trash"></i>
@@ -96,6 +102,13 @@
       @save="handleGenSave"
     />
   </div>
+  <!-- 版本历史 -->
+  <VersionModal
+    :open="showVersions"
+    :app-id="currentApp.id"
+    @cancel="showVersions = false"
+    @restored="handleRestored"
+  />
 </template>
 
 <script setup>
@@ -119,9 +132,12 @@ const props = defineProps({
   },
 })
 
+import VersionModal from './VersionModal.vue'
+
 const emit = defineEmits(['close', 'edit', 'delete'])
 
 const showGenModal = ref(false)
+const showVersions = ref(false)
 
 // 引用
 const genModalRef = ref(null)
@@ -137,6 +153,13 @@ watch(
   },
   { deep: true, immediate: true }
 )
+
+// 版本恢复后刷新详情
+const handleRestored = async () => {
+  await appStore.loadApps()
+  const fresh = appStore.apps.find((a) => a.id === currentApp.value.id)
+  if (fresh) currentApp.value = JSON.parse(JSON.stringify(fresh))
+}
 
 // 处理关闭
 const handleClose = () => {

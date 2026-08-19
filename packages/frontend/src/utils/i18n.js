@@ -220,6 +220,10 @@ const translations = {
     // 应用市场
     market: '应用市场',
     gallery: '资产库',
+    versionHistory: '版本历史',
+    noVersions: '暂无历史版本（更新 App 后自动记录）',
+    restore: '恢复',
+    versionRestored: '已恢复到历史版本',
     myApps: '我的应用',
     exploreMarketApps: '探索丰富的AI应用市场，发现优质工具和解决方案',
     tryOtherKeywords: '尝试其他关键词',
@@ -816,6 +820,10 @@ const translations = {
     // 应用市场
     market: 'App Market',
     gallery: 'Gallery',
+    versionHistory: 'Version History',
+    noVersions: 'No versions yet (recorded on each update)',
+    restore: 'Restore',
+    versionRestored: 'Restored to previous version',
     myApps: 'My Apps',
     exploreMarketApps: 'Explore rich AI app market, discover quality tools and solutions',
     tryOtherKeywords: 'Try other keywords',
