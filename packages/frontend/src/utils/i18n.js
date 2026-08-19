@@ -608,6 +608,15 @@ const translations = {
     shutdownCancelled: '已取消自动关闭',
     shutdownInProgress: '正在关闭计算机...',
     shutdownFailed: '关闭计算机失败',
+
+    // 完成通知
+    notifyOnComplete: '完成后手机通知',
+    notifyWebhookPlaceholder: 'https://api.day.app/xxxx 或 Telegram bot URL 或 server酱 URL',
+    notifyWebhookNote: '支持 Bark / Telegram / server酱等通用 webhook，URL 保存本机',
+    notifyBatchCompletedTitle: '批量任务完成',
+    notifyBatchCompletedBody: '共 {total} 项：成功 {success}，失败 {failed}',
+    notifySent: '完成通知已发送',
+    notifyFailed: '完成通知发送失败',
     shutdownSuccess: '计算机将在30秒后关闭',
     shutdownCountdown: '计算机将在 {seconds} 秒后关闭',
     cancelShutdown: '取消关闭',
@@ -1039,6 +1048,15 @@ const translations = {
     statusCompleted: 'Completed',
     statusFailed: 'Failed',
     statusStopped: 'Stopped',
+
+    // 完成通知
+    notifyOnComplete: 'Notify on Complete',
+    notifyWebhookPlaceholder: 'https://api.day.app/xxxx or Telegram bot URL or ServerChan URL',
+    notifyWebhookNote: 'Supports Bark / Telegram / ServerChan etc. URL is stored locally',
+    notifyBatchCompletedTitle: 'Batch Completed',
+    notifyBatchCompletedBody: 'Total {total}: {success} succeeded, {failed} failed',
+    notifySent: 'Notification sent',
+    notifyFailed: 'Failed to send notification',
 
     // 自动关闭计算机相关
     autoShutdown: 'Auto Shutdown Computer',

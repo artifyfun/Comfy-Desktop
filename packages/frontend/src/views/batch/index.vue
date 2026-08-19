@@ -356,6 +356,28 @@
             </div>
           </div>
 
+          <!-- 完成通知配置（Bark / Telegram / server酱 webhook） -->
+          <div class="auto-shutdown-config">
+            <div class="shutdown-toggle">
+              <a-switch v-model:checked="notifyEnabled" class="shutdown-switch" />
+              <div class="shutdown-info">
+                <div class="shutdown-label">{{ t('notifyOnComplete') }}</div>
+                <a-input
+                  v-if="notifyEnabled"
+                  v-model:value="notifyWebhookUrl"
+                  :placeholder="t('notifyWebhookPlaceholder')"
+                  size="small"
+                  style="margin-top: 4px"
+                />
+                <div class="shutdown-note">
+                  <InfoCircleOutlined class="shutdown-note-icon" />
+                  <span>{{ t('notifyWebhookNote') }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+
           <!-- 进度条 -->
           <div class="custom-progress-bar">
             <div class="custom-progress-inner" :style="{ width: executionProgress.percent + '%', background: executionProgress.strokeColor }"></div>
@@ -551,6 +573,9 @@ const draggedField = ref(null)
 const isExecuting = ref(false)
 const startFromIndex = ref(1) // 新增：开始执行的位置
 const autoShutdownEnabled = ref(false) // 新增：自动关闭计算机开关
+const notifyEnabled = ref(false) // 新增：完成通知开关
+const notifyWebhookUrl = ref('') // 新增：Bark/Telegram/server酱 webhook URL
+
 const executionProgress = reactive({
   total: 0,
   processed: 0,
@@ -638,6 +663,30 @@ async function saveHistory() {
     showError('historySaveFailed')
   }
 }
+// ===== 完成通知配置（localforage 持久化） =====
+const NOTIFY_CONFIG_KEY = 'batch/notify-config'
+async function loadNotifyConfig() {
+  try {
+    const cfg = (await localforage.getItem(NOTIFY_CONFIG_KEY)) || {}
+    notifyEnabled.value = !!cfg.enabled
+    notifyWebhookUrl.value = String(cfg.webhookUrl || '')
+  } catch (error) {
+    console.error('加载通知配置失败:', error)
+  }
+}
+async function saveNotifyConfig() {
+  try {
+    await localforage.setItem(NOTIFY_CONFIG_KEY, {
+      enabled: notifyEnabled.value,
+      webhookUrl: notifyWebhookUrl.value
+    })
+  } catch (error) {
+    console.error('保存通知配置失败:', error)
+  }
+}
+watch([notifyEnabled, notifyWebhookUrl], () => {
+  saveNotifyConfig()
+})
 
 function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj))
@@ -1476,6 +1525,16 @@ async function executeBatch() {
       } catch (e) {
         console.error('卸载模型失败:', e)
       }
+      if (notifyEnabled.value && notifyWebhookUrl.value.trim()) {
+        await handleNotify({
+          title: t('notifyBatchCompletedTitle'),
+          body: t('notifyBatchCompletedBody', {
+            total: executionProgress.total,
+            success: executionProgress.success,
+            failed: executionProgress.failed
+          })
+        })
+      }
       if (autoShutdownEnabled.value) {
         await handleAutoShutdown()
       }
@@ -1596,6 +1655,36 @@ async function openOutputDirectory() {
 }
 
 // 处理自动关闭计算机
+async function handleNotify({ title, body }) {
+  try {
+    const response = await fetch(`${appStore.config.serverHost}/api/notify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: notifyWebhookUrl.value.trim(),
+        title,
+        body
+      })
+    })
+    const json = await response.json().catch(() => ({}))
+    if (!response.ok || !json?.success) {
+      throw new Error(json?.message || `notify http ${response.status}`)
+    }
+    executionLogs.value.unshift({
+      time: new Date().toLocaleTimeString(),
+      message: t('notifySent'),
+      type: 'success'
+    })
+  } catch (error) {
+    console.error('完成通知失败:', error)
+    executionLogs.value.unshift({
+      time: new Date().toLocaleTimeString(),
+      message: t('notifyFailed'),
+      type: 'error'
+    })
+  }
+}
+
 async function handleAutoShutdown() {
   try {
     // 添加关闭日志
@@ -1684,6 +1773,7 @@ watch(fileFilter, () => {
 })
 
 onMounted(() => {
+  loadNotifyConfig()
   init()
 })
 

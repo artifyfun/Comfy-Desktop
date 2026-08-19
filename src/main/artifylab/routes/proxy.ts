@@ -45,6 +45,61 @@ export function createProxyRouter(): express.Router {
     }
   })
 
+  // ---------- 完成通知（Bark / Telegram / 通用 webhook） ----------
+  // 桌面端代理转发，避免浏览器 CORS 限制。body: { url, title, body }
+  // Bark:    https://api.day.app/<key> （GET，标题/正文拼路径）
+  // Telegram: https://api.telegram.org/bot<token>/sendMessage（POST JSON）
+  // 通用:    POST JSON {title, body}（server酱等）
+  router.post('/api/notify', async (req: express.Request, res: express.Response) => {
+    try {
+      const url = String(req.body?.url || '').trim()
+      const title = String(req.body?.title || '').slice(0, 200)
+      const bodyText = String(req.body?.body || '').slice(0, 2000)
+      if (!/^https:\/\//i.test(url)) {
+        res
+          .status(HTTP_STATUS.BAD_REQUEST)
+          .json(createErrorResponse('url must be a valid https webhook'))
+        return
+      }
+      let parsed: URL
+      try {
+        parsed = new URL(url)
+      } catch {
+        res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('invalid url'))
+        return
+      }
+
+      let resp: Response
+      if (parsed.pathname.includes('/sendMessage')) {
+        // Telegram Bot API
+        resp = await fetchWithRetry(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: `${title}\n${bodyText}`.trim() })
+        })
+      } else if (parsed.hostname === 'api.day.app' || parsed.hostname === 'api.bark.app') {
+        // Bark：路径拼接（encodeURIComponent）
+        const barkUrl = `${parsed.origin}${parsed.pathname}/${encodeURIComponent(title)}/${encodeURIComponent(bodyText || 'done')}`
+        resp = await fetchWithRetry(barkUrl, { method: 'GET' })
+      } else {
+        // 通用 webhook（server酱 / 飞书 / 钉钉等）
+        resp = await fetchWithRetry(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, body: bodyText })
+        })
+      }
+      res
+        .status(HTTP_STATUS.OK)
+        .json(createSuccessResponse({ status: resp.status }, `notify http ${resp.status}`))
+    } catch (error) {
+      logger.error('Notify failed', error)
+      res
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .json(createErrorResponse((error as Error).message))
+    }
+  })
+
   // ---------- ngrok ----------
   let lastNgrokAuthtoken: string | null = null
   let lastNgrokConfig: NgrokConfig | null = null
