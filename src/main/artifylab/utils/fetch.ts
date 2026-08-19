@@ -6,6 +6,7 @@ export interface FetchOptions {
   headers?: Record<string, string>
   body?: string
   signal?: AbortSignal
+  redirect?: 'follow' | 'manual' | 'error'
 }
 
 export interface FetchResponse<T = any> {

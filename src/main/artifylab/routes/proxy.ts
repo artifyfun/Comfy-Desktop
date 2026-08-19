@@ -68,25 +68,50 @@ export function createProxyRouter(): express.Router {
         res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('invalid url'))
         return
       }
+      // SSRF 防护：拒绝私网/环回/链路本地地址
+      const hostname = parsed.hostname.toLowerCase()
+      const ipv4 = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+      if (
+        hostname === 'localhost' ||
+        hostname === '[::1]' ||
+        hostname.endsWith('.local') ||
+        hostname.endsWith('.internal') ||
+        (ipv4 &&
+          (ipv4[1] === '127' ||
+            ipv4[1] === '10' ||
+            (ipv4[1] === '172' && Number(ipv4[2]) >= 16 && Number(ipv4[2]) <= 31) ||
+            (ipv4[1] === '192' && ipv4[2] === '168') ||
+            (ipv4[1] === '169' && ipv4[2] === '254') ||
+            ipv4[1] === '0'))
+      ) {
+        res
+          .status(HTTP_STATUS.BAD_REQUEST)
+          .json(createErrorResponse('private network addresses are not allowed'))
+        return
+      }
 
       let resp: Response
+      // redirect: 'manual' 防止 302 跳转到 http/内网地址绕过上面的校验
+      const noRedirect = { redirect: 'manual' as const }
       if (parsed.pathname.includes('/sendMessage')) {
         // Telegram Bot API
         resp = await fetchWithRetry(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: `${title}\n${bodyText}`.trim() })
+          body: JSON.stringify({ text: `${title}\n${bodyText}`.trim() }),
+          ...noRedirect
         })
       } else if (parsed.hostname === 'api.day.app' || parsed.hostname === 'api.bark.app') {
         // Bark：路径拼接（encodeURIComponent）
         const barkUrl = `${parsed.origin}${parsed.pathname}/${encodeURIComponent(title)}/${encodeURIComponent(bodyText || 'done')}`
-        resp = await fetchWithRetry(barkUrl, { method: 'GET' })
+        resp = await fetchWithRetry(barkUrl, { method: 'GET', ...noRedirect })
       } else {
         // 通用 webhook（server酱 / 飞书 / 钉钉等）
         resp = await fetchWithRetry(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title, body: bodyText })
+          body: JSON.stringify({ title, body: bodyText }),
+          ...noRedirect
         })
       }
       res

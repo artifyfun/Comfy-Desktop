@@ -63,7 +63,7 @@ export function inspectSafetensorsHeader(
   }
 }
 
-function* walkModels(dir: string, type: string, depth = 0): Generator<ModelFile> {
+function* walkModels(dir: string, type: string, typeRoot: string, depth = 0): Generator<ModelFile> {
   if (depth > 4) return
   let entries: fs.Dirent[]
   try {
@@ -75,7 +75,7 @@ function* walkModels(dir: string, type: string, depth = 0): Generator<ModelFile>
     if (entry.name.startsWith('.')) continue
     const full = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      yield* walkModels(full, type, depth + 1)
+      yield* walkModels(full, type, typeRoot, depth + 1)
     } else if (entry.isFile()) {
       let stat: fs.Stats
       try {
@@ -83,8 +83,9 @@ function* walkModels(dir: string, type: string, depth = 0): Generator<ModelFile>
       } catch {
         continue
       }
+      // relPath 相对类型根目录计算（含子目录层级），供 verify/file 接口定位
       yield {
-        relPath: path.join(type, path.relative(dir, full)),
+        relPath: path.join(type, path.relative(typeRoot, full)),
         name: entry.name,
         type,
         size: stat.size,
@@ -110,7 +111,8 @@ export function createModelsRouter(): express.Router {
       for (const base of modelsDirs) {
         for (const type of MODEL_SUBDIRS) {
           if (typeFilter && type !== typeFilter) continue
-          for (const f of walkModels(path.join(base, type), type)) items.push(f)
+          const typeRoot = path.join(base, type)
+          for (const f of walkModels(typeRoot, type, typeRoot)) items.push(f)
         }
       }
       const byType: Record<string, { count: number; size: number }> = {}
@@ -141,18 +143,18 @@ export function createModelsRouter(): express.Router {
         return res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('relPath is required'))
       }
       const modelsDirs = getSetting('modelsDirs') ?? []
-      // 防路径穿越：type 必须是白名单子目录
-      const [type = '', ...rest] = String(relPath).split(/[\\/]/)
+      // 防路径穿越：type 必须是白名单子目录，且只用重建后的路径（不回用原串，防 \.. 等平台差异）
+      const [type = '', ...rest] = String(relPath).split(/[\\/]/).filter(Boolean)
       if (!MODEL_SUBDIRS.includes(type)) {
         return res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('invalid type'))
       }
-      const rel = rest.join('/')
-      if (rel.includes('..')) {
+      if (rest.some((seg) => !seg || seg === '.' || seg === '..' || seg.includes('\0'))) {
         return res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('invalid path'))
       }
+      const rebuilt = path.join(type, ...rest)
       let filePath: string | null = null
       for (const base of modelsDirs) {
-        const full = path.join(base, relPath)
+        const full = path.join(base, rebuilt)
         if (fs.existsSync(full)) {
           filePath = full
           break
@@ -184,7 +186,8 @@ export function createModelsRouter(): express.Router {
       const seen = new Map<string, ModelFile[]>()
       for (const base of modelsDirs) {
         for (const type of MODEL_SUBDIRS) {
-          for (const f of walkModels(path.join(base, type), type)) {
+          const typeRoot = path.join(base, type)
+          for (const f of walkModels(typeRoot, type, typeRoot)) {
             const key = `${f.type}:${f.size}`
             const group = seen.get(key) ?? []
             group.push(f)
@@ -209,13 +212,17 @@ export function createModelsRouter(): express.Router {
   router.get('/api/models/file', (req, res) => {
     try {
       const relPath = String(req.query?.path || '')
-      const [type = '', ...rest] = relPath.split(/[\\/]/)
-      if (!MODEL_SUBDIRS.includes(type) || rest.join('/').includes('..')) {
+      const [type = '', ...rest] = relPath.split(/[\\/]/).filter(Boolean)
+      if (
+        !MODEL_SUBDIRS.includes(type) ||
+        rest.some((seg) => !seg || seg === '.' || seg === '..' || seg.includes('\0'))
+      ) {
         return res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('invalid path'))
       }
+      const rebuilt = path.join(type, ...rest)
       const modelsDirs = getSetting('modelsDirs') ?? []
       for (const base of modelsDirs) {
-        const full = path.join(base, relPath)
+        const full = path.join(base, rebuilt)
         if (fs.existsSync(full)) {
           return res.sendFile(full)
         }
