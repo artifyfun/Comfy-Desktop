@@ -2,6 +2,7 @@ import express from 'express'
 import { HTTP_STATUS } from '../config/constants'
 import { logger } from '../utils/logger'
 import { handleApiError, createErrorResponse, createSuccessResponse } from '../utils/errorHandler'
+import { fetchWithRetry } from '../utils/fetch'
 import appStoreManager from '../appStore'
 
 /**
@@ -150,6 +151,72 @@ export function createAppsRouter(): express.Router {
       res
         .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
         .json(createErrorResponse('Failed to import apps'))
+    }
+  })
+
+  /**
+   * 检查 App 依赖（模型 / 自定义节点）是否齐全。
+   * 原理：拉 ComfyUI /object_info，比对——
+   *  1. 节点缺失：prompt 里用到的 class_type 不在 object_info 中 → 缺自定义节点
+   *  2. 模型缺失：combo 型输入（ckpt_name / lora_name / vae_name 等模型选择器）
+   *     的当前值不在合法值列表（ComfyUI 按已安装模型文件生成）中 → 缺模型
+   * body: { app }，返回 { ok, missingNodes: string[], missingModels: {node,input,value}[] }
+   */
+  router.post('/api/apps/check-deps', async (req: express.Request, res: express.Response) => {
+    try {
+      const { app } = req.body ?? {}
+      const prompt = app?.template?.prompt
+      if (!prompt || typeof prompt !== 'object') {
+        return res
+          .status(HTTP_STATUS.BAD_REQUEST)
+          .json(createErrorResponse('app.template.prompt is required'))
+      }
+
+      const comfyHost = appStoreManager.getConfig().comfyHost
+      const objInfoRes = await fetchWithRetry(`${comfyHost}/object_info`, { method: 'GET' })
+      if (!objInfoRes.ok) {
+        return res
+          .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+          .json(createErrorResponse(`object_info http ${objInfoRes.status}`))
+      }
+      const objectInfo = (await objInfoRes.json()) as Record<
+        string,
+        { input?: Record<string, unknown[]> }
+      >
+
+      const missingNodes: string[] = []
+      const missingModels: Array<{ node: string; input: string; value: string }> = []
+
+      for (const [nodeId, nodeUnknown] of Object.entries(prompt)) {
+        const node = nodeUnknown as { class_type: string; inputs?: Record<string, unknown> }
+        const classDef = objectInfo[node.class_type]
+        if (!classDef) {
+          if (!missingNodes.includes(node.class_type)) missingNodes.push(node.class_type)
+          continue
+        }
+        const required = classDef.input?.required ?? []
+        for (const [inputName, inputDef] of Object.entries(required)) {
+          // combo 型输入：['a','b',...]（数组首元素为数组或字符串列表）
+          const def = inputDef as unknown[]
+          const values = Array.isArray(def?.[0]) ? (def[0] as unknown[]) : null
+          if (!values || values.length === 0) continue
+          const val = (node.inputs ?? {})[inputName]
+          if (typeof val === 'string' && !values.includes(val)) {
+            missingModels.push({ node: nodeId, input: inputName, value: val })
+          }
+        }
+      }
+
+      res.status(HTTP_STATUS.OK).json(
+        createSuccessResponse({
+          ok: missingNodes.length === 0 && missingModels.length === 0,
+          missingNodes,
+          missingModels
+        })
+      )
+    } catch (error) {
+      logger.error('Failed to check app deps', error)
+      handleApiError(res, 'Failed to check app deps')
     }
   })
   return router

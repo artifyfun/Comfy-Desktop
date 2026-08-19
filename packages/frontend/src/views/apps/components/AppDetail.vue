@@ -55,6 +55,12 @@
                   </span>
                 </a-tooltip>
                 <a-tooltip>
+                  <template #title>{{ t('checkDeps') }}</template>
+                  <span class="ml-2 text-xs cursor-pointer text-tech-blue" @click="handleCheckDeps">
+                    <i class="fas fa-solid fa-shield-halved"></i>
+                  </span>
+                </a-tooltip>
+                <a-tooltip>
                   <template #title>{{ t('delete') }}</template>
                   <span class="ml-2 text-xs text-red-500 cursor-pointer" @click="handleDelete">
                     <i class="fas fa-solid fa-trash"></i>
@@ -109,6 +115,45 @@
     @cancel="showVersions = false"
     @restored="handleRestored"
   />
+  <!-- 依赖检查报告 -->
+  <a-modal
+    :open="depsModalOpen"
+    :title="t('checkDeps')"
+    :footer="null"
+    @cancel="depsModalOpen = false"
+  >
+    <a-spin :spinning="depsChecking">
+      <div v-if="depsReport">
+        <a-alert
+          v-if="depsReport.ok"
+          type="success"
+          :message="t('depsAllPresent')"
+          show-icon
+          class="mb-4"
+        />
+        <template v-else>
+          <a-alert type="warning" :message="t('depsMissingTitle')" show-icon class="mb-4" />
+          <div v-if="depsReport.missingNodes.length">
+            <div class="mb-2 font-medium">{{ t('depsMissingNodes') }}</div>
+            <ul class="mb-4 ml-5 list-disc">
+              <li v-for="n in depsReport.missingNodes" :key="n">
+                <code>{{ n }}</code>
+              </li>
+            </ul>
+          </div>
+          <div v-if="depsReport.missingModels.length">
+            <div class="mb-2 font-medium">{{ t('depsMissingModels') }}</div>
+            <ul class="ml-5 list-disc">
+              <li v-for="(m, i) in depsReport.missingModels" :key="i">
+                <code>{{ m.value }}</code>
+                <span class="ml-1 text-slate-400">({{ m.input }} @ {{ m.node }})</span>
+              </li>
+            </ul>
+          </div>
+        </template>
+      </div>
+    </a-spin>
+  </a-modal>
 </template>
 
 <script setup>
@@ -138,6 +183,35 @@ const emit = defineEmits(['close', 'edit', 'delete'])
 
 const showGenModal = ref(false)
 const showVersions = ref(false)
+
+// ===== 依赖检查 =====
+const depsModalOpen = ref(false)
+const depsChecking = ref(false)
+const depsReport = ref(null)
+
+const handleCheckDeps = async () => {
+  depsModalOpen.value = true
+  depsChecking.value = true
+  depsReport.value = null
+  try {
+    const res = await fetch(`${appStore.config.serverHost}/api/apps/check-deps`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app: currentApp.value })
+    })
+    const json = await res.json()
+    if (!res.ok || !json?.success) {
+      throw new Error(json?.message || `http ${res.status}`)
+    }
+    depsReport.value = json.data
+  } catch (e) {
+    console.error('检查依赖失败:', e)
+    showInfo(e.message || t('depsCheckFailed'))
+    depsModalOpen.value = false
+  } finally {
+    depsChecking.value = false
+  }
+}
 
 // 引用
 const genModalRef = ref(null)
