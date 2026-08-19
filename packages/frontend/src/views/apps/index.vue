@@ -155,8 +155,6 @@ async function handleRerunQuery() {
   const appId = route.query.app
   const rerunId = route.query.rerun
   if (!appId || !rerunId) return
-  // 清掉 query，避免刷新重复触发
-  router.replace({ query: {} })
   try {
     const origin = appStore.config?.serverHost || window.location.origin
     const res = await fetch(`${origin}/api/gallery/detail?id=${encodeURIComponent(rerunId)}`)
@@ -166,19 +164,24 @@ async function handleRerunQuery() {
     const inputs = record.inputs_json ? JSON.parse(record.inputs_json) : null
     if (!inputs) {
       showInfo(t('noParamsRecorded'))
+      router.replace({ query: {} })
       return
     }
     const app = appStore.apps.find((a) => a.id === appId)
     if (!app) {
       showError(t('appNotFound'))
+      router.replace({ query: {} })
       return
     }
     await localforage.setItem(`workflows/state/${appId}`, { inputs })
     await appStore.updateConfig({ activeAppId: appId })
+    // 先落盘再清 query，避免中途 replace 触发重入
+    router.replace({ query: {} })
     router.push('/web')
   } catch (e) {
     console.warn('rerun failed', e)
     showError(e.message || 'rerun failed')
+    router.replace({ query: {} })
   }
 }
 

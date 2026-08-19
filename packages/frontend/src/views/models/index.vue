@@ -112,6 +112,9 @@
               </tbody>
             </table>
             <div v-else class="p-8 text-center text-slate-500">{{ t('modelsEmpty') }}</div>
+            <div v-if="totalMatched > filtered.length" class="p-2 text-center text-xs text-slate-500">
+              {{ t('modelsTruncated', { shown: filtered.length, total: totalMatched }) }}
+            </div>
           </div>
         </a-spin>
 
@@ -180,16 +183,23 @@ const dupGroups = ref([])
 const dupWasted = ref(0)
 
 const host = computed(() => appStore.config?.serverHost || window.location.origin)
+// 渲染上限：万级模型全量渲染 DOM 会卡，截断显示 + 提示（后端列表仍完整统计）
+const RENDER_LIMIT = 500
 const filtered = computed(() => {
   let list = items.value
   if (selectedType.value) list = list.filter((i) => i.type === selectedType.value)
   const q = search.value.trim().toLowerCase()
   if (q) list = list.filter((i) => i.name.toLowerCase().includes(q))
-  return list
+  return list.slice(0, RENDER_LIMIT)
 })
-const largest = computed(() =>
-  [...items.value].sort((a, b) => b.size - a.size)[0] || null
-)
+const totalMatched = computed(() => {
+  let list = items.value
+  if (selectedType.value) list = list.filter((i) => i.type === selectedType.value)
+  const q = search.value.trim().toLowerCase()
+  if (q) list = list.filter((i) => i.name.toLowerCase().includes(q))
+  return list.length
+})
+const largest = computed(() => [...items.value].sort((a, b) => b.size - a.size)[0] || null)
 
 function toggleType(k) {
   selectedType.value = selectedType.value === k ? '' : k
