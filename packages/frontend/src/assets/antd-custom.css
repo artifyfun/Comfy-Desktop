@@ -10,18 +10,16 @@
   background: linear-gradient(135deg, #40e0d0 0%, #06b6d4 100%);
   border: none;
   box-shadow: 0 2px 8px rgba(64, 224, 208, 0.3);
-  transition: all 0.3s ease;
+  transition: box-shadow 0.15s ease, transform 0.15s ease, filter 0.15s ease;
 }
 
 .ant-btn-primary:hover {
   background: linear-gradient(135deg, #06b6d4 0%, #40e0d0 100%);
   box-shadow: 0 4px 12px rgba(64, 224, 208, 0.4);
-  transform: translateY(-1px);
 }
 
 .ant-btn-primary:active {
   background: linear-gradient(135deg, #6a11cb 0%, #40e0d0 100%);
-  transform: translateY(0);
 }
 
 /* 输入框样式增强 */
@@ -78,7 +76,6 @@
 
 .ant-card:hover {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-  transform: translateY(-2px);
 }
 
 /* 通知样式增强 */
@@ -248,7 +245,9 @@
 }
 
 .ant-btn-primary.tech-glow {
-  animation: techGlow 2s ease-in-out infinite;
+  /* 移除无限循环动画（持续 box-shadow 动画会触发持续重绘）*/
+  animation: none;
+  box-shadow: 0 0 15px rgba(64, 224, 208, 0.5);
 }
 
 /* 响应式适配 */

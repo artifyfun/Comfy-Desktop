@@ -14,7 +14,7 @@ import { APP_ASSETS_ROUTE, getAppAssetsDir, getAppVersion, listAppVersions } fro
 export function createGalleryRouter(): express.Router {
   const router = express.Router()
 
-  // 列表：分页 + app/starred 筛选
+  // 列表：分页 + app/starred/q/subfolder 筛选
   router.post('/api/gallery/list', (req, res) => {
     try {
       const db = getGalleryDb()
@@ -33,6 +33,10 @@ export function createGalleryRouter(): express.Router {
         where.push('(filename LIKE ? OR app_name LIKE ?)')
         const like = `%${String(req.body.q)}%`
         params.push(like, like)
+      }
+      if (req.body?.subfolder) {
+        where.push('subfolder = ?')
+        params.push(String(req.body.subfolder))
       }
       const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
       const total = (
@@ -54,14 +58,60 @@ export function createGalleryRouter(): express.Router {
     }
   })
 
+  // 目录分层：按 subfolder 分组统计，每组带最新一条文件作为代表缩略图。
+  // 支持 starred/q 过滤（与 list 一致），供资产库顶部分层导航使用。
+  router.post('/api/gallery/dirs', (req, res) => {
+    try {
+      const db = getGalleryDb()
+      const where: string[] = []
+      const params: Array<string | number> = []
+      if (req.body?.starred) {
+        where.push('starred = 1')
+      }
+      if (req.body?.q) {
+        where.push('(filename LIKE ? OR app_name LIKE ?)')
+        const like = `%${String(req.body.q)}%`
+        params.push(like, like)
+      }
+      const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+      const groups = db
+        .prepare(
+          `SELECT subfolder, COUNT(*) AS cnt, MAX(created_at) AS last_ts
+           FROM assets ${whereSql}
+           GROUP BY subfolder
+           ORDER BY last_ts DESC`
+        )
+        .all(...params) as Array<{ subfolder: string; cnt: number; last_ts: number }>
+      const dirs = groups.map((g) => {
+        const latest = db
+          .prepare(
+            `SELECT filepath, filename FROM assets
+             WHERE subfolder = ? ORDER BY created_at DESC, id DESC LIMIT 1`
+          )
+          .get(g.subfolder) as { filepath: string; filename: string } | undefined
+        return {
+          subfolder: g.subfolder,
+          count: g.cnt,
+          lastTs: g.last_ts,
+          // 代表缩略图：复用 thumbs 静态服务的 filepath 拼接
+          filepath: latest?.filepath ?? null,
+          filename: latest?.filename ?? ''
+        }
+      })
+      res.json(createSuccessResponse({ dirs }))
+    } catch (e) {
+      res.status(500).json(createErrorResponse((e as Error).message))
+    }
+  })
+
   // 详情：Gallery「复用参数再跑」需要读取单条记录（含 inputs_json）
   router.get('/api/gallery/detail', (req, res) => {
     try {
       const id = Number(req.query?.id)
       if (!id) return res.status(400).json(createErrorResponse('id is required'))
-      const row = getGalleryDb()
-        .prepare('SELECT * FROM assets WHERE id = ?')
-        .get(id) as Record<string, unknown> | undefined
+      const row = getGalleryDb().prepare('SELECT * FROM assets WHERE id = ?').get(id) as
+        | Record<string, unknown>
+        | undefined
       if (!row) return res.status(404).json(createErrorResponse('not found'))
       res.json(createSuccessResponse(assetFromRow(row)))
     } catch (e) {

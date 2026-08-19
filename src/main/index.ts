@@ -1419,11 +1419,28 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // (issue #693), wired to the existing `updater.runCheck` entry point
     // — the result flows through the normal broadcast pipeline (title-bar
     // pill / Global Settings panel), so no new update logic is added.
-    installAppMenu(process.platform, undefined, {
-      onCheckForUpdates: () => {
-        void updater.runCheck('app-menu').catch(() => {})
+    // DEV-ONLY: wire the "Toggle Developer Tools" menu item (Ctrl+Shift+I)
+    // so the panelView (A UI) / comfyView can be inspected during dev.
+    const toggleEmbeddedDevTools = (focusedWindow?: Electron.BaseWindow | null): void => {
+      const entry = focusedWindow ? findEntryByHostWindow(focusedWindow as BrowserWindow) : null
+      if (entry) {
+        const pv = entry.panelView
+        const target =
+          pv && !pv.webContents.isDestroyed() ? pv.webContents : entry.comfyView.webContents
+        target.openDevTools({ mode: 'detach' })
+      } else if (focusedWindow && 'webContents' in focusedWindow) {
+        ;(focusedWindow as BrowserWindow).webContents.openDevTools({ mode: 'detach' })
       }
-    })
+    }
+    installAppMenu(
+      process.platform,
+      process.env['ELECTRON_RENDERER_URL'] ? { toggleEmbeddedDevTools } : undefined,
+      {
+        onCheckForUpdates: () => {
+          void updater.runCheck('app-menu').catch(() => {})
+        }
+      }
+    )
 
     // Hide the bar on every window (incl. window.open popups) while keeping
     // its accelerators live — the app uses a custom title bar throughout.

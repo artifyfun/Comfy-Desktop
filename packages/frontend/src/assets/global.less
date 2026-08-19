@@ -11,8 +11,6 @@
     margin: 0;
     width: 100%;
     height: 100%;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     & > div {
       width: 100%;
       height: 100%;
@@ -25,8 +23,6 @@
     width: 100%;
     height: 100%;
     background: rgba(15, 23, 42, 0.95);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(56, 70, 102, 0.4);
     border-radius: 16px;
     box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
@@ -73,15 +69,8 @@
 }
 
 /* 额外的 Ant Design Vue 组件样式覆盖 */
-.ant-message {
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
-
 .ant-message-notice-content {
   background: rgba(15, 23, 42, 0.95);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(56, 70, 102, 0.4);
   border-radius: 12px;
   color: #e2e8f0;
@@ -89,15 +78,8 @@
   box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
 }
 
-.ant-notification {
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
-
 .ant-notification-notice {
   background: rgba(15, 23, 42, 0.95);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(56, 70, 102, 0.4);
   border-radius: 12px;
   color: #e2e8f0;
@@ -132,12 +114,10 @@
 .ant-input,
 .ant-select-selector {
   background: rgba(15, 23, 42, 0.6) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
   border: 1px solid rgba(56, 70, 102, 0.6) !important;
   color: #e2e8f0 !important;
   border-radius: 8px !important;
-  transition: all 0.3s ease !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
 }
 
 .ant-input:focus,
@@ -153,8 +133,6 @@
 
 .ant-select-dropdown {
   background: rgba(15, 23, 42, 0.95) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
   border: 1px solid rgba(56, 70, 102, 0.4) !important;
   border-radius: 12px !important;
   box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4) !important;

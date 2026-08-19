@@ -1,5 +1,5 @@
 import express from 'express'
-import { HTTP_STATUS } from '../config/constants'
+import { CONFIG, HTTP_STATUS } from '../config/constants'
 import { logger } from '../utils/logger'
 import { handleApiError, createErrorResponse, createSuccessResponse } from '../utils/errorHandler'
 import { fetchWithRetry } from '../utils/fetch'
@@ -24,12 +24,24 @@ export function createAppsRouter(): express.Router {
 
   router.post('/api/market/apps', async (_req: express.Request, res: express.Response) => {
     try {
-      // const { data: apps } = await cachedFetchGet(CONFIG.APP_MARKET_URL) as { data: any };
-      // res.status(HTTP_STATUS.OK).json(createSuccessResponse(apps));
-      throw new Error('ASSETS NOT FOUND')
+      // 远程市场数据源（S3）可能不可用/已下线——抓取成功返回列表，
+      // 失败时兜底空数组，避免前端每次进入应用市场都报错。
+      const response = await fetchWithRetry(CONFIG.APP_MARKET_URL, {
+        method: 'GET',
+        signal: AbortSignal.timeout(8000)
+      })
+      if (response.ok) {
+        const json = await response.json()
+        const apps = Array.isArray(json) ? json : json?.data
+        return res
+          .status(HTTP_STATUS.OK)
+          .json(createSuccessResponse(Array.isArray(apps) ? apps : []))
+      }
+      res.status(HTTP_STATUS.OK).json(createSuccessResponse([]))
     } catch (error) {
       logger.error('Failed to get market apps', error)
-      handleApiError(error, res)
+      // 数据源不可达不算致命错误——返回空列表，前端展示空市场而非报错
+      res.status(HTTP_STATUS.OK).json(createSuccessResponse([]))
     }
   })
 

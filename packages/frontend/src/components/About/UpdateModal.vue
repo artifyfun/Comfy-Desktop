@@ -399,8 +399,6 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   animation: fadeIn 0.3s ease-out;
 }
 
@@ -413,8 +411,6 @@ onMounted(() => {
   max-width: 400px;
   padding: 1rem 1.5rem;
   border-radius: 0.75rem;
-  backdrop-filter: blur(15px);
-  -webkit-backdrop-filter: blur(15px);
   border: 1px solid;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   animation: messageSlideIn 0.4s ease-out;
@@ -588,8 +584,7 @@ onMounted(() => {
   margin-bottom: 1rem;
   background: rgba(15, 23, 42, 0.4);
   border: 1px solid rgba(56, 70, 102, 0.4);
-  backdrop-filter: blur(10px);
-  transition: all 0.3s ease;
+  transition: border-color 0.15s ease;
   position: relative;
   overflow: hidden;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
@@ -875,10 +870,9 @@ onMounted(() => {
   font-size: 1rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: border-color 0.15s ease;
   min-width: 140px;
   justify-content: center;
-  backdrop-filter: blur(10px);
   position: relative;
   overflow: hidden;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
@@ -924,7 +918,6 @@ onMounted(() => {
 .btn-primary:hover:not(:disabled) {
   background: linear-gradient(135deg, rgba(14, 165, 233, 0.3), rgba(59, 130, 246, 0.3));
   border-color: rgba(14, 165, 233, 0.8);
-  transform: translateY(-2px);
   box-shadow: 0 8px 25px rgba(14, 165, 233, 0.3);
 }
 
@@ -937,7 +930,6 @@ onMounted(() => {
 .btn-warning:hover:not(:disabled) {
   background: linear-gradient(135deg, rgba(245, 158, 11, 0.3), rgba(217, 119, 6, 0.3));
   border-color: rgba(245, 158, 11, 0.8);
-  transform: translateY(-2px);
   box-shadow: 0 8px 25px rgba(245, 158, 11, 0.3);
 }
 
@@ -950,7 +942,6 @@ onMounted(() => {
 .btn-secondary:hover:not(:disabled) {
   background: linear-gradient(135deg, rgba(100, 116, 139, 0.3), rgba(71, 85, 105, 0.3));
   border-color: rgba(100, 116, 139, 0.8);
-  transform: translateY(-2px);
   box-shadow: 0 8px 25px rgba(100, 116, 139, 0.3);
 }
 
@@ -963,7 +954,6 @@ onMounted(() => {
 .btn-outline:hover:not(:disabled) {
   background: rgba(14, 165, 233, 0.1);
   border-color: rgba(14, 165, 233, 0.8);
-  transform: translateY(-2px);
   box-shadow: 0 8px 25px rgba(14, 165, 233, 0.3);
 }
 
@@ -974,7 +964,6 @@ onMounted(() => {
   background: rgba(14, 165, 233, 0.05);
   border: 1px solid rgba(14, 165, 233, 0.2);
   border-radius: 0.75rem;
-  backdrop-filter: blur(5px);
 }
 
 .manual-update-tip {

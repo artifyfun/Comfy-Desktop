@@ -1,5 +1,13 @@
-import { message } from 'ant-design-vue'
+import { notification } from 'ant-design-vue'
 import { t } from '@/utils/i18n'
+
+// 全局通知配置：右上角弹出、无遮罩、不拦截点击（notification 无遮罩层，
+// pointer-events 只作用于提示卡片本身，不影响页面交互）
+notification.config({
+  placement: 'topRight',
+  duration: 2.5,
+  maxCount: 3,
+})
 
 export async function getElectronConfig() {
   let config
@@ -188,24 +196,24 @@ export const APP_POWER_LEVELS = {
   PROFESSIONAL: 'professional',
 }
 
-// 通用错误提示函数，支持i18n
+// 通用错误提示函数，支持i18n —— 右上角弹出，不遮罩不影响点击
 export function showError(key, params = {}) {
-  message.error(t(key, params))
+  notification.error({ message: t(key, params) })
 }
 
 // 通用成功提示函数，支持i18n
 export function showSuccess(key, params = {}) {
-  message.success(t(key, params))
+  notification.success({ message: t(key, params) })
 }
 
 // 通用警告提示函数，支持i18n
 export function showWarning(key, params = {}) {
-  message.warning(t(key, params))
+  notification.warning({ message: t(key, params) })
 }
 
 // 通用信息提示函数，支持i18n
 export function showInfo(key, params = {}) {
-  message.info(t(key, params))
+  notification.info({ message: t(key, params) })
 }
 
 /*

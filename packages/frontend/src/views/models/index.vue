@@ -283,7 +283,6 @@ onMounted(loadList)
 <style scoped>
 .glass-card {
   background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(12px);
   border: 1px solid rgba(56, 70, 102, 0.4);
 }
 </style>

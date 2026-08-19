@@ -260,12 +260,22 @@ export function createAiRouter(): express.Router {
 
   router.post('/api/build/styles', async (_req: express.Request, res: express.Response) => {
     try {
-      // const { data: styles } = await cachedFetchGet(CONFIG.APP_STYLES_URL) as { data: any };
-      // res.status(HTTP_STATUS.OK).json(createSuccessResponse(styles));
-      throw new Error('ASSETS NOT FOUND')
+      // 远程样式源不可用时兜底空数组，避免前端加载应用中心报错。
+      const response = await fetchWithRetry(CONFIG.APP_STYLES_URL, {
+        method: 'GET',
+        signal: AbortSignal.timeout(8000)
+      })
+      if (response.ok) {
+        const json = await response.json()
+        const styles = Array.isArray(json) ? json : json?.data
+        return res
+          .status(HTTP_STATUS.OK)
+          .json(createSuccessResponse(Array.isArray(styles) ? styles : []))
+      }
+      res.status(HTTP_STATUS.OK).json(createSuccessResponse([]))
     } catch (error) {
       logger.error('Failed to get build styles', error)
-      handleApiError(error, res)
+      res.status(HTTP_STATUS.OK).json(createSuccessResponse([]))
     }
   })
 

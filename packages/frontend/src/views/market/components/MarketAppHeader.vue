@@ -21,8 +21,8 @@
             to="/"
             class="px-3 py-2 text-sm font-medium rounded-lg transition-all duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
           >
-            <i class="mr-2 fas fa-home"></i>
-            {{ t('myApps') }}
+            <i class="mr-2 fas fa-th-large"></i>
+            {{ t('appCenter') }}
           </router-link>
         </nav>
         <!-- 语言切换 -->

@@ -619,8 +619,6 @@ const handleOptimizePrompt = () => {
     margin: 0;
     width: 100%;
     height: 100%;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     & > div {
       width: 100%;
       height: 100%;
@@ -633,8 +631,6 @@ const handleOptimizePrompt = () => {
     width: 100%;
     height: 100%;
     background: rgba(15, 23, 42, 0.95);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(56, 70, 102, 0.4);
     border-radius: 16px;
     box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
@@ -726,8 +722,6 @@ const handleOptimizePrompt = () => {
   border: 2px solid rgba(56, 70, 102, 0.4);
   border-radius: 16px;
   padding: 20px;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 }
 
 .config-title {
@@ -749,8 +743,6 @@ const handleOptimizePrompt = () => {
   border-radius: 12px;
   overflow: hidden;
   background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 
   .code-editor {
     height: 100%;
@@ -772,8 +764,6 @@ const handleOptimizePrompt = () => {
     border-radius: 12px;
     overflow: hidden;
     background: rgba(15, 23, 42, 0.6);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -835,13 +825,10 @@ const handleOptimizePrompt = () => {
   border-radius: 16px;
   overflow: hidden;
   cursor: pointer;
-  transition: all 0.3s ease;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .style-card:hover {
-  transform: translateY(-8px);
   border-color: rgba(14, 165, 233, 0.5);
   box-shadow: 0 12px 40px rgba(14, 165, 233, 0.2);
 }

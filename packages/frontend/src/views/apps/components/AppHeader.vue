@@ -18,11 +18,11 @@
         <!-- 桌面端导航 -->
         <nav class="flex space-x-6" v-if="isElectron">
           <router-link
-            to="/market"
+            :to="firstNavTo"
             class="px-3 py-2 text-sm font-medium rounded-lg transition-all duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
           >
-            <i class="mr-2 fas fa-store"></i>
-            {{ t('market') }}
+            <i :class="firstNavIcon"></i>
+            {{ firstNavLabel || t('appCenter') }}
           </router-link>
           <router-link
             to="/gallery"
@@ -92,6 +92,14 @@ import { isElectron } from '@/utils'
 
 const { t, currentLang } = useI18nInComponent()
 const appStore = useAppStore()
+
+// 首导航项可配置：默认「应用中心」（/）；如后续要恢复应用市场入口，
+// 传 first-nav-to="/market" first-nav-label 覆盖即可。
+const props = defineProps({
+  firstNavTo: { type: String, default: '/' },
+  firstNavLabel: { type: String, default: '' },
+  firstNavIcon: { type: String, default: 'mr-2 fas fa-th-large' }
+})
 
 // 模态框状态
 const showAboutModal = ref(false)

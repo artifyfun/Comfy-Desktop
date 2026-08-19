@@ -181,12 +181,10 @@ const handleAppUploadChange = ({ file }) => {
   height: 8px;
   border-radius: 50%;
   background: #0ea5e9;
-  animation: pulse-slow 2s infinite;
 }
 
 .floating-btn {
   box-shadow: 0 0 20px rgba(14, 165, 233, 0.5);
-  animation: float 4s ease-in-out infinite;
 }
 
 @keyframes pulse-slow {

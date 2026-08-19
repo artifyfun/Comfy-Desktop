@@ -160,7 +160,6 @@ export default {
     justify-content: center;
     align-items: center;
     z-index: 100;
-    backdrop-filter: blur(8px);
     overflow: hidden;
   }
 
@@ -420,8 +419,7 @@ export default {
     font-size: 0.85rem;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.3s ease;
-    backdrop-filter: blur(10px);
+    transition: color 0.15s ease;
     position: relative;
     overflow: hidden;
   }
@@ -440,7 +438,6 @@ export default {
   .check-update-btn:hover {
     background: linear-gradient(135deg, rgba(64, 224, 208, 0.3), rgba(252, 0, 255, 0.3));
     border-color: rgba(64, 224, 208, 0.8);
-    transform: translateY(-2px);
     box-shadow: 0 8px 25px rgba(64, 224, 208, 0.3);
   }
 

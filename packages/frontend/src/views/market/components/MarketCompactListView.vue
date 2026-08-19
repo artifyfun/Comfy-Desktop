@@ -366,7 +366,6 @@ onUnmounted(() => {
 .compact-app-item:hover {
   background: rgba(30, 41, 59, 0.8);
   border-color: rgba(14, 165, 233, 0.3);
-  transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 

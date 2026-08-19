@@ -86,8 +86,6 @@ const handleSave = async () => {
     margin: 0;
     width: 100%;
     height: 100%;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     & > div {
       width: 100%;
       height: 100%;
@@ -100,8 +98,6 @@ const handleSave = async () => {
     width: 100%;
     height: 100%;
     background: rgba(15, 23, 42, 0.95);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(56, 70, 102, 0.4);
     border-radius: 16px;
     box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);

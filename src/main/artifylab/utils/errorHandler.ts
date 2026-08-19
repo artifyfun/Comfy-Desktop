@@ -84,6 +84,8 @@ export function createErrorResponse(
 ) {
   return {
     ok: false,
+    success: false,
+    code: _statusCode,
     message
   }
 }
@@ -91,6 +93,8 @@ export function createErrorResponse(
 export function createSuccessResponse(data?: any, message?: string) {
   return {
     ok: true,
+    success: true,
+    code: 200,
     ...(data && { data }),
     ...(message && { message })
   }

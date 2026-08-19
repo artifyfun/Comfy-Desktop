@@ -27,30 +27,11 @@ const app = express()
 
 let server: HttpServer | null = null
 
-// MCP server（暴露 A UI app 为 MCP 工具，供 AI 客户端调用）
-// 必须挂在 history() 之前：否则 GET /mcp（Accept */*）会被改写成 index.html（M5）
-app.use('/mcp', createMcpRouter())
-
-// Gallery 资产库（同样必须在 history() 之前，GET /api/gallery/thumbs 不能被改写）
-app.use(createGalleryRouter())
-
-// 业务路由（自 server.ts 拆分；POST 为主，挂在 history() 之后亦可，但保持同序）
-app.use(createAppsRouter())
-app.use(createAiRouter())
-app.use(createConfigRouter())
-app.use(createProxyRouter())
-// 模型管理（GET /api/models/file 需在 history() 之前挂载）
-app.use(createModelsRouter())
-
-// 中间件配置
-app.use(history())
-app.use(bodyParser.json({ limit: CONFIG.BODY_LIMIT }))
-app.use(bodyParser.urlencoded({ limit: CONFIG.BODY_LIMIT, extended: true }))
-app.use(bodyParser.raw({ limit: CONFIG.BODY_LIMIT }))
-app.use(bodyParser.text({ limit: CONFIG.BODY_LIMIT }))
-app.use(cookieParser())
-
 // CORS 中间件 - 使用配置的域名
+// 必须挂在所有业务路由之前：Express 4 对已注册路由的 OPTIONS 预检请求会
+// 自动响应（200 + Allow），直接终结请求链，导致后面的 CORS 头永远不会被
+// 写入——dev 模式下 A UI（localhost:5000）跨源请求 server（3008）时，
+// 预检响应缺少 Access-Control-Allow-Origin，浏览器直接拦截（net::ERR_FAILED）。
 app.use((req, res, next) => {
   const origin = req.headers.origin
 
@@ -73,8 +54,42 @@ app.use((req, res, next) => {
   )
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PATCH, PUT, DELETE')
   res.header('Allow', 'GET, POST, PATCH, OPTIONS, PUT, DELETE')
+
+  // 显式终结 CORS 预检请求：返回 204，避免落到业务路由被 Express 的
+  // 自动 OPTIONS 处理截胡（那样响应缺少 CORS 头，浏览器照样拦截）。
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204)
+  }
+
   next()
 })
+
+// 请求体解析：必须挂在所有业务路由之前——Express 按注册顺序执行中间件，
+// 若 bodyParser 在路由之后，POST 请求到达路由时 req.body 还是空的，
+// 基于 body 的筛选（gallery 的 subfolder/starred/q、config 等）会全部失效。
+app.use(bodyParser.json({ limit: CONFIG.BODY_LIMIT }))
+app.use(bodyParser.urlencoded({ limit: CONFIG.BODY_LIMIT, extended: true }))
+app.use(bodyParser.raw({ limit: CONFIG.BODY_LIMIT }))
+app.use(bodyParser.text({ limit: CONFIG.BODY_LIMIT }))
+app.use(cookieParser())
+
+// MCP server（暴露 A UI app 为 MCP 工具，供 AI 客户端调用）
+// 必须挂在 history() 之前：否则 GET /mcp（Accept */*）会被改写成 index.html（M5）
+app.use('/mcp', createMcpRouter())
+
+// Gallery 资产库（同样必须在 history() 之前，GET /api/gallery/thumbs 不能被改写）
+app.use(createGalleryRouter())
+
+// 业务路由（自 server.ts 拆分；POST 为主，挂在 history() 之后亦可，但保持同序）
+app.use(createAppsRouter())
+app.use(createAiRouter())
+app.use(createConfigRouter())
+app.use(createProxyRouter())
+// 模型管理（GET /api/models/file 需在 history() 之前挂载）
+app.use(createModelsRouter())
+
+// 中间件配置
+app.use(history())
 
 // 静态文件中间件
 const setupStaticFiles = () => {

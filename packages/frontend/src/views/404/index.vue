@@ -122,7 +122,6 @@ const goBack = () => {
 }
 
 .btn-primary:hover {
-  transform: translateY(-2px);
   box-shadow: 0 8px 25px rgba(6, 182, 212, 0.3);
 }
 
@@ -139,7 +138,6 @@ const goBack = () => {
 
 .btn-secondary:hover {
   background: rgba(148, 163, 184, 0.2);
-  transform: translateY(-2px);
 }
 
 .error-suggestions h3 {

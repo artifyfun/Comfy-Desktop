@@ -219,6 +219,7 @@ const translations = {
 
     // 应用市场
     market: '应用市场',
+    appCenter: '应用中心',
     gallery: '资产库',
     versionHistory: '版本历史',
     noVersions: '暂无历史版本（更新 App 后自动记录）',
@@ -854,6 +855,7 @@ const translations = {
 
     // 应用市场
     market: 'App Market',
+    appCenter: 'App Center',
     gallery: 'Gallery',
     versionHistory: 'Version History',
     noVersions: 'No versions yet (recorded on each update)',

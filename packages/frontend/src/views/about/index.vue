@@ -92,12 +92,7 @@ const handleToggleAboutModal = () => {
   }
 
   .btn:hover {
-    transform: translateY(-3px);
     box-shadow: 0 8px 20px rgba(37, 117, 252, 0.6);
-  }
-
-  .btn:active {
-    transform: translateY(1px);
   }
 
   .btn::after {

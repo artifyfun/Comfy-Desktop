@@ -13,16 +13,18 @@
             <h1 class="text-xl font-bold text-white tech-font">
               {{ t('gallery') }}
             </h1>
-            <span class="text-sm text-slate-400">{{ total }} {{ currentLang === 'zh' ? '项' : 'items' }}</span>
+            <span class="text-sm text-slate-400">
+              {{ viewMode === 'dirs' ? dirsCount : total }} {{ currentLang === 'zh' ? '项' : 'items' }}
+            </span>
           </div>
           <div class="flex items-center gap-2">
             <a-input-search
               v-model:value="query"
               :placeholder="currentLang === 'zh' ? '搜索文件名 / 应用名' : 'Search filename / app'"
               style="width: 220px"
-              @search="reload"
+              @search="onFilterChange"
             />
-            <a-checkbox v-model:checked="starredOnly" @change="reload">
+            <a-checkbox v-model:checked="starredOnly" @change="onFilterChange">
               {{ currentLang === 'zh' ? '仅收藏' : 'Starred' }}
             </a-checkbox>
             <a-button :loading="scanning" @click="scan">
@@ -31,55 +33,115 @@
           </div>
         </div>
 
-        <div v-if="loading" class="py-20 text-center text-slate-400">
-          <a-spin size="large" />
-        </div>
-
-        <div v-else-if="!items.length" class="py-20 text-center text-slate-400">
-          <div class="mb-4"><i class="text-5xl fas fa-images"></i></div>
-          {{ currentLang === 'zh' ? '暂无生成记录，先去跑一张吧' : 'No generations yet' }}
-          <div class="mt-4">
-            <a-button type="primary" @click="goApps">{{ t('app') }}{{ t('center') }}</a-button>
+        <!-- ===== 目录卡片视图（默认） ===== -->
+        <template v-if="viewMode === 'dirs'">
+          <div v-if="loading" class="py-20 text-center text-slate-400">
+            <a-spin size="large" />
           </div>
-        </div>
 
-        <!-- 瀑布流 -->
-        <div v-else class="gallery-grid">
-          <div
-            v-for="item in items"
-            :key="item.id"
-            class="group relative overflow-hidden rounded-lg cursor-pointer bg-slate-800/60"
-            @click="showDetail(item)"
-          >
-            <img
-              :src="thumbUrl(item)"
-              :alt="item.filename"
-              loading="lazy"
-              class="w-full transition-transform duration-300 group-hover:scale-105"
-              @error="onImgError($event, item)"
-            />
-            <div class="absolute inset-x-0 bottom-0 p-2 text-xs text-white bg-gradient-to-t from-black/80 to-transparent opacity-0 transition-opacity group-hover:opacity-100">
-              <div class="truncate">{{ item.filename }}</div>
-              <div class="flex justify-between text-slate-300">
-                <span class="truncate">{{ item.app_name || formatTime(item.created_at) }}</span>
-                <span class="flex items-center gap-1">
-                  <i
-                    class="cursor-pointer"
-                    :class="item.starred ? 'fas fa-star text-yellow-400' : 'far fa-star'"
-                    @click.stop="toggleStar(item)"
-                  ></i>
-                  <i class="ml-1 cursor-pointer far fa-trash-alt hover:text-red-400" @click.stop="remove(item)"></i>
-                </span>
+          <div v-else-if="!dirs.length" class="py-20 text-center text-slate-400">
+            <div class="mb-4"><i class="text-5xl fas fa-folder-open"></i></div>
+            {{ currentLang === 'zh' ? '暂无生成目录，先去跑一张吧' : 'No directories yet' }}
+            <div class="mt-4">
+              <a-button type="primary" @click="goApps">{{ t('app') }}{{ t('center') }}</a-button>
+            </div>
+          </div>
+
+          <div v-else class="dir-grid">
+            <!-- 全部目录卡片 -->
+            <div
+              class="dir-card group"
+              @click="selectDir('')"
+            >
+              <div class="dir-thumb dir-thumb-all">
+                <i class="fas fa-layer-group"></i>
+              </div>
+              <div class="dir-name">{{ currentLang === 'zh' ? '全部' : 'All' }}</div>
+              <div class="dir-count">{{ dirsCount }} {{ currentLang === 'zh' ? '项' : 'items' }}</div>
+            </div>
+
+            <!-- 目录卡片 -->
+            <div
+              v-for="d in dirs"
+              :key="d.subfolder"
+              class="dir-card group"
+              :title="d.subfolder"
+              @click="selectDir(d.subfolder)"
+            >
+              <div class="dir-thumb">
+                <img
+                  v-if="d.filepath"
+                  :src="dirThumbUrl(d)"
+                  :alt="dirLabel(d.subfolder)"
+                  loading="lazy"
+                  class="w-full h-full object-cover"
+                />
+                <i v-else class="fas fa-folder"></i>
+              </div>
+              <div class="dir-name">{{ dirLabel(d.subfolder) }}</div>
+              <div class="dir-count">{{ d.count }} {{ currentLang === 'zh' ? '项' : 'items' }}</div>
+            </div>
+          </div>
+        </template>
+
+        <!-- ===== 目录内图片瀑布流 ===== -->
+        <template v-else>
+          <div class="mb-4 flex items-center gap-3">
+            <a-button size="small" @click="goBackToDirs">
+              <i class="mr-1 fas fa-arrow-left"></i>{{ currentLang === 'zh' ? '返回目录' : 'Back' }}
+            </a-button>
+            <span class="text-sm text-slate-300">
+              <i class="mr-1 fas fa-folder"></i>{{ activeDirLabel }}
+            </span>
+          </div>
+
+          <div v-if="loading" class="py-20 text-center text-slate-400">
+            <a-spin size="large" />
+          </div>
+
+          <div v-else-if="!items.length" class="py-20 text-center text-slate-400">
+            <div class="mb-4"><i class="text-5xl fas fa-images"></i></div>
+            {{ currentLang === 'zh' ? '该目录暂无内容' : 'Empty directory' }}
+          </div>
+
+          <!-- 瀑布流 -->
+          <div v-else class="gallery-grid">
+            <div
+              v-for="item in items"
+              :key="item.id"
+              class="group relative overflow-hidden rounded-lg cursor-pointer bg-slate-800/60"
+              @click="showDetail(item)"
+            >
+              <img
+                :src="thumbUrl(item)"
+                :alt="item.filename"
+                loading="lazy"
+                class="w-full transition-transform duration-300 group-hover:scale-105"
+                @error="onImgError($event, item)"
+              />
+              <div class="absolute inset-x-0 bottom-0 p-2 text-xs text-white bg-gradient-to-t from-black/80 to-transparent opacity-0 transition-opacity group-hover:opacity-100">
+                <div class="truncate">{{ item.filename }}</div>
+                <div class="flex justify-between text-slate-300">
+                  <span class="truncate">{{ item.app_name || formatTime(item.created_at) }}</span>
+                  <span class="flex items-center gap-1">
+                    <i
+                      class="cursor-pointer"
+                      :class="item.starred ? 'fas fa-star text-yellow-400' : 'far fa-star'"
+                      @click.stop="toggleStar(item)"
+                    ></i>
+                    <i class="ml-1 cursor-pointer far fa-trash-alt hover:text-red-400" @click.stop="remove(item)"></i>
+                  </span>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div v-if="items.length && items.length < total" class="mt-8 text-center">
-          <a-button :loading="loading" @click="loadMore">
-            {{ currentLang === 'zh' ? '加载更多' : 'Load more' }}
-          </a-button>
-        </div>
+          <div v-if="items.length && items.length < total" class="mt-8 text-center">
+            <a-button :loading="loading" @click="loadMore">
+              {{ currentLang === 'zh' ? '加载更多' : 'Load more' }}
+            </a-button>
+          </div>
+        </template>
       </main>
 
       <!-- 详情弹窗 -->
@@ -132,6 +194,7 @@ const { t, currentLang } = useI18nInComponent()
 const router = useRouter()
 const appStore = useAppStore()
 
+const viewMode = ref('dirs') // 'dirs' = 目录卡片视图 | 'items' = 目录内图片视图
 const items = ref([])
 const total = ref(0)
 const page = ref(1)
@@ -142,6 +205,8 @@ const query = ref('')
 const starredOnly = ref(false)
 const detailOpen = ref(false)
 const detail = ref(null)
+const dirs = ref([])
+const activeDir = ref('')
 
 const serverHost = computed(() => appStore.config?.serverHost || '')
 const detailInputs = computed(() => {
@@ -153,7 +218,19 @@ const detailInputs = computed(() => {
   }
 })
 
-const thumbUrl = (item) => `${serverHost.value}/api/gallery/thumbs/${encodeURIComponent(item.filepath)}.jpg`
+// 目录视图下展示的总数 = 所有目录 count 之和
+const dirsCount = computed(() => dirs.value.reduce((acc, d) => acc + (Number(d.count) || 0), 0))
+const activeDirLabel = computed(() => dirLabel(activeDir.value))
+
+// 缩略图文件名规则须与主进程 scanner.makeThumb 一致：
+// subfolder 的 \ 和 / 全部替换为 _，再加 `_` 前缀和 `.jpg` 后缀
+const thumbFileName = (subfolder, filename) =>
+  `${subfolder ? String(subfolder).replace(/[\\/]/g, '_') + '_' : ''}${filename}.jpg`
+
+const thumbUrl = (item) =>
+  `${serverHost.value}/api/gallery/thumbs/${encodeURIComponent(thumbFileName(item.subfolder, item.filename))}`
+const dirThumbUrl = (d) =>
+  `${serverHost.value}/api/gallery/thumbs/${encodeURIComponent(thumbFileName(d.subfolder, d.filename))}`
 const fullUrl = (item) =>
   `${appStore.config?.comfyHost}/view?filename=${encodeURIComponent(item.filename)}&subfolder=${encodeURIComponent(item.subfolder)}&type=${item.type}`
 
@@ -178,7 +255,13 @@ const fetchList = async () => {
     const res = await fetch(`${serverHost.value}/api/gallery/list`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ page: page.value, pageSize, q: query.value || undefined, starred: starredOnly.value })
+      body: JSON.stringify({
+        page: page.value,
+        pageSize,
+        q: query.value || undefined,
+        starred: starredOnly.value,
+        subfolder: activeDir.value || undefined
+      })
     })
     const data = await res.json()
     if (data.code === 200 || data.success) {
@@ -195,10 +278,61 @@ const fetchList = async () => {
   }
 }
 
-const reload = () => {
+// 加载目录分层列表（按 subfolder 分组）
+const fetchDirs = async () => {
+  loading.value = true
+  try {
+    const res = await fetch(`${serverHost.value}/api/gallery/dirs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: query.value || undefined, starred: starredOnly.value })
+    })
+    const data = await res.json()
+    if (data.code === 200 || data.success) {
+      dirs.value = (data.data?.dirs) || []
+    } else {
+      throw new Error(data.message)
+    }
+  } catch (e) {
+    message.error(`${currentLang.value === 'zh' ? '加载失败' : 'Load failed'}: ${e.message}`)
+    dirs.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+// 目录显示名：取路径最后一段（兼容 \ 与 / 分隔）
+const dirLabel = (subfolder) => {
+  const segs = String(subfolder || '').split(/[\\/]/).filter(Boolean)
+  return segs[segs.length - 1] || subfolder
+}
+
+// 进入目录（空串 = 全部）
+const selectDir = (subfolder) => {
+  activeDir.value = subfolder
+  viewMode.value = 'items'
   page.value = 1
   items.value = []
   fetchList()
+}
+
+// 返回目录卡片视图
+const goBackToDirs = () => {
+  viewMode.value = 'dirs'
+  activeDir.value = ''
+  page.value = 1
+  fetchDirs()
+}
+
+// 搜索 / 仅收藏变化：按当前视图刷新对应数据
+const onFilterChange = () => {
+  if (viewMode.value === 'dirs') {
+    fetchDirs()
+  } else {
+    page.value = 1
+    items.value = []
+    fetchList()
+  }
 }
 
 const loadMore = () => {
@@ -217,7 +351,13 @@ const scan = async () => {
         ? `扫描完成：新增 ${payload.added}/${payload.scanned}`
         : `Scan done: ${payload.added}/${payload.scanned} added`
     )
-    reload()
+    if (viewMode.value === 'dirs') {
+      fetchDirs()
+    } else {
+      page.value = 1
+      items.value = []
+      fetchList()
+    }
   } finally {
     scanning.value = false
   }
@@ -257,10 +397,55 @@ const reRun = (item) => {
   router.push({ path: '/', query: { app: item.app_id, rerun: item.id } })
 }
 
-onMounted(fetchList)
+onMounted(fetchDirs)
 </script>
 
 <style scoped>
+.dir-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+}
+.dir-card {
+  background: rgba(30, 41, 59, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.dir-card:hover {
+  border-color: rgba(56, 189, 248, 0.5);
+}
+.dir-thumb {
+  height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.6);
+  font-size: 34px;
+  color: rgba(56, 189, 248, 0.6);
+}
+.dir-thumb img {
+  display: block;
+}
+.dir-thumb-all {
+  font-size: 44px;
+  color: rgba(56, 189, 248, 0.7);
+}
+.dir-name {
+  padding: 8px 10px 0;
+  font-size: 13px;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dir-count {
+  padding: 2px 10px 10px;
+  font-size: 12px;
+  color: #94a3b8;
+}
 .gallery-grid {
   columns: 4 240px;
   column-gap: 12px;

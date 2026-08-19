@@ -1869,7 +1869,6 @@ watch(historyKey, (newKey) => {
 
 .step-content {
   background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(12px);
   border: 1px solid rgba(56, 70, 102, 0.4);
   border-radius: 16px;
   padding: 32px;
@@ -3266,10 +3265,9 @@ watch(historyKey, (newKey) => {
     border-radius: 12px;
     padding: 14px;
     box-shadow: 0 4px 10px #0003;
-    transition: border-color .2s, transform .2s;
+    transition: border-color 0.2s;
     &:hover {
       border-color: #0ea5e9;
-      transform: translateY(-1px);
     }
   }
   .history-head {

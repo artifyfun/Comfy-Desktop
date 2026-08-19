@@ -1,19 +1,12 @@
 <template>
   <div class="page-container bg-tech-dark">
     <div id="app" class="pb-20 min-h-screen">
-      <!-- 网格背景 -->
-      <div class="fixed inset-0 grid-lines"></div>
-
-      <!-- 装饰元素 -->
-      <div
-        class="fixed top-10 left-10 w-64 h-64 rounded-full opacity-10 blur-3xl bg-tech-purple"
-      ></div>
-      <div
-        class="fixed right-10 bottom-20 w-80 h-80 rounded-full opacity-10 blur-3xl bg-tech-cyan"
-      ></div>
-
-      <!-- 顶部导航 -->
-      <AppHeader />
+      <!-- 顶部导航：应用中心页自己展示「应用市场」入口，避免自指 -->
+      <AppHeader
+        :first-nav-to="'/market'"
+        :first-nav-label="currentLang === 'zh' ? '应用市场' : 'App Market'"
+        first-nav-icon="mr-2 fas fa-store"
+      />
 
       <!-- 主内容区 -->
       <main class="relative px-4 mx-auto mt-4 max-w-7xl sm:px-6 lg:px-8">

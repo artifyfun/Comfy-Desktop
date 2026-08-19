@@ -323,10 +323,8 @@ function compressImageToBase64(file, quality = 0.7, maxSize = 512) {
 <style scoped>
 .glass-card {
   background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(56, 70, 102, 0.4);
   box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
-  transition: all 0.3s ease;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 </style>

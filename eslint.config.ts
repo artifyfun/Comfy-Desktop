@@ -26,6 +26,8 @@ export default defineConfig([
       'node_modules/*',
       '.claude/**',
       '.worktrees/**',
+      '.pnpm-store/**',
+      'electron.vite.config.*.mjs',
       'packages/comfyui-desktop-bridge-types/*.d.ts'
     ]
   },

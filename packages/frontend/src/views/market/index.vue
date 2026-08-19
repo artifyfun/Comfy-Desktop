@@ -1,17 +1,6 @@
 <template>
   <div class="page-container bg-tech-dark">
     <div id="app" class="pb-20 min-h-screen">
-      <!-- 网格背景 -->
-      <div class="fixed inset-0 grid-lines"></div>
-
-      <!-- 装饰元素 -->
-      <div
-        class="fixed top-10 left-10 w-64 h-64 rounded-full opacity-10 blur-3xl bg-tech-purple"
-      ></div>
-      <div
-        class="fixed right-10 bottom-20 w-80 h-80 rounded-full opacity-10 blur-3xl bg-tech-cyan"
-      ></div>
-
       <!-- 顶部导航 -->
       <MarketAppHeader />
 
