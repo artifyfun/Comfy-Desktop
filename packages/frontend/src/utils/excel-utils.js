@@ -1,4 +1,11 @@
-import * as XLSX from 'xlsx'
+// xlsx 体积大（~430KB），改为按需动态加载：只有真正解析/导出 Excel 时才拉取
+let _xlsxModule = null
+async function loadXLSX() {
+  if (!_xlsxModule) {
+    _xlsxModule = await import('xlsx')
+  }
+  return _xlsxModule
+}
 
 /**
  * Excel文件处理工具类
@@ -11,6 +18,7 @@ export class ExcelProcessor {
    * @returns {Promise<Array>} 解析后的数据数组
    */
   static async parseExcelFile(file, options = {}) {
+    const XLSX = await loadXLSX()
     const {
       sheetIndex = 0, // 工作表索引
       headerRow = 0, // 表头行索引
@@ -164,6 +172,7 @@ export class ExcelProcessor {
    * @returns {Promise<Object>} 文件信息
    */
   static async getExcelInfo(file) {
+    const XLSX = await loadXLSX()
     return new Promise((resolve, reject) => {
       const reader = new FileReader()
 
@@ -252,7 +261,8 @@ export class ExcelProcessor {
    * @param {string} fileName - 文件名
    * @param {Object} options - 导出选项
    */
-  static exportToExcel(data, fileName = 'export.xlsx', options = {}) {
+  static async exportToExcel(data, fileName = 'export.xlsx', options = {}) {
+    const XLSX = await loadXLSX()
     const {
       sheetName = 'Sheet1',
       headers = null,
