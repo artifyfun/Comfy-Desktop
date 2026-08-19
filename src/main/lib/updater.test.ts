@@ -321,6 +321,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     on: ReturnType<typeof vi.fn>
     checkForUpdates: ReturnType<typeof vi.fn>
     quitAndInstall: ReturnType<typeof vi.fn>
+    restartAndInstall: ReturnType<typeof vi.fn>
   }
   let electronUpdaterMock: { autoInstallOnAppQuit: boolean }
   let emitMock: ReturnType<typeof vi.fn>
@@ -360,7 +361,8 @@ describe('startup update install + session-end guard (issue #1065)', () => {
         }
         return { updateInfo: null }
       }),
-      quitAndInstall: vi.fn()
+      quitAndInstall: vi.fn(),
+      restartAndInstall: vi.fn()
     }
     electronUpdaterMock = { autoInstallOnAppQuit: true }
     emitMock = vi.fn()
@@ -907,7 +909,11 @@ describe('version guard: reject non-newer offers (issue #1161)', () => {
   let emitMock: ReturnType<typeof vi.fn>
   let listeners: Record<string, Array<(...args: unknown[]) => void>>
   let settingsStore: Record<string, unknown>
-  let fakeUpdater: { on: ReturnType<typeof vi.fn>; checkForUpdates: ReturnType<typeof vi.fn> }
+  let fakeUpdater: {
+    on: ReturnType<typeof vi.fn>
+    checkForUpdates: ReturnType<typeof vi.fn>
+    restartAndInstall: ReturnType<typeof vi.fn>
+  }
 
   beforeEach(() => {
     vi.resetModules()
@@ -923,7 +929,8 @@ describe('version guard: reject non-newer offers (issue #1161)', () => {
         listeners[event] = listeners[event] || []
         listeners[event].push(cb)
       }) as ReturnType<typeof vi.fn>,
-      checkForUpdates: vi.fn(async () => ({ updateInfo: null }))
+      checkForUpdates: vi.fn(async () => ({ updateInfo: null })),
+      restartAndInstall: vi.fn()
     }
     vi.doMock('electron-updater', () => ({ autoUpdater: fakeUpdater }))
     vi.doMock('./telemetry', () => ({ emit: emitMock, bucketError: (s: string) => s }))

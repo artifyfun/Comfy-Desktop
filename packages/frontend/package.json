@@ -60,7 +60,8 @@
     "release:patch": "node scripts/release.js patch",
     "release:minor": "node scripts/release.js minor",
     "release:major": "node scripts/release.js major",
-    "release:help": "node scripts/release.js help"
+    "release:help": "node scripts/release.js help",
+    "build:desktop": "vite build --outDir ../../src/main/artifylab/public/frontend --emptyOutDir && node scripts/minify-inject.js"
   },
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",
