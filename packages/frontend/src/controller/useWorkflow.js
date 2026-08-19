@@ -27,11 +27,6 @@ export default function useWorkflow() {
     showHistoryModal: false,
   })
 
-  const fetchOption = reactive({
-    host: state.config.serverHost,
-    method: 'post'
-  })
-
   const loopGetStateTimerId = ref(0)
 
   const emitError = (message) => {
@@ -46,77 +41,84 @@ export default function useWorkflow() {
   const finishedSteps = ref(0)
   const cachedIds = ref([])
   const addIds = ref([])
-  const eventEmitter = (type, data) => {
-    if (type === 'message') {
-      const message = JSON.parse(data.toString())
-      if (message.type === 'execution_start') {
-        state.promptId = message.data.prompt_id
-      }
-      if (message.type === 'execution_cached') {
-        message.data.nodes.forEach(id => {
-          if (!cachedIds.value.includes(id)) {
-            cachedIds.value.push(id)
-          }
-        })
-        cachedIds.value.forEach(id => {
-          if (Object.keys(app.template.prompt).includes(id)) {
-            if (app.template.prompt[id]?.inputs?.steps) {
-              if (!addIds.value.includes(id)) {
-                if (!['BasicScheduler'].includes(app.template.prompt[id].class_type)) {
-                  finishedSteps.value += app.template.prompt[id].inputs.steps
-                }
-                addIds.value.push(id)
-              }
-            } else {
-              if (!addIds.value.includes(id)) {
-                finishedSteps.value += 1
-                addIds.value.push(id)
-              }
-            }
-          }
-        })
-      }
-      if (message.type === 'progress') {
-        if (['SamplerCustomAdvanced'].includes(app.template.prompt[message.data.node].class_type)) {
-          finishedSteps.value += 1
-        } else if (Object.keys(app.template.prompt).includes(message.data.node) && app.template.prompt[message.data.node]?.inputs?.steps && finishedSteps.value < totalSteps.value) {
-          finishedSteps.value += 1
-        } else if (!addIds.value.includes(message.data.node)) {
-          finishedSteps.value += 1
-        }
-        if (!addIds.value.includes(message.data.node)) {
-          addIds.value.push(message.data.node)
-        }
-      }
-      if (message.type === 'progress_state') {
-        Object.keys(message.data.nodes).forEach(id => {
-          const node = message.data.nodes[id]
-          if (node.state === 'finished') {
-            if (!addIds.value.includes(id)) {
-              finishedSteps.value += node.value
-              addIds.value.push(id)
-            }
-          }
-        })
-      }
-      state.progress = Number((finishedSteps.value / totalSteps.value) * 100).toFixed(2)
-      if (message.type === 'execution_success') {
-        state.progress = 100
-      }
-      state.executing = true
-      state.done = false
-    } else if (type === 'error') {
-      emitError(data)
-    }
-  }
 
   const client = ref(null)
 
   const getClient = () => {
     if (!client.value) {
-      client.value = new ComfyUIClient(state.config.comfyHost, state.clientId, eventEmitter)
+      // comfy-ui-client >= 0.4: 构造第三参为 options，事件经 client.on(event, data)
+      // 订阅（event 即旧 eventEmitter 里 message.type 的值）
+      client.value = new ComfyUIClient(state.config.comfyHost, state.clientId, {
+        logger: { info: () => {}, warn: () => {}, error: console.error, debug: () => {} }
+      })
+      client.value.on('status', () => {
+        // 兼容旧 eventEmitter('message') 分支里的通用状态
+        state.executing = true
+        state.done = false
+      })
+      for (const evt of [
+        'execution_start',
+        'execution_cached',
+        'progress',
+        'execution_success',
+        'execution_error',
+        'execution_interrupted'
+      ]) {
+        client.value.on(evt, (data) => handleWsEvent(evt, data))
+      }
+      client.value.on('disconnected', () => {})
     }
     return client.value
+  }
+
+  // 0.3.x eventEmitter('message', rawJson) 的等价实现：
+  // 0.5.x 直接按事件名分发，data 即 message.data
+  const handleWsEvent = (type, data) => {
+    if (type === 'execution_start') {
+      state.promptId = data.prompt_id
+    }
+    if (type === 'execution_cached') {
+      data.nodes.forEach(id => {
+        if (!cachedIds.value.includes(id)) {
+          cachedIds.value.push(id)
+        }
+      })
+      cachedIds.value.forEach(id => {
+        if (Object.keys(app.template.prompt).includes(id)) {
+          if (app.template.prompt[id]?.inputs?.steps) {
+            if (!addIds.value.includes(id)) {
+              if (!['BasicScheduler'].includes(app.template.prompt[id].class_type)) {
+                finishedSteps.value += app.template.prompt[id].inputs.steps
+              }
+              addIds.value.push(id)
+            }
+          } else {
+            if (!addIds.value.includes(id)) {
+              finishedSteps.value += 1
+              addIds.value.push(id)
+            }
+          }
+        }
+      })
+    }
+    if (type === 'progress') {
+      if (['SamplerCustomAdvanced'].includes(app.template.prompt[data.node]?.class_type)) {
+        finishedSteps.value += 1
+      } else if (Object.keys(app.template.prompt).includes(data.node) && app.template.prompt[data.node]?.inputs?.steps && finishedSteps.value < totalSteps.value) {
+        finishedSteps.value += 1
+      } else if (!addIds.value.includes(data.node)) {
+        finishedSteps.value += 1
+      }
+      if (!addIds.value.includes(data.node)) {
+        addIds.value.push(data.node)
+      }
+    }
+    state.progress = Number((finishedSteps.value / totalSteps.value) * 100).toFixed(2)
+    if (type === 'execution_success') {
+      state.progress = 100
+    }
+    state.executing = true
+    state.done = false
   }
 
   const uploadImage = (file) => {
@@ -126,12 +128,12 @@ export default function useWorkflow() {
 
   function getQueueState() {
     const client = getClient()
-    return client.getQueue(fetchOption)
+    return client.getQueue()
   }
 
   function deleteQueue() {
     const client = getClient()
-    return client.deleteQueue(state.promptId)
+    return client.editQueue({ delete: [state.promptId] })
   }
 
   function interrupt() {
@@ -141,7 +143,7 @@ export default function useWorkflow() {
 
   function getHistoryByPromptId() {
     const client = getClient()
-    return client.getHistory(fetchOption, state.promptId)
+    return client.getHistory(state.promptId)
   }
 
   function getImageUrl(data, type) {
@@ -170,12 +172,15 @@ export default function useWorkflow() {
     const client = getClient()
     try {
       await client.connect()
-      return await client.getResult(fetchOption, prompt)
+      // 0.3.x getResult(fetchOption, prompt) = queue + wait + history 条目
+      // 0.5.x 等价物：waitForPrompt(prompt)（内部 queuePrompt + WS 等待 + 取 history）
+      return await client.waitForPrompt(prompt)
     } catch (error) {
       console.log(error)
       throw error
     } finally {
-      await client.disconnect().catch(() => {})
+      // 0.5.x disconnect 是同步的
+      client.disconnect()
     }
   }
 

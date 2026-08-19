@@ -533,7 +533,9 @@ const client = ref(null)
 
 const getClient = () => {
   if (!client.value) {
-    client.value = new ComfyUIClient(appStore.config.comfyHost, state.clientId)
+    client.value = new ComfyUIClient(appStore.config.comfyHost, state.clientId, {
+      logger: { info: () => {}, warn: () => {}, error: console.error, debug: () => {} }
+    })
   }
   return client.value
 }
@@ -1308,14 +1310,16 @@ function toErrorMessage(err) {
 }
 
 const getOutputs = async (prompt) => {
+  const client = getClient()
   try {
-    const client = getClient()
     await client.connect()
-    const result = await client.getResult(prompt)
-    await client.disconnect()
+    // comfy-ui-client >= 0.4: getResult() 已移除，等价物 waitForPrompt()
+    const result = await client.waitForPrompt(prompt)
+    client.disconnect() // 0.4+ 同步且幂等
     return result
   } catch (error) {
     console.log(error)
+    client.disconnect()
     throw error
   }
 }
