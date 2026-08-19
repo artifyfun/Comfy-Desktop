@@ -31,9 +31,7 @@
             <div class="w-8 h-8 text-2xl text-tech-blue">
               <i class="fas fa-home"></i>
             </div>
-            <h1 class="text-xl font-bold text-white tech-font">
-              {{ t('app') }}{{ t('center') }}
-            </h1>
+            <h1 class="text-xl font-bold text-white tech-font">{{ t('app') }}{{ t('center') }}</h1>
           </div>
         </div>
 
@@ -75,12 +73,7 @@
       </main>
 
       <!-- 添加应用表单 -->
-      <AppForm
-        v-if="showAppForm"
-        :app="currentApp"
-        @close="showAppForm = false"
-        @save="saveApp"
-      />
+      <AppForm v-if="showAppForm" :app="currentApp" @close="showAppForm = false" @save="saveApp" />
 
       <!-- 应用详情 -->
       <AppDetail
@@ -96,7 +89,9 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { uuidv4, showError, showSuccess } from '@/utils'
+import localforage from 'localforage'
+import { useRoute, useRouter } from 'vue-router'
+import { uuidv4, showError, showSuccess, showInfo } from '@/utils'
 import { useAppStore } from '@/stores/appStore'
 import { useViewStore } from '@/stores/viewStore'
 import { t } from '@/utils/i18n'
@@ -108,6 +103,8 @@ import AppDetail from './components/AppDetail.vue'
 
 const appStore = useAppStore()
 const viewStore = useViewStore()
+const route = useRoute()
+const router = useRouter()
 
 // 新增应用表单状态
 const showAppForm = ref(false)
@@ -146,6 +143,43 @@ const handleSearch = () => {
 
 async function init() {
   await appStore.loadApps()
+  await handleRerunQuery()
+}
+
+/**
+ * 消费 Gallery「复用参数再跑」的跳转：/?app=<id>&rerun=<gallery asset id>
+ * 流程：拉 gallery 记录 → 把记录的 inputs 预写入 workflow state 槽位
+ * （useWorkflow 的 getLastState 会读取并合并）→ 激活 app → 跳 /web 运行。
+ */
+async function handleRerunQuery() {
+  const appId = route.query.app
+  const rerunId = route.query.rerun
+  if (!appId || !rerunId) return
+  // 清掉 query，避免刷新重复触发
+  router.replace({ query: {} })
+  try {
+    const origin = appStore.config?.serverHost || window.location.origin
+    const res = await fetch(`${origin}/api/gallery/detail?id=${encodeURIComponent(rerunId)}`)
+    const json = await res.json()
+    if (!res.ok || !json?.success) throw new Error(json?.message || 'gallery detail failed')
+    const record = json.data || {}
+    const inputs = record.inputs_json ? JSON.parse(record.inputs_json) : null
+    if (!inputs) {
+      showInfo(t('noParamsRecorded'))
+      return
+    }
+    const app = appStore.apps.find((a) => a.id === appId)
+    if (!app) {
+      showError(t('appNotFound'))
+      return
+    }
+    await localforage.setItem(`workflows/state/${appId}`, { inputs })
+    await appStore.updateConfig({ activeAppId: appId })
+    router.push('/web')
+  } catch (e) {
+    console.warn('rerun failed', e)
+    showError(e.message || 'rerun failed')
+  }
 }
 
 init()
@@ -211,12 +245,8 @@ async function handleAppUploadChange({ file }) {
         }
 
         // 验证应用数据结构
-        const validApps = appsToImport.filter(app => {
-          return app &&
-                 typeof app === 'object' &&
-                 app.name &&
-                 app.template &&
-                 app.template.prompt
+        const validApps = appsToImport.filter((app) => {
+          return app && typeof app === 'object' && app.name && app.template && app.template.prompt
         })
 
         if (validApps.length === 0) {
@@ -225,7 +255,7 @@ async function handleAppUploadChange({ file }) {
         }
 
         // 为每个应用生成新的ID并导入
-        const appsWithNewIds = validApps.map(app => ({...app, id: uuidv4()}))
+        const appsWithNewIds = validApps.map((app) => ({ ...app, id: uuidv4() }))
         await appStore.mergeApps(appsWithNewIds)
 
         showSuccess('importSuccess', { count: validApps.length })

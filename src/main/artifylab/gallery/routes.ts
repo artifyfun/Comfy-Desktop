@@ -54,6 +54,21 @@ export function createGalleryRouter(): express.Router {
     }
   })
 
+  // 详情：Gallery「复用参数再跑」需要读取单条记录（含 inputs_json）
+  router.get('/api/gallery/detail', (req, res) => {
+    try {
+      const id = Number(req.query?.id)
+      if (!id) return res.status(400).json(createErrorResponse('id is required'))
+      const row = getGalleryDb()
+        .prepare('SELECT * FROM assets WHERE id = ?')
+        .get(id) as Record<string, unknown> | undefined
+      if (!row) return res.status(404).json(createErrorResponse('not found'))
+      res.json(createSuccessResponse(assetFromRow(row)))
+    } catch (e) {
+      res.status(500).json(createErrorResponse((e as Error).message))
+    }
+  })
+
   // 扫描 output 目录（手动触发；启动时可后台调一次）
   router.post('/api/gallery/scan', async (_req, res) => {
     try {
