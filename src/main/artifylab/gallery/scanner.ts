@@ -3,6 +3,7 @@ import path from 'node:path'
 import { nativeImage } from 'electron'
 import { get as getSetting } from '../../settings'
 import { getGalleryThumbDir, upsertAsset } from './db'
+import { extractPngMetadata } from './pngMetadata'
 import { logger } from '../utils/logger'
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp'])
@@ -43,13 +44,19 @@ export async function scanOutputDir(): Promise<{
         try {
           const stat = fs.statSync(full)
           const sub = subfolder
+          const meta =
+            path.extname(entry.name).toLowerCase() === '.png'
+              ? extractPngMetadata(full)
+              : {}
           upsertAsset({
             filename: entry.name,
             subfolder: sub,
             filepath: sub ? `${sub}/${entry.name}` : entry.name,
             size: stat.size,
             mtime: Math.floor(stat.mtimeMs),
-            created_at: Math.floor(stat.mtimeMs)
+            created_at: Math.floor(stat.mtimeMs),
+            prompt_json: meta.prompt ?? null,
+            workflow_json: meta.workflow ?? null
           })
           added++
           makeThumb(outputDir, sub, entry.name)

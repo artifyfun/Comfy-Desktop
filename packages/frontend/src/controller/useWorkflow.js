@@ -264,6 +264,7 @@ export default function useWorkflow() {
             app: { id: app.id, name: app.name },
             inputs: state.inputs,
             prompt: app.template.prompt,
+            workflow: app.template.workflow,
             outputs: outputsFlat
           })
         }).catch(() => {})

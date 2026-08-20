@@ -162,7 +162,7 @@ export function createGalleryRouter(): express.Router {
    */
   router.post('/api/gallery/record', (req, res) => {
     try {
-      const { app: appMeta, inputs, prompt, outputs } = req.body ?? {}
+      const { app: appMeta, inputs, prompt, workflow, outputs } = req.body ?? {}
       if (!Array.isArray(outputs) || outputs.length === 0) {
         return res.status(400).json(createErrorResponse('outputs array is required'))
       }
@@ -176,13 +176,14 @@ export function createGalleryRouter(): express.Router {
         const filepath = subfolder ? `${subfolder}/${filename}` : filename
         // 已存在（扫描器先建过行）则补快照，否则插入
         db.prepare(
-          `INSERT INTO assets (filename, subfolder, filepath, type, size, mtime, created_at, app_id, app_name, inputs_json, prompt_json)
-             VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)
+          `INSERT INTO assets (filename, subfolder, filepath, type, size, mtime, created_at, app_id, app_name, inputs_json, prompt_json, workflow_json)
+             VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(filepath) DO UPDATE SET
                app_id = excluded.app_id,
                app_name = excluded.app_name,
                inputs_json = excluded.inputs_json,
-               prompt_json = excluded.prompt_json
+               prompt_json = excluded.prompt_json,
+               workflow_json = COALESCE(excluded.workflow_json, workflow_json)
              RETURNING id`
         ).run(
           filename,
@@ -193,7 +194,8 @@ export function createGalleryRouter(): express.Router {
           appMeta?.id ?? null,
           appMeta?.name ?? null,
           inputs ? JSON.stringify(inputs) : null,
-          prompt ? JSON.stringify(prompt) : null
+          prompt ? JSON.stringify(prompt) : null,
+          workflow ? JSON.stringify(workflow) : null
         )
         const row = db.prepare('SELECT id FROM assets WHERE filepath = ?').get(filepath) as
           | { id: number }

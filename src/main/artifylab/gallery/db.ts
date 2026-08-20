@@ -27,6 +27,7 @@ export interface GalleryAsset {
   app_name: string | null
   inputs_json: string | null
   prompt_json: string | null
+  workflow_json: string | null
   starred: number
 }
 
@@ -61,11 +62,18 @@ export function getGalleryDb(): DatabaseSync {
       app_name TEXT,
       inputs_json TEXT,
       prompt_json TEXT,
+      workflow_json TEXT,
       starred INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_assets_created ON assets(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_assets_app ON assets(app_id);
   `)
+  // 兼容旧库：新增列（新装库建表时已包含，此处失败可忽略）
+  try {
+    db.exec(`ALTER TABLE assets ADD COLUMN workflow_json TEXT`)
+  } catch {
+    // column already exists
+  }
   return db
 }
 
@@ -85,6 +93,7 @@ export function assetFromRow(row: Record<string, unknown>): GalleryAsset {
     app_name: (row.app_name as string | null) ?? null,
     inputs_json: (row.inputs_json as string | null) ?? null,
     prompt_json: (row.prompt_json as string | null) ?? null,
+    workflow_json: (row.workflow_json as string | null) ?? null,
     starred: Number(row.starred ?? 0)
   }
 }
@@ -104,18 +113,20 @@ export function upsertAsset(asset: {
   app_name?: string | null
   inputs_json?: string | null
   prompt_json?: string | null
+  workflow_json?: string | null
 }): number {
   const db = getGalleryDb()
   db.prepare(
-    `INSERT INTO assets (filename, subfolder, filepath, type, size, mtime, created_at, width, height, app_id, app_name, inputs_json, prompt_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO assets (filename, subfolder, filepath, type, size, mtime, created_at, width, height, app_id, app_name, inputs_json, prompt_json, workflow_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(filepath) DO UPDATE SET
        size = excluded.size,
        mtime = excluded.mtime,
        app_id = COALESCE(excluded.app_id, app_id),
        app_name = COALESCE(excluded.app_name, app_name),
        inputs_json = COALESCE(excluded.inputs_json, inputs_json),
-       prompt_json = COALESCE(excluded.prompt_json, prompt_json)
+       prompt_json = COALESCE(excluded.prompt_json, prompt_json),
+       workflow_json = COALESCE(excluded.workflow_json, workflow_json)
      RETURNING id`
   ).run(
     asset.filename,
@@ -130,7 +141,8 @@ export function upsertAsset(asset: {
     asset.app_id ?? null,
     asset.app_name ?? null,
     asset.inputs_json ?? null,
-    asset.prompt_json ?? null
+    asset.prompt_json ?? null,
+    asset.workflow_json ?? null
   )
   const row = db.prepare('SELECT id FROM assets WHERE filepath = ?').get(asset.filepath) as
     | { id: number }

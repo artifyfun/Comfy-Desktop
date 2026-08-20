@@ -88,6 +88,7 @@
     "electron-updater": "^6.8.9",
     "express": "^4.21.2",
     "node-pty": "^1.1.0",
+    "png-chunks-extract": "^1.0.0",
     "posthog-node": "^5.30.7",
     "semver": "^7.7.4",
     "smol-toml": "^1.6.1",

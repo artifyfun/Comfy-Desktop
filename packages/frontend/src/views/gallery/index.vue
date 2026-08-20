@@ -168,7 +168,13 @@
 
             <div v-if="detailJson" class="max-h-48 overflow-auto rounded bg-slate-100 p-3 text-xs">
               <div class="mb-1 font-medium text-slate-600">
-                {{ currentLang === 'zh' ? '生成参数（完整 JSON，可复原生成）' : 'Generation params (full JSON, reproducible)' }}
+                {{
+                  detailJsonType === 'workflow'
+                    ? (currentLang === 'zh' ? 'UI 工作流（可拖回画布编辑）' : 'UI workflow (drag back to canvas)')
+                    : detailJsonType === 'prompt'
+                      ? (currentLang === 'zh' ? 'API Prompt（可复原生成）' : 'API prompt (reproducible)')
+                      : (currentLang === 'zh' ? '应用输入参数' : 'App inputs')
+                }}
               </div>
               <VueJsonPretty
                 v-if="detailJsonData"
@@ -240,11 +246,11 @@ const activeDir = ref('')
 
 const serverHost = computed(() => appStore.config?.serverHost || '')
 const comfyHost = computed(() => appStore.config?.comfyHost || '')
-// 工作流/参数快照：优先完整 prompt（API 格式，可直接复原生成），
-// 没有 prompt 时退回 App 输入参数 inputs_json。
+// 工作流/参数快照：优先 UI workflow（可拖回画布编辑），
+// 其次完整 API prompt（可直接复原生成），最后退回 App 输入参数。
 const detailJson = computed(() => {
   if (!detail.value) return ''
-  const raw = detail.value.prompt_json || detail.value.inputs_json
+  const raw = detail.value.workflow_json || detail.value.prompt_json || detail.value.inputs_json
   if (!raw) return ''
   try {
     return JSON.stringify(JSON.parse(raw), null, 2)
@@ -261,6 +267,15 @@ const detailJsonData = computed(() => {
   } catch {
     return null
   }
+})
+
+// 当前展示的 JSON 来源类型，用于标题提示
+const detailJsonType = computed(() => {
+  if (!detail.value) return ''
+  if (detail.value.workflow_json) return 'workflow'
+  if (detail.value.prompt_json) return 'prompt'
+  if (detail.value.inputs_json) return 'inputs'
+  return ''
 })
 
 // Viewer.js 图片预览
