@@ -104,36 +104,20 @@
             {{ currentLang === 'zh' ? '该目录暂无内容' : 'Empty directory' }}
           </div>
 
-          <!-- 瀑布流 -->
-          <div v-else class="gallery-grid">
-            <div
-              v-for="item in items"
-              :key="item.id"
-              class="group relative overflow-hidden rounded-lg cursor-pointer bg-slate-800/60"
-              @click="showDetail(item)"
-            >
-              <img
-                :src="thumbUrl(item)"
-                :alt="item.filename"
-                loading="lazy"
-                class="w-full transition-transform duration-300 group-hover:scale-105"
-                @error="onImgError($event, item)"
-              />
-              <div class="absolute inset-x-0 bottom-0 p-2 text-xs text-white bg-gradient-to-t from-black/80 to-transparent opacity-0 transition-opacity group-hover:opacity-100">
-                <div class="truncate">{{ item.filename }}</div>
-                <div class="flex justify-between text-slate-300">
-                  <span class="truncate">{{ item.app_name || formatTime(item.created_at) }}</span>
-                  <span class="flex items-center gap-1">
-                    <i
-                      class="cursor-pointer"
-                      :class="item.starred ? 'fas fa-star text-yellow-400' : 'far fa-star'"
-                      @click.stop="toggleStar(item)"
-                    ></i>
-                    <i class="ml-1 cursor-pointer far fa-trash-alt hover:text-red-400" @click.stop="remove(item)"></i>
-                  </span>
-                </div>
-              </div>
-            </div>
+          <!-- 瀑布流（虚拟滚动，只渲染可见行） -->
+          <div v-else class="gallery-virtual-wrap">
+            <GalleryVirtualGrid
+              :items="items"
+              :server-host="serverHost"
+              :comfy-host="comfyHost"
+              :loading="loading"
+              :has-more="items.length < total"
+              @open="showDetail"
+              @star="toggleStar"
+              @remove="remove"
+              @img-error="onImgError"
+              @load-more="loadMore"
+            />
           </div>
 
           <div v-if="items.length && items.length < total" class="mt-8 text-center">
@@ -148,12 +132,22 @@
       <a-modal
         v-model:open="detailOpen"
         :title="detail?.filename"
-        width="860px"
+        width="960px"
         :footer="null"
+        @after-close="destroyViewer"
       >
         <div v-if="detail" class="flex flex-col gap-4 md:flex-row">
           <div class="md:w-1/2">
-            <img :src="fullUrl(detail)" class="w-full rounded-lg" />
+            <!-- Viewer.js inline 预览：滚轮缩放 / 拖拽平移 / 工具栏 -->
+            <img
+              ref="detailImageRef"
+              :src="fullUrl(detail)"
+              class="w-full rounded-lg"
+              alt=""
+            />
+            <div class="mt-2 text-center text-xs text-slate-400">
+              {{ currentLang === 'zh' ? '滚轮缩放，拖拽平移，点击图片可全屏' : 'Wheel to zoom, drag to pan, click image for fullscreen' }}
+            </div>
           </div>
           <div class="space-y-3 md:w-1/2">
             <a-descriptions :column="1" size="small">
@@ -162,16 +156,28 @@
               <a-descriptions-item :label="currentLang === 'zh' ? '大小' : 'Size'">{{ formatSize(detail.size) }}</a-descriptions-item>
             </a-descriptions>
 
-            <div v-if="detailInputs" class="max-h-56 overflow-auto rounded bg-slate-100 p-3 text-xs">
-              <pre class="whitespace-pre-wrap">{{ detailInputs }}</pre>
+            <div v-if="detailJson" class="max-h-48 overflow-auto rounded bg-slate-100 p-3 text-xs">
+              <div class="mb-1 font-medium text-slate-600">
+                {{ currentLang === 'zh' ? '生成参数（完整 JSON，可复原生成）' : 'Generation params (full JSON, reproducible)' }}
+              </div>
+              <pre class="whitespace-pre-wrap">{{ detailJson }}</pre>
+            </div>
+            <div v-else class="rounded bg-slate-100 p-3 text-xs text-slate-500">
+              {{ currentLang === 'zh' ? '该图片暂无参数快照' : 'No parameter snapshot for this image' }}
             </div>
 
-            <div class="flex gap-2">
+            <div class="flex flex-wrap gap-2">
               <a-button v-if="detail.app_id" type="primary" @click="reRun(detail)">
                 <i class="mr-1 fas fa-redo"></i>{{ currentLang === 'zh' ? '用此参数再跑' : 'Re-run' }}
               </a-button>
               <a-button @click="download(detail)">
-                <i class="mr-1 fas fa-download"></i>{{ currentLang === 'zh' ? '下载' : 'Download' }}
+                <i class="mr-1 fas fa-download"></i>{{ currentLang === 'zh' ? '下载图片' : 'Download image' }}
+              </a-button>
+              <a-button v-if="detailJson" @click="copyWorkflow">
+                <i class="mr-1 fas fa-copy"></i>{{ currentLang === 'zh' ? '复制工作流' : 'Copy workflow' }}
+              </a-button>
+              <a-button v-if="detailJson" @click="downloadWorkflow">
+                <i class="mr-1 fas fa-file-code"></i>{{ currentLang === 'zh' ? '下载工作流' : 'Download workflow' }}
               </a-button>
             </div>
           </div>
@@ -182,10 +188,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick, watch, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
+import Viewer from 'viewerjs'
+import 'viewerjs/dist/viewer.css'
 import AppHeader from '../apps/components/AppHeader.vue'
+import GalleryVirtualGrid from './components/GalleryVirtualGrid.vue'
 import { useAppStore } from '@/stores/appStore'
 import { useI18nInComponent } from '@/utils/i18n'
 import dayjs from 'dayjs'
@@ -209,14 +218,64 @@ const dirs = ref([])
 const activeDir = ref('')
 
 const serverHost = computed(() => appStore.config?.serverHost || '')
-const detailInputs = computed(() => {
-  if (!detail.value?.inputs_json) return ''
+const comfyHost = computed(() => appStore.config?.comfyHost || '')
+// 工作流/参数快照：优先完整 prompt（API 格式，可直接复原生成），
+// 没有 prompt 时退回 App 输入参数 inputs_json。
+const detailJson = computed(() => {
+  if (!detail.value) return ''
+  const raw = detail.value.prompt_json || detail.value.inputs_json
+  if (!raw) return ''
   try {
-    return JSON.stringify(JSON.parse(detail.value.inputs_json), null, 2)
+    return JSON.stringify(JSON.parse(raw), null, 2)
   } catch {
-    return detail.value.inputs_json
+    return raw
   }
 })
+
+// Viewer.js 图片预览
+const detailImageRef = ref(null)
+let viewer = null
+
+const initViewer = () => {
+  destroyViewer()
+  if (!detailImageRef.value) return
+  viewer = new Viewer(detailImageRef.value, {
+    inline: true,
+    viewMode: 1,
+    zoomOnWheel: true,
+    title: false,
+    navbar: false,
+    toolbar: {
+      zoomIn: 1,
+      zoomOut: 1,
+      oneToOne: 1,
+      reset: 1,
+      rotateLeft: 1,
+      rotateRight: 1,
+      flipHorizontal: 1,
+      flipVertical: 1,
+    },
+  })
+}
+
+const destroyViewer = () => {
+  if (viewer) {
+    try {
+      viewer.destroy()
+    } catch {
+      // 已销毁
+    }
+    viewer = null
+  }
+}
+
+watch(detailOpen, (open) => {
+  if (open) {
+    nextTick(initViewer)
+  }
+})
+
+onBeforeUnmount(destroyViewer)
 
 // 目录视图下展示的总数 = 所有目录 count 之和
 const dirsCount = computed(() => dirs.value.reduce((acc, d) => acc + (Number(d.count) || 0), 0))
@@ -227,8 +286,6 @@ const activeDirLabel = computed(() => dirLabel(activeDir.value))
 const thumbFileName = (subfolder, filename) =>
   `${subfolder ? String(subfolder).replace(/[\\/]/g, '_') + '_' : ''}${filename}.jpg`
 
-const thumbUrl = (item) =>
-  `${serverHost.value}/api/gallery/thumbs/${encodeURIComponent(thumbFileName(item.subfolder, item.filename))}`
 const dirThumbUrl = (d) =>
   `${serverHost.value}/api/gallery/thumbs/${encodeURIComponent(thumbFileName(d.subfolder, d.filename))}`
 const fullUrl = (item) =>
@@ -391,6 +448,36 @@ const download = (item) => {
   window.open(fullUrl(item), '_blank')
 }
 
+// 复制完整工作流/参数 JSON（与生成该图一致，可复原生成）
+const copyWorkflow = async () => {
+  if (!detailJson.value) {
+    message.warning(currentLang.value === 'zh' ? '该图片暂无参数快照' : 'No parameter snapshot for this image')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(detailJson.value)
+    message.success(currentLang.value === 'zh' ? '工作流已复制到剪贴板' : 'Workflow copied to clipboard')
+  } catch {
+    message.error(currentLang.value === 'zh' ? '复制失败，请手动选择复制' : 'Copy failed, please copy manually')
+  }
+}
+
+// 下载工作流/参数 JSON
+const downloadWorkflow = () => {
+  if (!detailJson.value) {
+    message.warning(currentLang.value === 'zh' ? '该图片暂无参数快照' : 'No parameter snapshot for this image')
+    return
+  }
+  const base = detail.value?.filename?.replace(/\.[^.]+$/, '') || 'workflow'
+  const blob = new Blob([detailJson.value], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${base}.workflow.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 const goApps = () => router.push('/')
 
 const reRun = (item) => {
@@ -446,12 +533,8 @@ onMounted(fetchDirs)
   font-size: 12px;
   color: #94a3b8;
 }
-.gallery-grid {
-  columns: 4 240px;
-  column-gap: 12px;
-}
-.gallery-grid > div {
-  margin-bottom: 12px;
-  break-inside: avoid;
+.gallery-virtual-wrap {
+  height: calc(100vh - 280px);
+  min-height: 320px;
 }
 </style>
