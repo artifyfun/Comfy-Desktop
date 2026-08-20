@@ -436,6 +436,7 @@ const translations = {
     startFromItem: '从第几项开始',
     startFromItemPlaceholder: '请输入开始位置',
     startFromItemHint: '从第1项开始，最大为总项目数',
+    startFromItemLabel: '从第几项开始：',
     executionProgress: '执行进度',
     processed: '已处理',
     total: '总数',

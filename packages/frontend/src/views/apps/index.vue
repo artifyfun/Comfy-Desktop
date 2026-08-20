@@ -4,7 +4,7 @@
       <!-- 顶部导航：应用中心页自己展示「应用市场」入口，避免自指 -->
       <AppHeader
         :first-nav-to="'/market'"
-        :first-nav-label="currentLang === 'zh' ? '应用市场' : 'App Market'"
+        :first-nav-label="t('market')"
         first-nav-icon="mr-2 fas fa-store"
       />
 
