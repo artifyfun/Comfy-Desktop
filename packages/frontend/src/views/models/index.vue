@@ -59,7 +59,7 @@
         </div>
 
         <!-- 搜索 -->
-        <a-input-search
+        <a-input
           v-model:value="search"
           :placeholder="t('searchModels')"
           class="mb-4"

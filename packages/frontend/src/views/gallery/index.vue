@@ -18,12 +18,19 @@
             </span>
           </div>
           <div class="flex items-center gap-2">
-            <a-input-search
-              v-model:value="query"
-              :placeholder="currentLang === 'zh' ? '搜索文件名 / 应用名' : 'Search filename / app'"
-              style="width: 220px"
-              @search="onFilterChange"
-            />
+            <div class="flex items-center gap-1">
+              <a-input
+                v-model:value="query"
+                :placeholder="currentLang === 'zh' ? '搜索文件名 / 应用名' : 'Search filename / app'"
+                style="width: 180px"
+                allow-clear
+                @pressEnter="onFilterChange"
+                @change="onFilterChange"
+              />
+              <a-button @click="onFilterChange">
+                <i class="fas fa-search"></i>
+              </a-button>
+            </div>
             <a-checkbox v-model:checked="starredOnly" @change="onFilterChange">
               {{ currentLang === 'zh' ? '仅收藏' : 'Starred' }}
             </a-checkbox>
