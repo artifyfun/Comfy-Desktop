@@ -235,6 +235,18 @@
     window.dispatchEvent(new Event('load'))
   }
 
+  // 浮标按钮尽早创建：切换 A UI 不依赖画布就绪。此前按钮在
+  // checkComfyUIReady 成功后才建，Comfy Cloud / 新版前端可能不暴露
+  // window.LiteGraph 或节点注册超时（60s 轮询窗口耗尽），按钮就永不
+  // 出现。iframe/playground/readonly 模式不需要按钮。
+  if (!artify_inject && !isIframe && !artify_playground && isElectron) {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', setButton)
+    } else {
+      setButton()
+    }
+  }
+
   function uuidv4() {
     return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (a) =>
       (a ^ ((Math.random() * 16) >> (a / 4))).toString(16),
@@ -1045,6 +1057,8 @@
   }
 
   function setButton() {
+    // 幂等：脚本加载即建一次 + ComfyUI 就绪回调再调一次，防重复
+    if (document.getElementById('floating-btn')) return
     const style = document.createElement('style')
     style.innerHTML = `
       #floating-btn {
