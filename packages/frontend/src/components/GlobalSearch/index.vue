@@ -1,6 +1,7 @@
 <template>
   <a-modal
     :open="open"
+    :title="currentLang === 'zh' ? '全局搜索' : 'Global Search'"
     width="640px"
     :footer="null"
     @cancel="$emit('close')"
