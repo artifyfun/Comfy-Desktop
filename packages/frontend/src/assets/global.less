@@ -130,6 +130,14 @@
   height: 100%;
 }
 
+/* Input.Search 输入框与搜索按钮融合为一个整体，避免出现“两层框” */
+.ant-input-search .ant-input-wrapper .ant-input-affix-wrapper {
+  border-radius: 8px 0 0 8px;
+}
+.ant-input-search .ant-input-wrapper .ant-input-search-button {
+  border-radius: 0 8px 8px 0;
+}
+
 .ant-input:focus,
 .ant-select-focused .ant-select-selector {
   border-color: #0ea5e9 !important;

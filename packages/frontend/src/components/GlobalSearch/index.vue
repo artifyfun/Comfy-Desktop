@@ -15,9 +15,7 @@
         allow-clear
         @change="onInput"
         @search="runSearch"
-      >
-        <template #prefix><i class="fas fa-search text-slate-400"></i></template>
-      </a-input-search>
+      />
 
       <div v-if="loading" class="py-10 text-center text-slate-400">
         <a-spin />
