@@ -24,7 +24,6 @@ declare module 'vue' {
     AForm: typeof import('ant-design-vue/es')['Form']
     AFormItem: typeof import('ant-design-vue/es')['FormItem']
     AInput: typeof import('ant-design-vue/es')['Input']
-    AInputSearch: typeof import('ant-design-vue/es')['InputSearch']
     AMenu: typeof import('ant-design-vue/es')['Menu']
     AMenuItem: typeof import('ant-design-vue/es')['MenuItem']
     AModal: typeof import('ant-design-vue/es')['Modal']
@@ -39,7 +38,6 @@ declare module 'vue' {
     ATable: typeof import('ant-design-vue/es')['Table']
     ATabPane: typeof import('ant-design-vue/es')['TabPane']
     ATabs: typeof import('ant-design-vue/es')['Tabs']
-    ATag: typeof import('ant-design-vue/es')['Tag']
     ATextarea: typeof import('ant-design-vue/es')['Textarea']
     ATooltip: typeof import('ant-design-vue/es')['Tooltip']
     AUpload: typeof import('ant-design-vue/es')['Upload']
@@ -58,7 +56,6 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     SaveTemplateDialog: typeof import('./src/components/preview/components/save-template-dialog.vue')['default']
     TemplatesListDialog: typeof import('./src/components/preview/components/templates-list-dialog.vue')['default']
-    ThemeDemo: typeof import('./src/components/ThemeDemo/index.vue')['default']
     UpdateModal: typeof import('./src/components/About/UpdateModal.vue')['default']
   }
 }

@@ -34,14 +34,7 @@
               <i
                 class="absolute left-3 top-1/2 transform -translate-y-1/2 fas fa-search text-slate-400"
               ></i>
-              <button
-                v-if="query"
-                @click="
-                  query = ''
-                  onFilterChange()
-                "
-                class="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-white"
-              >
+              <button v-if="query" @click="clearQuery" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-white">
                 <i class="fas fa-times"></i>
               </button>
             </div>
@@ -491,6 +484,12 @@ const onFilterChange = () => {
     items.value = []
     fetchList()
   }
+}
+
+// 清空搜索关键词并刷新
+const clearQuery = () => {
+  query.value = ''
+  onFilterChange()
 }
 
 const loadMore = () => {
