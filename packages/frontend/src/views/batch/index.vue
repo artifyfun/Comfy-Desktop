@@ -706,6 +706,7 @@ async function createNewHistoryRecord() {
   const now = new Date().toISOString()
   const record = {
     id: newId,
+    taskId: batchTaskStore.status?.id ?? null,
     appId: currentApp.value?.id,
     appName: currentApp.value?.name,
     createdAt: now,
@@ -1516,6 +1517,27 @@ function watchBatchTask() {
   batchWatchStop = unwatch
 }
 
+// 刷新页面/重新进入时恢复运行中任务的历史记录绑定
+async function restoreRunningTask() {
+  await batchTaskStore.fetchStatus()
+  const st = batchTaskStore.status
+  if (!st || st.status !== 'running') return
+  await ensureHistoryLoaded()
+  const record = historyRecords.value.find((r) => r.taskId === st.id)
+  if (record) {
+    currentHistoryRecordId.value = record.id
+  }
+  isExecuting.value = true
+  executionProgress.total = st.total
+  executionProgress.processed = st.processed
+  executionProgress.success = st.success
+  executionProgress.failed = st.failed
+  executionProgress.percent = st.percent
+  executionProgress.currentItem = st.currentPreview
+  batchTaskStore.startPolling()
+  watchBatchTask()
+}
+
 // 停止执行
 async function stopExecution() {
   // 先停 main 进程常驻引擎（interrupt 已由后端执行）
@@ -1737,9 +1759,10 @@ watch(fileFilter, () => {
   }
 })
 
-onMounted(() => {
+onMounted(async () => {
   loadNotifyConfig()
-  init()
+  await init()
+  await restoreRunningTask()
 })
 
 // 离开页面：批量任务已在 main 进程常驻执行，这里只断开本页监控，不再杀任务
