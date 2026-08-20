@@ -23,7 +23,9 @@ import { createModelsRouter } from './routes/models'
 // Load environment variables from .env file
 dotenv.config()
 
-const app = express()
+// 显式类型注解：pnpm 隔离布局下 express() 的推断类型引用了 .pnpm 深层路径，
+// 触发 TS2742（类型不可命名）——注解为 express.Express。
+const app: express.Express = express()
 
 let server: HttpServer | null = null
 
