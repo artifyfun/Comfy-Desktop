@@ -106,7 +106,7 @@
 
           <!-- 瀑布流（虚拟滚动，只渲染可见行） -->
           <div v-else class="gallery-virtual-wrap">
-            <GalleryVirtualGrid
+            <GalleryVirtualMasonry
               :items="items"
               :server-host="serverHost"
               :comfy-host="comfyHost"
@@ -204,7 +204,7 @@ import 'viewerjs/dist/viewer.css'
 import VueJsonPretty from 'vue-json-pretty'
 import 'vue-json-pretty/lib/styles.css'
 import AppHeader from '../apps/components/AppHeader.vue'
-import GalleryVirtualGrid from './components/GalleryVirtualGrid.vue'
+import GalleryVirtualMasonry from './components/GalleryVirtualMasonry.vue'
 import { useAppStore } from '@/stores/appStore'
 import { useI18nInComponent } from '@/utils/i18n'
 import dayjs from 'dayjs'
