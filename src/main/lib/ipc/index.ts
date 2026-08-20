@@ -101,7 +101,16 @@ export function register(callbacks: RegisterCallbacks = {}): Promise<void> {
 
   // Auto-track a detected Legacy Desktop install.
   {
-    const desktopInfo = detectDesktopInstall()
+    // TCC 防护：dev 模式下未签名 Electron 访问 ~/Documents 会被 macOS
+    // 拒绝（EACCES/EPERM），assertReadable 直接 throw 会炸掉整个
+    // register() 启动链（unhandledRejection → 窗口不显示）。此处探测
+    // 仅用于自动登记 legacy 安装，失败降级为 null 即可（不阻断启动）。
+    let desktopInfo: ReturnType<typeof detectDesktopInstall> = null
+    try {
+      desktopInfo = detectDesktopInstall()
+    } catch (err) {
+      console.warn('[ipc] detectDesktopInstall failed (permission?):', (err as Error).message)
+    }
     if (desktopInfo) {
       installations
         .ensureExists('desktop', {
