@@ -13,12 +13,14 @@
         }"
         @click="$emit('open', layout.item)"
       >
+        <div class="absolute inset-0 bg-slate-800/60 animate-pulse"></div>
         <img
           :src="thumbUrl(layout.item)"
           :alt="layout.item.filename"
           loading="lazy"
           decoding="async"
-          class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+          class="relative w-full h-full object-cover transition-all duration-300 group-hover:scale-105"
+          :class="{ 'opacity-0': !loadedItems.has(layout.item.id) }"
           @load="onImgLoad(layout.item, $event)"
           @error="$emit('img-error', $event, layout.item)"
         />
@@ -74,6 +76,8 @@ const viewportHeight = ref(800)
 
 // 图片自然尺寸缓存：id -> { w, h }
 const sizeMap = reactive(new Map())
+// 已加载完成的图片 id（用于骨架占位淡入）
+const loadedItems = reactive(new Set())
 // 布局结果：{ item, left, top, width, height }[]
 const layouts = ref([])
 let layoutDirty = false
@@ -145,6 +149,7 @@ const visibleLayouts = computed(() => {
 // 图片加载完成：缓存自然尺寸并触发重排
 const onImgLoad = (item, e) => {
   const target = e.target
+  loadedItems.add(item.id)
   const w = target.naturalWidth
   const h = target.naturalHeight
   if (!w || !h) return
