@@ -414,7 +414,9 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     // `__artifyInjectLoaded` guard makes re-injection a no-op.
     const comfyInjectJs = getComfyInjectScriptSource()
     if (comfyInjectJs) {
-      comfyContents.executeJavaScript(comfyInjectJs).catch(() => {})
+      comfyContents.executeJavaScript(comfyInjectJs).catch((e) =>
+        console.warn('[artify-inject] executeJavaScript failed:', e)
+      )
     }
     // Inject the Terminal bottom-panel entry on local managed installs.
     //
