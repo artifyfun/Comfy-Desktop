@@ -293,7 +293,7 @@ const deleteHistoryItem = (index) => {
 .tech-input {
   background: rgba(15, 23, 42, 0.4);
   border: 1px solid rgba(56, 70, 102, 0.6);
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .tech-input:focus {

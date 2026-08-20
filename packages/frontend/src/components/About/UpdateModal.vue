@@ -558,7 +558,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease, width 0.3s ease, height 0.3s ease, transform 0.3s ease;
 }
 
 .close-btn:hover {

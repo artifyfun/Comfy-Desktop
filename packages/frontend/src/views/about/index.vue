@@ -83,7 +83,7 @@ const handleToggleAboutModal = () => {
     border-radius: 30px;
     cursor: pointer;
     margin-top: 30px;
-    transition: all 0.3s ease;
+    transition: box-shadow 0.3s ease;
     box-shadow: 0 5px 15px rgba(37, 117, 252, 0.4);
     position: relative;
     overflow: hidden;
@@ -104,7 +104,7 @@ const handleToggleAboutModal = () => {
     height: 200%;
     background: rgba(255, 255, 255, 0.3);
     transform: rotate(25deg);
-    transition: all 0.6s;
+    transition: background 0.6s, width 0.6s, height 0.6s, transform 0.6s;
   }
 
   .btn:hover::after {

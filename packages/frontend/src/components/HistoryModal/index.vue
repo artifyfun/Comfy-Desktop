@@ -281,11 +281,11 @@ const getHistoryUrl = (item) => {
   }
 
   .slide-enter-active {
-    transition: all 0.3s ease-out;
+    transition: opacity 0.3s ease-out;
   }
 
   .slide-leave-active {
-    transition: all 0.3s ease-in;
+    transition: opacity 0.3s ease-in, transform 0.3s ease-in;
   }
 
   .slide-enter-from,

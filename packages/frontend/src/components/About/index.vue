@@ -204,7 +204,7 @@ export default {
     align-items: center;
     color: #40e0d0;
     font-size: 1.2rem;
-    transition: all 0.3s ease;
+    transition: background 0.3s ease, color 0.3s ease, transform 0.3s ease;
   }
 
   .close-btn:hover {

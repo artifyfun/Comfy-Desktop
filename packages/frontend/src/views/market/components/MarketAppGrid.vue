@@ -58,7 +58,7 @@ defineEmits(['view-detail', 'install', 'clear-search', 'clear-filter'])
 
 <style scoped>
 .card-enter-active {
-  transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .card-enter-from {

@@ -939,7 +939,7 @@ onMounted(async () => {
   .tech-input {
     background: rgba(15, 23, 42, 0.4);
     border: 1px solid rgba(56, 70, 102, 0.6);
-    transition: all 0.3s ease;
+    transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
   }
 
   .tech-input:focus {
@@ -958,11 +958,11 @@ onMounted(async () => {
   }
 
   .slide-enter-active {
-    transition: all 0.3s ease-out;
+    transition: opacity 0.3s ease-out;
   }
 
   .slide-leave-active {
-    transition: all 0.3s ease-in;
+    transition: opacity 0.3s ease-in, transform 0.3s ease-in;
   }
 
   .slide-enter-from,
@@ -972,7 +972,7 @@ onMounted(async () => {
   }
 
   .card-enter-active {
-    transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
 
   .card-enter-from {
@@ -1065,7 +1065,7 @@ body {
 .tech-input {
   background: rgba(15, 23, 42, 0.4);
   border: 1px solid rgba(56, 70, 102, 0.6);
-  transition: all 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .tech-input:focus {
@@ -1084,11 +1084,11 @@ body {
 }
 
 .slide-enter-active {
-  transition: all 0.3s ease-out;
+  transition: opacity 0.3s ease-out;
 }
 
 .slide-leave-active {
-  transition: all 0.3s ease-in;
+  transition: opacity 0.3s ease-in, transform 0.3s ease-in;
 }
 
 .slide-enter-from,
@@ -1098,7 +1098,7 @@ body {
 }
 
 .card-enter-active {
-  transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .card-enter-from {

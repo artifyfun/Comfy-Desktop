@@ -589,6 +589,13 @@ const executionProgress = reactive({
   currentItem: ''
 })
 const executionLogs = ref([]) // 新增：执行日志
+// 日志上限：长任务下 unshift 无限增长会拖垮内存与渲染，超限丢弃最旧（尾部）
+const EXECUTION_LOGS_MAX = 500
+watch(executionLogs, (logs) => {
+  if (logs.length > EXECUTION_LOGS_MAX) {
+    logs.splice(EXECUTION_LOGS_MAX)
+  }
+})
 
 // 预计剩余时间统计
 const executionTimeStats = reactive({
@@ -1807,7 +1814,7 @@ watch(historyKey, (newKey) => {
       background: rgba(15, 23, 42, 0.8);
       border: 2px solid rgba(56, 70, 102, 0.6);
       border-radius: 12px;
-      transition: all 0.3s ease;
+      transition: background 0.3s ease, border-color 0.3s ease;
 
       &:hover {
         border-color: #0ea5e9;
@@ -2128,7 +2135,7 @@ watch(historyKey, (newKey) => {
     border-radius: 8px;
     margin-bottom: 8px;
     cursor: grab;
-    transition: all 0.3s ease;
+    transition: background 0.3s ease, border-color 0.3s ease;
 
     &:hover {
       border-color: #0ea5e9;
@@ -2229,7 +2236,7 @@ watch(historyKey, (newKey) => {
     border: 2px dashed rgba(56, 70, 102, 0.4);
     border-radius: 8px;
     margin-bottom: 12px;
-    transition: all 0.3s ease;
+    transition: background 0.3s ease, border-color 0.3s ease, height 0.3s ease;
     min-height: 80px;
 
     &.has-mapping {

@@ -353,7 +353,7 @@ onUnmounted(() => {
   border: 1px solid rgba(51, 65, 85, 0.3);
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease;
   margin-bottom: 8px;
 }
 
@@ -375,7 +375,7 @@ onUnmounted(() => {
 }
 
 .card-enter-active {
-  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .card-enter-from {
