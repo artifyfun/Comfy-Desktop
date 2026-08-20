@@ -120,6 +120,16 @@
   transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
 }
 
+/* 大号搜索框 wrapper 与右侧按钮严格等高（antd large 默认有 1-2px 偏差） */
+.ant-input-affix-wrapper-lg {
+  height: 40px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.ant-input-affix-wrapper-lg .ant-input {
+  height: 100%;
+}
+
 .ant-input:focus,
 .ant-select-focused .ant-select-selector {
   border-color: #0ea5e9 !important;
@@ -194,4 +204,9 @@ select::placeholder {
   .group:hover .group-hover\:scale-110 {
     transform: scale(1.05);
   }
+}
+
+/* 辅助文字对比度提亮：Tailwind slate-400 → 更亮的蓝灰 */
+.text-slate-400 {
+  color: #a5b4c8 !important;
 }

@@ -139,7 +139,7 @@ function goBatch() {
   width: 340px;
   background: rgba(15, 23, 42, 0.96);
   border: 1px solid rgba(56, 70, 102, 0.8);
-  border-radius: 10px;
+  border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   padding: 12px;
   display: flex;

@@ -11,7 +11,7 @@
             <div class="w-8 h-8 text-2xl text-tech-blue">
               <i class="fas fa-store"></i>
             </div>
-            <h1 class="text-xl font-bold text-white tech-font">
+            <h1 class="text-2xl font-bold text-white tech-font">
               {{ t('market') }}
             </h1>
           </div>

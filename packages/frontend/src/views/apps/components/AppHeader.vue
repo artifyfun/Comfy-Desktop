@@ -16,7 +16,7 @@
       <!-- 右侧操作 -->
       <div class="flex items-center space-x-4">
         <!-- 桌面端导航 -->
-        <nav class="flex space-x-6" v-if="isElectron">
+        <nav class="flex space-x-4" v-if="isElectron">
           <router-link
             :to="firstNavTo"
             class="px-3 py-2 text-sm font-medium rounded-lg transition duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"

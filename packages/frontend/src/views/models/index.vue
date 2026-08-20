@@ -10,7 +10,7 @@
             <div class="w-8 h-8 text-2xl text-tech-blue">
               <i class="fas fa-cube"></i>
             </div>
-            <h1 class="text-xl font-bold text-white tech-font">{{ t('modelsTitle') }}</h1>
+            <h1 class="text-2xl font-bold text-white tech-font">{{ t('modelsTitle') }}</h1>
           </div>
           <div class="flex items-center gap-2">
             <a-button :loading="scanning" @click="loadList">

@@ -316,7 +316,7 @@ export default {
     background: #0d0b1f;
     width: 260px;
     height: 260px;
-    border-radius: 10px;
+    border-radius: 12px;
     display: flex;
     justify-content: center;
     align-items: center;

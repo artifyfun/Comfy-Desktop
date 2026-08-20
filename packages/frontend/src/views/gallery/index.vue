@@ -10,7 +10,7 @@
             <div class="w-8 h-8 text-2xl text-tech-blue">
               <i class="fas fa-images"></i>
             </div>
-            <h1 class="text-xl font-bold text-white tech-font">
+            <h1 class="text-2xl font-bold text-white tech-font">
               {{ t('gallery') }}
             </h1>
             <span class="text-sm text-slate-400">
@@ -658,7 +658,7 @@ onMounted(() => {
 .dir-card {
   background: rgba(30, 41, 59, 0.6);
   border: 1px solid rgba(148, 163, 184, 0.15);
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   cursor: pointer;
   transition: border-color 0.2s;

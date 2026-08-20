@@ -24,7 +24,7 @@
             <div class="w-8 h-8 text-2xl text-tech-blue">
               <i class="fas fa-home"></i>
             </div>
-            <h1 class="text-xl font-bold text-white tech-font">{{ t('app') }}{{ t('center') }}</h1>
+            <h1 class="text-2xl font-bold text-white tech-font">{{ t('app') }}{{ t('center') }}</h1>
           </div>
         </div>
 

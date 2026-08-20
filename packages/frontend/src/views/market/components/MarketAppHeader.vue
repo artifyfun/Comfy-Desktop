@@ -16,7 +16,7 @@
       <!-- 右侧操作 -->
       <div class="flex items-center space-x-4">
         <!-- 导航 -->
-        <nav class="hidden ml-8 space-x-6 md:flex">
+        <nav class="hidden ml-8 space-x-4 md:flex">
           <router-link
             to="/"
             class="px-3 py-2 text-sm font-medium rounded-lg transition duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
