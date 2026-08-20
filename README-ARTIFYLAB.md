@@ -86,6 +86,12 @@ pnpm --filter artifylab-frontend lint
 pnpm test        # vitest（注意：上游遗留 70 个失败为已知基线）
 ```
 
+### 已知限制
+
+- **主题**：界面为暗色专属设计（各视图硬编码暗色背景/渐变），Config 中的亮色主题开关实际不生效，非 bug
+- **批量任务**：执行引擎在 main 进程常驻（`services/batchRunner.ts`），任意页面浮层可监控/停止；同一时刻只允许一个任务
+- 批量页 `index.vue` 样式已抽至同目录 `batch.less`；模板拆子组件待做（需传 20+ props，收益有限）
+
 ### 打包
 
 ```bash
