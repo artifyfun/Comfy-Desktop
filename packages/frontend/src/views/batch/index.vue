@@ -380,7 +380,7 @@
 
           <!-- 进度条 -->
           <div class="custom-progress-bar">
-            <div class="custom-progress-inner" :style="{ width: executionProgress.percent + '%', background: executionProgress.strokeColor }"></div>
+            <div class="custom-progress-inner" :style="{ transform: `scaleX(${executionProgress.percent / 100})`, background: executionProgress.strokeColor }"></div>
             <span class="custom-progress-text">{{ executionProgress.percent }}%</span>
           </div>
           <div class="mb-2 eta-row" v-if="isExecuting && executionProgress.processed > 0 && executionProgress.processed < executionProgress.total">

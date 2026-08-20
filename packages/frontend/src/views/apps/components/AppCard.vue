@@ -107,7 +107,7 @@ function formatDate(date) {
 }
 
 .app-imageUrl {
-  transition: transform 0.5s ease;
+  transition: transform 0.2s ease-out;
 }
 
 .glass-card:hover .app-imageUrl {

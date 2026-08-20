@@ -4,7 +4,7 @@
     <div v-if="!expanded" class="batch-float-pill" @click="expanded = true">
       <span class="dot" :class="statusClass"></span>
       <span class="pill-text">{{ pillText }}</span>
-      <div class="pill-bar"><div class="pill-bar-fill" :style="{ width: percent + '%' }"></div></div>
+      <div class="pill-bar"><div class="pill-bar-fill" :style="{ transform: `scaleX(${percent / 100})` }"></div></div>
     </div>
 
     <div v-else class="batch-float-panel">
@@ -16,7 +16,7 @@
 
       <div class="panel-progress">
         <div class="progress-track">
-          <div class="progress-fill" :class="statusClass" :style="{ width: percent + '%' }"></div>
+          <div class="progress-fill" :class="statusClass" :style="{ transform: `scaleX(${percent / 100})` }"></div>
         </div>
         <span class="progress-text">{{ s.processed }}/{{ s.total }}（{{ percent }}%）</span>
       </div>
@@ -125,9 +125,11 @@ function goBatch() {
     background: rgba(255, 255, 255, 0.12);
     overflow: hidden;
     .pill-bar-fill {
+      width: 100%;
       height: 100%;
       background: #0ea5e9;
-      transition: width 0.5s ease;
+      transform-origin: left center;
+      transition: transform 0.3s ease-out;
     }
   }
 }
@@ -197,8 +199,10 @@ function goBatch() {
     background: rgba(255, 255, 255, 0.1);
     overflow: hidden;
     .progress-fill {
+      width: 100%;
       height: 100%;
-      transition: width 0.5s ease;
+      transform-origin: left center;
+      transition: transform 0.3s ease-out;
       &.running {
         background: #0ea5e9;
       }

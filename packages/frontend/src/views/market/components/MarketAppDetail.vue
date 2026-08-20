@@ -74,14 +74,14 @@
 
             <div class="flex gap-3">
               <button
-                class="flex-1 py-3 font-medium text-white bg-gradient-to-r rounded-lg transition-all duration-300 cursor-pointer from-tech-green to-tech-cyan hover:from-tech-green/80 hover:to-tech-cyan/80"
+                class="flex-1 py-3 font-medium text-white bg-gradient-to-r rounded-lg transition duration-300 cursor-pointer from-tech-green to-tech-cyan hover:from-tech-green/80 hover:to-tech-cyan/80"
                 @click="$emit('install', app)"
               >
                 <i class="mr-2 fas fa-download"></i>
                 {{ t('install') }}
               </button>
               <!-- <button
-                class="flex-1 py-3 font-medium text-white bg-gradient-to-r rounded-lg transition-all duration-300 cursor-pointer from-tech-blue to-tech-cyan hover:from-tech-blue/80 hover:to-tech-cyan/80"
+                class="flex-1 py-3 font-medium text-white bg-gradient-to-r rounded-lg transition duration-300 cursor-pointer from-tech-blue to-tech-cyan hover:from-tech-blue/80 hover:to-tech-cyan/80"
                 @click="$emit('launch', app)"
               >
                 <i class="mr-2 fas fa-play"></i>

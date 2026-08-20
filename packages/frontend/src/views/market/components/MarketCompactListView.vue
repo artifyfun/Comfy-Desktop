@@ -96,7 +96,7 @@
               </button>
               <button
                 @click.stop="$emit('install', app)"
-                class="px-3 py-1 text-xs font-medium text-white bg-gradient-to-r rounded-lg transition-all cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90"
+                class="px-3 py-1 text-xs font-medium text-white bg-gradient-to-r rounded-lg transition cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90"
                 :title="t('install')"
               >
                 <i class="mr-1 fas fa-download"></i>

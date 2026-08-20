@@ -38,7 +38,7 @@
             <img
               :src="currentApp.imageUrl"
               alt="preview"
-              class="w-full max-w-full h-[120px] object-cover rounded shadow transition-all duration-200"
+              class="w-full max-w-full h-[120px] object-cover rounded shadow transition duration-200"
             />
             <button
               class="absolute top-2 right-2 p-1 text-white rounded-full opacity-0 transition-opacity bg-black/60 group-hover:opacity-100"

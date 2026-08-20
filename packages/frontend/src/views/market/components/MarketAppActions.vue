@@ -11,7 +11,7 @@
             @keyup.enter="$emit('search')"
             type="text"
             :placeholder="t('searchApps')"
-            class="px-4 py-3 pl-12 w-full text-white rounded-lg border backdrop-blur-sm transition-all duration-300 bg-slate-800/50 border-slate-600 focus:border-tech-blue focus:ring-2 focus:ring-tech-blue/20"
+            class="px-4 py-3 pl-12 w-full text-white rounded-lg border backdrop-blur-sm transition duration-300 bg-slate-800/50 border-slate-600 focus:border-tech-blue focus:ring-2 focus:ring-tech-blue/20"
           />
           <i class="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 fas fa-search"></i>
           <button
@@ -30,7 +30,7 @@
         <select
           :value="selectedCategory"
           @change="$emit('update:selected-category', $event.target.value)"
-          class="px-4 py-2 text-white rounded-lg border backdrop-blur-sm transition-all duration-300 bg-slate-800/50 border-slate-600 focus:border-tech-blue focus:ring-2 focus:ring-tech-blue/20"
+          class="px-4 py-2 text-white rounded-lg border backdrop-blur-sm transition duration-300 bg-slate-800/50 border-slate-600 focus:border-tech-blue focus:ring-2 focus:ring-tech-blue/20"
         >
           <option value="">{{ t('all') }}</option>
           <option v-for="category in categories" :key="category" :value="category">

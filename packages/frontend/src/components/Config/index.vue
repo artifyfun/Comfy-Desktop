@@ -23,7 +23,7 @@
                 :key="tab.key"
                 @click="activeTab = tab.key"
                 :class="[
-                  'px-4 py-2 rounded-t-lg font-medium transition-all',
+                  'px-4 py-2 rounded-t-lg font-medium transition',
                   activeTab === tab.key
                     ? 'bg-tech-cyan/80 text-white'
                     : 'bg-slate-700/60 text-slate-300 hover:bg-slate-600',
@@ -48,7 +48,7 @@
                         'bg-tech-blue/80': state.config.provider === 'deepseek',
                         'bg-slate-700/60 hover:bg-slate-600': state.config.provider !== 'deepseek',
                       }"
-                      class="flex flex-col items-center p-3 w-full rounded-lg transition-all duration-300"
+                      class="flex flex-col items-center p-3 w-full rounded-lg transition duration-300"
                     >
                       <i class="mb-1.5 text-xl fas fa-robot"></i>
                       <span>DeepSeek</span>
@@ -59,7 +59,7 @@
                         'bg-tech-cyan/80': state.config.provider === 'openai',
                         'bg-slate-700/60 hover:bg-slate-600': state.config.provider !== 'openai',
                       }"
-                      class="flex flex-col items-center p-3 w-full rounded-lg transition-all duration-300"
+                      class="flex flex-col items-center p-3 w-full rounded-lg transition duration-300"
                     >
                       <i class="mb-1.5 text-xl fas fa-bolt"></i>
                       <span>OpenAI</span>
@@ -148,7 +148,7 @@
                   <button
                     @click="testConnection"
                     :disabled="isTesting"
-                    class="flex justify-center items-center px-4 py-2.5 mt-3 w-full text-white rounded-lg transition-all duration-300"
+                    class="flex justify-center items-center px-4 py-2.5 mt-3 w-full text-white rounded-lg transition duration-300"
                     :class="{
                       'bg-gradient-to-r from-tech-blue to-tech-cyan hover:opacity-90': !isTesting,
                       'bg-slate-600 cursor-not-allowed': isTesting,
@@ -246,7 +246,7 @@
                       :key="style.id"
                       @click="state.config.buildStyleId = style.id"
                       :class="[
-                        'flex flex-row items-center p-3 w-full rounded-lg border transition-all relative',
+                        'flex flex-row items-center p-3 w-full rounded-lg border transition relative',
                         state.config.buildStyleId === style.id
                           ? 'border-tech-cyan bg-tech-cyan/10 text-tech-cyan'
                           : 'border-slate-700 bg-slate-800/60 text-slate-300 hover:border-tech-cyan',
@@ -289,7 +289,7 @@
                   <button
                     @click="testNgrok"
                     :disabled="ngrokTestLoading"
-                    class="flex items-center px-4 py-2.5 mt-3 mb-2 w-full text-white rounded-lg transition-all duration-300"
+                    class="flex items-center px-4 py-2.5 mt-3 mb-2 w-full text-white rounded-lg transition duration-300"
                     :class="
                       ngrokTestLoading
                         ? 'bg-slate-600 cursor-not-allowed'
@@ -333,14 +333,14 @@
                         </div>
                         <button
                           @click="copyShareUrl"
-                          class="flex items-center px-3 py-1.5 text-xs font-medium text-green-400 rounded-lg border transition-all duration-200 bg-green-500/20 border-green-500/40 hover:bg-green-500/30"
+                          class="flex items-center px-3 py-1.5 text-xs font-medium text-green-400 rounded-lg border transition duration-200 bg-green-500/20 border-green-500/40 hover:bg-green-500/30"
                         >
                           <i class="mr-1 fas fa-copy"></i>
                           {{ t('copyLink') }}
                         </button>
                         <button
                           @click="showQr = true"
-                          class="flex items-center px-2 py-2 ml-2 text-xs font-medium text-green-400 rounded-lg border transition-all duration-200 bg-green-500/20 border-green-500/40 hover:bg-green-500/30"
+                          class="flex items-center px-2 py-2 ml-2 text-xs font-medium text-green-400 rounded-lg border transition duration-200 bg-green-500/20 border-green-500/40 hover:bg-green-500/30"
                         >
                           <i class="mr-1 fas fa-qrcode"></i>
                         </button>
@@ -375,12 +375,12 @@
                   <div class="flex gap-2 mt-6">
                     <button
                       @click="exportApps"
-                      class="flex relative flex-1 justify-center items-center px-4 py-2.5 text-white bg-gradient-to-r rounded-lg transition-all duration-300 from-tech-blue to-tech-cyan hover:opacity-90"
+                      class="flex relative flex-1 justify-center items-center px-4 py-2.5 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-blue to-tech-cyan hover:opacity-90"
                     >
                       <i class="mr-2 fas fa-download"></i>{{ t('exportApps') }}
                     </button>
                     <label
-                      class="flex relative flex-1 justify-center items-center px-4 py-2.5 text-white bg-gradient-to-r rounded-lg transition-all duration-300 cursor-pointer from-tech-cyan to-tech-blue hover:opacity-90"
+                      class="flex relative flex-1 justify-center items-center px-4 py-2.5 text-white bg-gradient-to-r rounded-lg transition duration-300 cursor-pointer from-tech-cyan to-tech-blue hover:opacity-90"
                     >
                       <i class="mr-2 fas fa-upload"></i>{{ t('importApps') }}
                       <input type="file" accept=".json" class="hidden" @change="importApps" />
@@ -395,7 +395,7 @@
                   <div class="grid grid-cols-1 gap-3">
                     <button
                       @click="openRootFolder('')"
-                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition-all duration-300 from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
+                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
                     >
                       <i class="mr-3 text-xl fas fa-folder-open"></i>
                       <span>{{ t('openRootFolder') }}</span>
@@ -403,7 +403,7 @@
 
                     <button
                       @click="openRootFolder('input')"
-                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition-all duration-300 from-tech-cyan to-tech-blue hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
+                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-cyan to-tech-blue hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
                     >
                       <i class="mr-3 text-xl fas fa-upload"></i>
                       <span>{{ t('openInputFolder') }}</span>
@@ -411,7 +411,7 @@
 
                     <button
                       @click="openRootFolder('output')"
-                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition-all duration-300 from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
+                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
                     >
                       <i class="mr-3 text-xl fas fa-download"></i>
                       <span>{{ t('openOutputFolder') }}</span>
@@ -419,7 +419,7 @@
 
                     <button
                       @click="openRootFolder('custom_nodes')"
-                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition-all duration-300 from-tech-cyan to-tech-blue hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
+                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-cyan to-tech-blue hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
                     >
                       <i class="mr-3 text-xl fas fa-puzzle-piece"></i>
                       <span>{{ t('openPluginsFolder') }}</span>
@@ -427,14 +427,14 @@
 
                     <button
                       @click="openRootFolder('models')"
-                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition-all duration-300 from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
+                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
                     >
                       <i class="mr-3 text-xl fas fa-cube"></i>
                       <span>{{ t('openModelsFolder') }}</span>
                     </button>
                     <button
                       @click="openCMD('python')"
-                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition-all duration-300 from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
+                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
                     >
                       <i class="mr-3 text-xl fa-brands fa-python"></i>
                       <span>{{ t('openPythonVenv') }}</span>
@@ -473,7 +473,7 @@
               <div class="pt-4" v-if="!['quick'].includes(activeTab)">
                 <button
                   @click="handleClickConfirm"
-                  class="py-3 w-full font-medium text-white bg-gradient-to-r rounded-lg transition-all cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
+                  class="py-3 w-full font-medium text-white bg-gradient-to-r rounded-lg transition cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
                 >
                   {{ t('saveSettings') }}
                 </button>
@@ -901,7 +901,7 @@ onMounted(async () => {
   }
 
   .app-imageUrl {
-    transition: transform 0.5s ease;
+    transition: transform 0.2s ease-out;
   }
 
   .glass-card:hover .app-imageUrl {
@@ -962,7 +962,7 @@ onMounted(async () => {
   }
 
   .slide-leave-active {
-    transition: opacity 0.3s ease-in, transform 0.3s ease-in;
+    transition: opacity 0.25s ease-out, transform 0.25s ease-out;
   }
 
   .slide-enter-from,
@@ -972,7 +972,7 @@ onMounted(async () => {
   }
 
   .card-enter-active {
-    transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
 
   .card-enter-from {
@@ -1027,7 +1027,7 @@ body {
 }
 
 .app-imageUrl {
-  transition: transform 0.5s ease;
+  transition: transform 0.2s ease-out;
 }
 
 .glass-card:hover .app-imageUrl {
@@ -1088,7 +1088,7 @@ body {
 }
 
 .slide-leave-active {
-  transition: opacity 0.3s ease-in, transform 0.3s ease-in;
+  transition: opacity 0.25s ease-out, transform 0.25s ease-out;
 }
 
 .slide-enter-from,
@@ -1098,7 +1098,7 @@ body {
 }
 
 .card-enter-active {
-  transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .card-enter-from {

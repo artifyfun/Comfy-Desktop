@@ -50,14 +50,14 @@
         <button
           v-if="searchQuery.trim()"
           @click="$emit('clear-search')"
-          class="px-6 py-2 font-medium text-white bg-gradient-to-r rounded-lg transition-all cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90"
+          class="px-6 py-2 font-medium text-white bg-gradient-to-r rounded-lg transition cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90"
         >
           {{ t('clearSearch') }}
         </button>
         <button
           v-if="selectedCategory"
           @click="$emit('clear-filter')"
-          class="px-6 py-2 font-medium text-white bg-gradient-to-r rounded-lg transition-all cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90"
+          class="px-6 py-2 font-medium text-white bg-gradient-to-r rounded-lg transition cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90"
         >
           {{ t('clearFilter') }}
         </button>
@@ -257,7 +257,7 @@ onUnmounted(() => {
 }
 
 .card-enter-active {
-  transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .card-enter-from {

@@ -558,7 +558,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease, width 0.3s ease, height 0.3s ease, transform 0.3s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
 }
 
 .close-btn:hover {
@@ -882,15 +882,16 @@ onMounted(() => {
   content: '';
   position: absolute;
   top: 0;
-  left: -100%;
+  left: 0;
   width: 100%;
   height: 100%;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-  transition: left 0.5s;
+  transform: translateX(-100%);
+  transition: transform 0.3s ease-out;
 }
 
 .btn:hover::before {
-  left: 100%;
+  transform: translateX(200%);
 }
 
 .btn:disabled {

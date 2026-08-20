@@ -100,7 +100,7 @@
         <button
           @click="handleCategoryChange('')"
           :class="[
-            'px-3 py-1 text-xs rounded-full transition-all',
+            'px-3 py-1 text-xs rounded-full transition',
             selectedCategory === '' 
               ? 'bg-tech-blue text-white' 
               : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
@@ -113,7 +113,7 @@
           :key="category"
           @click="handleCategoryChange(category)"
           :class="[
-            'px-3 py-1 text-xs rounded-full transition-all',
+            'px-3 py-1 text-xs rounded-full transition',
             selectedCategory === category 
               ? 'bg-tech-blue text-white' 
               : 'bg-slate-700 text-slate-300 hover:bg-slate-600'

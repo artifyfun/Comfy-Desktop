@@ -175,3 +175,23 @@ select::placeholder {
   color: #6b7280; /* 更暗的灰色 */
   opacity: 1;
 }
+
+/* 动效可访问性：尊重系统「减少动态效果」 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* hover 动效只在支持精确指针的设备上启用 */
+@media (hover: hover) and (pointer: fine) {
+  .group:hover .group-hover\:scale-105,
+  .group:hover .group-hover\:scale-110 {
+    transform: scale(1.05);
+  }
+}

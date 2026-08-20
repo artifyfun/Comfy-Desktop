@@ -33,7 +33,7 @@
           :alt="layout.item.filename"
           loading="lazy"
           decoding="async"
-          class="relative w-full h-full object-cover transition-all duration-300 group-hover:scale-105"
+          class="relative w-full h-full object-cover transition duration-300 group-hover:scale-105"
           :class="{ 'opacity-0': !loadedItems.has(layout.item.id) }"
           @load="onImgLoad(layout.item, $event)"
           @error="$emit('img-error', $event, layout.item)"

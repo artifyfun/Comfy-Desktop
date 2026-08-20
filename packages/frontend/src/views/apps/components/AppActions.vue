@@ -5,7 +5,7 @@
       <div class="flex items-center space-x-4" v-if="isElectron && props.showCreate">
         <a-dropdown :trigger="['click']">
           <button
-            class="flex items-center px-5 py-3 space-x-2 font-semibold text-white bg-gradient-to-r rounded-lg transition-all cursor-pointer floating-btn from-tech-blue to-tech-cyan hover:opacity-90"
+            class="flex items-center px-5 py-3 space-x-2 font-semibold text-white bg-gradient-to-r rounded-lg transition cursor-pointer floating-btn from-tech-blue to-tech-cyan hover:opacity-90"
           >
             <i class="fas fa-plus"></i>
             <span>{{ t('addNewApp') }}</span>
@@ -54,7 +54,7 @@
           <button
             @click="$emit('update:viewMode', 'grid')"
             :class="[
-              'flex items-center justify-center w-10 h-10 text-sm font-medium rounded-md transition-all',
+              'flex items-center justify-center w-10 h-10 text-sm font-medium rounded-md transition',
               viewMode === 'grid'
                 ? 'text-white bg-tech-blue shadow-lg'
                 : 'text-slate-400 hover:text-white hover:bg-tech-darker'
@@ -66,7 +66,7 @@
           <button
             @click="$emit('update:viewMode', 'compact')"
             :class="[
-              'flex items-center justify-center w-10 h-10 text-sm font-medium rounded-md transition-all',
+              'flex items-center justify-center w-10 h-10 text-sm font-medium rounded-md transition',
               viewMode === 'compact'
                 ? 'text-white bg-tech-blue shadow-lg'
                 : 'text-slate-400 hover:text-white hover:bg-tech-darker'

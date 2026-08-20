@@ -285,7 +285,7 @@ const getHistoryUrl = (item) => {
   }
 
   .slide-leave-active {
-    transition: opacity 0.3s ease-in, transform 0.3s ease-in;
+    transition: opacity 0.25s ease-out, transform 0.25s ease-out;
   }
 
   .slide-enter-from,

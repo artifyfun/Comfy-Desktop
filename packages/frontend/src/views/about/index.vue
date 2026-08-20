@@ -99,16 +99,16 @@ const handleToggleAboutModal = () => {
     content: '';
     position: absolute;
     top: -50%;
-    left: -60%;
+    left: 0;
     width: 20px;
     height: 200%;
     background: rgba(255, 255, 255, 0.3);
-    transform: rotate(25deg);
-    transition: background 0.6s, width 0.6s, height 0.6s, transform 0.6s;
+    transform: translateX(-300%) rotate(25deg);
+    transition: transform 0.3s ease-out;
   }
 
   .btn:hover::after {
-    left: 120%;
+    transform: translateX(1200%) rotate(25deg);
   }
 }
 </style>

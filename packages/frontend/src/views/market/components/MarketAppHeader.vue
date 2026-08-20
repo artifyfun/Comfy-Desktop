@@ -19,7 +19,7 @@
         <nav class="hidden ml-8 space-x-6 md:flex">
           <router-link
             to="/"
-            class="px-3 py-2 text-sm font-medium rounded-lg transition-all duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
+            class="px-3 py-2 text-sm font-medium rounded-lg transition duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
           >
             <i class="mr-2 fas fa-th-large"></i>
             {{ t('appCenter') }}
@@ -29,7 +29,7 @@
         <button
           v-if="isElectron"
           @click="toggleLanguage"
-          class="px-3 py-2 text-sm font-medium rounded-lg transition-all duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
+          class="px-3 py-2 text-sm font-medium rounded-lg transition duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
         >
           <i class="mr-2 fas fa-globe"></i>
           {{ currentLang === 'zh' ? 'EN' : '中文' }}
@@ -38,7 +38,7 @@
         <!-- 关于按钮 -->
         <button
           @click="toggleAboutModal"
-          class="px-3 py-2 text-sm font-medium rounded-lg transition-all duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
+          class="px-3 py-2 text-sm font-medium rounded-lg transition duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
         >
           <i class="mr-2 fas fa-info-circle"></i>
           {{ t('about') }}
@@ -47,7 +47,7 @@
         <button
           v-if="isElectron"
           @click="toggleConfigModal"
-          class="px-3 py-2 text-sm font-medium rounded-lg transition-all duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
+          class="px-3 py-2 text-sm font-medium rounded-lg transition duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
         >
           <i class="mr-2 fas fa-cog"></i>
           {{ t('settings') }}

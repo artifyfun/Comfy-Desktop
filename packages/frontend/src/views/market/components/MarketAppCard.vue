@@ -47,7 +47,7 @@
       <!-- 安装按钮 -->
       <!-- <div class="pt-3 mt-3 border-t border-slate-700">
         <button
-          class="px-4 py-2 w-full text-sm font-medium text-white bg-gradient-to-r rounded-lg transition-all duration-300 cursor-pointer from-tech-green to-tech-cyan hover:from-tech-green/80 hover:to-tech-cyan/80"
+          class="px-4 py-2 w-full text-sm font-medium text-white bg-gradient-to-r rounded-lg transition duration-300 cursor-pointer from-tech-green to-tech-cyan hover:from-tech-green/80 hover:to-tech-cyan/80"
           @click.stop="$emit('install', app)"
         >
           <i class="mr-2 fas fa-download"></i>
@@ -111,7 +111,7 @@ function formatDate(date) {
 }
 
 .app-imageUrl {
-  transition: transform 0.5s ease;
+  transition: transform 0.2s ease-out;
 }
 
 .glass-card:hover .app-imageUrl {
