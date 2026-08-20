@@ -1419,15 +1419,29 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     // (issue #693), wired to the existing `updater.runCheck` entry point
     // — the result flows through the normal broadcast pipeline (title-bar
     // pill / Global Settings panel), so no new update logic is added.
-    // DEV-ONLY: wire the "Toggle Developer Tools" menu item (Ctrl+Shift+I)
-    // so the panelView (A UI) / comfyView can be inspected during dev.
+    // DEV-ONLY: wire the "Toggle Developer Tools" menu item (macOS
+    // Option+Cmd+I / Win Ctrl+Shift+I) so the panelView (A UI) / comfyView
+    // can be inspected during dev. Opens devtools on the CURRENTLY VISIBLE
+    // surface — comfy body (cloud/local canvas) → comfyView, panel body
+    // (chooser/A UI) → panelView. panelView-first order would open devtools
+    // on the hidden panel while the user is looking at the canvas.
     const toggleEmbeddedDevTools = (focusedWindow?: Electron.BaseWindow | null): void => {
       const entry = focusedWindow ? findEntryByHostWindow(focusedWindow as BrowserWindow) : null
       if (entry) {
-        const pv = entry.panelView
-        const target =
-          pv && !pv.webContents.isDestroyed() ? pv.webContents : entry.comfyView.webContents
-        target.openDevTools({ mode: 'detach' })
+        const comfyVisible =
+          entry.activePanel === 'comfy' && entry.panelSurface !== 'artify'
+        const comfyWc = entry.comfyView.webContents
+        const panelWc = entry.panelView?.webContents
+        const target = comfyVisible
+          ? comfyWc.isDestroyed()
+            ? null
+            : comfyWc
+          : panelWc && !panelWc.isDestroyed()
+            ? panelWc
+            : !comfyWc.isDestroyed()
+              ? comfyWc
+              : null
+        target?.openDevTools({ mode: 'detach' })
       } else if (focusedWindow && 'webContents' in focusedWindow) {
         ;(focusedWindow as BrowserWindow).webContents.openDevTools({ mode: 'detach' })
       }
