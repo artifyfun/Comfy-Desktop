@@ -139,12 +139,22 @@
         <div v-if="detail" class="flex flex-col gap-4 md:flex-row">
           <div class="md:w-1/2">
             <!-- Viewer.js inline 预览：滚轮缩放 / 拖拽平移 / 工具栏 -->
-            <img
-              ref="detailImageRef"
-              :src="fullUrl(detail)"
-              class="w-full rounded-lg"
-              alt=""
-            />
+            <div class="relative">
+              <div
+                v-if="!detailLoaded"
+                class="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-slate-800/60"
+              >
+                <a-spin />
+              </div>
+              <img
+                ref="detailImageRef"
+                :src="fullUrl(detail)"
+                class="w-full rounded-lg transition-opacity duration-300"
+                :class="{ 'opacity-0': !detailLoaded }"
+                alt=""
+                @load="onDetailImageLoad"
+              />
+            </div>
             <div class="mt-2 text-center text-xs text-slate-400">
               {{ currentLang === 'zh' ? '滚轮缩放，拖拽平移，点击图片可全屏' : 'Wheel to zoom, drag to pan, click image for fullscreen' }}
             </div>
@@ -224,6 +234,7 @@ const query = ref('')
 const starredOnly = ref(false)
 const detailOpen = ref(false)
 const detail = ref(null)
+const detailLoaded = ref(false)
 const dirs = ref([])
 const activeDir = ref('')
 
@@ -287,6 +298,18 @@ const destroyViewer = () => {
     }
     viewer = null
   }
+}
+
+// 原图加载完成：隐藏 loading，刷新 Viewer 布局
+const onDetailImageLoad = () => {
+  detailLoaded.value = true
+  nextTick(() => {
+    try {
+      viewer?.update()
+    } catch {
+      // Viewer 可能尚未初始化或已销毁
+    }
+  })
 }
 
 watch(detailOpen, (open) => {
@@ -461,6 +484,7 @@ const remove = async (item) => {
 
 const showDetail = (item) => {
   detail.value = item
+  detailLoaded.value = false
   detailOpen.value = true
 }
 

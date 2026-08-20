@@ -52,7 +52,7 @@
 </template>
 
 <script setup>
-import { reactive, provide, watch, defineAsyncComponent } from 'vue'
+import { reactive, provide, watch, defineAsyncComponent, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { SettingOutlined, HomeOutlined } from '@ant-design/icons-vue'
 import { useAppStore } from '@/stores/appStore'
@@ -99,6 +99,23 @@ watch(() => appStore.config?.lang, (newLang) => {
 })
 
 initConfig()
+
+// 空闲时预取常用路由组件，减少后续切换等待
+onMounted(() => {
+  const prefetch = () => {
+    import('@/views/gallery/index.vue')
+    import('@/views/batch/index.vue')
+    import('@/views/models/index.vue')
+    if (isElectron) {
+      import('@/views/market/index.vue')
+    }
+  }
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(prefetch, { timeout: 2000 })
+  } else {
+    setTimeout(prefetch, 1500)
+  }
+})
 
 const handleUpdateConfig = async (config) => {
   await appStore.updateConfig(config)
