@@ -1,85 +1,100 @@
 <template>
   <div class="params-manager">
-    <vxe-table
-      ref="tableRef"
-      :border="true"
-      size="mini"
-      :data="paramsNodes"
-      height="auto"
+    <a-table
+      :data-source="paramsNodes"
+      :columns="columns"
       :loading="state.tableLoading"
-      show-overflow
-      :column-config="{ resizable: true }"
-      :row-config="{ isCurrent: true, isHover: true, drag: true }"
-      :scroll-y="{ enabled: true, gt: 0 }"
-      :edit-config="{ trigger: 'manual', mode: 'row' }"
-      @cell-click="focusNode"
-      @row-dragend="handleSortChange"
+      size="small"
+      :pagination="false"
+      :scroll="{ y: 360 }"
+      row-key="name"
+      :custom-row="customRow"
     >
-      <vxe-column v-for="item in state.columns" :key="item.field" v-bind="item">
-        <template #default="{ row }">
-          <template v-if="['operation'].includes(item.field)">
-            <template v-if="hasEditStatus(row)">
-              <a-tooltip placement="top" :title="t('save')">
-                <CheckOutlined class="operation-icon" @click.stop="saveRowEvent(row)" />
-              </a-tooltip>
-              <a-tooltip placement="top" :title="t('cancel')">
-                <CloseOutlined class="operation-icon" @click.stop="cancelRowEvent()" />
-              </a-tooltip>
-            </template>
-            <template v-else>
-              <a-tooltip placement="top" :title="t('edit')">
-                <EditOutlined class="operation-icon" @click.stop="editRowEvent(row)" />
-              </a-tooltip>
-              <a-tooltip placement="top" :title="t('delete')">
-                <DeleteOutlined class="operation-icon" @click.stop="removeParams(row)" />
-              </a-tooltip>
-            </template>
-          </template>
-          <template v-else-if="['name'].includes(item.field)">
-            <div class="cell-name">
-              <div class="color-block" :style="{ background: row.color }"></div>
-              <a-tooltip placement="top" :title="row.name">
-                <div>{{ row.name }}</div>
-              </a-tooltip>
-            </div>
-          </template>
-          <template v-else-if="['category'].includes(item.field)">
-            <div>{{ row.category === 'input' ? t('input') : t('output') }}</div>
-          </template>
-          <template v-else-if="['title'].includes(item.field)">
-            <a-tooltip placement="top" :title="row.title || row.type">
-              <div>{{ row.title || row.type }}</div>
+      <template #bodyCell="{ column, record, index }">
+        <template v-if="column.key === 'name'">
+          <div class="cell-name">
+            <div class="color-block" :style="{ background: record.color }"></div>
+            <a-tooltip placement="top" :title="record.name">
+              <div>{{ record.name }}</div>
             </a-tooltip>
-          </template>
-          <template v-else-if="['renderComponent'].includes(item.field)">
-            <a-select
-              v-model:value="row.renderComponent"
-              :options="options"
-              size="small"
-              style="width: 100%"
-            ></a-select>
-          </template>
-          <span v-else>{{ row[item.field] }}</span>
+          </div>
         </template>
-      </vxe-column>
-    </vxe-table>
+        <template v-else-if="column.key === 'category'">
+          {{ record.category === 'input' ? t('input') : t('output') }}
+        </template>
+        <template v-else-if="column.key === 'title'">
+          <a-tooltip placement="top" :title="record.title || record.type">
+            <div>{{ record.title || record.type }}</div>
+          </a-tooltip>
+        </template>
+        <template v-else-if="column.key === 'operation'">
+          <a-tooltip placement="top" :title="t('edit')">
+            <EditOutlined class="operation-icon" @click.stop="openEdit(record)" />
+          </a-tooltip>
+          <a-tooltip placement="top" :title="t('delete')">
+            <DeleteOutlined class="operation-icon" @click.stop="removeParams(record)" />
+          </a-tooltip>
+          <a-tooltip placement="top" :title="t('moveUp')">
+            <ArrowUpOutlined
+              class="operation-icon"
+              :class="{ disabled: index === 0 }"
+              @click.stop="moveRow(index, -1)"
+            />
+          </a-tooltip>
+          <a-tooltip placement="top" :title="t('moveDown')">
+            <ArrowDownOutlined
+              class="operation-icon"
+              :class="{ disabled: index === paramsNodes.length - 1 }"
+              @click.stop="moveRow(index, 1)"
+            />
+          </a-tooltip>
+        </template>
+        <template v-else-if="column.key === 'renderComponent'">
+          {{ renderComponentLabel(record.renderComponent) }}
+        </template>
+      </template>
+    </a-table>
+
+    <!-- 编辑弹窗：填表单替代原行内编辑，避免误触、便于一次看清全部可改字段 -->
+    <a-modal
+      v-model:open="state.editOpen"
+      :title="t('editParam')"
+      :ok-text="t('save')"
+      :cancel-text="t('cancel')"
+      destroy-on-close
+      @ok="saveEdit"
+    >
+      <a-form layout="vertical" v-if="state.editing">
+        <a-form-item :label="t('paramName')">
+          <a-input :value="state.editing.name" disabled />
+        </a-form-item>
+        <a-form-item :label="t('belongingNode')">
+          <a-input :value="state.editing.title || state.editing.type" disabled />
+        </a-form-item>
+        <a-form-item :label="t('alias')">
+          <a-input v-model:value="state.editing.description" :placeholder="t('aliasPlaceholder')" />
+        </a-form-item>
+        <a-form-item :label="t('renderComponent')">
+          <a-select
+            v-model:value="state.editing.renderComponent"
+            :options="options"
+            style="width: 100%"
+          />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
-import { CheckOutlined, CloseOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons-vue'
+import { reactive, ref } from 'vue'
+import {
+  EditOutlined,
+  DeleteOutlined,
+  ArrowUpOutlined,
+  ArrowDownOutlined,
+} from '@ant-design/icons-vue'
 import { t } from '@/utils/i18n'
-
-// vxe-table 按需引入（替代全局注册，减小主包体积）
-// 深路径按需引入：'vxe-pc-ui' 包入口会带进全量组件+xe-utils(约 1MB)，
-// 改从 es/input 只取 VxeInput，样式也只取对应文件
-import { VxeUI, VxeTable, VxeColumn } from 'vxe-table'
-import { VxeInput } from 'vxe-pc-ui/es/input'
-import 'vxe-table/lib/style.css'
-import 'vxe-pc-ui/es/input/style.css'
-// 行编辑依赖的输入组件，需显式注册到 VxeUI 才能被 editRender 解析
-VxeUI.component(VxeInput)
 
 const props = defineProps({
   paramsNodes: {
@@ -90,50 +105,20 @@ const props = defineProps({
 
 const emit = defineEmits(['postMessage'])
 
-const tableRef = ref()
-
 const state = reactive({
   tableLoading: false,
-  columns: [
-    {
-      field: 'name',
-      title: t('paramName'),
-      showOverflow: true,
-      width: 200,
-    },
-    {
-      field: 'description',
-      title: t('alias'),
-      showOverflow: true,
-      editRender: {
-        name: 'VxeInput',
-      },
-    },
-    {
-      field: 'category',
-      title: t('paramType'),
-      showOverflow: true,
-    },
-    {
-      field: 'title',
-      title: t('belongingNode'),
-      showOverflow: true,
-    },
-    {
-      field: 'operation',
-      title: t('operation'),
-      showOverflow: false,
-      width: 200,
-      fixed: 'right',
-      dragSort: true,
-    },
-    {
-      field: 'renderComponent',
-      title: t('renderComponent'),
-      showOverflow: false,
-    },
-  ],
+  editOpen: false,
+  editing: null,
 })
+
+const columns = [
+  { title: t('paramName'), key: 'name', dataIndex: 'name', width: 200, ellipsis: true },
+  { title: t('alias'), key: 'description', dataIndex: 'description', ellipsis: true },
+  { title: t('paramType'), key: 'category', dataIndex: 'category', width: 100 },
+  { title: t('belongingNode'), key: 'title', ellipsis: true },
+  { title: t('renderComponent'), key: 'renderComponent', width: 160 },
+  { title: t('operation'), key: 'operation', width: 160, fixed: 'right' },
+]
 
 const options = ref([
   { label: t('textarea'), value: 'textarea' },
@@ -151,6 +136,11 @@ const options = ref([
   { label: t('text'), value: 'text' },
 ])
 
+const renderComponentLabel = (value) => {
+  const hit = options.value.find((o) => o.value === value)
+  return hit ? hit.label : value
+}
+
 const updateParamsNodes = (nodes) => {
   const message = JSON.stringify({
     eventType: 'updateParamsNodes',
@@ -164,52 +154,43 @@ const removeParams = (node) => {
   updateParamsNodes(nodes)
 }
 
-const handleSortChange = () => {
-  const nodes = tableRef.value.getFullData()
+// 上下移动替代原拖拽排序（无需拖拽库，触点更明确）
+const moveRow = (index, offset) => {
+  const target = index + offset
+  if (target < 0 || target >= props.paramsNodes.length) return
+  const nodes = [...props.paramsNodes]
+  const [row] = nodes.splice(index, 1)
+  nodes.splice(target, 0, row)
   updateParamsNodes(nodes)
 }
 
+// 点击行 → 画布定位到对应节点
 const centerOnNode = (node) => {
   const message = JSON.stringify({
     eventType: 'centerOnNode',
     data: node,
   })
-  console.log(node)
   emit('postMessage', message)
 }
 
-const hasEditStatus = (row) => {
-  const $table = tableRef.value
-  if ($table) {
-    return $table.isEditByRow(row)
-  }
-}
-const editRowEvent = (row) => {
-  const $table = tableRef.value
-  if ($table) {
-    $table.setEditRow(row)
-  }
-}
-const saveRowEvent = (row) => {
-  const $table = tableRef.value
-  if ($table) {
-    $table.clearEdit().then(() => {
-      updateParamsNodes(props.paramsNodes)
-      console.log('保存成功')
-    })
-  }
-}
-const cancelRowEvent = () => {
-  const $table = tableRef.value
-  if ($table) {
-    $table.clearEdit()
-  }
+const customRow = (record) => ({
+  onClick: () => centerOnNode(record),
+})
+
+// 编辑弹窗：浅拷贝工作副本，取消不落盘，保存才 postMessage 回写
+const openEdit = (record) => {
+  state.editing = { ...record }
+  state.editOpen = true
 }
 
-const focusNode = ({ row }) => {
-  if (!hasEditStatus(row)) {
-    centerOnNode(row)
-  }
+const saveEdit = () => {
+  if (!state.editing) return
+  // 编辑对象是浅拷贝副本，按 name 匹配回写原列表
+  const nodes = props.paramsNodes.map((item) =>
+    item.name === state.editing.name ? { ...item, ...state.editing } : item,
+  )
+  updateParamsNodes(nodes)
+  state.editOpen = false
 }
 </script>
 
@@ -224,6 +205,17 @@ const focusNode = ({ row }) => {
       height: 10px;
       border-radius: 50%;
       margin-right: 10px;
+      flex-shrink: 0;
+    }
+  }
+  .operation-icon {
+    font-size: 14px;
+    margin-right: 10px;
+    cursor: pointer;
+    &.disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+      pointer-events: none;
     }
   }
 }

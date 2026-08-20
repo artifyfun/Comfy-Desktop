@@ -20,7 +20,7 @@ const isDark = useDark({
   valueLight: 'light',
 })
 
-// 设置暗色模式（vxe-table 主题随 ParamsManager 局部按需引入，此处不再全量 import）
+// 设置暗色模式
 const setDarkMode = (darkMode) => {
   isDark.value = darkMode
   useToggle(darkMode)
