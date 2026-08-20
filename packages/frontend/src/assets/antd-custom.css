@@ -270,4 +270,12 @@
     height: 36px;
     font-size: 13px;
   }
+
+  /* 输入框 wrapper 与搜索按钮保持同一高度，避免窄屏下错位 */
+  .ant-input-affix-wrapper {
+    height: 36px;
+  }
+  .ant-input-affix-wrapper .ant-input {
+    height: 100%;
+  }
 } 
