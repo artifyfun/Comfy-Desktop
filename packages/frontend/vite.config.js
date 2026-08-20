@@ -52,6 +52,50 @@ export default defineConfig(({ command, mode }) => {
           // 应用模式构建配置
           outDir: 'dist/frontend', // 修改输出目录
           entry: './src/main.js',
+          rollupOptions: {
+            output: {
+              // 社区常见 vendor 分包：稳定第三方库单独成 chunk，
+              // 业务迭代时浏览器可继续命中缓存
+                manualChunks(id) {
+                  if (!id.includes('node_modules')) return undefined
+                  if (
+                    id.includes('node_modules/vue/') ||
+                    id.includes('node_modules/vue-router/') ||
+                    id.includes('node_modules/pinia/') ||
+                    id.includes('node_modules/@vueuse/')
+                  ) {
+                    return 'vue-vendor'
+                  }
+                  if (
+                    id.includes('node_modules/ant-design-vue/') ||
+                    id.includes('node_modules/@ant-design/icons-vue/')
+                  ) {
+                    return 'antd-vendor'
+                  }
+                  if (id.includes('node_modules/monaco-editor/')) {
+                    return 'monaco-vendor'
+                  }
+                  if (id.includes('node_modules/xlsx/')) {
+                    return 'xlsx-vendor'
+                  }
+                  if (
+                    id.includes('node_modules/viewerjs/') ||
+                    id.includes('node_modules/vue-json-pretty/')
+                  ) {
+                    return 'gallery-vendor'
+                  }
+                  if (
+                    id.includes('node_modules/dayjs/') ||
+                    id.includes('node_modules/localforage/') ||
+                    id.includes('node_modules/axios/') ||
+                    id.includes('node_modules/splitpanes/')
+                  ) {
+                    return 'utils-vendor'
+                  }
+                  return undefined
+                },
+            },
+          },
         },
     server: {
       proxy: {

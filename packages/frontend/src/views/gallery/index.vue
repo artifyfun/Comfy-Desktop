@@ -160,7 +160,15 @@
               <div class="mb-1 font-medium text-slate-600">
                 {{ currentLang === 'zh' ? '生成参数（完整 JSON，可复原生成）' : 'Generation params (full JSON, reproducible)' }}
               </div>
-              <pre class="whitespace-pre-wrap">{{ detailJson }}</pre>
+              <VueJsonPretty
+                v-if="detailJsonData"
+                :data="detailJsonData"
+                :deep="2"
+                show-line-numbers
+                show-icon
+                :show-length="true"
+              />
+              <pre v-else class="whitespace-pre-wrap">{{ detailJson }}</pre>
             </div>
             <div v-else class="rounded bg-slate-100 p-3 text-xs text-slate-500">
               {{ currentLang === 'zh' ? '该图片暂无参数快照' : 'No parameter snapshot for this image' }}
@@ -193,6 +201,8 @@ import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import Viewer from 'viewerjs'
 import 'viewerjs/dist/viewer.css'
+import VueJsonPretty from 'vue-json-pretty'
+import 'vue-json-pretty/lib/styles.css'
 import AppHeader from '../apps/components/AppHeader.vue'
 import GalleryVirtualGrid from './components/GalleryVirtualGrid.vue'
 import { useAppStore } from '@/stores/appStore'
@@ -229,6 +239,16 @@ const detailJson = computed(() => {
     return JSON.stringify(JSON.parse(raw), null, 2)
   } catch {
     return raw
+  }
+})
+
+// 给 vue-json-pretty 用的对象形式（无法解析时返回 null）
+const detailJsonData = computed(() => {
+  if (!detailJson.value) return null
+  try {
+    return JSON.parse(detailJson.value)
+  } catch {
+    return null
   }
 })
 
