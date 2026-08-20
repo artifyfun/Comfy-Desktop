@@ -117,7 +117,6 @@ onMounted(() => {
   const prefetch = () => {
     import('@/views/gallery/index.vue')
     import('@/views/batch/index.vue')
-    import('@/views/models/index.vue')
     if (isElectron) {
       import('@/views/market/index.vue')
     }

@@ -31,13 +31,6 @@
             <i class="mr-2 fas fa-images"></i>
             {{ t('gallery') }}
           </router-link>
-          <router-link
-            to="/models"
-            class="px-3 py-2 text-sm font-medium rounded-lg transition duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
-          >
-            <i class="mr-2 fas fa-cube"></i>
-            {{ t('modelsTitle') }}
-          </router-link>
         </nav>
         <!-- 语言切换 -->
         <button

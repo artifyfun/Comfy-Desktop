@@ -10,7 +10,7 @@
       <div class="global-search-bar">
         <a-input
           v-model:value="keyword"
-          :placeholder="currentLang === 'zh' ? '搜索应用 / 图片 / 模型…' : 'Search apps / images / models…'"
+          :placeholder="currentLang === 'zh' ? '搜索应用 / 图片…' : 'Search apps / images…'"
           size="large"
           allow-clear
           @pressEnter="runSearch"
@@ -77,20 +77,6 @@
             <span class="text-xs text-slate-500 truncate">{{ img.app_name || '' }}</span>
           </div>
         </div>
-
-        <div v-if="models.length" class="search-group">
-          <div class="search-group-title">{{ currentLang === 'zh' ? '模型' : 'Models' }}</div>
-          <div
-            v-for="model in models"
-            :key="'model-' + model.id"
-            class="search-item"
-            @click="goModels"
-          >
-            <i class="mr-2 fas fa-cube text-tech-blue"></i>
-            <span class="flex-1 truncate">{{ model.name }}</span>
-            <span class="text-xs text-slate-500 truncate">{{ model.type || '' }}</span>
-          </div>
-        </div>
       </div>
     </div>
   </a-modal>
@@ -117,10 +103,9 @@ const loading = ref(false)
 const apps = ref([])
 const marketApps = ref([])
 const images = ref([])
-const models = ref([])
 
 const hasResults = computed(
-  () => apps.value.length + marketApps.value.length + images.value.length + models.value.length > 0
+  () => apps.value.length + marketApps.value.length + images.value.length > 0
 )
 
 const serverHost = computed(() => appStore.config?.serverHost || '')
@@ -131,7 +116,6 @@ const runSearch = async () => {
     apps.value = []
     marketApps.value = []
     images.value = []
-    models.value = []
     return
   }
   loading.value = true
@@ -163,18 +147,6 @@ const runSearch = async () => {
     })
     const imgJson = await imgRes.json()
     images.value = (imgJson?.data?.items) || []
-
-    // 模型（一次拉全量后前端过滤）
-    const modelRes = await fetch(`${serverHost.value}/api/models/list`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    })
-    const modelJson = await modelRes.json()
-    const allModels = modelJson?.data?.items || []
-    models.value = allModels.filter(
-      (m) => m.name?.toLowerCase().includes(ql) || m.type?.toLowerCase().includes(ql)
-    )
   } catch (e) {
     console.warn('global search failed', e)
   } finally {
@@ -192,7 +164,6 @@ watch(
       apps.value = []
       marketApps.value = []
       images.value = []
-      models.value = []
     }
   }
 )
@@ -210,11 +181,6 @@ const goMarket = () => {
 const goImages = () => {
   emit('close')
   router.push({ path: '/gallery', query: { q: keyword.value.trim() } })
-}
-
-const goModels = () => {
-  emit('close')
-  router.push({ path: '/models', query: { q: keyword.value.trim() } })
 }
 </script>
 
