@@ -7,15 +7,21 @@
     @cancel="$emit('close')"
   >
     <div class="global-search">
-      <a-input-search
-        v-model:value="keyword"
-        :placeholder="currentLang === 'zh' ? '搜索应用 / 图片 / 模型…' : 'Search apps / images / models…'"
-        size="large"
-        autofocus
-        allow-clear
-        @change="onInput"
-        @search="runSearch"
-      />
+      <div class="global-search-bar">
+        <a-input
+          v-model:value="keyword"
+          :placeholder="currentLang === 'zh' ? '搜索应用 / 图片 / 模型…' : 'Search apps / images / models…'"
+          size="large"
+          allow-clear
+          @pressEnter="runSearch"
+          @change="onInput"
+        >
+          <template #prefix><i class="fas fa-search text-slate-400"></i></template>
+        </a-input>
+        <a-button type="primary" size="large" @click="runSearch">
+          {{ currentLang === 'zh' ? '搜索' : 'Search' }}
+        </a-button>
+      </div>
 
       <div v-if="loading" class="py-10 text-center text-slate-400">
         <a-spin />
@@ -213,6 +219,18 @@ const goModels = () => {
 </script>
 
 <style scoped>
+.global-search-bar {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.global-search-bar .ant-input-affix-wrapper {
+  flex: 1;
+}
+.global-search-bar .ant-btn {
+  height: 40px;
+  border-radius: 8px;
+}
 .global-search-results {
   max-height: 60vh;
   overflow-y: auto;
