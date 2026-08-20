@@ -50,14 +50,15 @@
 </template>
 
 <script setup>
-import { reactive, provide, watch } from 'vue'
+import { reactive, provide, watch, defineAsyncComponent } from 'vue'
 import { useRouter } from 'vue-router'
-import { theme, Modal, notification, message } from 'ant-design-vue'
-import { SettingOutlined, BulbOutlined, HomeOutlined } from '@ant-design/icons-vue'
+import { SettingOutlined, HomeOutlined } from '@ant-design/icons-vue'
 import { useAppStore } from '@/stores/appStore'
 import { isElectron } from '@/utils'
 import { t, setLanguage, useI18n } from '@/utils/i18n'
 import { createThemeConfig } from '@/utils/antd-theme'
+// Config 弹窗较重(含大量表单+antd 组件),首屏未必打开——异步加载,不进主 chunk
+const Config = defineAsyncComponent(() => import('@/components/Config/index.vue'))
 
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import enUS from 'ant-design-vue/es/locale/en_US'

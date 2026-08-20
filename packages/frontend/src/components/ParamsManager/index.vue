@@ -67,15 +67,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive } from 'vue'
 import { CheckOutlined, CloseOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import { t } from '@/utils/i18n'
 
 // vxe-table 按需引入（替代全局注册，减小主包体积）
-import { VxeUI, VxeTable, VxeColumn, VxeColgroup } from 'vxe-table'
-import { VxeInput } from 'vxe-pc-ui'
+// 深路径按需引入：'vxe-pc-ui' 包入口会带进全量组件+xe-utils(约 1MB)，
+// 改从 es/input 只取 VxeInput，样式也只取对应文件
+import { VxeUI, VxeTable, VxeColumn } from 'vxe-table'
+import { VxeInput } from 'vxe-pc-ui/es/input'
 import 'vxe-table/lib/style.css'
-import 'vxe-pc-ui/lib/style.css'
+import 'vxe-pc-ui/es/input/style.css'
 // 行编辑依赖的输入组件，需显式注册到 VxeUI 才能被 editRender 解析
 VxeUI.component(VxeInput)
 
