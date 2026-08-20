@@ -8,19 +8,26 @@
   >
     <div class="global-search">
       <div class="global-search-bar">
-        <a-input
-          v-model:value="keyword"
-          :placeholder="currentLang === 'zh' ? '搜索应用 / 图片…' : 'Search apps / images…'"
-          size="large"
-          allow-clear
-          @pressEnter="runSearch"
-          @change="onInput"
-        >
-          <template #prefix><i class="fas fa-search text-slate-400"></i></template>
-        </a-input>
-        <a-button type="primary" size="large" @click="runSearch">
-          {{ currentLang === 'zh' ? '搜索' : 'Search' }}
-        </a-button>
+        <div class="relative flex-1">
+          <input
+            v-model="keyword"
+            type="text"
+            :placeholder="currentLang === 'zh' ? '搜索应用 / 图片…' : 'Search apps / images…'"
+            class="px-4 py-2 pl-10 w-full text-white rounded-lg tech-input focus:outline-none"
+            @keyup.enter="runSearch"
+            @input="onInput"
+          />
+          <i
+            class="absolute left-3 top-1/2 transform -translate-y-1/2 fas fa-search text-slate-400"
+          ></i>
+          <button
+            v-if="keyword.trim()"
+            @click="clearKeyword"
+            class="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-white"
+          >
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
       </div>
 
       <div v-if="loading" class="py-10 text-center text-slate-400">
@@ -38,12 +45,7 @@
       <div v-else class="global-search-results">
         <div v-if="apps.length" class="search-group">
           <div class="search-group-title">{{ currentLang === 'zh' ? '应用' : 'Apps' }}</div>
-          <div
-            v-for="app in apps"
-            :key="'app-' + app.id"
-            class="search-item"
-            @click="goApp(app)"
-          >
+          <div v-for="app in apps" :key="'app-' + app.id" class="search-item" @click="goApp(app)">
             <i class="mr-2 fas fa-th-large text-tech-blue"></i>
             <span class="flex-1 truncate">{{ app.name }}</span>
             <span class="text-xs text-slate-500 truncate">{{ app.category || '' }}</span>
@@ -66,12 +68,7 @@
 
         <div v-if="images.length" class="search-group">
           <div class="search-group-title">{{ currentLang === 'zh' ? '图片' : 'Images' }}</div>
-          <div
-            v-for="img in images"
-            :key="'img-' + img.id"
-            class="search-item"
-            @click="goImages"
-          >
+          <div v-for="img in images" :key="'img-' + img.id" class="search-item" @click="goImages">
             <i class="mr-2 fas fa-image text-tech-blue"></i>
             <span class="flex-1 truncate">{{ img.filename }}</span>
             <span class="text-xs text-slate-500 truncate">{{ img.app_name || '' }}</span>
@@ -105,7 +102,7 @@ const marketApps = ref([])
 const images = ref([])
 
 const hasResults = computed(
-  () => apps.value.length + marketApps.value.length + images.value.length > 0
+  () => apps.value.length + marketApps.value.length + images.value.length > 0,
 )
 
 const serverHost = computed(() => appStore.config?.serverHost || '')
@@ -127,7 +124,7 @@ const runSearch = async () => {
       (a) =>
         a.name?.toLowerCase().includes(ql) ||
         a.description?.toLowerCase().includes(ql) ||
-        a.category?.toLowerCase().includes(ql)
+        a.category?.toLowerCase().includes(ql),
     )
 
     // 市场应用
@@ -136,17 +133,17 @@ const runSearch = async () => {
       (a) =>
         a.name?.toLowerCase().includes(ql) ||
         a.description?.toLowerCase().includes(ql) ||
-        a.category?.toLowerCase().includes(ql)
+        a.category?.toLowerCase().includes(ql),
     )
 
     // 图片（gallery 列表接口支持 q）
     const imgRes = await fetch(`${serverHost.value}/api/gallery/list`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ page: 1, pageSize: 10, q })
+      body: JSON.stringify({ page: 1, pageSize: 10, q }),
     })
     const imgJson = await imgRes.json()
-    images.value = (imgJson?.data?.items) || []
+    images.value = imgJson?.data?.items || []
   } catch (e) {
     console.warn('global search failed', e)
   } finally {
@@ -155,6 +152,12 @@ const runSearch = async () => {
 }
 
 const onInput = useDebounceFn(runSearch, 300)
+
+// 清空关键词并触发搜索（结果列表随之清空）
+const clearKeyword = () => {
+  keyword.value = ''
+  runSearch()
+}
 
 watch(
   () => props.open,
@@ -165,7 +168,7 @@ watch(
       marketApps.value = []
       images.value = []
     }
-  }
+  },
 )
 
 const goApp = (app) => {
@@ -187,15 +190,20 @@ const goImages = () => {
 <style scoped>
 .global-search-bar {
   display: flex;
-  gap: 8px;
   align-items: stretch;
 }
-.global-search-bar .ant-input-affix-wrapper {
-  flex: 1;
+/* 与应用中心一致的搜索输入框样式（单层边框） */
+.tech-input {
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(56, 70, 102, 0.6);
+  transition:
+    background 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
 }
-.global-search-bar .ant-btn {
-  height: 40px;
-  border-radius: 8px;
+.tech-input:focus {
+  border-color: #0ea5e9;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
 }
 .global-search-results {
   max-height: 60vh;

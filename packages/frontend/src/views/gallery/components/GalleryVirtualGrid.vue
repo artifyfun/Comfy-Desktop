@@ -2,14 +2,17 @@
   <div ref="scrollContainer" class="gallery-virtual-scroll" @scroll.passive="onScroll">
     <div :style="{ height: totalHeight + 'px', position: 'relative' }">
       <div
-        :style="{ transform: `translateY(${virtualRows.start * rowHeight}px)` }"
+        :style="{ transform: `translateY(${virtualRows[0]?.start ?? 0}px)` }"
         class="gallery-virtual-items"
       >
         <div
-          v-for="row in visibleRows"
+          v-for="row in virtualRows"
           :key="row.key"
           class="gallery-row"
-          :style="{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, height: rowHeight + 'px' }"
+          :style="{
+            gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+            height: rowHeight + 'px',
+          }"
         >
           <div
             v-for="item in rows[row.index]"
@@ -99,13 +102,17 @@ const rows = computed(() => {
   return out
 })
 
-const virtualizer = useVirtualizer({
-  count: computed(() => rows.value.length),
-  getScrollElement: () => scrollContainer.value,
-  estimateSize: () => rowHeight,
-  overscan: 2,
-  getItemKey: (index) => rows.value[index]?.[0]?.id ?? index,
-})
+// options 整体包成 computed（MaybeRef 用法），count 传普通数字；
+// 直接传 computed 引用时 count 变化不会驱动 virtualizer 更新，导致不渲染
+const virtualizer = useVirtualizer(
+  computed(() => ({
+    count: rows.value.length,
+    getScrollElement: () => scrollContainer.value,
+    estimateSize: () => rowHeight,
+    overscan: 2,
+    getItemKey: (index) => rows.value[index]?.[0]?.id ?? index,
+  })),
+)
 
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalHeight = computed(() => virtualizer.value.getTotalSize())
@@ -147,7 +154,7 @@ watch(scrollContainer, (el) => {
 
 watch(
   () => props.items.length,
-  () => nextTick(() => virtualizer.value.measure())
+  () => nextTick(() => virtualizer.value.measure()),
 )
 
 onUnmounted(() => {

@@ -7,13 +7,13 @@
 
       <!-- 可见行容器（基于 @tanstack/vue-virtual 行级虚拟化） -->
       <div
-        :style="{ transform: `translateY(${virtualRows.start * rowHeight}px)` }"
+        :style="{ transform: `translateY(${virtualRows[0]?.start ?? 0}px)` }"
         class="virtual-items-container"
       >
         <div
-          v-for="row in visibleRows"
+          v-for="row in virtualRows"
           :key="row.key"
-          class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+          class="grid grid-cols-1 gap-6 mb-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
         >
           <AppCard
             v-for="app in rows[row.index]"
@@ -117,13 +117,18 @@ const rows = computed(() => {
 })
 
 // @tanstack/vue-virtual：行级虚拟化
-const virtualizer = useVirtualizer({
-  count: computed(() => rows.value.length),
-  getScrollElement: () => scrollContainer.value,
-  estimateSize: () => rowHeight.value,
-  overscan: 2,
-  getItemKey: (index) => rows.value[index]?.[0]?.id ?? index,
-})
+// 注意：options 必须整体包成 computed（MaybeRef 用法），count 传普通数字。
+// 若 count 直接传 computed 引用，rows 变化时 virtualizer 的 options 不会更新，
+// virtual-core 拿到的 count 是 ref 对象本身，测量循环永不执行，导致卡片不渲染。
+const virtualizer = useVirtualizer(
+  computed(() => ({
+    count: rows.value.length,
+    getScrollElement: () => scrollContainer.value,
+    estimateSize: () => rowHeight.value,
+    overscan: 2,
+    getItemKey: (index) => rows.value[index]?.[0]?.id ?? index,
+  })),
+)
 
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalHeight = computed(() => virtualizer.value.getTotalSize())

@@ -14,22 +14,36 @@
               {{ t('gallery') }}
             </h1>
             <span class="text-sm text-slate-400">
-              {{ viewMode === 'dirs' ? dirsCount : total }} {{ currentLang === 'zh' ? '项' : 'items' }}
+              {{ viewMode === 'dirs' ? dirsCount : total }}
+              {{ currentLang === 'zh' ? '项' : 'items' }}
             </span>
           </div>
           <div class="flex items-center gap-2">
-            <div class="flex items-center gap-1">
-              <a-input
-                v-model:value="query"
-                :placeholder="currentLang === 'zh' ? '搜索文件名 / 应用名' : 'Search filename / app'"
-                style="width: 180px"
-                allow-clear
-                @pressEnter="onFilterChange"
-                @change="onFilterChange"
+            <div class="relative">
+              <input
+                v-model="query"
+                type="text"
+                :placeholder="
+                  currentLang === 'zh' ? '搜索文件名 / 应用名' : 'Search filename / app'
+                "
+                class="px-4 py-2 pl-10 w-full text-white rounded-lg tech-input focus:outline-none"
+                style="width: 200px"
+                @keyup.enter="onFilterChange"
+                @input="onFilterChange"
               />
-              <a-button @click="onFilterChange">
-                <i class="fas fa-search"></i>
-              </a-button>
+              <i
+                class="absolute left-3 top-1/2 transform -translate-y-1/2 fas fa-search text-slate-400"
+              ></i>
+              <button
+                v-if="query"
+                @click="
+                  query = ''
+                  onFilterChange()
+                "
+                class="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-white"
+              >
+                <i class="fas fa-times"></i>
+              </button>
             </div>
             <a-checkbox v-model:checked="starredOnly" @change="onFilterChange">
               {{ currentLang === 'zh' ? '仅收藏' : 'Starred' }}
@@ -37,7 +51,11 @@
             <a-button :loading="scanning" @click="scan">
               <i class="mr-1 fas fa-sync"></i>{{ currentLang === 'zh' ? '扫描' : 'Scan' }}
             </a-button>
-            <a-button v-if="viewMode === 'items'" :type="selectionMode ? 'primary' : 'default'" @click="toggleSelectionMode">
+            <a-button
+              v-if="viewMode === 'items'"
+              :type="selectionMode ? 'primary' : 'default'"
+              @click="toggleSelectionMode"
+            >
               <i class="mr-1 fas fa-check-square"></i>{{ currentLang === 'zh' ? '多选' : 'Select' }}
             </a-button>
           </div>
@@ -49,20 +67,30 @@
           class="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-slate-800/60 px-4 py-2"
         >
           <span class="text-sm text-slate-300">
-            {{ currentLang === 'zh' ? `已选 ${selectedIds.length} 项` : `${selectedIds.length} selected` }}
+            {{
+              currentLang === 'zh'
+                ? `已选 ${selectedIds.length} 项`
+                : `${selectedIds.length} selected`
+            }}
           </span>
           <a-button size="small" @click="batchStar(true)">
             <i class="mr-1 fas fa-star"></i>{{ currentLang === 'zh' ? '批量收藏' : 'Star all' }}
           </a-button>
           <a-button size="small" @click="batchStar(false)">
-            <i class="mr-1 fas fa-star-half-alt"></i>{{ currentLang === 'zh' ? '取消收藏' : 'Unstar all' }}
+            <i class="mr-1 fas fa-star-half-alt"></i
+            >{{ currentLang === 'zh' ? '取消收藏' : 'Unstar all' }}
           </a-button>
           <a-popconfirm
-            :title="currentLang === 'zh' ? `确定删除选中的 ${selectedIds.length} 项吗？` : `Delete ${selectedIds.length} selected items?`"
+            :title="
+              currentLang === 'zh'
+                ? `确定删除选中的 ${selectedIds.length} 项吗？`
+                : `Delete ${selectedIds.length} selected items?`
+            "
             @confirm="batchRemove"
           >
             <a-button size="small" danger>
-              <i class="mr-1 fas fa-trash"></i>{{ currentLang === 'zh' ? '批量删除' : 'Delete all' }}
+              <i class="mr-1 fas fa-trash"></i
+              >{{ currentLang === 'zh' ? '批量删除' : 'Delete all' }}
             </a-button>
           </a-popconfirm>
           <a-button size="small" @click="toggleSelectionMode">
@@ -86,15 +114,14 @@
 
           <div v-else class="dir-grid">
             <!-- 全部目录卡片 -->
-            <div
-              class="dir-card group"
-              @click="selectDir('')"
-            >
+            <div class="dir-card group" @click="selectDir('')">
               <div class="dir-thumb dir-thumb-all">
                 <i class="fas fa-layer-group"></i>
               </div>
               <div class="dir-name">{{ currentLang === 'zh' ? '全部' : 'All' }}</div>
-              <div class="dir-count">{{ dirsCount }} {{ currentLang === 'zh' ? '项' : 'items' }}</div>
+              <div class="dir-count">
+                {{ dirsCount }} {{ currentLang === 'zh' ? '项' : 'items' }}
+              </div>
             </div>
 
             <!-- 目录卡片 -->
@@ -173,11 +200,12 @@
         v-model:open="detailOpen"
         :title="detail?.filename"
         width="960px"
+        :top="48"
         :footer="null"
         @after-close="destroyViewer"
       >
         <div v-if="detail" class="flex flex-col gap-4 md:flex-row">
-          <div class="md:w-1/2">
+          <div class="md:w-2/3">
             <!-- Viewer.js inline 预览：滚轮缩放 / 拖拽平移 / 工具栏 -->
             <div class="relative">
               <div
@@ -196,52 +224,42 @@
               />
             </div>
             <div class="mt-2 text-center text-xs text-slate-400">
-              {{ currentLang === 'zh' ? '滚轮缩放，拖拽平移，点击图片可全屏' : 'Wheel to zoom, drag to pan, click image for fullscreen' }}
+              {{
+                currentLang === 'zh'
+                  ? '滚轮缩放，拖拽平移，点击图片可全屏'
+                  : 'Wheel to zoom, drag to pan, click image for fullscreen'
+              }}
             </div>
           </div>
-          <div class="space-y-3 md:w-1/2">
+          <div class="space-y-3 md:w-1/3">
             <a-descriptions :column="1" size="small">
-              <a-descriptions-item :label="currentLang === 'zh' ? '时间' : 'Time'">{{ formatTime(detail.created_at) }}</a-descriptions-item>
-              <a-descriptions-item :label="currentLang === 'zh' ? '应用' : 'App'">{{ detail.app_name || '-' }}</a-descriptions-item>
-              <a-descriptions-item :label="currentLang === 'zh' ? '大小' : 'Size'">{{ formatSize(detail.size) }}</a-descriptions-item>
+              <a-descriptions-item :label="currentLang === 'zh' ? '时间' : 'Time'">{{
+                formatTime(detail.created_at)
+              }}</a-descriptions-item>
+              <a-descriptions-item :label="currentLang === 'zh' ? '应用' : 'App'">{{
+                detail.app_name || '-'
+              }}</a-descriptions-item>
+              <a-descriptions-item :label="currentLang === 'zh' ? '大小' : 'Size'">{{
+                formatSize(detail.size)
+              }}</a-descriptions-item>
             </a-descriptions>
-
-            <div v-if="detailJson" class="max-h-48 overflow-auto rounded bg-slate-100 p-3 text-xs">
-              <div class="mb-1 font-medium text-slate-600">
-                {{
-                  detailJsonType === 'workflow'
-                    ? (currentLang === 'zh' ? 'UI 工作流（可拖回画布编辑）' : 'UI workflow (drag back to canvas)')
-                    : detailJsonType === 'prompt'
-                      ? (currentLang === 'zh' ? 'API Prompt（可复原生成）' : 'API prompt (reproducible)')
-                      : (currentLang === 'zh' ? '应用输入参数' : 'App inputs')
-                }}
-              </div>
-              <VueJsonPretty
-                v-if="detailJsonData"
-                :data="detailJsonData"
-                :deep="2"
-                show-line-numbers
-                show-icon
-                :show-length="true"
-              />
-              <pre v-else class="whitespace-pre-wrap">{{ detailJson }}</pre>
-            </div>
-            <div v-else class="rounded bg-slate-100 p-3 text-xs text-slate-500">
-              {{ currentLang === 'zh' ? '该图片暂无参数快照' : 'No parameter snapshot for this image' }}
-            </div>
 
             <div class="flex flex-wrap gap-2">
               <a-button v-if="detail.app_id" type="primary" @click="reRun(detail)">
-                <i class="mr-1 fas fa-redo"></i>{{ currentLang === 'zh' ? '用此参数再跑' : 'Re-run' }}
+                <i class="mr-1 fas fa-redo"></i
+                >{{ currentLang === 'zh' ? '用此参数再跑' : 'Re-run' }}
               </a-button>
               <a-button @click="download(detail)">
-                <i class="mr-1 fas fa-download"></i>{{ currentLang === 'zh' ? '下载图片' : 'Download image' }}
+                <i class="mr-1 fas fa-download"></i
+                >{{ currentLang === 'zh' ? '下载图片' : 'Download image' }}
               </a-button>
               <a-button v-if="detailJson" @click="copyWorkflow">
-                <i class="mr-1 fas fa-copy"></i>{{ currentLang === 'zh' ? '复制工作流' : 'Copy workflow' }}
+                <i class="mr-1 fas fa-copy"></i
+                >{{ currentLang === 'zh' ? '复制工作流' : 'Copy workflow' }}
               </a-button>
               <a-button v-if="detailJson" @click="downloadWorkflow">
-                <i class="mr-1 fas fa-file-code"></i>{{ currentLang === 'zh' ? '下载工作流' : 'Download workflow' }}
+                <i class="mr-1 fas fa-file-code"></i
+                >{{ currentLang === 'zh' ? '下载工作流' : 'Download workflow' }}
               </a-button>
             </div>
           </div>
@@ -257,8 +275,6 @@ import { useRouter, useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import Viewer from 'viewerjs'
 import 'viewerjs/dist/viewer.css'
-import VueJsonPretty from 'vue-json-pretty'
-import 'vue-json-pretty/lib/styles.css'
 import AppHeader from '../apps/components/AppHeader.vue'
 import GalleryVirtualMasonry from './components/GalleryVirtualMasonry.vue'
 import { useAppStore } from '@/stores/appStore'
@@ -291,6 +307,7 @@ const serverHost = computed(() => appStore.config?.serverHost || '')
 const comfyHost = computed(() => appStore.config?.comfyHost || '')
 // 工作流/参数快照：优先 UI workflow（可拖回画布编辑），
 // 其次完整 API prompt（可直接复原生成），最后退回 App 输入参数。
+// 供「复制工作流 / 下载工作流」按钮使用。
 const detailJson = computed(() => {
   if (!detail.value) return ''
   const raw = detail.value.workflow_json || detail.value.prompt_json || detail.value.inputs_json
@@ -300,25 +317,6 @@ const detailJson = computed(() => {
   } catch {
     return raw
   }
-})
-
-// 给 vue-json-pretty 用的对象形式（无法解析时返回 null）
-const detailJsonData = computed(() => {
-  if (!detailJson.value) return null
-  try {
-    return JSON.parse(detailJson.value)
-  } catch {
-    return null
-  }
-})
-
-// 当前展示的 JSON 来源类型，用于标题提示
-const detailJsonType = computed(() => {
-  if (!detail.value) return ''
-  if (detail.value.workflow_json) return 'workflow'
-  if (detail.value.prompt_json) return 'prompt'
-  if (detail.value.inputs_json) return 'inputs'
-  return ''
 })
 
 // Viewer.js 图片预览
@@ -418,8 +416,8 @@ const fetchList = async () => {
         pageSize,
         q: query.value || undefined,
         starred: starredOnly.value,
-        subfolder: activeDir.value || undefined
-      })
+        subfolder: activeDir.value || undefined,
+      }),
     })
     const data = await res.json()
     if (data.code === 200 || data.success) {
@@ -443,11 +441,11 @@ const fetchDirs = async () => {
     const res = await fetch(`${serverHost.value}/api/gallery/dirs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q: query.value || undefined, starred: starredOnly.value })
+      body: JSON.stringify({ q: query.value || undefined, starred: starredOnly.value }),
     })
     const data = await res.json()
     if (data.code === 200 || data.success) {
-      dirs.value = (data.data?.dirs) || []
+      dirs.value = data.data?.dirs || []
     } else {
       throw new Error(data.message)
     }
@@ -461,7 +459,9 @@ const fetchDirs = async () => {
 
 // 目录显示名：取路径最后一段（兼容 \ 与 / 分隔）
 const dirLabel = (subfolder) => {
-  const segs = String(subfolder || '').split(/[\\/]/).filter(Boolean)
+  const segs = String(subfolder || '')
+    .split(/[\\/]/)
+    .filter(Boolean)
   return segs[segs.length - 1] || subfolder
 }
 
@@ -507,7 +507,7 @@ const scan = async () => {
     message.success(
       currentLang.value === 'zh'
         ? `扫描完成：新增 ${payload.added}/${payload.scanned}`
-        : `Scan done: ${payload.added}/${payload.scanned} added`
+        : `Scan done: ${payload.added}/${payload.scanned} added`,
     )
     if (viewMode.value === 'dirs') {
       fetchDirs()
@@ -544,7 +544,7 @@ const batchStar = async (starred) => {
     await fetch(`${serverHost.value}/api/gallery/batch-star`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: selectedIds.value, starred })
+      body: JSON.stringify({ ids: selectedIds.value, starred }),
     })
     items.value.forEach((i) => {
       if (selectedIds.value.includes(i.id)) i.starred = starred ? 1 : 0
@@ -552,10 +552,12 @@ const batchStar = async (starred) => {
     message.success(
       currentLang.value === 'zh'
         ? `已${starred ? '收藏' : '取消收藏'} ${selectedIds.value.length} 项`
-        : `${selectedIds.value.length} item(s) ${starred ? 'starred' : 'unstarred'}`
+        : `${selectedIds.value.length} item(s) ${starred ? 'starred' : 'unstarred'}`,
     )
   } catch (e) {
-    message.error(`${currentLang.value === 'zh' ? '批量操作失败' : 'Batch operation failed'}: ${e.message}`)
+    message.error(
+      `${currentLang.value === 'zh' ? '批量操作失败' : 'Batch operation failed'}: ${e.message}`,
+    )
   }
 }
 
@@ -565,7 +567,7 @@ const batchRemove = async () => {
     await fetch(`${serverHost.value}/api/gallery/batch-remove`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: selectedIds.value })
+      body: JSON.stringify({ ids: selectedIds.value }),
     })
     items.value = items.value.filter((i) => !selectedIds.value.includes(i.id))
     total.value -= selectedIds.value.length
@@ -573,7 +575,9 @@ const batchRemove = async () => {
     selectionMode.value = false
     message.success(currentLang.value === 'zh' ? '已删除选中项' : 'Selected items deleted')
   } catch (e) {
-    message.error(`${currentLang.value === 'zh' ? '批量删除失败' : 'Batch delete failed'}: ${e.message}`)
+    message.error(
+      `${currentLang.value === 'zh' ? '批量删除失败' : 'Batch delete failed'}: ${e.message}`,
+    )
   }
 }
 
@@ -582,7 +586,7 @@ const toggleStar = async (item) => {
   await fetch(`${serverHost.value}/api/gallery/star`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: item.id, starred: !!item.starred })
+    body: JSON.stringify({ id: item.id, starred: !!item.starred }),
   })
 }
 
@@ -590,7 +594,7 @@ const remove = async (item) => {
   await fetch(`${serverHost.value}/api/gallery/remove`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: item.id })
+    body: JSON.stringify({ id: item.id }),
   })
   items.value = items.value.filter((i) => i.id !== item.id)
   total.value--
@@ -609,21 +613,29 @@ const download = (item) => {
 // 复制完整工作流/参数 JSON（与生成该图一致，可复原生成）
 const copyWorkflow = async () => {
   if (!detailJson.value) {
-    message.warning(currentLang.value === 'zh' ? '该图片暂无参数快照' : 'No parameter snapshot for this image')
+    message.warning(
+      currentLang.value === 'zh' ? '该图片暂无参数快照' : 'No parameter snapshot for this image',
+    )
     return
   }
   try {
     await navigator.clipboard.writeText(detailJson.value)
-    message.success(currentLang.value === 'zh' ? '工作流已复制到剪贴板' : 'Workflow copied to clipboard')
+    message.success(
+      currentLang.value === 'zh' ? '工作流已复制到剪贴板' : 'Workflow copied to clipboard',
+    )
   } catch {
-    message.error(currentLang.value === 'zh' ? '复制失败，请手动选择复制' : 'Copy failed, please copy manually')
+    message.error(
+      currentLang.value === 'zh' ? '复制失败，请手动选择复制' : 'Copy failed, please copy manually',
+    )
   }
 }
 
 // 下载工作流/参数 JSON
 const downloadWorkflow = () => {
   if (!detailJson.value) {
-    message.warning(currentLang.value === 'zh' ? '该图片暂无参数快照' : 'No parameter snapshot for this image')
+    message.warning(
+      currentLang.value === 'zh' ? '该图片暂无参数快照' : 'No parameter snapshot for this image',
+    )
     return
   }
   const base = detail.value?.filename?.replace(/\.[^.]+$/, '') || 'workflow'
@@ -657,6 +669,21 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* 与应用中心一致的搜索输入框样式（单层边框） */
+.tech-input {
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(56, 70, 102, 0.6);
+  transition:
+    background 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+.tech-input:focus {
+  border-color: #0ea5e9;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+}
+
 .dir-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
