@@ -32,7 +32,6 @@ import {
   resolveTheme
 } from '../lib/ipc/shared'
 import * as mainTelemetry from '../lib/telemetry'
-import { isArtifyPanelMode } from '../artifylab/panelMode'
 import { getUserTier } from '../lib/userTier'
 import { trackFirebaseAuthReporter } from '../lib/firebaseAuthIdentity'
 import { forwardDatadogError } from '../lib/processErrorHandlers'
@@ -1015,9 +1014,10 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     previewInstallationId: null,
     coldStartPendingReveal: false,
     _installCleanup: null,
-    // Single-window mode hosts the A UI in the panelView from the start;
-    // native mode keeps the chooser surface.
-    panelSurface: isArtifyPanelMode() ? 'artify' : 'chooser',
+    // 默认进入 C 侧原生界面（chooser：安装选择/实例管理），A UI 由两侧
+    // 浮动按钮互切（C 侧 🎨 浮标 loadArtifyLab、A 侧 comfyui 浮标
+    // loadComfyUI）。此前单窗口模式开机直进 A UI，安装引导藏在按钮后面。
+    panelSurface: 'chooser',
     // Bound below so it can self-reference the freshly-created entry.
     detachInstall: () => {}
   }
