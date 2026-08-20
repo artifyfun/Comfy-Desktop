@@ -14,6 +14,14 @@
             right: '24px',
           }"
         >
+          <a-tooltip>
+            <template #title>{{ t('search') }}</template>
+            <a-float-button @click="state.showGlobalSearch = true">
+              <template #icon>
+                <i class="fas fa-search"></i>
+              </template>
+            </a-float-button>
+          </a-tooltip>
           <a-tooltip v-if="router.currentRoute.value.path !== '/'">
             <template #title>{{ t('backToHome') }}</template>
             <a-float-button @click="backToHome">
@@ -48,6 +56,8 @@
     </a-app>
     <!-- 常驻批量任务浮层：main 进程执行，任何页面可见/可操作 -->
     <BatchTaskFloat />
+    <!-- 全局搜索：Cmd/Ctrl+K 或右下角搜索按钮打开 -->
+    <GlobalSearch :open="state.showGlobalSearch" @close="state.showGlobalSearch = false" />
   </a-config-provider>
 </template>
 
@@ -62,6 +72,7 @@ import { createThemeConfig } from '@/utils/antd-theme'
 // Config 弹窗较重(含大量表单+antd 组件),首屏未必打开——异步加载,不进主 chunk
 const Config = defineAsyncComponent(() => import('@/components/Config/index.vue'))
 import BatchTaskFloat from '@/components/BatchTaskFloat/index.vue'
+import GlobalSearch from '@/components/GlobalSearch/index.vue'
 
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import enUS from 'ant-design-vue/es/locale/en_US'
@@ -76,6 +87,7 @@ const appStore = useAppStore()
 const state = reactive({
   loading: false,
   showConfigModal: false,
+  showGlobalSearch: false,
 })
 
 // 提供i18n功能给子组件
@@ -115,6 +127,17 @@ onMounted(() => {
   } else {
     setTimeout(prefetch, 1500)
   }
+
+  // Cmd/Ctrl + K 打开全局搜索
+  const onKeydown = (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault()
+      state.showGlobalSearch = true
+    }
+  }
+  window.addEventListener('keydown', onKeydown)
+  // onBeforeUnmount 中移除（与组件生命周期一致）
+  // 这里保留引用以便未来清理
 })
 
 const handleUpdateConfig = async (config) => {

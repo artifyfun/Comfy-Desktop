@@ -30,7 +30,37 @@
             <a-button :loading="scanning" @click="scan">
               <i class="mr-1 fas fa-sync"></i>{{ currentLang === 'zh' ? '扫描' : 'Scan' }}
             </a-button>
+            <a-button v-if="viewMode === 'items'" :type="selectionMode ? 'primary' : 'default'" @click="toggleSelectionMode">
+              <i class="mr-1 fas fa-check-square"></i>{{ currentLang === 'zh' ? '多选' : 'Select' }}
+            </a-button>
           </div>
+        </div>
+
+        <!-- 批量操作条 -->
+        <div
+          v-if="viewMode === 'items' && selectionMode"
+          class="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-slate-800/60 px-4 py-2"
+        >
+          <span class="text-sm text-slate-300">
+            {{ currentLang === 'zh' ? `已选 ${selectedIds.length} 项` : `${selectedIds.length} selected` }}
+          </span>
+          <a-button size="small" @click="batchStar(true)">
+            <i class="mr-1 fas fa-star"></i>{{ currentLang === 'zh' ? '批量收藏' : 'Star all' }}
+          </a-button>
+          <a-button size="small" @click="batchStar(false)">
+            <i class="mr-1 fas fa-star-half-alt"></i>{{ currentLang === 'zh' ? '取消收藏' : 'Unstar all' }}
+          </a-button>
+          <a-popconfirm
+            :title="currentLang === 'zh' ? `确定删除选中的 ${selectedIds.length} 项吗？` : `Delete ${selectedIds.length} selected items?`"
+            @confirm="batchRemove"
+          >
+            <a-button size="small" danger>
+              <i class="mr-1 fas fa-trash"></i>{{ currentLang === 'zh' ? '批量删除' : 'Delete all' }}
+            </a-button>
+          </a-popconfirm>
+          <a-button size="small" @click="toggleSelectionMode">
+            {{ currentLang === 'zh' ? '取消' : 'Cancel' }}
+          </a-button>
         </div>
 
         <!-- ===== 目录卡片视图（默认） ===== -->
@@ -112,11 +142,14 @@
               :comfy-host="comfyHost"
               :loading="loading"
               :has-more="items.length < total"
+              :select-mode="selectionMode"
+              :selected-ids="selectedIds"
               @open="showDetail"
               @star="toggleStar"
               @remove="remove"
               @img-error="onImgError"
               @load-more="loadMore"
+              @toggle-select="toggleSelect"
             />
           </div>
 
@@ -213,7 +246,7 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick, watch, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import Viewer from 'viewerjs'
 import 'viewerjs/dist/viewer.css'
@@ -227,10 +260,13 @@ import dayjs from 'dayjs'
 
 const { t, currentLang } = useI18nInComponent()
 const router = useRouter()
+const route = useRoute()
 const appStore = useAppStore()
 
 const viewMode = ref('dirs') // 'dirs' = 目录卡片视图 | 'items' = 目录内图片视图
 const items = ref([])
+const selectionMode = ref(false)
+const selectedIds = ref([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = 60
@@ -478,6 +514,62 @@ const scan = async () => {
   }
 }
 
+// ===== 多选 / 批量操作 =====
+const toggleSelectionMode = () => {
+  selectionMode.value = !selectionMode.value
+  if (!selectionMode.value) {
+    selectedIds.value = []
+  }
+}
+
+const toggleSelect = (item) => {
+  const idx = selectedIds.value.indexOf(item.id)
+  if (idx > -1) {
+    selectedIds.value.splice(idx, 1)
+  } else {
+    selectedIds.value.push(item.id)
+  }
+}
+
+const batchStar = async (starred) => {
+  if (!selectedIds.value.length) return
+  try {
+    await fetch(`${serverHost.value}/api/gallery/batch-star`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: selectedIds.value, starred })
+    })
+    items.value.forEach((i) => {
+      if (selectedIds.value.includes(i.id)) i.starred = starred ? 1 : 0
+    })
+    message.success(
+      currentLang.value === 'zh'
+        ? `已${starred ? '收藏' : '取消收藏'} ${selectedIds.value.length} 项`
+        : `${selectedIds.value.length} item(s) ${starred ? 'starred' : 'unstarred'}`
+    )
+  } catch (e) {
+    message.error(`${currentLang.value === 'zh' ? '批量操作失败' : 'Batch operation failed'}: ${e.message}`)
+  }
+}
+
+const batchRemove = async () => {
+  if (!selectedIds.value.length) return
+  try {
+    await fetch(`${serverHost.value}/api/gallery/batch-remove`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: selectedIds.value })
+    })
+    items.value = items.value.filter((i) => !selectedIds.value.includes(i.id))
+    total.value -= selectedIds.value.length
+    selectedIds.value = []
+    selectionMode.value = false
+    message.success(currentLang.value === 'zh' ? '已删除选中项' : 'Selected items deleted')
+  } catch (e) {
+    message.error(`${currentLang.value === 'zh' ? '批量删除失败' : 'Batch delete failed'}: ${e.message}`)
+  }
+}
+
 const toggleStar = async (item) => {
   item.starred = item.starred ? 0 : 1
   await fetch(`${serverHost.value}/api/gallery/star`, {
@@ -543,7 +635,18 @@ const reRun = (item) => {
   router.push({ path: '/', query: { app: item.app_id, rerun: item.id } })
 }
 
-onMounted(fetchDirs)
+onMounted(() => {
+  const q = typeof route.query.q === 'string' ? route.query.q : ''
+  if (q) {
+    query.value = q
+    viewMode.value = 'items'
+    activeDir.value = ''
+    page.value = 1
+    fetchList()
+  } else {
+    fetchDirs()
+  }
+})
 </script>
 
 <style scoped>

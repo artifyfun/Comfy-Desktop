@@ -1424,6 +1424,8 @@ async function executeBatch() {
     isExecuting.value = true
     executionProgress.total = task.total
     executionProgress.processed = task.processed
+    // 新建一条执行历史（含完整源数据/映射/批量数据），后续轮询增量更新
+    currentHistoryRecordId.value = await createNewHistoryRecord()
     showSuccess('batchExecutionStarted')
 
     // 本页监控：轮询 store 同步进度（离开页面无碍，浮层/再进页面仍可看）
@@ -1440,6 +1442,7 @@ async function executeBatch() {
 let batchWatchStop = null
 function watchBatchTask() {
   if (batchWatchStop) batchWatchStop()
+  let lastResultCount = 0
   const unwatch = watch(
     () => batchTaskStore.status,
     async (st) => {
@@ -1457,6 +1460,34 @@ function watchBatchTask() {
           type: 'info'
         })
       }
+
+      // 增量写入执行历史：新完成的 item 追加到 history.results
+      if (currentHistoryRecordId.value && Array.isArray(st.results)) {
+        const newResults = st.results.slice(lastResultCount)
+        lastResultCount = st.results.length
+        for (const r of newResults) {
+          await upsertHistoryRecord({
+            id: currentHistoryRecordId.value,
+            resultItem: {
+              index: r.index,
+              success: r.success,
+              error: r.error,
+              durationMs: r.durationMs
+            }
+          })
+        }
+        await upsertHistoryRecord({
+          id: currentHistoryRecordId.value,
+          processed: st.processed,
+          success: st.success,
+          failed: st.failed,
+          percent: st.percent,
+          logs: st.currentPreview
+            ? [{ time: new Date().toLocaleTimeString(), message: st.currentPreview, type: 'info' }]
+            : undefined
+        })
+      }
+
       if (st.status !== 'running') {
         isExecuting.value = false
         executionProgress.status = st.status === 'completed' ? 'success' : 'exception'
@@ -1465,6 +1496,16 @@ function watchBatchTask() {
         if (st.status === 'completed') {
           showSuccess('batchExecutionCompleted', {
             total: st.total, success: st.success, failed: st.failed
+          })
+        }
+        if (currentHistoryRecordId.value) {
+          await upsertHistoryRecord({
+            id: currentHistoryRecordId.value,
+            status: st.status === 'completed' ? 'completed' : st.status === 'stopped' ? 'stopped' : 'failed',
+            processed: st.processed,
+            success: st.success,
+            failed: st.failed,
+            percent: st.percent
           })
         }
         if (batchWatchStop) batchWatchStop()

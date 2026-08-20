@@ -155,6 +155,42 @@ export function createGalleryRouter(): express.Router {
     }
   })
 
+  // 批量收藏/取消收藏
+  router.post('/api/gallery/batch-star', (req, res) => {
+    try {
+      const { ids, starred } = req.body ?? {}
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json(createErrorResponse('ids array is required'))
+      }
+      const db = getGalleryDb()
+      const stmt = db.prepare('UPDATE assets SET starred = ? WHERE id = ?')
+      for (const id of ids) {
+        stmt.run(starred ? 1 : 0, Number(id))
+      }
+      res.json(createSuccessResponse({ ids, starred: !!starred }))
+    } catch (e) {
+      res.status(500).json(createErrorResponse((e as Error).message))
+    }
+  })
+
+  // 批量删除（同时删缩略图；物理文件仍不删盘）
+  router.post('/api/gallery/batch-remove', (req, res) => {
+    try {
+      const { ids } = req.body ?? {}
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json(createErrorResponse('ids array is required'))
+      }
+      const db = getGalleryDb()
+      const stmt = db.prepare('DELETE FROM assets WHERE id = ?')
+      for (const id of ids) {
+        stmt.run(Number(id))
+      }
+      res.json(createSuccessResponse({ ids }))
+    } catch (e) {
+      res.status(500).json(createErrorResponse((e as Error).message))
+    }
+  })
+
   /**
    * 出图成功后由前端调用：写入参数/工作流快照。
    * outputs 为 ComfyUI history 的 outputs 结构（filename/subfolder/type），

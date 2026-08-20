@@ -5,15 +5,29 @@
         v-for="layout in visibleLayouts"
         :key="layout.item.id"
         class="group absolute overflow-hidden rounded-lg cursor-pointer bg-slate-800/60"
+        :class="{
+          'ring-2 ring-tech-blue': selectMode && selectedIds.includes(layout.item.id),
+        }"
         :style="{
           left: layout.left + 'px',
           top: layout.top + 'px',
           width: layout.width + 'px',
           height: layout.height + 'px',
         }"
-        @click="$emit('open', layout.item)"
+        @click="onCardClick(layout.item)"
       >
         <div class="absolute inset-0 bg-slate-800/60 animate-pulse"></div>
+        <div
+          v-if="selectMode"
+          class="absolute top-2 left-2 z-10 flex items-center justify-center w-5 h-5 rounded border border-white/60 bg-black/40"
+          :class="{ 'bg-tech-blue border-tech-blue': selectedIds.includes(layout.item.id) }"
+          @click.stop="onCardClick(layout.item)"
+        >
+          <i
+            v-if="selectedIds.includes(layout.item.id)"
+            class="fas fa-check text-white text-xs"
+          ></i>
+        </div>
         <img
           :src="thumbUrl(layout.item)"
           :alt="layout.item.filename"
@@ -62,9 +76,11 @@ const props = defineProps({
   comfyHost: { type: String, default: '' },
   loading: { type: Boolean, default: false },
   hasMore: { type: Boolean, default: false },
+  selectMode: { type: Boolean, default: false },
+  selectedIds: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(['open', 'star', 'remove', 'img-error', 'load-more'])
+const emit = defineEmits(['open', 'star', 'remove', 'img-error', 'load-more', 'toggle-select'])
 
 const scrollContainer = ref(null)
 const minColumnWidth = 220
@@ -145,6 +161,15 @@ const visibleLayouts = computed(() => {
   const bottom = scrollTop.value + viewportHeight.value + 200
   return layouts.value.filter((l) => l.top + l.height >= top && l.top <= bottom)
 })
+
+// 卡片点击：多选模式切换选中，普通模式打开详情
+const onCardClick = (item) => {
+  if (props.selectMode) {
+    emit('toggle-select', item)
+  } else {
+    emit('open', item)
+  }
+}
 
 // 图片加载完成：缓存自然尺寸并触发重排
 const onImgLoad = (item, e) => {

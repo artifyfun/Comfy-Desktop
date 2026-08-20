@@ -162,12 +162,13 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/appStore'
 import AppHeader from '../apps/components/AppHeader.vue'
 import { t } from '@/utils/i18n'
 
 const router = useRouter()
+const route = useRoute()
 const appStore = useAppStore()
 
 const items = ref([])
@@ -277,7 +278,13 @@ async function checkDuplicates() {
   }
 }
 
-onMounted(loadList)
+onMounted(() => {
+  const q = typeof route.query.q === 'string' ? route.query.q : ''
+  if (q) {
+    search.value = q
+  }
+  loadList()
+})
 </script>
 
 <style scoped>
