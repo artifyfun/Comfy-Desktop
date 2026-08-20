@@ -46,6 +46,8 @@
         />
       </div>
     </a-app>
+    <!-- 常驻批量任务浮层：main 进程执行，任何页面可见/可操作 -->
+    <BatchTaskFloat />
   </a-config-provider>
 </template>
 
@@ -59,6 +61,7 @@ import { t, setLanguage, useI18n } from '@/utils/i18n'
 import { createThemeConfig } from '@/utils/antd-theme'
 // Config 弹窗较重(含大量表单+antd 组件),首屏未必打开——异步加载,不进主 chunk
 const Config = defineAsyncComponent(() => import('@/components/Config/index.vue'))
+import BatchTaskFloat from '@/components/BatchTaskFloat/index.vue'
 
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import enUS from 'ant-design-vue/es/locale/en_US'

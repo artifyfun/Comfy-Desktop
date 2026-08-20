@@ -42,6 +42,7 @@ declare module 'vue' {
     ATextarea: typeof import('ant-design-vue/es')['Textarea']
     ATooltip: typeof import('ant-design-vue/es')['Tooltip']
     AUpload: typeof import('ant-design-vue/es')['Upload']
+    BatchTaskFloat: typeof import('./src/components/BatchTaskFloat/index.vue')['default']
     CodeEditor: typeof import('./src/components/CodeEditor/index.vue')['default']
     ComfyuiPlayground: typeof import('./src/components/ComfyuiPlayground/index.vue')['default']
     ComfyuiWorkflowEditor: typeof import('./src/components/ComfyuiWorkflowEditor/index.vue')['default']

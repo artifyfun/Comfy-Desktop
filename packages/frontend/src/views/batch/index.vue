@@ -505,6 +505,7 @@ import { showError, showSuccess, showInfo, uuidv4, getSeed } from '@/utils'
 import CodeEditor from '@/components/CodeEditor/index.vue'
 import { ExcelProcessor } from '@/utils/excel-utils'
 import localforage from 'localforage'
+import { useBatchTaskStore } from '@/stores/batchTaskStore'
 import {
   FolderOpenOutlined,
   FileTextOutlined,
@@ -536,6 +537,7 @@ const state = reactive({
 })
 
 const appStore = useAppStore()
+const batchTaskStore = useBatchTaskStore()
 
 const currentApp = ref(null)
 
@@ -1380,185 +1382,100 @@ function interrupt() {
 
 // 执行批量处理
 async function executeBatch() {
-  if (batchData.value.length === 0) {
-    showError('noDataToProcess')
+  if (batchTaskStore.isRunning) {
+    showError('batchTaskAlreadyRunning')
+    return
+  }
+  if (!currentApp.value?.template?.prompt) {
+    showError('batchExecutionFailed')
     return
   }
 
-  const mappedInputs = state.inputs.filter(input => input.valueMap)
-  if (mappedInputs.length === 0) {
-    showError('noMappedFields')
-    return
-  }
-
-  isExecuting.value = true
-  executionProgress.total = batchData.value.length
-  executionProgress.processed = startFromIndex.value - 1
-  executionProgress.success = 0
-  executionProgress.failed = 0
-  executionProgress.percent = 0
   executionProgress.status = 'normal'
   executionProgress.strokeColor = '#10b981'
   executionProgress.currentItem = ''
   executionLogs.value = []
-  executionTimeStats.totalMs = 0
-  executionTimeStats.count = 0
+
+  executionLogs.value.unshift({
+    time: new Date().toLocaleTimeString(),
+    message: t('batchExecutionStarted'),
+    type: 'info'
+  })
 
   try {
-    // 添加开始日志
-    executionLogs.value.unshift({
-      time: new Date().toLocaleTimeString(),
-      message: t('batchExecutionStarted'),
-      type: 'info'
+    // 提交到 main 进程常驻引擎：离开页面/切换路由不再中断执行
+    const task = await batchTaskStore.submit({
+      prompt: JSON.parse(JSON.stringify(currentApp.value.template.prompt)),
+      inputsMapping: deepClone(state.inputs),
+      items: deepClone(batchData.value),
+      startFrom: startFromIndex.value,
+      notifyUrl: notifyEnabled.value ? notifyWebhookUrl.value.trim() : '',
+      autoShutdown: autoShutdownEnabled.value,
+      appId: currentApp.value.id,
+      appName: currentApp.value.name
     })
+    isExecuting.value = true
+    executionProgress.total = task.total
+    executionProgress.processed = task.processed
+    showSuccess('batchExecutionStarted')
 
-    const startIndex = startFromIndex.value - 1
-    const itemsToProcess = batchData.value.slice(startIndex)
-
-    // 创建执行记录
-    await ensureHistoryLoaded()
-    const recordId = await createNewHistoryRecord()
-    currentHistoryRecordId.value = recordId
-
-    for (let i = 0; i < itemsToProcess.length; i++) {
-      if (!isExecuting.value) {
-        // 执行被停止
-        break
-      }
-
-      const item = itemsToProcess[i]
-      const currentIndex = startIndex + i + 1
-
-      // 更新当前处理的项目
-      executionProgress.currentItem = `${currentIndex}: ${JSON.stringify(item).substring(0, 100)}...`
-
-      const prompt = getPrompt(item)
-      let isSuccess = false
-      let errorErrorMsg = ''
-      const itemStart = nowMs()
-      try {
-        // await new Promise(resolve => setTimeout(resolve, 1000))
-        const result = await getOutputs(prompt)
-        if (result.status.completed) {
-          isSuccess = true
-        }
-      } catch (err) {
-        errorErrorMsg = toErrorMessage(err)
-      }
-      const itemDuration = Math.max(0, nowMs() - itemStart)
-      executionTimeStats.totalMs += itemDuration
-      executionTimeStats.count += 1
-
-      if (isSuccess) {
-        executionProgress.success++
-        executionLogs.value.unshift({
-          time: new Date().toLocaleTimeString(),
-          message: t('itemProcessedSuccessfully', { index: currentIndex }),
-          type: 'success'
-        })
-      } else {
-        executionProgress.failed++
-        executionLogs.value.unshift({
-          time: new Date().toLocaleTimeString(),
-          message: errorErrorMsg,
-          type: 'error'
-        })
-      }
-
-      executionProgress.processed++
-      executionProgress.percent = Math.round((executionProgress.processed / executionProgress.total) * 100)
-
-      // 更新执行记录（逐条）
-      await upsertHistoryRecord({
-        id: recordId,
-        processed: executionProgress.processed,
-        success: executionProgress.success,
-        failed: executionProgress.failed,
-        percent: executionProgress.percent,
-        currentItem: executionProgress.currentItem,
-        logs: [
-          {
-            time: new Date().toLocaleTimeString(),
-            type: isSuccess ? 'success' : 'error',
-            message: isSuccess ? t('itemProcessedSuccessfully', { index: currentIndex }) : String(errorErrorMsg || 'error')
-          }
-        ],
-        resultItem: {
-          index: currentIndex,
-          durationMs: itemDuration,
-          success: isSuccess,
-          error: isSuccess ? null : String(errorErrorMsg || 'error'),
-          data: item
-        }
-      })
-    }
-
-    // 执行完成
-    if (isExecuting.value) {
-      executionProgress.status = 'success'
-      executionProgress.currentItem = ''
-      executionLogs.value.push({
-        time: new Date().toLocaleTimeString(),
-        message: t('batchExecutionCompleted', {
-          total: executionProgress.total,
-          success: executionProgress.success,
-          failed: executionProgress.failed
-        }),
-        type: 'success'
-      })
-      showSuccess('batchExecutionCompleted', {
-        total: executionProgress.total,
-        success: executionProgress.success,
-        failed: executionProgress.failed
-      })
-
-      // 结束记录
-      await upsertHistoryRecord({
-        id: currentHistoryRecordId.value,
-        status: 'completed',
-        currentItem: ''
-      })
-
-      // 卸载模型属清理动作：失败不应把已显示的成功翻成异常，但必须显式记录（Fail Loud）。
-      try {
-        await unloadModel()
-      } catch (e) {
-        console.error('卸载模型失败:', e)
-      }
-      if (notifyEnabled.value && notifyWebhookUrl.value.trim()) {
-        await handleNotify({
-          title: t('notifyBatchCompletedTitle'),
-          body: t('notifyBatchCompletedBody', {
-            total: executionProgress.total,
-            success: executionProgress.success,
-            failed: executionProgress.failed
-          })
-        })
-      }
-      if (autoShutdownEnabled.value) {
-        await handleAutoShutdown()
-      }
-    }
-
+    // 本页监控：轮询 store 同步进度（离开页面无碍，浮层/再进页面仍可看）
+    watchBatchTask()
   } catch (error) {
-    console.error('批量执行失败:', error)
+    console.error('批量任务提交失败:', error)
+    showError('batchExecutionFailed')
     executionProgress.status = 'exception'
     executionProgress.strokeColor = '#ef4444'
-    executionProgress.currentItem = ''
-    executionLogs.value.push({
-      time: new Date().toLocaleTimeString(),
-      message: t('batchExecutionFailed'),
-      type: 'error'
-    })
-    showError('batchExecutionFailed')
-    await upsertHistoryRecord({ id: currentHistoryRecordId.value, status: 'failed', currentItem: '' })
-  } finally {
-    isExecuting.value = false
   }
+}
+
+// 监听常驻任务：同步到本页进度 UI + 落历史记录
+let batchWatchStop = null
+function watchBatchTask() {
+  if (batchWatchStop) batchWatchStop()
+  const unwatch = watch(
+    () => batchTaskStore.status,
+    async (st) => {
+      if (!st) return
+      executionProgress.total = st.total
+      executionProgress.processed = st.processed
+      executionProgress.success = st.success
+      executionProgress.failed = st.failed
+      executionProgress.percent = st.percent
+      executionProgress.currentItem = st.currentPreview
+      if (st.currentPreview) {
+        executionLogs.value.unshift({
+          time: new Date().toLocaleTimeString(),
+          message: st.currentPreview,
+          type: 'info'
+        })
+      }
+      if (st.status !== 'running') {
+        isExecuting.value = false
+        executionProgress.status = st.status === 'completed' ? 'success' : 'exception'
+        executionProgress.strokeColor = st.status === 'completed' ? '#10b981' : '#ef4444'
+        executionProgress.currentItem = ''
+        if (st.status === 'completed') {
+          showSuccess('batchExecutionCompleted', {
+            total: st.total, success: st.success, failed: st.failed
+          })
+        }
+        if (batchWatchStop) batchWatchStop()
+      }
+    },
+    { deep: false }
+  )
+  batchWatchStop = unwatch
 }
 
 // 停止执行
 async function stopExecution() {
+  // 先停 main 进程常驻引擎（interrupt 已由后端执行）
+  try {
+    await batchTaskStore.stop()
+  } catch (e) {
+    console.error('stop batch runner 失败:', e)
+  }
   // 停止动作各自隔离捕获：一个失败不能掩盖另一个，且 interrupt/unload 失败要可见。
   try {
     await interrupt()
@@ -1777,26 +1694,11 @@ onMounted(() => {
   init()
 })
 
-// 离开页面前自动停止执行
+// 离开页面：批量任务已在 main 进程常驻执行，这里只断开本页监控，不再杀任务
 onBeforeUnmount(() => {
-  if (isExecuting.value) {
-    // 页面离开时静默停止，不显示提示信息
-    isExecuting.value = false
-    executionProgress.status = 'exception'
-    executionProgress.strokeColor = '#ef4444'
-    executionProgress.currentItem = ''
-
-    // 如果有electronAPI，尝试停止后端执行。后端失败时返回 {success:false}（不会 reject），
-    // 需显式检查 result.success，否则离开页面后端仍在跑却被当成已停止。
-    if (window.electronAPI) {
-      window.electronAPI.ArtifyLab.stopExecution().then(result => {
-        if (result && result.success === false) {
-          console.error('页面离开时停止执行失败:', result.error)
-        }
-      }).catch(error => {
-        console.error('页面离开时停止执行失败:', error)
-      })
-    }
+  if (batchWatchStop) {
+    batchWatchStop()
+    batchWatchStop = null
   }
 })
 
