@@ -14,6 +14,29 @@ files:
   - '!out/**/*.map'
   - '!reference/*'
   - '!**/*.wsb'
+  # ===== 排除非运行时内容，避免 app.asar 体积膨胀导致 Electron 无法加载 =====
+  # .npmrc 将 pnpm store 指向项目内 .pnpm-store（~1.2GB / 6 万文件），
+  # 不排除会被整个打进 asar，asar 膨胀到 1.5GB 后主进程加载失败（打包安装后白屏/无日志）。
+  - '!.pnpm-store/**'
+  # bootstrap-python 已由 win/mac/linux 的 extraResources 复制到 resources/，asar 内不需要
+  - '!bootstrap-python/**'
+  # 前端源码已由 build:frontend 产出到 src/main/artifylab/public/frontend（extraResources）
+  - '!packages/**'
+  # 开发期产物与工具文件
+  - '!.codegraph/**'
+  - '!e2e/**'
+  - '!**/*.log'
+  - '!CLAUDE.md'
+  - '!release-cache.json'
+  - '!todesktop.json'
+  - '!TESTING.md'
+  - '!linux-dev.sh'
+  - '!vitest.*.ts'
+  - '!playwright.config.ts'
+  - '!tsconfig.e2e.json'
+  - '!tsconfig.test.json'
+  - '!tsconfig.vitest-integration.json'
+  - '!tsconfig.comfy-desktop-bridge-types.json'
 extraResources:
   - from: lib
     to: lib
