@@ -16,7 +16,13 @@ const basePrompt = {
 const mapping = [
   { id: '3', key: 'text', category: 'input', valueType: 'string', valueMap: { key: 'prompt' } },
   { id: '1', key: 'steps', category: 'input', valueType: 'number', valueMap: { key: 'n' } },
-  { id: '2', key: 'ckpt_name', category: 'input', valueType: 'string', manualValue: 'fixed.safetensors' }
+  {
+    id: '2',
+    key: 'ckpt_name',
+    category: 'input',
+    valueType: 'string',
+    manualValue: 'fixed.safetensors'
+  }
 ]
 
 describe('convertValueByType', () => {
@@ -58,10 +64,10 @@ describe('buildItemPrompt', () => {
   })
 
   it('merges valueMap with type conversion and manualValue wins when no map', () => {
-    const out = buildItemPrompt(basePrompt as never, mapping, { prompt: 'hello', n: '30' }) as Record<
-      string,
-      { inputs: Record<string, unknown> }
-    >
+    const out = buildItemPrompt(basePrompt as never, mapping, {
+      prompt: 'hello',
+      n: '30'
+    }) as Record<string, { inputs: Record<string, unknown> }>
     expect(out['3']!.inputs['text']).toBe('hello')
     expect(out['1']!.inputs['steps']).toBe(30) // number, not string
     expect(out['2']!.inputs['ckpt_name']).toBe('fixed.safetensors')

@@ -23,9 +23,7 @@ export function createBatchRouter(): express.Router {
   router.post('/api/batch/start', (req: express.Request, res: express.Response) => {
     try {
       if (isBatchRunning()) {
-        res
-          .status(409)
-          .json(createErrorResponse('a batch task is already running'))
+        res.status(409).json(createErrorResponse('a batch task is already running'))
         return
       }
       const body = req.body as Partial<BatchStartOptions>

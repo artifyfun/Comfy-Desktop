@@ -122,7 +122,8 @@ export function convertValueByType(value: unknown, targetType?: string): unknown
 export function getSeed(n = 15): number {
   let num = ''
   for (let i = 0; i < n; i++) {
-    num += i === 0 ? String(Math.floor(Math.random() * 9 + 1)) : String(Math.floor(Math.random() * 10))
+    num +=
+      i === 0 ? String(Math.floor(Math.random() * 9 + 1)) : String(Math.floor(Math.random() * 10))
   }
   return Number(num)
 }
@@ -289,9 +290,16 @@ async function executeLoop(
         current.updatedAt = nowIso()
         pushLog(
           res.ok ? 'success' : 'error',
-          res.ok ? `#${currentIndex} ok (${durationMs}ms)` : `#${currentIndex} ${res.error ?? 'error'}`
+          res.ok
+            ? `#${currentIndex} ok (${durationMs}ms)`
+            : `#${currentIndex} ${res.error ?? 'error'}`
         )
-        current.results.unshift({ index: currentIndex, success: res.ok, error: res.error, durationMs })
+        current.results.unshift({
+          index: currentIndex,
+          success: res.ok,
+          error: res.error,
+          durationMs
+        })
         if (current.results.length > MAX_RESULTS) current.results.splice(MAX_RESULTS)
       }
     }

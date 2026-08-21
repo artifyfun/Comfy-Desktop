@@ -10,9 +10,7 @@ import extractChunks from 'png-chunks-extract'
  *
  * 这样扫描入库的存量图片也能补全“复制/下载工作流”，不依赖前端上报。
  */
-export function extractPngMetadata(
-  filepath: string
-): { prompt?: string; workflow?: string } {
+export function extractPngMetadata(filepath: string): { prompt?: string; workflow?: string } {
   try {
     const buf = fs.readFileSync(filepath)
     const chunks = extractChunks(buf)

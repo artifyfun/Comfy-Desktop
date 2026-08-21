@@ -1428,8 +1428,7 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     const toggleEmbeddedDevTools = (focusedWindow?: Electron.BaseWindow | null): void => {
       const entry = focusedWindow ? findEntryByHostWindow(focusedWindow as BrowserWindow) : null
       if (entry) {
-        const comfyVisible =
-          entry.activePanel === 'comfy' && entry.panelSurface !== 'artify'
+        const comfyVisible = entry.activePanel === 'comfy' && entry.panelSurface !== 'artify'
         const comfyWc = entry.comfyView.webContents
         const panelWc = entry.panelView?.webContents
         const target = comfyVisible

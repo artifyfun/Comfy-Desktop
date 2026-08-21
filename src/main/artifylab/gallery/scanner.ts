@@ -45,9 +45,7 @@ export async function scanOutputDir(): Promise<{
           const stat = fs.statSync(full)
           const sub = subfolder
           const meta =
-            path.extname(entry.name).toLowerCase() === '.png'
-              ? extractPngMetadata(full)
-              : {}
+            path.extname(entry.name).toLowerCase() === '.png' ? extractPngMetadata(full) : {}
           upsertAsset({
             filename: entry.name,
             subfolder: sub,
