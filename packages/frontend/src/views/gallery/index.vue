@@ -34,7 +34,11 @@
               <i
                 class="absolute left-3 top-1/2 transform -translate-y-1/2 fas fa-search text-slate-400"
               ></i>
-              <button v-if="query" @click="clearQuery" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-white">
+              <button
+                v-if="query"
+                @click="clearQuery"
+                class="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-white"
+              >
                 <i class="fas fa-times"></i>
               </button>
             </div>
@@ -59,13 +63,19 @@
           v-if="viewMode === 'items' && selectionMode"
           class="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-slate-800/60 px-4 py-2"
         >
-          <span class="text-sm text-slate-300">
-            {{
-              currentLang === 'zh'
-                ? `已选 ${selectedIds.length} 项`
-                : `${selectedIds.length} selected`
+          <span class="text-sm text-slate-300">{{ selectedLabel }}</span>
+          <a-button size="small" @click="toggleSelectAll">
+            <i class="mr-1 fas" :class="allSelected ? 'fa-square' : 'fa-check-double'"></i
+            >{{
+              allSelected
+                ? currentLang === 'zh'
+                  ? '取消全选'
+                  : 'Deselect all'
+                : currentLang === 'zh'
+                  ? '全选'
+                  : 'Select all'
             }}
-          </span>
+          </a-button>
           <a-button size="small" @click="batchStar(true)">
             <i class="mr-1 fas fa-star"></i>{{ currentLang === 'zh' ? '批量收藏' : 'Star all' }}
           </a-button>
@@ -76,9 +86,11 @@
           <a-popconfirm
             :title="
               currentLang === 'zh'
-                ? `确定删除选中的 ${selectedIds.length} 项吗？`
-                : `Delete ${selectedIds.length} selected items?`
+                ? `确定删除选中的 ${selectedIds.length} 项吗？磁盘文件将被一并删除，不可恢复`
+                : `Delete ${selectedIds.length} selected items? Files will be removed from disk permanently`
             "
+            ok-text="删除"
+            cancel-text="取消"
             @confirm="batchRemove"
           >
             <a-button size="small" danger>
@@ -137,6 +149,18 @@
               </div>
               <div class="dir-name">{{ dirLabel(d.subfolder) }}</div>
               <div class="dir-count">{{ d.count }} {{ currentLang === 'zh' ? '项' : 'items' }}</div>
+              <div class="dir-del" @click.stop>
+                <a-popconfirm
+                  :title="dirRemoveTitle(d)"
+                  ok-text="删除"
+                  cancel-text="取消"
+                  @confirm="removeDir(d)"
+                >
+                  <a-button size="small" danger type="text" class="dir-del-btn">
+                    <i class="far fa-trash-alt"></i>
+                  </a-button>
+                </a-popconfirm>
+              </div>
             </div>
           </div>
         </template>
@@ -265,7 +289,7 @@
 <script setup>
 import { ref, computed, onMounted, nextTick, watch, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import Viewer from 'viewerjs'
 import 'viewerjs/dist/viewer.css'
 import AppHeader from '../apps/components/AppHeader.vue'
@@ -528,6 +552,28 @@ const toggleSelectionMode = () => {
   }
 }
 
+// 全选 / 取消全选（当前已加载列表）
+const allSelected = computed(
+  () => items.value.length > 0 && items.value.every((i) => selectedIds.value.includes(i.id)),
+)
+// 已选计数文案（含「仅已加载」提示；独立 computed 避免模板内联复杂表达式）
+const selectedLabel = computed(() => {
+  const n = selectedIds.value.length
+  const loadedOnly = items.value.length > 0 && n < total.value
+  if (currentLang.value === 'zh') {
+    return n === 0 ? '已选 0 项' : `已选 ${n} 项${loadedOnly ? '（当前已加载）' : ''}`
+  }
+  return `${n} selected${loadedOnly ? ' (loaded only)' : ''}`
+})
+const toggleSelectAll = () => {
+  if (allSelected.value) {
+    const ids = new Set(items.value.map((i) => i.id))
+    selectedIds.value = selectedIds.value.filter((id) => !ids.has(id))
+  } else {
+    selectedIds.value = [...new Set([...selectedIds.value, ...items.value.map((i) => i.id)])]
+  }
+}
+
 const toggleSelect = (item) => {
   const idx = selectedIds.value.indexOf(item.id)
   if (idx > -1) {
@@ -563,19 +609,59 @@ const batchStar = async (starred) => {
 const batchRemove = async () => {
   if (!selectedIds.value.length) return
   try {
-    await fetch(`${serverHost.value}/api/gallery/batch-remove`, {
+    const res = await fetch(`${serverHost.value}/api/gallery/batch-remove`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids: selectedIds.value }),
     })
+    const data = await res.json()
+    if (data.code !== 200 && !data.success) throw new Error(data.message)
     items.value = items.value.filter((i) => !selectedIds.value.includes(i.id))
     total.value -= selectedIds.value.length
     selectedIds.value = []
     selectionMode.value = false
-    message.success(currentLang.value === 'zh' ? '已删除选中项' : 'Selected items deleted')
+    message.success(
+      currentLang.value === 'zh'
+        ? '已删除选中项（含磁盘文件）'
+        : 'Selected items deleted (files removed)',
+    )
   } catch (e) {
     message.error(
       `${currentLang.value === 'zh' ? '批量删除失败' : 'Batch delete failed'}: ${e.message}`,
+    )
+  }
+}
+
+// 删除整个目录（物理目录 + 缩略图 + 库记录）
+const dirRemoveTitle = (d) =>
+  currentLang.value === 'zh'
+    ? `删除整个目录「${dirLabel(d.subfolder)}」及其 ${d.count} 项图片？磁盘文件将被一并删除，不可恢复`
+    : `Delete directory "${dirLabel(d.subfolder)}" and its ${d.count} images? Files will be removed from disk permanently`
+
+const removeDir = async (d) => {
+  try {
+    const res = await fetch(`${serverHost.value}/api/gallery/remove-dir`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subfolder: d.subfolder }),
+    })
+    const data = await res.json()
+    if (data.code !== 200 && !data.success) throw new Error(data.message)
+    const payload = data.data || data
+    const removed = payload.removedFiles ?? d.count
+    message.success(
+      currentLang.value === 'zh'
+        ? `已删除目录「${dirLabel(d.subfolder)}」（${removed} 个文件）`
+        : `Directory \"${dirLabel(d.subfolder)}\" deleted (${removed} files)`,
+    )
+    if (activeDir.value === d.subfolder) {
+      goBackToDirs()
+    } else {
+      fetchDirs()
+    }
+  } catch (e) {
+    message.error(
+      `${currentLang.value === 'zh' ? '删除目录失败' : 'Delete directory failed'}: ${e.message}`,
     )
   }
 }
@@ -589,14 +675,36 @@ const toggleStar = async (item) => {
   })
 }
 
-const remove = async (item) => {
-  await fetch(`${serverHost.value}/api/gallery/remove`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: item.id }),
+const remove = (item) => {
+  Modal.confirm({
+    title: currentLang.value === 'zh' ? '删除这张图片？' : 'Delete this image?',
+    content:
+      currentLang.value === 'zh'
+        ? '磁盘文件将被一并删除，不可恢复'
+        : 'The file will be removed from disk permanently',
+    okText: currentLang.value === 'zh' ? '删除' : 'Delete',
+    cancelText: currentLang.value === 'zh' ? '取消' : 'Cancel',
+    okButtonProps: { danger: true },
+    async onOk() {
+      const res = await fetch(`${serverHost.value}/api/gallery/remove`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.id }),
+      })
+      const data = await res.json()
+      if (data.code !== 200 && !data.success) throw new Error(data.message)
+      items.value = items.value.filter((i) => i.id !== item.id)
+      total.value--
+      message.success(
+        currentLang.value === 'zh' ? '已删除（含磁盘文件）' : 'Deleted (file removed)',
+      )
+    },
+    onError: (err) => {
+      message.error(
+        `${currentLang.value === 'zh' ? '删除失败' : 'Delete failed'}: ${err?.message ?? err}`,
+      )
+    },
   })
-  items.value = items.value.filter((i) => i.id !== item.id)
-  total.value--
 }
 
 const showDetail = (item) => {
@@ -689,6 +797,7 @@ onMounted(() => {
   gap: 14px;
 }
 .dir-card {
+  position: relative;
   background: rgba(30, 41, 59, 0.6);
   border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 12px;
@@ -698,6 +807,21 @@ onMounted(() => {
 }
 .dir-card:hover {
   border-color: rgba(56, 189, 248, 0.5);
+}
+.dir-del {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 5;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.dir-card:hover .dir-del {
+  opacity: 1;
+}
+.dir-del-btn {
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 6px;
 }
 .dir-thumb {
   height: 110px;

@@ -7,6 +7,60 @@ import { makeThumb, scanOutputDir } from './scanner'
 import { createErrorResponse, createSuccessResponse } from '../utils/errorHandler'
 import { APP_ASSETS_ROUTE, getAppAssetsDir, getAppVersion, listAppVersions } from '../appAssets'
 
+/** 目录名规范化：统一 / 分隔、去尾部斜杠，用于 db 中 \ 与 / 混合存储的匹配 */
+function normalizeDir(s: string): string {
+  return String(s || '')
+    .replace(/[\\/]/g, '/')
+    .replace(/\/+$/, '')
+}
+
+/** 把相对路径（可含 \ 或 /）安全拼接进 base，拒绝越权（.. / 绝对路径） */
+function safeJoin(base: string, rel: string): string | null {
+  const segs = rel.split(/[\\/]/).filter(Boolean)
+  if (segs.includes('..')) return null
+  const full = path.resolve(base, ...segs)
+  if (full !== base && !full.startsWith(base + path.sep)) return null
+  return full
+}
+
+/** 统计目录内文件数（递归） */
+function countFiles(dir: string): number {
+  let n = 0
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.isDirectory()) n += countFiles(path.join(dir, e.name))
+    else n++
+  }
+  return n
+}
+
+/** 删除单条资产对应的磁盘文件 + 缩略图。返回是否删除了物理文件。 */
+function deleteAssetFiles(row: Record<string, unknown>): boolean {
+  const outputDir = getSetting('outputDir')
+  const filename = String(row.filename ?? '')
+  const subfolder = String(row.subfolder ?? '')
+  let removed = false
+  if (outputDir && filename) {
+    const full = safeJoin(outputDir, subfolder ? `${subfolder}/${filename}` : filename)
+    if (full && fs.existsSync(full)) {
+      try {
+        fs.rmSync(full, { force: true })
+        removed = true
+      } catch {
+        // ignore per-file failure
+      }
+    }
+  }
+  // 缩略图：与 scanner.makeThumb 命名规则一致
+  const thumbDir = getGalleryThumbDir()
+  const thumbName = `${subfolder ? subfolder.replace(/[\\/]/g, '_') + '_' : ''}${filename}.jpg`
+  try {
+    fs.rmSync(path.join(thumbDir, thumbName), { force: true })
+  } catch {
+    // ignore
+  }
+  return removed
+}
+
 /**
  * /api/gallery/* 路由 + 缩略图静态服务。
  * 挂载在 artifylab server.ts（history() 之前）。
@@ -143,12 +197,18 @@ export function createGalleryRouter(): express.Router {
     }
   })
 
-  // 删除（同时删库记录 + 缩略图；物理文件交给用户/ComfyUI 管理，第一版不删盘）
+  // 删除单条资产（物理文件 + 缩略图 + 库记录）
   router.post('/api/gallery/remove', (req, res) => {
     try {
       const { id } = req.body ?? {}
       if (!id) return res.status(400).json(createErrorResponse('id is required'))
-      getGalleryDb().prepare('DELETE FROM assets WHERE id = ?').run(Number(id))
+      const db = getGalleryDb()
+      const row = db.prepare('SELECT * FROM assets WHERE id = ?').get(Number(id)) as
+        | Record<string, unknown>
+        | undefined
+      if (!row) return res.status(404).json(createErrorResponse('asset not found'))
+      deleteAssetFiles(row)
+      db.prepare('DELETE FROM assets WHERE id = ?').run(Number(id))
       res.json(createSuccessResponse({ id }))
     } catch (e) {
       res.status(500).json(createErrorResponse((e as Error).message))
@@ -173,7 +233,7 @@ export function createGalleryRouter(): express.Router {
     }
   })
 
-  // 批量删除（同时删缩略图；物理文件仍不删盘）
+  // 批量删除（物理文件 + 缩略图 + 库记录）
   router.post('/api/gallery/batch-remove', (req, res) => {
     try {
       const { ids } = req.body ?? {}
@@ -182,10 +242,76 @@ export function createGalleryRouter(): express.Router {
       }
       const db = getGalleryDb()
       const stmt = db.prepare('DELETE FROM assets WHERE id = ?')
+      let removedFiles = 0
       for (const id of ids) {
+        const row = db.prepare('SELECT * FROM assets WHERE id = ?').get(Number(id)) as
+          | Record<string, unknown>
+          | undefined
+        if (!row) continue
+        removedFiles += deleteAssetFiles(row) ? 1 : 0
         stmt.run(Number(id))
       }
-      res.json(createSuccessResponse({ ids }))
+      res.json(createSuccessResponse({ ids, removedFiles }))
+    } catch (e) {
+      res.status(500).json(createErrorResponse((e as Error).message))
+    }
+  })
+
+  // 删除整个目录（递归删除 output 物理目录 + 全部缩略图 + 库记录）
+  router.post('/api/gallery/remove-dir', (req, res) => {
+    try {
+      const { subfolder } = req.body ?? {}
+      if (typeof subfolder !== 'string' || !subfolder.trim()) {
+        return res.status(400).json(createErrorResponse('subfolder is required'))
+      }
+      const dir = subfolder.trim().replace(/^[\\/]+|[\\/]+$/g, '')
+      if (!dir || dir.split(/[\\/]/).includes('..')) {
+        return res.status(400).json(createErrorResponse('invalid subfolder'))
+      }
+      const outputDir = getSetting('outputDir')
+      if (!outputDir) return res.status(400).json(createErrorResponse('outputDir not configured'))
+      const target = safeJoin(outputDir, dir)
+      if (!target) return res.status(400).json(createErrorResponse('invalid path'))
+
+      // 1. 物理目录（递归）
+      let removedFiles = 0
+      if (fs.existsSync(target)) {
+        removedFiles = countFiles(target)
+        fs.rmSync(target, { recursive: true, force: true })
+      }
+
+      // 2. 缩略图：文件名前缀匹配（含子目录）
+      const thumbPrefix = `${dir.replace(/[\\/]/g, '_')}_`
+      const thumbDir = getGalleryThumbDir()
+      if (fs.existsSync(thumbDir)) {
+        for (const f of fs.readdirSync(thumbDir)) {
+          if (f.startsWith(thumbPrefix)) {
+            try {
+              fs.rmSync(path.join(thumbDir, f), { force: true })
+            } catch {
+              // ignore per-file failure
+            }
+          }
+        }
+      }
+
+      // 3. 库记录：规范化匹配 subfolder（兼容 \ 与 /，含子目录）
+      const norm = normalizeDir(dir)
+      const db = getGalleryDb()
+      const rows = db.prepare('SELECT id, subfolder FROM assets').all() as Array<{
+        id: number
+        subfolder: string | null
+      }>
+      const ids = rows
+        .filter((r) => {
+          const sub = normalizeDir(r.subfolder ?? '')
+          return sub === norm || sub.startsWith(`${norm}/`)
+        })
+        .map((r) => r.id)
+      const stmt = db.prepare('DELETE FROM assets WHERE id = ?')
+      for (const id of ids) stmt.run(id)
+
+      res.json(createSuccessResponse({ subfolder: dir, removedFiles, removedRecords: ids.length }))
     } catch (e) {
       res.status(500).json(createErrorResponse((e as Error).message))
     }
