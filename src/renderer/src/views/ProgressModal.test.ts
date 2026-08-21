@@ -247,6 +247,28 @@ describe('ProgressModal — brand branch state transitions', () => {
     expect(body.exists('[data-testid="install-showcase"]')).toBe(false)
   })
 
+  it('keeps the Cloud showcase through the chained launch leg (past the 70% handoff)', async () => {
+    const { body } = await mountWithOp('inst-launch-leg', {
+      opKind: 'launch',
+      chainSpan: 'launch'
+    })
+    expect(
+      body.exists('[data-testid="install-showcase"]'),
+      'the launch leg is a separate op (opKind != install), so it must ride chainSpan launch'
+    ).toBe(true)
+  })
+
+  it('hides the Cloud showcase for a standalone launch op', async () => {
+    const { body } = await mountWithOp('inst-plain-launch', {
+      opKind: 'launch',
+      chainSpan: null
+    })
+    expect(
+      body.exists('[data-testid="install-showcase"]'),
+      'a plain launch (no install chain) must not show the showcase'
+    ).toBe(false)
+  })
+
   it('renders the success banner on a finished+ok op and auto-closes after the grace delay', async () => {
     const { wrapper, body } = await mountWithOp('inst-1', {
       finished: true,
