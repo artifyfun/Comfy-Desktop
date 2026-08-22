@@ -176,6 +176,12 @@ let userStopped = false
  * 队列再次空闲时重置为 true。
  */
 let sessionFirstFree = true
+/**
+ * 本队列会话内是否**实际执行过** autoShutdown 任务（executeJob 消费任务时记录）。
+ * 区别于 jobs.some(j.autoShutdown)：后者会命中历史残留任务（已完成/已停止的旧记录），
+ * 导致"本次没开自动关机却触发关机"。会话结束时（队列空闲）重置。
+ */
+let sessionAutoShutdown = false
 
 function nowIso(): string {
   return new Date().toISOString()
@@ -307,6 +313,9 @@ async function executeJob(job: BatchJob): Promise<'completed' | 'stopped' | 'fai
   try {
     const comfyOrigin = artifyUtils.getConfig().comfy_origin
 
+    // 本会话实际执行过 autoShutdown 任务（仅记录"本次真正跑的"，历史残留不计入）
+    if (job.autoShutdown) sessionAutoShutdown = true
+
     // 任务前置清理显存：
     //  - 会话首个任务（队列从空闲开始跑的第一次）：无条件 /free，防 C 界面残留模型；
     //  - 后续任务：与上次执行的工作流不同才 /free（同工作流跳过，避免无谓重载）。
@@ -429,6 +438,8 @@ async function pump(): Promise<void> {
       // 队列空闲：下一轮会话的首个任务重新无条件 free（期间用户可能去过 C 界面）
       sessionFirstFree = true
       await finishActionsWhenIdle()
+      // 会话结束，清空本会话的自动关机标记（本次是否触发已由上面决定）
+      sessionAutoShutdown = false
     }
   } finally {
     pumping = false
@@ -454,12 +465,12 @@ async function notifyJob(job: BatchJob): Promise<void> {
   }
 }
 
-/** 队列级 autoShutdown：仅整个队列空闲时触发一次（防多任务时提前关机）；用户手动停止过则不触发 */
+/** 队列级 autoShutdown：仅队列自然跑完时触发；本会话执行过 autoShutdown 任务才算数，用户手动停止过则不触发 */
 async function finishActionsWhenIdle(): Promise<void> {
   if (autoShutdownHandled) return
   autoShutdownHandled = true
   if (userStopped) return // 用户手动停止过队列 → 不再自动关机
-  if (!jobs.some((j) => j.autoShutdown)) return
+  if (!sessionAutoShutdown) return // 本会话没执行过 autoShutdown 任务（含历史残留）→ 不关机
   const serverOrigin = `http://localhost:${artifyUtils.getServerPort() ?? ''}`
   try {
     await fetch(`${serverOrigin}/api/shutdown`, {

@@ -418,4 +418,46 @@ describe('batch queue engine', () => {
     expect(fetchSpy.mock.calls.some(([u]) => String(u).includes('/api/shutdown'))).toBe(false)
     vi.unstubAllGlobals()
   })
+
+  it('residual auto-shutdown job from persistence does not trigger shutdown for new batch', async () => {
+    vi.resetModules()
+    // 持久化里有一条已完成的 autoShutdown 历史任务（旧逻辑 jobs.some 会命中 → 误关机）
+    fs.writeFileSync(
+      queueFile,
+      JSON.stringify([
+        {
+          id: 'old',
+          status: 'completed',
+          autoShutdown: true,
+          startFrom: 1,
+          total: 1,
+          processed: 1,
+          success: 1,
+          failed: 0,
+          percent: 100,
+          currentIndex: 1,
+          currentPreview: '',
+          createdAt: 'now',
+          updatedAt: 'now',
+          prompt: {},
+          inputsMapping: [],
+          items: [],
+          logs: [],
+          results: []
+        }
+      ])
+    )
+    const mod = await import('./batchRunner')
+    mod.loadQueue()
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchSpy)
+    // 本次新提交普通任务（未开自动关机）→ 跑完不应触发关机
+    await mod.startBatch(mkOpts({ appId: 'plain' }))
+    await waitFor(() =>
+      mod.listBatchQueue().every((j) => j.status !== 'queued' && j.status !== 'running')
+    )
+    await new Promise((r) => setTimeout(r, 100))
+    expect(fetchSpy.mock.calls.some(([u]) => String(u).includes('/api/shutdown'))).toBe(false)
+    vi.unstubAllGlobals()
+  })
 })
