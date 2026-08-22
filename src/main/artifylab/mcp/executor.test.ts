@@ -4,7 +4,11 @@ import {
   getExecutionStatus,
   extractOutputs,
   assertSafeMediaUrl,
-  getSeed
+  getSeed,
+  freeIfWorkflowChanged,
+  forceFreeAndTrack,
+  resolveWorkflowKey,
+  resetWorkflowKey
 } from './executor'
 import type { App, ComfyPrompt, ParamNode } from '../appStore'
 
@@ -25,6 +29,9 @@ let fetchMock: ReturnType<typeof vi.fn>
 beforeEach(() => {
   fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
     if (url.startsWith('data:')) return new Response(new Blob(['x']), { status: 200 })
+    if (url.includes('/free')) {
+      return new Response('{}', { status: 200 })
+    }
     if (url.includes('/prompt')) {
       return new Response(JSON.stringify({ prompt_id: 'p-test-1' }), {
         status: 200,
@@ -34,6 +41,8 @@ beforeEach(() => {
     throw new Error(`unexpected fetch: ${url}`)
   })
   vi.stubGlobal('fetch', fetchMock)
+  // 工作流跟踪是模块级状态，跨测试重置，避免"上一个 app"残留影响
+  resetWorkflowKey()
 })
 
 afterEach(() => {
@@ -223,5 +232,47 @@ describe('extractOutputs', () => {
     const out = extractOutputs(paramsNodes, raw)
     expect(String(out['7'])).toContain('x.png')
     expect(String(out['7'])).not.toBe('[object Object]')
+  })
+})
+
+describe('freeIfWorkflowChanged / 工作流切换前置清理', () => {
+  function freeCallCount(): number {
+    return fetchMock.mock.calls.filter(([u]) => String(u).includes('/free')).length
+  }
+
+  it('resolveWorkflowKey: appId 优先，缺失时退化 prompt 指纹', () => {
+    expect(resolveWorkflowKey('app-x')).toBe('app:app-x')
+    expect(resolveWorkflowKey(undefined, { '1': { class_type: 'A', inputs: {} } })).toContain(
+      'prompt:'
+    )
+  })
+
+  it('首次执行 free；同工作流跳过；换工作流再 free', async () => {
+    expect(await freeIfWorkflowChanged(ORIGIN, 'app:a')).toBe(true)
+    expect(await freeIfWorkflowChanged(ORIGIN, 'app:a')).toBe(false)
+    expect(await freeIfWorkflowChanged(ORIGIN, 'app:b')).toBe(true)
+    expect(freeCallCount()).toBe(2)
+  })
+
+  it('forceFreeAndTrack 无条件 free 并更新指纹（后续同 key 跳过）', async () => {
+    await forceFreeAndTrack(ORIGIN, 'app:x')
+    expect(freeCallCount()).toBe(1) // 无条件清了一次
+    expect(await freeIfWorkflowChanged(ORIGIN, 'app:x')).toBe(false) // 指纹已记录 → 跳过
+    expect(freeCallCount()).toBe(1)
+  })
+
+  it('executeApp 切换 app 时发 /free；首次执行也 free（防外部残留）', async () => {
+    const appA = makeApp({ '1': { class_type: 'KSampler', inputs: { seed: 1 } } })
+    const appB: App = {
+      ...makeApp({ '1': { class_type: 'KSampler', inputs: { seed: 2 } } }),
+      id: 'app-2',
+      name: 'app2'
+    }
+    await executeApp(appA, {}, ORIGIN)
+    expect(freeCallCount()).toBe(1) // 首次执行防御性 free
+    await executeApp(appB, {}, ORIGIN)
+    expect(freeCallCount()).toBe(2) // 切换 app → free
+    await executeApp(appA, {}, ORIGIN)
+    expect(freeCallCount()).toBe(3) // 换回 app-a → 又 free
   })
 })

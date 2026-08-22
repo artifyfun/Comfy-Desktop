@@ -416,6 +416,54 @@
               🧹 {{ t('clearLogs') }}
             </button>
           </div>
+
+          <!-- 排队等待提示 -->
+          <div class="queue-waiting-tip" v-if="myJob && myJob.status === 'queued'">
+            <span class="queue-waiting-dot"></span>
+            <span>本任务已加入队列，前方还有 {{ queueWaitCount }} 个任务等待执行</span>
+          </div>
+        </div>
+
+        <!-- 任务队列面板 -->
+        <div class="task-queue-panel">
+          <!-- 重启恢复后的暂停提示：需人工继续 -->
+          <div class="queue-paused-banner" v-if="batchTaskStore.paused">
+            <span class="queue-paused-text">应用重启后队列已暂停，排队任务不会自动执行</span>
+            <a-button size="small" type="primary" @click="handleResumeQueue">▶ 继续执行</a-button>
+          </div>
+          <div class="queue-header">
+            <h4 class="queue-title">📋 任务队列</h4>
+            <div class="queue-header-actions">
+              <a-button size="small" danger v-if="batchTaskStore.isRunning" @click="stopAllExecution">
+                ⏹️ 停止全部
+              </a-button>
+              <a-button size="small" v-if="finishedCount > 0" @click="handleClearFinished">
+                🧹 清空已完成
+              </a-button>
+            </div>
+          </div>
+          <div class="queue-empty" v-if="batchTaskStore.queue.length === 0">
+            暂无任务，提交后自动排队依次执行
+          </div>
+          <div class="queue-list" v-else>
+            <div class="queue-item" v-for="job in batchTaskStore.queue" :key="job.id" :class="job.status">
+              <div class="queue-item-head">
+                <span class="queue-badge" :class="job.status">{{ statusText(job.status) }}</span>
+                <span class="queue-app">{{ job.appName || '批量任务' }}</span>
+                <span class="queue-meta">{{ job.processed }}/{{ job.total }}</span>
+                <span class="queue-spacer"></span>
+                <a-button size="small" v-if="job.status === 'queued'" @click="handleMoveTop(job.id)">置顶</a-button>
+                <a-button size="small" danger v-if="job.status === 'queued'" @click="handleCancelJob(job.id)">取消</a-button>
+              </div>
+              <div class="queue-progress">
+                <div class="queue-progress-fill" :class="job.status" :style="{ width: (job.percent || 0) + '%' }"></div>
+              </div>
+              <div class="queue-item-foot">
+                <span class="queue-preview" v-if="job.currentPreview" :title="job.currentPreview">{{ job.currentPreview }}</span>
+                <span class="queue-stats">✓ {{ job.success }} · ✗ {{ job.failed }}</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -578,6 +626,31 @@ const autoShutdownEnabled = ref(false) // 新增：自动关闭计算机开关
 const notifyEnabled = ref(false) // 新增：完成通知开关
 const notifyWebhookUrl = ref('') // 新增：Bark/Telegram/server酱 webhook URL
 
+// 队列相关：本页提交的任务 id（可能排队等待，也可能在跑）
+const currentJobId = ref(null)
+const myJob = computed(() =>
+  batchTaskStore.queue.find((j) => j.id === currentJobId.value) ?? null
+)
+// 排在我前面的排队任务数
+const queueWaitCount = computed(() => {
+  const idx = batchTaskStore.queue.findIndex((j) => j.id === currentJobId.value)
+  if (idx === -1) return 0
+  return batchTaskStore.queue.slice(0, idx).filter((j) => j.status === 'queued').length
+})
+const finishedCount = computed(
+  () => batchTaskStore.queue.filter((j) => !['queued', 'running'].includes(j.status)).length
+)
+function statusText(status) {
+  const map = {
+    queued: '排队中',
+    running: '执行中',
+    completed: '已完成',
+    stopped: '已停止',
+    failed: '失败'
+  }
+  return map[status] || status
+}
+
 const executionProgress = reactive({
   total: 0,
   processed: 0,
@@ -706,7 +779,7 @@ async function createNewHistoryRecord() {
   const now = new Date().toISOString()
   const record = {
     id: newId,
-    taskId: batchTaskStore.status?.id ?? null,
+    taskId: currentJobId.value ?? batchTaskStore.status?.id ?? null,
     appId: currentApp.value?.id,
     appName: currentApp.value?.name,
     createdAt: now,
@@ -1390,10 +1463,6 @@ function interrupt() {
 
 // 执行批量处理
 async function executeBatch() {
-  if (batchTaskStore.isRunning) {
-    showError('batchTaskAlreadyRunning')
-    return
-  }
   if (!currentApp.value?.template?.prompt) {
     showError('batchExecutionFailed')
     return
@@ -1404,15 +1473,9 @@ async function executeBatch() {
   executionProgress.currentItem = ''
   executionLogs.value = []
 
-  executionLogs.value.unshift({
-    time: new Date().toLocaleTimeString(),
-    message: t('batchExecutionStarted'),
-    type: 'info'
-  })
-
   try {
-    // 提交到 main 进程常驻引擎：离开页面/切换路由不再中断执行
-    const task = await batchTaskStore.submit({
+    // 提交到 main 进程队列引擎：运行中也能入队，排队等待执行
+    const data = await batchTaskStore.submit({
       prompt: JSON.parse(JSON.stringify(currentApp.value.template.prompt)),
       inputsMapping: deepClone(state.inputs),
       items: deepClone(batchData.value),
@@ -1422,12 +1485,17 @@ async function executeBatch() {
       appId: currentApp.value.id,
       appName: currentApp.value.name
     })
+    currentJobId.value = data.jobId
     isExecuting.value = true
-    executionProgress.total = task.total
-    executionProgress.processed = task.processed
+    executionProgress.total = batchData.value.length
+    executionProgress.processed = startFromIndex.value - 1
     // 新建一条执行历史（含完整源数据/映射/批量数据），后续轮询增量更新
     currentHistoryRecordId.value = await createNewHistoryRecord()
-    showSuccess('batchExecutionStarted')
+    if (queueWaitCount.value > 0) {
+      showInfo(`已加入任务队列，前方还有 ${queueWaitCount.value} 个任务等待执行`)
+    } else {
+      showSuccess('batchExecutionStarted')
+    }
 
     // 本页监控：轮询 store 同步进度（离开页面无碍，浮层/再进页面仍可看）
     watchBatchTask()
@@ -1439,33 +1507,51 @@ async function executeBatch() {
   }
 }
 
-// 监听常驻任务：同步到本页进度 UI + 落历史记录
+// 监听常驻任务：同步到本页进度 UI + 落历史记录（按本页提交的任务 jobId 过滤）
 let batchWatchStop = null
 function watchBatchTask() {
   if (batchWatchStop) batchWatchStop()
   let lastResultCount = 0
+  let queuedLogged = false
   const unwatch = watch(
-    () => batchTaskStore.status,
-    async (st) => {
-      if (!st) return
-      executionProgress.total = st.total
-      executionProgress.processed = st.processed
-      executionProgress.success = st.success
-      executionProgress.failed = st.failed
-      executionProgress.percent = st.percent
-      executionProgress.currentItem = st.currentPreview
-      if (st.currentPreview) {
+    () => (myJob.value ? myJob.value.updatedAt : 0) + (myJob.value?.status || ''),
+    async () => {
+      const job = myJob.value
+      if (!job) return
+
+      // 排队中：只提示，不同步进度（进度是别的任务的）
+      if (job.status === 'queued') {
+        if (!queuedLogged) {
+          queuedLogged = true
+          executionLogs.value.unshift({
+            time: new Date().toLocaleTimeString(),
+            message: `已加入队列，等待执行（前方 ${queueWaitCount.value} 个任务）`,
+            type: 'info'
+          })
+        }
+        isExecuting.value = true
+        return
+      }
+      queuedLogged = false
+
+      executionProgress.total = job.total
+      executionProgress.processed = job.processed
+      executionProgress.success = job.success
+      executionProgress.failed = job.failed
+      executionProgress.percent = job.percent
+      executionProgress.currentItem = job.currentPreview
+      if (job.currentPreview && job.status === 'running') {
         executionLogs.value.unshift({
           time: new Date().toLocaleTimeString(),
-          message: st.currentPreview,
+          message: job.currentPreview,
           type: 'info'
         })
       }
 
       // 增量写入执行历史：新完成的 item 追加到 history.results
-      if (currentHistoryRecordId.value && Array.isArray(st.results)) {
-        const newResults = st.results.slice(lastResultCount)
-        lastResultCount = st.results.length
+      if (currentHistoryRecordId.value && Array.isArray(job.results)) {
+        const newResults = job.results.slice(lastResultCount)
+        lastResultCount = job.results.length
         for (const r of newResults) {
           await upsertHistoryRecord({
             id: currentHistoryRecordId.value,
@@ -1479,34 +1565,34 @@ function watchBatchTask() {
         }
         await upsertHistoryRecord({
           id: currentHistoryRecordId.value,
-          processed: st.processed,
-          success: st.success,
-          failed: st.failed,
-          percent: st.percent,
-          logs: st.currentPreview
-            ? [{ time: new Date().toLocaleTimeString(), message: st.currentPreview, type: 'info' }]
+          processed: job.processed,
+          success: job.success,
+          failed: job.failed,
+          percent: job.percent,
+          logs: job.currentPreview
+            ? [{ time: new Date().toLocaleTimeString(), message: job.currentPreview, type: 'info' }]
             : undefined
         })
       }
 
-      if (st.status !== 'running') {
+      if (job.status !== 'running') {
         isExecuting.value = false
-        executionProgress.status = st.status === 'completed' ? 'success' : 'exception'
-        executionProgress.strokeColor = st.status === 'completed' ? '#10b981' : '#ef4444'
+        executionProgress.status = job.status === 'completed' ? 'success' : 'exception'
+        executionProgress.strokeColor = job.status === 'completed' ? '#10b981' : '#ef4444'
         executionProgress.currentItem = ''
-        if (st.status === 'completed') {
+        if (job.status === 'completed') {
           showSuccess('batchExecutionCompleted', {
-            total: st.total, success: st.success, failed: st.failed
+            total: job.total, success: job.success, failed: job.failed
           })
         }
         if (currentHistoryRecordId.value) {
           await upsertHistoryRecord({
             id: currentHistoryRecordId.value,
-            status: st.status === 'completed' ? 'completed' : st.status === 'stopped' ? 'stopped' : 'failed',
-            processed: st.processed,
-            success: st.success,
-            failed: st.failed,
-            percent: st.percent
+            status: job.status === 'completed' ? 'completed' : job.status === 'stopped' ? 'stopped' : 'failed',
+            processed: job.processed,
+            success: job.success,
+            failed: job.failed,
+            percent: job.percent
           })
         }
         if (batchWatchStop) batchWatchStop()
@@ -1517,28 +1603,32 @@ function watchBatchTask() {
   batchWatchStop = unwatch
 }
 
-// 刷新页面/重新进入时恢复运行中任务的历史记录绑定
+// 刷新页面/重新进入时恢复本 app 运行中/排队任务的历史记录绑定
 async function restoreRunningTask() {
-  await batchTaskStore.fetchStatus()
-  const st = batchTaskStore.status
-  if (!st || st.status !== 'running') return
+  await batchTaskStore.fetchQueue()
   await ensureHistoryLoaded()
-  const record = historyRecords.value.find((r) => r.taskId === st.id)
+  // 优先恢复本 app 的运行中任务，其次排队任务
+  const candidate =
+    batchTaskStore.queue.find((j) => j.status === 'running' && j.appId === currentApp.value?.id) ||
+    batchTaskStore.queue.find((j) => j.status === 'queued' && j.appId === currentApp.value?.id)
+  if (!candidate) return
+  currentJobId.value = candidate.id
+  const record = historyRecords.value.find((r) => r.taskId === candidate.id)
   if (record) {
     currentHistoryRecordId.value = record.id
   }
   isExecuting.value = true
-  executionProgress.total = st.total
-  executionProgress.processed = st.processed
-  executionProgress.success = st.success
-  executionProgress.failed = st.failed
-  executionProgress.percent = st.percent
-  executionProgress.currentItem = st.currentPreview
+  executionProgress.total = candidate.total
+  executionProgress.processed = candidate.processed
+  executionProgress.success = candidate.success
+  executionProgress.failed = candidate.failed
+  executionProgress.percent = candidate.percent
+  executionProgress.currentItem = candidate.currentPreview
   batchTaskStore.startPolling()
   watchBatchTask()
 }
 
-// 停止执行
+// 停止执行（只停当前任务，队列中后续任务继续）
 async function stopExecution() {
   // 先停 main 进程常驻引擎（interrupt 已由后端执行）
   try {
@@ -1570,12 +1660,50 @@ async function stopExecution() {
   // 添加停止日志
   executionLogs.value.unshift({
     time: new Date().toLocaleTimeString(),
-    message: t('executionStoppedByUser'),
+    message: t('executionStoppedByUser') + '（队列中后续任务继续执行）',
     type: 'info'
   })
 
   // 标记记录已停止
   await upsertHistoryRecord({ id: currentHistoryRecordId.value, status: 'stopped', currentItem: '' })
+}
+
+// 停止全部：中断当前任务 + 取消所有排队任务
+async function stopAllExecution() {
+  try {
+    await batchTaskStore.stopAll()
+  } catch (e) {
+    console.error('stop all batch 失败:', e)
+  }
+  isExecuting.value = false
+  showInfo('已停止全部批量任务')
+  executionLogs.value.unshift({
+    time: new Date().toLocaleTimeString(),
+    message: '已停止全部任务（含排队中的任务）',
+    type: 'info'
+  })
+  await upsertHistoryRecord({ id: currentHistoryRecordId.value, status: 'stopped', currentItem: '' })
+}
+
+// 队列操作
+async function handleResumeQueue() {
+  await batchTaskStore.resume()
+  showSuccess('已恢复队列，排队任务开始依次执行')
+}
+async function handleCancelJob(id) {
+  await batchTaskStore.cancel(id)
+  if (currentJobId.value === id) {
+    currentJobId.value = null
+    isExecuting.value = false
+  }
+  showInfo('已取消该任务')
+}
+async function handleMoveTop(id) {
+  await batchTaskStore.moveTop(id)
+  showInfo('已置顶')
+}
+async function handleClearFinished() {
+  await batchTaskStore.clearFinished()
 }
 
 // 清除日志

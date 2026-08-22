@@ -14,7 +14,7 @@
         <button class="panel-close" @click="expanded = false">×</button>
       </div>
 
-      <div class="panel-progress">
+      <div class="panel-progress" v-if="store.isRunning">
         <div class="progress-track">
           <div class="progress-fill" :class="statusClass" :style="{ transform: `scaleX(${percent / 100})` }"></div>
         </div>
@@ -27,6 +27,20 @@
         <span v-if="s.currentPreview" class="current" :title="s.currentPreview">
           {{ s.currentPreview }}
         </span>
+      </div>
+
+      <!-- 队列摘要：排队中任务 -->
+      <div class="panel-queue" v-if="queuedJobs.length > 0">
+        <div class="queue-summary">队列中 {{ queuedJobs.length }} 个任务等待执行</div>
+        <div class="queue-mini-list">
+          <div v-for="qj in queuedJobs.slice(0, 5)" :key="qj.id" class="queue-mini-item">
+            <span class="queue-mini-name">{{ qj.appName || '批量任务' }}</span>
+            <span class="queue-mini-meta">{{ qj.processed }}/{{ qj.total }}</span>
+          </div>
+          <div class="queue-mini-more" v-if="queuedJobs.length > 5">
+            还有 {{ queuedJobs.length - 5 }} 个…
+          </div>
+        </div>
       </div>
 
       <div v-if="recentLogs.length" class="panel-logs">
@@ -58,24 +72,33 @@ const expanded = ref(false)
 
 const s = computed(() => store.status || {})
 const percent = computed(() => store.percent)
-const visible = computed(() => !!store.status && (store.isRunning || expanded.value))
-const statusClass = computed(() =>
-  store.isRunning ? 'running' : (s.value.status === 'completed' ? 'ok' : 'err')
+const visible = computed(
+  () => store.isRunning || store.queuedCount > 0 || (expanded.value && store.queue.length > 0)
 )
+const statusClass = computed(() => {
+  if (store.isRunning) return 'running'
+  if (store.queuedCount > 0) return 'waiting'
+  return s.value.status === 'completed' ? 'ok' : 'err'
+})
 const pillText = computed(() =>
-  store.isRunning ? `${s.value.processed}/${s.value.total} · ${percent.value}%` : t('batchTaskDone')
+  store.isRunning
+    ? `${s.value.processed}/${s.value.total} · ${percent.value}%` +
+      (store.queuedCount > 0 ? ` · 队列中 ${store.queuedCount}` : '')
+    : t('batchTaskDone')
 )
 const headerText = computed(() =>
   store.isRunning
-    ? `${s.value.appName || t('batchExecution')} · ${percent.value}%`
+    ? `${s.value.appName || t('batchExecution')} · ${percent.value}%` +
+      (store.queuedCount > 0 ? `（队列 ${store.queuedCount}）` : '')
     : t('batchTaskDone')
 )
+const queuedJobs = computed(() => store.queue.filter((j) => j.status === 'queued'))
 const recentLogs = computed(() => (s.value.logs || []).slice(0, 8))
 
 onMounted(() => {
-  // 启动时探一次：main 进程可能有正在跑的任务（如刷新/重开面板后恢复显示）
-  store.fetchStatus().then(() => {
-    if (store.isRunning) store.startPolling()
+  // 启动时探一次：main 进程可能有正在跑/排队的任务（如刷新/重开面板后恢复显示）
+  store.fetchQueue().then(() => {
+    if (store.isRunning || store.queuedCount > 0) store.startPolling()
   })
 })
 
@@ -180,11 +203,50 @@ function goBatch() {
   &.running {
     background: #0ea5e9;
   }
+  &.waiting {
+    background: #fbbf24;
+  }
   &.ok {
     background: #10b981;
   }
   &.err {
     background: #ef4444;
+  }
+}
+
+/* 队列摘要 */
+.panel-queue {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  padding: 6px 8px;
+  .queue-summary {
+    color: #fbbf24;
+    font-size: 11px;
+    margin-bottom: 4px;
+  }
+  .queue-mini-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    .queue-mini-item {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 11px;
+      color: #94a3b8;
+      .queue-mini-name {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .queue-mini-meta {
+        flex-shrink: 0;
+      }
+    }
+    .queue-mini-more {
+      font-size: 11px;
+      color: #64748b;
+    }
   }
 }
 

@@ -1538,3 +1538,157 @@
     margin-top: 10px;
   }
 }
+
+/* ===== 任务队列面板（批量模式任务队列） ===== */
+.queue-waiting-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(14, 165, 233, 0.12);
+  border: 1px solid rgba(14, 165, 233, 0.35);
+  color: #7dd3fc;
+  font-size: 13px;
+  .queue-waiting-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #0ea5e9;
+    animation: queuePulse 1.4s ease-in-out infinite;
+  }
+}
+@keyframes queuePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.task-queue-panel {
+  margin-top: 24px;
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(56, 70, 102, 0.8);
+  .queue-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    .queue-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+      color: #e2e8f0;
+    }
+    .queue-header-actions {
+      display: flex;
+      gap: 8px;
+    }
+  }
+  .queue-empty {
+    padding: 24px 0;
+    text-align: center;
+    color: #64748b;
+    font-size: 13px;
+  }
+  .queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 340px;
+    overflow-y: auto;
+  }
+  .queue-item {
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(56, 70, 102, 0.5);
+    &.running { border-color: rgba(14, 165, 233, 0.55); }
+    &.completed { border-color: rgba(16, 185, 129, 0.4); }
+    &.stopped, &.failed { border-color: rgba(239, 68, 68, 0.35); }
+    .queue-item-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      .queue-badge {
+        flex-shrink: 0;
+        padding: 1px 8px;
+        border-radius: 10px;
+        font-size: 11px;
+        line-height: 18px;
+        color: #94a3b8;
+        background: rgba(100, 116, 139, 0.2);
+        &.queued { color: #fbbf24; background: rgba(251, 191, 36, 0.15); }
+        &.running { color: #7dd3fc; background: rgba(14, 165, 233, 0.15); }
+        &.completed { color: #6ee7b7; background: rgba(16, 185, 129, 0.15); }
+        &.stopped, &.failed { color: #fca5a5; background: rgba(239, 68, 68, 0.15); }
+      }
+      .queue-app {
+        color: #e2e8f0;
+        font-size: 13px;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .queue-meta {
+        color: #94a3b8;
+        font-size: 12px;
+        flex-shrink: 0;
+      }
+      .queue-spacer { flex: 1; }
+    }
+    .queue-progress {
+      height: 5px;
+      margin: 8px 0 6px;
+      border-radius: 3px;
+      background: rgba(51, 65, 85, 0.6);
+      overflow: hidden;
+      .queue-progress-fill {
+        height: 100%;
+        border-radius: 3px;
+        background: #0ea5e9;
+        transition: width .35s ease;
+        &.completed { background: #10b981; }
+        &.stopped, &.failed { background: #ef4444; }
+      }
+    }
+    .queue-item-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      .queue-preview {
+        flex: 1;
+        color: #64748b;
+        font-size: 11px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .queue-stats {
+        flex-shrink: 0;
+        color: #94a3b8;
+        font-size: 11px;
+      }
+    }
+  }
+}
+
+/* 重启恢复后暂停提示 */
+.queue-paused-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  .queue-paused-text {
+    color: #fbbf24;
+    font-size: 13px;
+  }
+}

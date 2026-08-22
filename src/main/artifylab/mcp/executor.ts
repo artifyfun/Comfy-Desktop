@@ -9,6 +9,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import type { App, ComfyPrompt, ParamNode } from '../appStore'
+import { logger } from '../utils/logger'
 
 export interface ExecutionResult {
   prompt_id: string
@@ -148,6 +149,14 @@ export async function executeApp(
   const clientId = randomUUID()
   const inputs: ParamNode[] = (template.paramsNodes ?? []).filter((n) => n.category === 'input')
 
+  // 0. 工作流切换前置清理：与上一次执行的 app 不同（或首次/外部残留）时先 /free
+  //    清显存，防止不同模型叠加 OOM。free 失败不阻断本次执行。
+  try {
+    await freeIfWorkflowChanged(comfyOrigin, resolveWorkflowKey(app.id, prompt))
+  } catch (e) {
+    logger.warn('free before app execution failed', e)
+  }
+
   // 1. seed（M2：显式 seed 生效——传了 seed 且未强制 randomize 时用 seed；NaN 拒绝）
   const hasSeed = args.seed != null
   const randomize = args.randomize_seed ?? !hasSeed
@@ -264,4 +273,56 @@ export function extractOutputs(
     }
   }
   return response
+}
+
+/** POST /free：卸载模型 + 释放显存（工作流切换前调用，避免不同模型叠加 OOM） */
+export async function freeModels(comfyOrigin: string): Promise<void> {
+  await fetchTimeout(`${comfyOrigin}/free`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ unload_models: true, free_memory: true })
+  })
+}
+
+/**
+ * 最近一次执行的工作流指纹（批量任务与单次执行共享同一份跟踪）：
+ * - 从 C 界面（ComfyUI 原生）跑完的工作流无法感知，lastWorkflowKey 保持旧值/空，
+ *   因此下一次任意来源执行都会触发一次防御性 free，避免残留模型占显存。
+ * - 批量任务之间、批量与单次之间、单次与单次之间都能互相感知"上一个工作流"。
+ */
+let lastWorkflowKey: string | null = null
+
+/** 工作流指纹：优先 appId（同一 app 一定是同一模板），否则退化为 prompt 结构 */
+export function resolveWorkflowKey(appId: string | undefined, prompt?: ComfyPrompt): string {
+  if (appId) return `app:${appId}`
+  return `prompt:${JSON.stringify(prompt ?? {})}`
+}
+
+/**
+ * 工作流切换前置清理：若上次执行的工作流与本次不同（含首次执行/外部残留），
+ * 先 POST /free 清显存并记录本次指纹，返回 true；同工作流直接跳过返回 false。
+ * free 失败会抛出，由调用方决定容错策略。
+ */
+export async function freeIfWorkflowChanged(
+  comfyOrigin: string,
+  workflowKey: string
+): Promise<boolean> {
+  if (lastWorkflowKey === workflowKey) return false
+  await freeModels(comfyOrigin)
+  lastWorkflowKey = workflowKey
+  return true
+}
+
+/**
+ * 无条件清理：不判断上次工作流，直接 POST /free 并记录本次指纹。
+ * 用于"队列会话首个任务"等需要防御外部残留（如 C 界面跑过其他模型）的场景。
+ */
+export async function forceFreeAndTrack(comfyOrigin: string, workflowKey: string): Promise<void> {
+  await freeModels(comfyOrigin)
+  lastWorkflowKey = workflowKey
+}
+
+/** 重置工作流跟踪（测试用 / 显存状态异常时兜底） */
+export function resetWorkflowKey(): void {
+  lastWorkflowKey = null
 }
