@@ -8,6 +8,10 @@
  * POST /api/batch/cancel  取消指定任务（排队=移出；运行=停止），body { id }
  * POST /api/batch/clear   清空已结束任务
  * POST /api/batch/move    排队任务置顶/提前，body { id, toTop }
+ * POST /api/batch/pause   暂停当前运行任务（保留进度），body { id? }
+ * POST /api/batch/job-resume 继续已暂停任务，body { id }
+ * POST /api/batch/config  队列级配置（关机/通知），body { autoShutdown?, notifyUrl? }
+ * POST /api/batch/rerun   重新运行已结束任务（一键重跑原配置），body { id }
  */
 import express from 'express'
 import { HTTP_STATUS } from '../config/constants'
@@ -15,8 +19,10 @@ import { createErrorResponse, createSuccessResponse } from '../utils/errorHandle
 import { logger } from '../utils/logger'
 import {
   startBatch,
+  rerunBatchJob,
   stopBatch,
   cancelBatchJob,
+  deleteBatchJob,
   clearBatchQueue,
   moveBatchJob,
   getBatchStatus,
@@ -25,7 +31,12 @@ import {
   resumeQueue,
   listBatchQueue,
   loadQueue,
-  type BatchStartOptions
+  pauseBatch,
+  resumeBatch,
+  setQueueConfig,
+  getQueueConfig,
+  type BatchStartOptions,
+  type QueueConfigPayload
 } from '../services/batchRunner'
 
 export function createBatchRouter(): express.Router {
@@ -67,6 +78,47 @@ export function createBatchRouter(): express.Router {
         })
     } catch (error) {
       logger.error('Failed to start batch', error)
+      res
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .json(createErrorResponse((error as Error).message))
+    }
+  })
+
+  // 重新运行已结束任务（一键重跑原配置）；body { id }
+  router.post('/api/batch/rerun', (req: express.Request, res: express.Response) => {
+    try {
+      const id = (req.body as { id?: string } | undefined)?.id
+      if (!id) {
+        res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('id is required'))
+        return
+      }
+      void rerunBatchJob(id)
+        .then((result) => {
+          if (!result) {
+            res
+              .status(HTTP_STATUS.NOT_FOUND)
+              .json(createErrorResponse('batch job not found or still active'))
+            return
+          }
+          res.status(HTTP_STATUS.OK).json(
+            createSuccessResponse({
+              jobId: result.job.id,
+              queue: result.queue,
+              running: isBatchRunning(),
+              paused: isQueuePaused()
+            })
+          )
+        })
+        .catch((error: Error) => {
+          if (/queue is full/.test(error.message)) {
+            res.status(HTTP_STATUS.CONFLICT).json(createErrorResponse(error.message))
+          } else {
+            logger.error('Failed to rerun batch job', error)
+            res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json(createErrorResponse(error.message))
+          }
+        })
+    } catch (error) {
+      logger.error('Failed to rerun batch job', error)
       res
         .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
         .json(createErrorResponse((error as Error).message))
@@ -148,6 +200,32 @@ export function createBatchRouter(): express.Router {
     }
   })
 
+  // 删除任意任务（含终态记录）；运行中任务返回 409 请先停止/暂停。body { id }
+  router.post('/api/batch/delete', (req: express.Request, res: express.Response) => {
+    try {
+      const id = (req.body as { id?: string } | undefined)?.id
+      if (!id) {
+        res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('id is required'))
+        return
+      }
+      const ok = deleteBatchJob(id)
+      if (!ok) {
+        res
+          .status(HTTP_STATUS.NOT_FOUND)
+          .json(createErrorResponse('batch job not found or still running'))
+        return
+      }
+      res
+        .status(HTTP_STATUS.OK)
+        .json(createSuccessResponse({ jobs: listBatchQueue(), running: isBatchRunning() }))
+    } catch (error) {
+      logger.error('Failed to delete batch job', error)
+      res
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .json(createErrorResponse((error as Error).message))
+    }
+  })
+
   router.post('/api/batch/clear', (_req: express.Request, res: express.Response) => {
     try {
       const removed = clearBatchQueue()
@@ -173,6 +251,73 @@ export function createBatchRouter(): express.Router {
       }
       res.status(HTTP_STATUS.OK).json(createSuccessResponse({ jobs: listBatchQueue() }))
     } catch (error) {
+      res
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .json(createErrorResponse((error as Error).message))
+    }
+  })
+
+  // 暂停当前运行任务（保留进度，可继续）；body { id } 可选，缺省 = 当前运行任务
+  router.post('/api/batch/pause', async (req: express.Request, res: express.Response) => {
+    try {
+      const id = (req.body as { id?: string } | undefined)?.id
+      const job = await pauseBatch(id)
+      if (!job) {
+        res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse('no running batch job to pause'))
+        return
+      }
+      res.status(HTTP_STATUS.OK).json(
+        createSuccessResponse({
+          jobs: listBatchQueue(),
+          running: isBatchRunning(),
+          paused: isQueuePaused()
+        })
+      )
+    } catch (error) {
+      logger.error('Failed to pause batch job', error)
+      res
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .json(createErrorResponse((error as Error).message))
+    }
+  })
+
+  // 继续执行已暂停任务；body { id } 必填
+  router.post('/api/batch/job-resume', (req: express.Request, res: express.Response) => {
+    try {
+      const id = (req.body as { id?: string } | undefined)?.id
+      if (!id) {
+        res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('id is required'))
+        return
+      }
+      const ok = resumeBatch(id)
+      if (!ok) {
+        res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse('paused batch job not found'))
+        return
+      }
+      res
+        .status(HTTP_STATUS.OK)
+        .json(createSuccessResponse({ jobs: listBatchQueue(), running: isBatchRunning() }))
+    } catch (error) {
+      logger.error('Failed to resume batch job', error)
+      res
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .json(createErrorResponse((error as Error).message))
+    }
+  })
+
+  // 队列级配置：运行完成后关机 / 通知 webhook；对排队中/运行中任务即时生效
+  router.post('/api/batch/config', (req: express.Request, res: express.Response) => {
+    try {
+      const body = (req.body ?? {}) as { autoShutdown?: unknown; notifyUrl?: unknown }
+      const payload: QueueConfigPayload = {}
+      if (typeof body.autoShutdown === 'boolean') payload.autoShutdown = body.autoShutdown
+      if (typeof body.notifyUrl === 'string') payload.notifyUrl = body.notifyUrl
+      setQueueConfig(payload)
+      res
+        .status(HTTP_STATUS.OK)
+        .json(createSuccessResponse({ config: getQueueConfig(), jobs: listBatchQueue() }))
+    } catch (error) {
+      logger.error('Failed to set batch queue config', error)
       res
         .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
         .json(createErrorResponse((error as Error).message))

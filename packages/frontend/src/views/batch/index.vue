@@ -434,6 +434,7 @@
           <div class="queue-header">
             <h4 class="queue-title">📋 任务队列</h4>
             <div class="queue-header-actions">
+              <a-button size="small" @click="goQueueDetail">📋 队列详情</a-button>
               <a-button size="small" danger v-if="batchTaskStore.isRunning" @click="stopAllExecution">
                 ⏹️ 停止全部
               </a-button>
@@ -453,7 +454,16 @@
                 <span class="queue-meta">{{ job.processed }}/{{ job.total }}</span>
                 <span class="queue-spacer"></span>
                 <a-button size="small" v-if="job.status === 'queued'" @click="handleMoveTop(job.id)">置顶</a-button>
-                <a-button size="small" danger v-if="job.status === 'queued'" @click="handleCancelJob(job.id)">取消</a-button>
+                <a-button size="small" danger v-if="job.status === 'queued'" @click="handleCancelJob(job.id)">删除出队</a-button>
+                <a-button size="small" v-if="job.status === 'running'" @click="handlePauseJob(job.id)">⏸ 暂停</a-button>
+                <a-button size="small" danger v-if="job.status === 'running'" @click="handleStopJob">⏹ 停止</a-button>
+                <a-button size="small" type="primary" v-if="job.status === 'paused'" @click="handleResumeJob(job.id)">▶ 继续</a-button>
+                <a-button size="small" danger v-if="job.status === 'paused'" @click="handleCancelJob(job.id)">删除</a-button>
+                <a-button
+                  size="small"
+                  v-if="['completed', 'stopped', 'failed'].includes(job.status)"
+                  @click="handleRerun(job)"
+                >🔁 重跑</a-button>
               </div>
               <div class="queue-progress">
                 <div class="queue-progress-fill" :class="job.status" :style="{ width: (job.percent || 0) + '%' }"></div>
@@ -545,11 +555,13 @@
 
 <script setup>
 import { reactive, ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { Modal } from 'ant-design-vue'
 import { ComfyUIClient } from '@artifyfun/comfy-ui-client'
 import { useAppStore } from '@/stores/appStore'
 import { genMeta } from '@/utils/genPrompt'
 import { t } from '@/utils/i18n'
-import { showError, showSuccess, showInfo, uuidv4, getSeed } from '@/utils'
+import { showError, showSuccess, showInfo, uuidv4, getSeed, debounce } from '@/utils'
 import CodeEditor from '@/components/CodeEditor/index.vue'
 import { ExcelProcessor } from '@/utils/excel-utils'
 import localforage from 'localforage'
@@ -586,6 +598,7 @@ const state = reactive({
 
 const appStore = useAppStore()
 const batchTaskStore = useBatchTaskStore()
+const router = useRouter()
 
 const currentApp = ref(null)
 
@@ -638,12 +651,13 @@ const queueWaitCount = computed(() => {
   return batchTaskStore.queue.slice(0, idx).filter((j) => j.status === 'queued').length
 })
 const finishedCount = computed(
-  () => batchTaskStore.queue.filter((j) => !['queued', 'running'].includes(j.status)).length
+  () => batchTaskStore.queue.filter((j) => !['queued', 'running', 'paused'].includes(j.status)).length
 )
 function statusText(status) {
   const map = {
     queued: '排队中',
     running: '执行中',
+    paused: '已暂停',
     completed: '已完成',
     stopped: '已停止',
     failed: '失败'
@@ -745,29 +759,39 @@ async function saveHistory() {
     showError('historySaveFailed')
   }
 }
-// ===== 完成通知配置（localforage 持久化） =====
-const NOTIFY_CONFIG_KEY = 'batch/notify-config'
-async function loadNotifyConfig() {
-  try {
-    const cfg = (await localforage.getItem(NOTIFY_CONFIG_KEY)) || {}
-    notifyEnabled.value = !!cfg.enabled
-    notifyWebhookUrl.value = String(cfg.webhookUrl || '')
-  } catch (error) {
-    console.error('加载通知配置失败:', error)
-  }
+// ===== 队列级配置（关机/通知）：与浮层/详情页共用一份，变更即时应用到后端 =====
+async function loadQueueConfig() {
+  await batchTaskStore.loadQueueConfig()
+  autoShutdownEnabled.value = batchTaskStore.queueConfig.autoShutdown
+  notifyEnabled.value = batchTaskStore.queueConfig.notifyEnabled
+  notifyWebhookUrl.value = batchTaskStore.queueConfig.notifyUrl
 }
-async function saveNotifyConfig() {
-  try {
-    await localforage.setItem(NOTIFY_CONFIG_KEY, {
-      enabled: notifyEnabled.value,
-      webhookUrl: notifyWebhookUrl.value
-    })
-  } catch (error) {
-    console.error('保存通知配置失败:', error)
-  }
+function syncQueueConfig() {
+  batchTaskStore.setQueueConfig({
+    autoShutdown: autoShutdownEnabled.value,
+    notifyEnabled: notifyEnabled.value,
+    notifyUrl: notifyWebhookUrl.value
+  })
 }
-watch([notifyEnabled, notifyWebhookUrl], () => {
-  saveNotifyConfig()
+// URL 输入防抖应用（避免每敲一个字符就打一次后端）
+const debouncedApplyQueueConfig = debounce(() => {
+  syncQueueConfig()
+  batchTaskStore.applyQueueConfig()
+}, 800)
+let queueConfigLoaded = false
+watch(autoShutdownEnabled, () => {
+  if (!queueConfigLoaded) return
+  syncQueueConfig()
+  batchTaskStore.applyQueueConfig()
+})
+watch(notifyEnabled, () => {
+  if (!queueConfigLoaded) return
+  syncQueueConfig()
+  batchTaskStore.applyQueueConfig()
+})
+watch(notifyWebhookUrl, () => {
+  if (!queueConfigLoaded) return
+  debouncedApplyQueueConfig()
 })
 
 function deepClone(obj) {
@@ -1577,6 +1601,13 @@ function watchBatchTask() {
 
       if (job.status !== 'running') {
         isExecuting.value = false
+        if (job.status === 'paused') {
+          // 暂停中：进度保持，不当作终态；保留监控以便"继续"后恢复同步
+          executionProgress.status = 'exception'
+          executionProgress.strokeColor = '#fbbf24'
+          executionProgress.currentItem = job.currentPreview
+          return
+        }
         executionProgress.status = job.status === 'completed' ? 'success' : 'exception'
         executionProgress.strokeColor = job.status === 'completed' ? '#10b981' : '#ef4444'
         executionProgress.currentItem = ''
@@ -1698,12 +1729,52 @@ async function handleCancelJob(id) {
   }
   showInfo('已取消该任务')
 }
+async function handlePauseJob(id) {
+  await batchTaskStore.pauseJob(id)
+  if (currentJobId.value === id) {
+    isExecuting.value = false
+  }
+  showInfo('已暂停，可点击"继续"从进度处恢复')
+}
+async function handleResumeJob(id) {
+  await batchTaskStore.resumeJob(id)
+  if (currentJobId.value === id) {
+    isExecuting.value = true
+  }
+  showInfo('已继续执行')
+}
+async function handleStopJob() {
+  await batchTaskStore.stop()
+  isExecuting.value = false
+  showInfo('executionStopped')
+}
 async function handleMoveTop(id) {
   await batchTaskStore.moveTop(id)
   showInfo('已置顶')
 }
 async function handleClearFinished() {
   await batchTaskStore.clearFinished()
+}
+function goQueueDetail() {
+  router.push('/batch/detail')
+}
+
+/** 一键重跑：完整复刻原配置重新入队（无需重新编排队列） */
+function handleRerun(job) {
+  Modal.confirm({
+    title: '重新运行批量任务',
+    content: `将按「${job.appName || '批量任务'}」的原配置（数据 ${job.total} 条、映射与开始位置）重新入队执行一遍，确定？`,
+    okText: '重新运行',
+    cancelText: '取消',
+    onOk: async () => {
+      try {
+        await batchTaskStore.rerunJob(job.id)
+        showInfo('rerunQueued')
+      } catch (e) {
+        showInfo(e?.message || '重新运行失败')
+      }
+    }
+  })
 }
 
 // 清除日志
@@ -1888,7 +1959,8 @@ watch(fileFilter, () => {
 })
 
 onMounted(async () => {
-  loadNotifyConfig()
+  await loadQueueConfig()
+  queueConfigLoaded = true
   await init()
   await restoreRunningTask()
 })

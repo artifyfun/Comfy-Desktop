@@ -1,4 +1,5 @@
 import express from 'express'
+import { buildAppCode } from '../agentDriver'
 import { CONFIG, HTTP_STATUS } from '../config/constants'
 import { logger } from '../utils/logger'
 import { handleApiError, createErrorResponse, createSuccessResponse } from '../utils/errorHandler'
@@ -204,6 +205,47 @@ export function createAiRouter(): express.Router {
       }
     } catch (error) {
       handleApiError(error, res)
+    }
+  })
+
+  // 构建应用接口（Codex agent 驱动，替换一次性提示词）
+  router.post('/api/build-app', async (req: express.Request, res: express.Response) => {
+    try {
+      const { appId, name, description, paramsNodes, style, provider, apiKey, model } = req.body
+      if (!appId) {
+        return res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('Missing appId'))
+      }
+
+      // 设置流式响应头（SSE）
+      res.setHeader('Content-Type', 'text/event-stream')
+      res.setHeader('Cache-Control', 'no-cache')
+      res.setHeader('Connection', 'keep-alive')
+      res.setHeader('Transfer-Encoding', 'chunked')
+      res.setHeader('X-Accel-Buffering', 'no')
+      res.flushHeaders()
+
+      const ac = new AbortController()
+      req.on('close', () => ac.abort())
+
+      const html = await buildAppCode(
+        { appId, name, description, paramsNodes, style, provider, apiKey, model },
+        (p) => {
+          if (!res.writableEnded) {
+            res.write(`data: ${JSON.stringify(p)}\n\n`)
+          }
+        },
+        ac.signal
+      )
+      if (!res.writableEnded) {
+        res.write(`event: done\ndata: ${JSON.stringify({ code: html })}\n\n`)
+        res.end()
+      }
+    } catch (error) {
+      if (!res.writableEnded) {
+        const message = error instanceof Error ? error.message : String(error)
+        res.write(`event: error\ndata: ${JSON.stringify({ message })}\n\n`)
+        res.end()
+      }
     }
   })
 

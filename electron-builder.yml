@@ -44,6 +44,15 @@ extraResources:
   # server.ts 的 getFrontendPath() 在生产环境从这里读取）
   - from: src/main/artifylab/public/frontend
     to: frontend
+  # 构建应用（Codex agent）的设计体系指引：ui-ux-pro-max 设计智能 + minimalist-ui 极简反 slop 协议。
+  # agentDriver 在 build 目录里把它拷给 Codex 读取，替代原本固化的提示词、提升出图质感。
+  - from: src/main/artifylab/public/design-system
+    to: design-system
+  # codex 原生二进制（scripts/copy-codex-bin.mjs 从 @openai/codex-<platform> 平台包拷入）。
+  # agentDriver 通过 Codex SDK 的 codexPathOverride 直接 spawn 内置 exe —— 用户无需安装 codex CLI / node，
+  # 只填 DeepSeek key 即可构建应用。
+  - from: src/main/artifylab/public/codex-bin
+    to: codex-bin
 # Skip the node-gyp rebuild pass: node-pty (the only native dependency)
 # ships N-API prebuilds for win32-x64 that are ABI-agnostic across
 # Electron versions, and its winpty git-submodule sources are not fully

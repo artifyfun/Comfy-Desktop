@@ -51,3 +51,6 @@ src/main/artifylab/public/frontend/
 
 # artifylab 前端构建产物（由 pnpm build:frontend 生成，不提交）
 src/main/artifylab/public/frontend/
+
+# codex 原生二进制（scripts/copy-codex-bin.mjs 从 node_modules 生成，勿入库）
+src/main/artifylab/public/codex-bin/

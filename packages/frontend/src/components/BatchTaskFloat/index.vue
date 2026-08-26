@@ -14,7 +14,7 @@
         <button class="panel-close" @click="expanded = false">×</button>
       </div>
 
-      <div class="panel-progress" v-if="store.isRunning">
+      <div class="panel-progress" v-if="store.status && store.status.total > 0">
         <div class="progress-track">
           <div class="progress-fill" :class="statusClass" :style="{ transform: `scaleX(${percent / 100})` }"></div>
         </div>
@@ -29,16 +29,73 @@
         </span>
       </div>
 
-      <!-- 队列摘要：排队中任务 -->
-      <div class="panel-queue" v-if="queuedJobs.length > 0">
-        <div class="queue-summary">队列中 {{ queuedJobs.length }} 个任务等待执行</div>
+      <!-- 队列设置：运行完成后关机 / 通知手机 -->
+      <div class="panel-config">
+        <div class="config-toggle" @click="showConfig = !showConfig">
+          <span class="config-title">⚙️ 队列设置</span>
+          <span class="config-arrow" :class="{ open: showConfig }">▾</span>
+        </div>
+        <div v-if="showConfig" class="config-body">
+          <div class="config-row">
+            <button
+              class="mini-switch"
+              :class="{ on: cfg.autoShutdown }"
+              @click="toggleShutdown"
+            >
+              <span class="mini-knob"></span>
+            </button>
+            <span class="config-label">运行完成后关机</span>
+          </div>
+          <div class="config-row">
+            <button
+              class="mini-switch"
+              :class="{ on: cfg.notifyEnabled }"
+              @click="toggleNotify"
+            >
+              <span class="mini-knob"></span>
+            </button>
+            <span class="config-label">完成后通知手机</span>
+          </div>
+          <div v-if="cfg.notifyEnabled" class="config-url-row">
+            <input
+              v-model="notifyUrlDraft"
+              class="config-input"
+              :placeholder="'Bark / Telegram / server酱 webhook'"
+              @blur="applyNotifyUrl"
+              @keyup.enter="applyNotifyUrl"
+            />
+          </div>
+          <div class="config-note">
+            <span v-if="cfg.autoShutdown">⚡ 队列跑完自动关机（30s）</span>
+            <span v-if="cfg.autoShutdown && cfg.notifyEnabled"> · </span>
+            <span v-if="cfg.notifyEnabled">🔔 完成即推送</span>
+            <span v-if="!cfg.autoShutdown && !cfg.notifyEnabled">变更即时生效</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 队列摘要：暂停任务 + 排队中任务 -->
+      <div class="panel-queue" v-if="queuedJobs.length > 0 || pausedJob">
+        <div class="queue-summary">
+          <template v-if="pausedJob">已暂停 {{ pausedJob.appName || '任务' }} · </template>
+          队列中 {{ queuedJobs.length }} 个任务等待执行
+        </div>
         <div class="queue-mini-list">
-          <div v-for="qj in queuedJobs.slice(0, 5)" :key="qj.id" class="queue-mini-item">
+          <!-- 暂停任务（保留进度，可继续/删除） -->
+          <div v-if="pausedJob" class="queue-mini-item paused">
+            <span class="queue-mini-name">{{ pausedJob.appName || '批量任务' }}</span>
+            <span class="queue-mini-meta">{{ pausedJob.processed }}/{{ pausedJob.total }} 已暂停</span>
+            <button class="mini-act ok" title="继续执行" @click="handleResumeJob(pausedJob.id)">▶</button>
+            <button class="mini-act danger" title="删除出队" @click="handleDequeue(pausedJob.id)">✕</button>
+          </div>
+          <div v-for="qj in queuedJobs.slice(0, 4)" :key="qj.id" class="queue-mini-item">
             <span class="queue-mini-name">{{ qj.appName || '批量任务' }}</span>
             <span class="queue-mini-meta">{{ qj.processed }}/{{ qj.total }}</span>
+            <button class="mini-act" title="置顶" @click="handleMoveTop(qj.id)">↑</button>
+            <button class="mini-act danger" title="删除出队" @click="handleDequeue(qj.id)">✕</button>
           </div>
-          <div class="queue-mini-more" v-if="queuedJobs.length > 5">
-            还有 {{ queuedJobs.length - 5 }} 个…
+          <div class="queue-mini-more" v-if="queuedJobs.length > 4">
+            还有 {{ queuedJobs.length - 4 }} 个…
           </div>
         </div>
       </div>
@@ -51,65 +108,159 @@
       </div>
 
       <div class="panel-actions">
+        <button v-if="store.isRunning" class="btn" @click="handlePause">
+          ⏸ {{ t('pause') }}
+        </button>
         <button v-if="store.isRunning" class="btn btn-danger" @click="handleStop">
           ⏹ {{ t('stopExecution') }}
         </button>
-        <button class="btn" @click="goBatch">{{ t('batchTaskDetail') }}</button>
+        <button v-if="pausedJob" class="btn btn-ok" @click="handleResumeJob(pausedJob.id)">
+          ▶ {{ t('resume') }}
+        </button>
+        <button class="btn btn-primary" @click="goDetail">📋 {{ t('batchQueueDetail') }}</button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { Modal } from 'ant-design-vue'
 import { useBatchTaskStore } from '@/stores/batchTaskStore'
 import { t } from '@/utils/i18n'
+import { showInfo } from '@/utils'
 
 const store = useBatchTaskStore()
 const router = useRouter()
 const expanded = ref(false)
+const showConfig = ref(false)
+const notifyUrlDraft = ref('')
 
+const cfg = computed(() => store.queueConfig)
 const s = computed(() => store.status || {})
 const percent = computed(() => store.percent)
 const visible = computed(
-  () => store.isRunning || store.queuedCount > 0 || (expanded.value && store.queue.length > 0)
+  () =>
+    store.isRunning ||
+    store.queuedCount > 0 ||
+    !!store.pausedJob ||
+    (expanded.value && store.queue.length > 0)
 )
 const statusClass = computed(() => {
   if (store.isRunning) return 'running'
+  if (store.pausedJob) return 'waiting'
   if (store.queuedCount > 0) return 'waiting'
   return s.value.status === 'completed' ? 'ok' : 'err'
 })
-const pillText = computed(() =>
-  store.isRunning
-    ? `${s.value.processed}/${s.value.total} · ${percent.value}%` +
+// 全部终态时的汇总文案（区分成功/失败，避免"已完成"误导）
+const doneText = computed(() => {
+  const total = store.queue.length
+  if (total === 0) return t('batchTaskDone')
+  const failed = store.queue.filter(
+    (j) => j.status === 'failed' || j.status === 'stopped'
+  ).length
+  const done = store.queue.filter((j) => j.status === 'completed').length
+  if (failed === 0) return t('batchTaskDone')
+  return `${done} 成功 · ${failed} 失败/停止`
+})
+const pillText = computed(() => {
+  if (store.isRunning) {
+    return `${s.value.processed}/${s.value.total} · ${percent.value}%` +
       (store.queuedCount > 0 ? ` · 队列中 ${store.queuedCount}` : '')
-    : t('batchTaskDone')
-)
-const headerText = computed(() =>
-  store.isRunning
-    ? `${s.value.appName || t('batchExecution')} · ${percent.value}%` +
+  }
+  if (store.pausedJob) {
+    return `已暂停 ${s.value.processed}/${s.value.total} · 队列中 ${store.queuedCount}`
+  }
+  if (store.paused) return '队列已暂停'
+  if (store.queuedCount > 0) return `排队中 ${store.queuedCount} 个任务`
+  return doneText.value
+})
+const headerText = computed(() => {
+  if (store.isRunning) {
+    return `${s.value.appName || t('batchExecution')} · ${percent.value}%` +
       (store.queuedCount > 0 ? `（队列 ${store.queuedCount}）` : '')
-    : t('batchTaskDone')
-)
+  }
+  if (store.pausedJob) {
+    return `已暂停：${s.value.appName || t('batchExecution')} · ${percent.value}%`
+  }
+  if (store.paused) return '队列已暂停，点击查看详情'
+  if (store.queuedCount > 0) return `排队中 ${store.queuedCount} 个任务`
+  return doneText.value
+})
 const queuedJobs = computed(() => store.queue.filter((j) => j.status === 'queued'))
+const pausedJob = computed(() => store.pausedJob)
 const recentLogs = computed(() => (s.value.logs || []).slice(0, 8))
 
-onMounted(() => {
+onMounted(async () => {
   // 启动时探一次：main 进程可能有正在跑/排队的任务（如刷新/重开面板后恢复显示）
-  store.fetchQueue().then(() => {
-    if (store.isRunning || store.queuedCount > 0) store.startPolling()
-  })
+  await store.loadQueueConfig()
+  notifyUrlDraft.value = store.queueConfig.notifyUrl
+  await store.fetchQueue()
+  if (store.isRunning || store.queuedCount > 0 || store.pausedJob) store.startPolling()
 })
+
+watch(
+  () => store.queueConfig.notifyUrl,
+  (v) => {
+    notifyUrlDraft.value = v || ''
+  }
+)
 
 async function handleStop() {
   await store.stop()
   expanded.value = true
 }
 
-function goBatch() {
+async function handlePause() {
+  await store.pauseJob()
+  showInfo('batchPaused')
+  expanded.value = true
+}
+
+async function handleResumeJob(id) {
+  await store.resumeJob(id)
+  showInfo('batchResumed')
+}
+
+function handleDequeue(id) {
+  Modal.confirm({
+    title: '删除出队',
+    content: '确定将该任务移出队列吗？（已完成的进度将丢失）',
+    okText: '删除',
+    okType: 'danger',
+    cancelText: '取消',
+    onOk: async () => {
+      await store.cancel(id)
+      showInfo('batchDequeued')
+    }
+  })
+}
+
+async function handleMoveTop(id) {
+  await store.moveTop(id)
+}
+
+// ---- 队列设置 ----
+async function toggleShutdown() {
+  store.setQueueConfig({ autoShutdown: !cfg.value.autoShutdown })
+  await store.applyQueueConfig()
+  showInfo(cfg.value.autoShutdown ? 'autoShutdownEnabled' : 'autoShutdownDisabled')
+}
+
+async function toggleNotify() {
+  store.setQueueConfig({ notifyEnabled: !cfg.value.notifyEnabled })
+  await store.applyQueueConfig()
+}
+
+async function applyNotifyUrl() {
+  store.setQueueConfig({ notifyUrl: notifyUrlDraft.value })
+  await store.applyQueueConfig()
+}
+
+function goDetail() {
   expanded.value = false
-  router.push('/batch')
+  router.push('/batch/detail')
 }
 </script>
 
@@ -159,8 +310,10 @@ function goBatch() {
 
 /* 展开态：面板 */
 .batch-float-panel {
-  width: 340px;
-  background: rgba(15, 23, 42, 0.96);
+  width: 360px;
+  max-height: 78vh;
+  overflow-y: auto;
+  background: rgba(15, 23, 42, 0.97);
   border: 1px solid rgba(56, 70, 102, 0.8);
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
@@ -214,6 +367,106 @@ function goBatch() {
   }
 }
 
+/* 队列设置 */
+.panel-config {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  padding: 6px 8px;
+  .config-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    .config-title {
+      color: #38bdf8;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .config-arrow {
+      color: #64748b;
+      font-size: 10px;
+      transition: transform 0.2s;
+      &.open {
+        transform: rotate(180deg);
+      }
+    }
+  }
+  .config-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(56, 70, 102, 0.4);
+  }
+  .config-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    .config-label {
+      color: #cbd5e1;
+      font-size: 11px;
+    }
+  }
+  .config-url-row {
+    margin-top: 2px;
+    .config-input {
+      width: 100%;
+      box-sizing: border-box;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(56, 70, 102, 0.7);
+      border-radius: 4px;
+      color: #e2e8f0;
+      font-size: 11px;
+      padding: 4px 8px;
+      outline: none;
+      &:focus {
+        border-color: #0ea5e9;
+      }
+      &::placeholder {
+        color: #475569;
+      }
+    }
+  }
+  .config-note {
+    color: #64748b;
+    font-size: 10px;
+    line-height: 1.4;
+  }
+}
+
+/* 迷你开关 */
+.mini-switch {
+  width: 28px;
+  height: 16px;
+  border-radius: 8px;
+  background: #334155;
+  border: 1px solid #475569;
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: background 0.2s;
+  .mini-knob {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #94a3b8;
+    transition: left 0.2s, background 0.2s;
+  }
+  &.on {
+    background: #059669;
+    border-color: #10b981;
+    .mini-knob {
+      left: 13px;
+      background: #ffffff;
+    }
+  }
+}
+
 /* 队列摘要 */
 .panel-queue {
   background: rgba(0, 0, 0, 0.25);
@@ -230,17 +483,48 @@ function goBatch() {
     gap: 2px;
     .queue-mini-item {
       display: flex;
-      justify-content: space-between;
-      gap: 8px;
+      align-items: center;
+      gap: 6px;
       font-size: 11px;
       color: #94a3b8;
+      &.paused {
+        color: #fbbf24;
+      }
       .queue-mini-name {
+        flex: 1;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
       .queue-mini-meta {
         flex-shrink: 0;
+      }
+      .mini-act {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(56, 70, 102, 0.8);
+        border-radius: 4px;
+        color: #94a3b8;
+        font-size: 10px;
+        line-height: 1;
+        padding: 3px 5px;
+        cursor: pointer;
+        &:hover {
+          color: #e2e8f0;
+          border-color: #0ea5e9;
+        }
+        &.ok {
+          color: #10b981;
+          &:hover {
+            border-color: #10b981;
+          }
+        }
+        &.danger {
+          color: #f87171;
+          &:hover {
+            border-color: #ef4444;
+            background: rgba(239, 68, 68, 0.15);
+          }
+        }
       }
     }
     .queue-mini-more {
@@ -302,7 +586,7 @@ function goBatch() {
 }
 
 .panel-logs {
-  max-height: 140px;
+  max-height: 100px;
   overflow-y: auto;
   background: rgba(0, 0, 0, 0.25);
   border-radius: 6px;
@@ -353,6 +637,21 @@ function goBatch() {
       color: #f87171;
       &:hover {
         background: rgba(239, 68, 68, 0.15);
+      }
+    }
+    &.btn-ok {
+      border-color: rgba(16, 185, 129, 0.6);
+      color: #34d399;
+      &:hover {
+        background: rgba(16, 185, 129, 0.15);
+      }
+    }
+    &.btn-primary {
+      background: linear-gradient(90deg, #0ea5e9 0%, #8b5cf6 100%);
+      border: none;
+      color: #fff;
+      &:hover {
+        opacity: 0.9;
       }
     }
   }

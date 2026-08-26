@@ -230,6 +230,18 @@
                       :placeholder="t('enterCustomModel')"
                     />
                   </div>
+
+                  <!-- 构建应用模型（Codex agent） -->
+                  <div class="pt-4 mt-4 border-t border-slate-700">
+                    <label class="block mb-2 text-slate-300">{{ t('buildModel') }}</label>
+                    <input
+                      v-model="state.config.buildModel"
+                      type="text"
+                      class="px-4 py-2.5 w-full text-white rounded-lg tech-input focus:outline-none"
+                      :placeholder="t('enterBuildModel')"
+                    />
+                    <p class="mt-1.5 text-xs text-slate-400">{{ t('buildModelHint') }}</p>
+                  </div>
                 </div>
               </div>
 
@@ -536,6 +548,7 @@ const state = reactive({
     base_url: 'https://api.deepseek.com/v1',
     model: 'deepseek-reasoner',
     provider: 'deepseek', // 新增供应商字段
+    buildModel: 'deepseek-v4-flash', // 构建应用（Codex agent）使用的模型
     buildStyleId: 'tech', // 新增构建风格ID
     ngrokAuthtoken: '', // 新增ngrok authtoken
   },
