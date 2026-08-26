@@ -4,6 +4,8 @@ import { attachSessionDownloadHandler } from '../lib/comfyDownloadManager'
 import { getComfyInjectScriptSource } from './comfyInject'
 import { getModelDownloadContentScript } from '../lib/comfyContentScript'
 import { getComfyTerminalContentScript } from '../lib/comfyTerminalContentScript'
+import { getMcpSidebarContentScript } from '../lib/mcpSidebarContentScript'
+import { getFlag, recordExposure } from '../lib/experiments'
 import { closeInstallPopouts } from '../lib/popoutWindows'
 import { _operationAborts, sourceMap } from '../lib/ipc/shared'
 import { readableSymbolColor } from '../lib/theme'
@@ -40,6 +42,9 @@ const APP_VERSION = getAppVersion()
  *  default). These get the stopgap Terminal-tab injection; remote/cloud and
  *  external (legacy v1 desktop) installs do not. */
 const TERMINAL_INJECTION_SOURCE_IDS = new Set(['standalone', 'portable', 'git'])
+
+/** PostHog flag gating the Local MCP sidebar icon. */
+const MCP_SIDEBAR_FLAG = 'mcp_sidebar_enabled'
 
 /** Entry point that triggered a zoom reset, tagged as `source` on the
  *  `comfy.desktop.zoom.reset` telemetry event. `titlebar` (the zoom pill)
@@ -431,6 +436,11 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     // `comfyTerminalContentScript.ts` for the dedupe guard.
     if (isLocal && TERMINAL_INJECTION_SOURCE_IDS.has(installation.sourceId)) {
       comfyContents.executeJavaScript(getComfyTerminalContentScript()).catch(() => {})
+      // Local MCP sidebar icon, flag-gated. Same install gate as the terminal.
+      if (getFlag(MCP_SIDEBAR_FLAG) === true) {
+        recordExposure(MCP_SIDEBAR_FLAG, 'enabled', 'cache')
+        comfyContents.executeJavaScript(getMcpSidebarContentScript()).catch(() => {})
+      }
     }
     // Cloud-only patches (popup-blocked toast suppression + post-signin
     // flicker hide). Skipped for local installs — they don't load cloud
