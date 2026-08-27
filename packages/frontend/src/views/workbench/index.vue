@@ -118,8 +118,11 @@
                   </div>
                 </div>
                 <div
-                  class="rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words"
-                  :class="messageClass(m)"
+                  class="rounded-lg px-3 py-2 text-sm break-words"
+                  :class="[
+                    messageClass(m),
+                    m.kind === 'chat' || m.kind === 'error' ? '' : 'whitespace-pre-wrap',
+                  ]"
                 >
                   <template v-if="m.kind === 'card' && m.plan">
                     <div class="font-semibold mb-1">
@@ -132,6 +135,11 @@
                     <a-spin size="small" />
                     <span class="ml-2">{{ m.text }}</span>
                   </template>
+                  <!-- agent 文本走 markdown（dsh 同款 marked+DOMPurify）；用户消息保持纯文本 -->
+                  <WbMarkdown
+                    v-else-if="(m.kind === 'chat' || m.kind === 'error') && m.role === 'agent'"
+                    :source="m.text"
+                  />
                   <template v-else>{{ m.text }}</template>
                 </div>
               </div>
@@ -362,6 +370,7 @@ import { useI18n } from '@/utils/i18n'
 import { useAppStore } from '@/stores/appStore'
 import AppHeader from '@/views/apps/components/AppHeader.vue'
 import SessionSidebar from './components/SessionSidebar.vue'
+import WbMarkdown from './components/WbMarkdown.vue'
 import Composer from './components/Composer.vue'
 import NewSessionDialog from './components/NewSessionDialog.vue'
 import PresetManager from './components/PresetManager.vue'
