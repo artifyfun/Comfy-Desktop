@@ -1,0 +1,89 @@
+/**
+ * 纯函数层：app → 模板转换 + 伪 App 包装（无 electron/appStore 运行时依赖，
+ * 便于单测；templates.ts 在此之上加缓存/事件/单例）。
+ */
+import type { App, ComfyPrompt, ParamNode } from '../appStore'
+
+export type WorkbenchMediaType = 'image' | 'video' | 'audio' | 'text'
+
+export interface WorkflowTemplate {
+  id: string // builtin:<name> | app:<appId>
+  name: string
+  description: string
+  descriptionEn?: string
+  mediaType: WorkbenchMediaType
+  prompt: ComfyPrompt
+  paramsNodes: ParamNode[]
+  requiredModels?: string[]
+  knowledge?: string
+  chainable?: boolean
+  source: 'builtin' | 'app'
+  appId?: string
+}
+
+/** 从 app 推断产物媒体类型：输出 renderComponent 优先，class_type 兜底 */
+export function inferMediaType(app: App): WorkbenchMediaType {
+  const outs = (app.template?.paramsNodes ?? []).filter((n) => n.category === 'output')
+  for (const n of outs) {
+    if (n.renderComponent === 'video-uploader') return 'video'
+    if (n.renderComponent === 'audio-uploader') return 'audio'
+  }
+  const prompt = app.template?.prompt
+  if (prompt) {
+    const types = Object.values(prompt).map((n) => n.class_type)
+    if (types.some((t) => /video|animate|VHS_/i.test(t))) return 'video'
+    if (types.some((t) => /audio|music/i.test(t))) return 'audio'
+  }
+  return 'image'
+}
+
+/** loader 节点提取模型依赖（.safetensors 等），去重 */
+export function extractRequiredModels(prompt: ComfyPrompt): string[] {
+  const models: string[] = []
+  for (const node of Object.values(prompt)) {
+    if (!/Loader|Load/i.test(node.class_type)) continue
+    for (const v of Object.values(node.inputs)) {
+      if (typeof v === 'string' && /\.(ckpt|safetensors|pt|gguf|bin|sft)$/i.test(v)) {
+        models.push(v)
+      }
+    }
+  }
+  return [...new Set(models)]
+}
+
+/** app → 模板（无 template.prompt 不可执行，null） */
+export function templateFromApp(app: App): WorkflowTemplate | null {
+  const prompt = app.template?.prompt
+  if (!prompt || Object.keys(prompt).length === 0) return null
+  const paramsNodes = app.template?.paramsNodes ?? []
+  const mediaType = inferMediaType(app)
+  return {
+    id: `app:${app.id}`,
+    name: app.name,
+    description: app.description || `${app.name}（${mediaType}）`,
+    mediaType,
+    prompt,
+    paramsNodes,
+    requiredModels: extractRequiredModels(prompt),
+    chainable:
+      mediaType !== 'text' &&
+      paramsNodes.some(
+        (n) =>
+          n.category === 'input' && /image|video|audio|-uploader$/i.test(n.renderComponent ?? '')
+      ),
+    source: 'app',
+    appId: app.id
+  }
+}
+
+/** 模板 → executor.executeApp 认识的伪 App */
+export function toPseudoApp(t: WorkflowTemplate): App {
+  return {
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    createdAt: 0,
+    updatedAt: 0,
+    template: { prompt: t.prompt, paramsNodes: t.paramsNodes, workflow: undefined }
+  }
+}

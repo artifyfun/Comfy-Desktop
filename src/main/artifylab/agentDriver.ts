@@ -1,4 +1,5 @@
 import { Codex } from './vendor/codex-sdk'
+export { Codex } from './vendor/codex-sdk'
 import { mkdtempSync, readFileSync, rmSync, existsSync, cpSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -98,7 +99,7 @@ function currentTriple(): string | null {
 // 解析打包/开发环境下内置的 codex 原生二进制。
 // 生产：electron-builder extraResources 把 src/main/artifylab/public/codex-bin 拷到 resources/codex-bin。
 // 开发：源码目录 public/codex-bin（scripts/copy-codex-bin.mjs 生成）。
-function resolveCodexBinary(): string | null {
+export function resolveCodexBinary(): string | null {
   const triple = currentTriple()
   if (!triple) return null
   const exeName = process.platform === 'win32' ? 'codex.exe' : 'codex'

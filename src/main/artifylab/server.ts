@@ -21,6 +21,7 @@ import { createProxyRouter } from './routes/proxy'
 import { createModelsRouter } from './routes/models'
 import { createBatchRouter } from './routes/batch'
 import { createMcpConfigRouter } from './routes/mcp'
+import { createWorkbenchRouter } from './routes/workbench'
 import { isLoopbackHost, resolveListenHost } from './config/listenHost'
 import appStoreManager from './appStore'
 
@@ -97,6 +98,8 @@ app.use(createModelsRouter())
 app.use(createBatchRouter())
 // MCP 接入配置（GET /api/mcp/config 需在 history() 之前）
 app.use(createMcpConfigRouter())
+// AI 工作台（GET /api/workbench/templates 等需在 history() 之前）
+app.use(createWorkbenchRouter())
 
 // 中间件配置
 app.use(history())
