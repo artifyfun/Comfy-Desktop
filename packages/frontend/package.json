@@ -82,6 +82,7 @@
     "marked": "^18.0.11",
     "monaco-editor": "^0.52.2",
     "pinia": "^3.0.1",
+    "qrcode": "^1.5.4",
     "splitpanes": "^4.0.4",
     "tailwindcss": "^4.1.10",
     "viewerjs": "^1.11.8",

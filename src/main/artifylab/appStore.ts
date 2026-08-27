@@ -59,6 +59,8 @@ const getDefaultConfig = () => {
     api_key: '',
     base_url: 'https://api.deepseek.com/v1',
     model: 'deepseek-reasoner',
+    provider: 'deepseek', // 供应商标识（设置弹窗供应商卡片用）
+    buildModel: 'deepseek-v4-flash', // 工作台 decide/构建 agent 模型
     buildStyleId: 'tech', // 新增构建风格ID
     ngrokAuthtoken: '' // 新增ngrok authtoken
   }
@@ -181,7 +183,9 @@ class AppStoreManager extends EventEmitter {
   // 获取config
   getConfig(): any {
     const defaultConfig = getDefaultConfig()
-    const config = this.store.get('config', defaultConfig)
+    // 已存配置与新默认值做浅合并：新增字段（如 provider/buildModel）能补齐到老用户，
+    // 同时用户显式设过的值不被默认值覆盖
+    const config = { ...defaultConfig, ...this.store.get('config', {}) }
     config.comfyHost = defaultConfig.comfyHost
     config.serverHost = defaultConfig.serverHost
     return config

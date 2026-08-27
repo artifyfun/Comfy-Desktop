@@ -78,52 +78,6 @@
                   />
                 </div>
 
-                <!-- Max Tokens - 滑块 -->
-                <div>
-                  <div class="flex justify-between items-center mb-3">
-                    <label class="text-slate-300">
-                      {{ t('maxTokens') }}
-                    </label>
-                    <span class="font-bold text-tech-cyan">{{ state.config.max_tokens }}</span>
-                  </div>
-                  <input
-                    v-model="state.config.max_tokens"
-                    type="range"
-                    min="1000"
-                    max="128000"
-                    step="1000"
-                    class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-slate-600 accent-tech-cyan"
-                  />
-                  <div class="flex justify-between mt-1 text-xs text-slate-400">
-                    <span>1K</span>
-                    <span>64K</span>
-                    <span>128K</span>
-                  </div>
-                </div>
-
-                <!-- Temperature - 滑块 -->
-                <div>
-                  <div class="flex justify-between items-center mb-3">
-                    <label class="text-slate-300">
-                      {{ t('creativity') }}
-                    </label>
-                    <span class="font-bold text-tech-cyan">{{ state.config.temperature }}</span>
-                  </div>
-                  <input
-                    v-model="state.config.temperature"
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    class="w-full h-2 rounded-lg appearance-none cursor-pointer bg-slate-600 accent-tech-cyan"
-                  />
-                  <div class="flex justify-between mt-1 text-xs text-slate-400">
-                    <span>{{ t('precise') }}</span>
-                    <span>{{ t('balanced') }}</span>
-                    <span>{{ t('creative') }}</span>
-                  </div>
-                </div>
-
                 <!-- API Key - 带可见性切换 -->
                 <div>
                   <label class="block mb-2 text-slate-300">{{ t('apiKey') }}</label>
@@ -242,41 +196,6 @@
                     />
                     <p class="mt-1.5 text-xs text-slate-400">{{ t('buildModelHint') }}</p>
                   </div>
-                </div>
-              </div>
-
-              <!-- Tab2: 构建配置 -->
-              <div v-if="activeTab === 'build'">
-                <div>
-                  <label class="block mb-3 text-slate-300">{{ t('appStyle') }}</label>
-                  <div v-if="appStore.isLoading" class="py-4 text-slate-400">
-                    {{ t('loading') }}
-                  </div>
-                  <div v-if="appStore.buildStyles.length > 0" class="flex flex-col gap-4">
-                    <button
-                      v-for="style in appStore.buildStyles"
-                      :key="style.id"
-                      @click="state.config.buildStyleId = style.id"
-                      :class="[
-                        'flex flex-row items-center p-3 w-full rounded-lg border transition relative',
-                        state.config.buildStyleId === style.id
-                          ? 'border-tech-cyan bg-tech-cyan/10 text-tech-cyan'
-                          : 'border-slate-700 bg-slate-800/60 text-slate-300 hover:border-tech-cyan',
-                      ]"
-                      style="height: 160px"
-                    >
-                      <img
-                        :src="style.image"
-                        alt="style"
-                        class="object-cover w-full h-full rounded"
-                      />
-                      <span
-                        class="absolute bottom-4 left-1/2 text-lg font-medium text-green-400 backdrop-blur-sm -translate-x-1/2 text-shadow-lg/30"
-                        >{{ style[`${state.config.lang}_name`] }}</span
-                      >
-                    </button>
-                  </div>
-                  <div v-else class="py-4 text-slate-400">{{ t('noBuildStyles') }}</div>
                 </div>
               </div>
 
@@ -475,7 +394,7 @@
                           style="width: 220px; height: 230px"
                         >
                           <img
-                            :src="`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(shareUrl)}`"
+                            :src="qrDataUrl"
                             alt="QR Code"
                             class="mx-auto"
                             style="width: 200px; height: 200px"
@@ -490,21 +409,22 @@
                       </div>
                     </div>
                   </div>
-                  <!-- 导出/导入应用功能 -->
-                  <div class="flex gap-2 mt-6">
-                    <button
-                      @click="exportApps"
-                      class="flex relative flex-1 justify-center items-center px-4 py-2.5 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-blue to-tech-cyan hover:opacity-90"
-                    >
-                      <i class="mr-2 fas fa-download"></i>{{ t('exportApps') }}
-                    </button>
-                    <label
-                      class="flex relative flex-1 justify-center items-center px-4 py-2.5 text-white bg-gradient-to-r rounded-lg transition duration-300 cursor-pointer from-tech-cyan to-tech-blue hover:opacity-90"
-                    >
-                      <i class="mr-2 fas fa-upload"></i>{{ t('importApps') }}
-                      <input type="file" accept=".json" class="hidden" @change="importApps" />
-                    </label>
-                  </div>
+                </div>
+
+                <!-- 导出/导入应用功能（独立于 ngrok 测试结果，始终可见） -->
+                <div class="flex gap-2 mt-6">
+                  <button
+                    @click="exportApps"
+                    class="flex relative flex-1 justify-center items-center px-4 py-2.5 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-blue to-tech-cyan hover:opacity-90"
+                  >
+                    <i class="mr-2 fas fa-download"></i>{{ t('exportApps') }}
+                  </button>
+                  <label
+                    class="flex relative flex-1 justify-center items-center px-4 py-2.5 text-white bg-gradient-to-r rounded-lg transition duration-300 cursor-pointer from-tech-cyan to-tech-blue hover:opacity-90"
+                  >
+                    <i class="mr-2 fas fa-upload"></i>{{ t('importApps') }}
+                    <input type="file" accept=".json" class="hidden" @change="importApps" />
+                  </label>
                 </div>
               </div>
 
@@ -565,7 +485,10 @@
                       <div class="flex justify-between items-start">
                         <div class="flex-1 mr-2">
                           <div class="mb-1">{{ t('executeInTerminal') }}</div>
-                          <code class="block p-2 text-[11px] leading-4 rounded bg-black/30 text-cyan-200 break-all">{{ cmdText }}</code>
+                          <code
+                            class="block p-2 text-[11px] leading-4 rounded bg-black/30 text-cyan-200 break-all"
+                            >{{ cmdText }}</code
+                          >
                         </div>
                         <button
                           class="ml-2 text-cyan-400 hover:text-cyan-200"
@@ -582,7 +505,9 @@
                         >
                           {{ t('copyCommand') }}
                         </button>
-                        <div class="self-center text-[11px] opacity-80">{{ t('copy') }} → {{ t('paste') || 'Paste' }} → Enter</div>
+                        <div class="self-center text-[11px] opacity-80">
+                          {{ t('copy') }} → {{ t('paste') || 'Paste' }} → Enter
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -607,6 +532,7 @@
 
 <script setup name="ConfigModal">
 import { reactive, onMounted, ref, watch, computed } from 'vue'
+import QRCode from 'qrcode'
 import { t } from '@/utils/i18n'
 import { showError, showSuccess, uuidv4 } from '@/utils'
 import { useAppStore } from '@/stores/appStore'
@@ -675,9 +601,10 @@ const handleClickConfirm = () => {
 // 获取当前供应商的模型列表
 const getModelList = () => {
   if (state.config.provider === 'deepseek') {
-    return ['deepseek-reasoner', 'deepseek-coder', 'deepseek-chat']
+    // deepseek-coder 已并入 chat；补现役 v3.2 系列命名
+    return ['deepseek-chat', 'deepseek-reasoner', 'deepseek-v3.2-exp']
   } else if (state.config.provider === 'openai') {
-    return ['gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo']
+    return ['gpt-4.1', 'gpt-4o', 'gpt-4o-mini']
   }
   return []
 }
@@ -774,6 +701,11 @@ const testConnection = async () => {
 const ngrokTestLoading = ref(false)
 const ngrokTestResult = ref(null)
 const shareUrl = ref('')
+// 本地生成二维码（不依赖外网 qrserver，分享链接不出本机）
+const qrDataUrl = ref('')
+watch(shareUrl, async (url) => {
+  qrDataUrl.value = url ? await QRCode.toDataURL(url, { width: 200 }) : ''
+})
 
 // —— AI 接入（MCP）——
 const mcp = ref(null)
@@ -826,7 +758,7 @@ const mcpSnippets = computed(() => {
       cmd: JSON.stringify(
         { mcpServers: { artify: { url, headers: { Authorization: `Bearer ${token}` } } } },
         null,
-        2
+        2,
       ),
     },
     { key: 'generic', label: t('mcpGeneric'), cmd: `URL: ${url}\nToken: ${token}` },
@@ -1086,7 +1018,10 @@ onMounted(async () => {
     background: rgba(15, 23, 42, 0.6);
     border: 1px solid rgba(56, 70, 102, 0.4);
     box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
-    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    transition:
+      transform 0.15s ease,
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
   }
 
   .glass-card:hover {
@@ -1150,7 +1085,10 @@ onMounted(async () => {
   .tech-input {
     background: rgba(15, 23, 42, 0.4);
     border: 1px solid rgba(56, 70, 102, 0.6);
-    transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+    transition:
+      background 0.3s ease,
+      border-color 0.3s ease,
+      box-shadow 0.3s ease;
   }
 
   .tech-input:focus {
@@ -1173,7 +1111,9 @@ onMounted(async () => {
   }
 
   .slide-leave-active {
-    transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+    transition:
+      opacity 0.25s ease-out,
+      transform 0.25s ease-out;
   }
 
   .slide-enter-from,
@@ -1183,7 +1123,9 @@ onMounted(async () => {
   }
 
   .card-enter-active {
-    transition: opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition:
+      opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+      transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
 
   .card-enter-from {
@@ -1212,7 +1154,10 @@ body {
   background: rgba(15, 23, 42, 0.6);
   border: 1px solid rgba(56, 70, 102, 0.4);
   box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
-  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .glass-card:hover {
@@ -1276,7 +1221,10 @@ body {
 .tech-input {
   background: rgba(15, 23, 42, 0.4);
   border: 1px solid rgba(56, 70, 102, 0.6);
-  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+  transition:
+    background 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
 }
 
 .tech-input:focus {
@@ -1299,7 +1247,9 @@ body {
 }
 
 .slide-leave-active {
-  transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+  transition:
+    opacity 0.25s ease-out,
+    transform 0.25s ease-out;
 }
 
 .slide-enter-from,
@@ -1309,7 +1259,9 @@ body {
 }
 
 .card-enter-active {
-  transition: opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition:
+    opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .card-enter-from {
