@@ -72,6 +72,20 @@
                     <i v-else :class="kindIcon(a.kind)" class="text-slate-400"></i>
                   </div>
                 </div>
+                <!-- 产物缩略图（artifact 消息内联，点击 lightbox） -->
+                <div
+                  v-if="m.kind === 'artifact' && m.outputFiles?.length"
+                  class="flex gap-2 flex-wrap"
+                >
+                  <div
+                    v-for="(f, j) in m.outputFiles"
+                    :key="j"
+                    class="w-24 h-24 rounded-lg overflow-hidden bg-slate-800 border border-slate-600 cursor-zoom-in hover:border-tech-blue transition flex items-center justify-center"
+                    @click="lightboxFile = f"
+                  >
+                    <img :src="viewUrl(f)" class="w-full h-full object-cover" loading="lazy" />
+                  </div>
+                </div>
                 <div
                   class="rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words"
                   :class="messageClass(m)"
@@ -156,7 +170,18 @@
                   a.templateName
                 }}</span>
               </div>
-              <div v-if="a.outputs.length" class="text-xs text-slate-300 break-all">
+              <!-- 产物缩略图网格（ComfyUI /view 直出，点击 lightbox） -->
+              <div v-if="a.files?.length" class="grid grid-cols-3 gap-1 mb-1">
+                <div
+                  v-for="(f, j) in a.files"
+                  :key="j"
+                  class="aspect-square rounded overflow-hidden bg-slate-900 border border-slate-600 cursor-zoom-in hover:border-tech-blue transition"
+                  @click="lightboxFile = f"
+                >
+                  <img :src="viewUrl(f)" class="w-full h-full object-cover" loading="lazy" />
+                </div>
+              </div>
+              <div v-else-if="a.outputs.length" class="text-xs text-slate-300 break-all">
                 {{ a.outputs.join(' · ') }}
               </div>
               <div class="mt-2 flex gap-2">
@@ -190,6 +215,24 @@
       :default-id="defaultPresetId"
       @changed="loadPresets"
     />
+
+    <!-- Lightbox：产物大图预览 -->
+    <div
+      v-if="lightboxFile"
+      class="fixed inset-0 z-[100] bg-black/85 flex items-center justify-center"
+      @click="lightboxFile = null"
+    >
+      <img
+        :src="viewUrl(lightboxFile)"
+        class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+      />
+      <button
+        class="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/10 text-white text-xl hover:bg-white/20 flex items-center justify-center"
+        @click.stop="lightboxFile = null"
+      >
+        <i class="fas fa-xmark"></i>
+      </button>
+    </div>
 
     <!-- 固化弹窗 -->
     <a-modal
@@ -328,7 +371,9 @@ async function selectSession(s) {
     templateId: e.templateId,
     templateName: e.templateId,
     status: e.status,
-    outputs: e.outputs ?? [],
+    outputs: (e.outputs ?? []).map((f) => (typeof f === 'string' ? f : f.filename)),
+    // v2 outputs 为完整引用对象；旧数据字符串只有 filename（lightbox 降级直开）
+    files: (e.outputs ?? []).filter((f) => typeof f === 'object'),
   }))
   modelOverride.value = session.modelOverride ?? {}
   pendingIssues.value = []
@@ -537,6 +582,7 @@ function handleSse(chunk) {
       templateName: data.templateId,
       status: 'running',
       outputs: [],
+      files: [],
     })
     startPoll(data.promptId)
   } else if (event === 'invalid') {
@@ -585,7 +631,10 @@ function startPoll(promptId) {
       const artifact = artifacts.value.find((a) => a.promptId === promptId)
       if (artifact) {
         artifact.status = r.status
-        if (r.status === 'success' && r.outputs) artifact.outputs = extractFiles(r.outputs)
+        if (r.status === 'success' && r.outputs) {
+          artifact.outputs = extractFiles(r.outputs).map((f) => f.filename)
+          artifact.files = extractFiles(r.outputs)
+        }
       }
       if (r.status === 'success' || r.status === 'error') {
         messages.value.push({
@@ -603,7 +652,12 @@ function startPoll(promptId) {
           const exec = s?.executions?.find((e) => e.promptId === promptId)
           if (exec) {
             const art = artifacts.value.find((a) => a.promptId === promptId)
-            if (art) art.outputs = exec.outputs ?? []
+            if (art) {
+              art.outputs = (exec.outputs ?? []).map((f) =>
+                typeof f === 'string' ? f : f.filename,
+              )
+              art.files = (exec.outputs ?? []).filter((f) => typeof f === 'object')
+            }
           }
         })
       }
@@ -623,14 +677,25 @@ function stopPoll(promptId) {
 }
 
 function extractFiles(outputs) {
+  // v2：保留完整引用（filename+subfolder+type），/view 直出缩略图
   const files = []
   for (const v of Object.values(outputs || {})) {
     const o = v || {}
     for (const key of ['images', 'gifs']) {
-      for (const it of o[key] ?? []) if (it.filename) files.push(it.filename)
+      for (const it of o[key] ?? []) {
+        if (it.filename)
+          files.push({ filename: it.filename, subfolder: it.subfolder, type: it.type })
+      }
     }
   }
   return files
+}
+
+const comfyOrigin = computed(() => appStore.config?.comfyHost || 'http://127.0.0.1:8188')
+const lightboxFile = ref(null)
+
+function viewUrl(f) {
+  return `${comfyOrigin.value}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? '')}&type=${encodeURIComponent(f.type ?? 'output')}`
 }
 
 // ---------- 固化 ----------

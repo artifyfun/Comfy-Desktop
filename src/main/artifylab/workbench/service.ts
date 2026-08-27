@@ -60,15 +60,25 @@ export interface WorkbenchMessage {
   plan?: WorkbenchPlan
   promptId?: string
   outputs?: string[]
+  /** v2：完整产物引用（/view 直出缩略图） */
+  outputFiles?: WorkbenchOutputFile[]
   attachments?: AttachmentMeta[]
   createdAt: number
+}
+
+/** 产物文件引用（gallery /view 直出缩略图所需的完整定位） */
+export interface WorkbenchOutputFile {
+  filename: string
+  subfolder?: string
+  type?: string
 }
 
 export interface WorkbenchExecution {
   promptId: string
   templateId: string
   params: Record<string, unknown>
-  outputs: string[] // gallery 可定位的产物描述
+  /** v2：完整文件引用（含 subfolder/type，/view 直出）；旧数据为纯 filename 字符串 */
+  outputs: (WorkbenchOutputFile | string)[]
   status: ExecutionResult['status']
   startedAt: number
 }
@@ -520,14 +530,17 @@ ${userInput}`
       const exec = session?.executions.find((e) => e.promptId === promptId)
       if (exec && result.outputs) {
         exec.status = 'success'
-        const files: string[] = []
+        const files: WorkbenchOutputFile[] = []
         for (const v of Object.values(result.outputs as Record<string, unknown>)) {
           const o = v as {
-            images?: Array<{ filename?: string }>
-            gifs?: Array<{ filename?: string }>
+            images?: Array<{ filename?: string; subfolder?: string; type?: string }>
+            gifs?: Array<{ filename?: string; subfolder?: string; type?: string }>
           }
           for (const key of ['images', 'gifs'] as const) {
-            for (const it of o[key] ?? []) if (it.filename) files.push(it.filename)
+            for (const it of o[key] ?? []) {
+              if (it.filename)
+                files.push({ filename: it.filename, subfolder: it.subfolder, type: it.type })
+            }
           }
         }
         exec.outputs = files
@@ -535,7 +548,8 @@ ${userInput}`
           role: 'agent',
           kind: 'artifact',
           text: files.length ? `产物 ${files.length} 个文件` : '执行完成（无产物文件）',
-          outputs: files,
+          outputs: files.map((f) => f.filename),
+          outputFiles: files,
           promptId
         })
         this.flush()
