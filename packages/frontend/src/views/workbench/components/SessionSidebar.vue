@@ -131,6 +131,22 @@
       </div>
     </template>
   </aside>
+
+  <a-modal
+    v-model:open="renameOpen"
+    :title="t('workbenchRenamePrompt')"
+    :ok-text="t('confirm')"
+    :cancel-text="t('cancel')"
+    @ok="confirmRename"
+  >
+    <a-input
+      v-model:value="renameTitle"
+      :placeholder="t('workbenchSessionTitle')"
+      class="wb-tech-input"
+      allow-clear
+      @press-enter="confirmRename"
+    />
+  </a-modal>
 </template>
 
 <script setup>
@@ -185,9 +201,20 @@ function statusDot(s) {
   return ''
 }
 
+// 重命名：统一 wb-tech-input 样式的 Modal（替代原生 window.prompt）
+const renameOpen = ref(false)
+const renameTitle = ref('')
+let renameTarget = null
+
 function startRename(s) {
-  // 简易重命名：window.prompt（MVP；后续换内联编辑）
-  const title = window.prompt(t('workbenchRenamePrompt'), s.title)
-  if (title && title.trim()) emit('rename', { id: s.id, title: title.trim() })
+  renameTarget = s
+  renameTitle.value = s.title || ''
+  renameOpen.value = true
+}
+
+function confirmRename() {
+  const title = renameTitle.value.trim()
+  if (title && renameTarget) emit('rename', { id: renameTarget.id, title })
+  renameOpen.value = false
 }
 </script>

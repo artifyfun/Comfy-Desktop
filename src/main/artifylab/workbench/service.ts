@@ -222,6 +222,8 @@ class WorkbenchService {
     const session: WorkbenchSession = {
       id: randomUUID(),
       title: opts.title || '新会话',
+      // 用户在建会话时显式填了标题 → 视同手动命名，防 PLAN 自动标题覆盖
+      titleLocked: !!opts.title,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       messages: [],
@@ -414,7 +416,8 @@ class WorkbenchService {
 2. intent=text 走纯文本生成（文案/起名/总结等），把生成结果放 reply。
 3. intent=chat 用于追问澄清或闲聊，回复放 reply。
 4. 模板库为空或不匹配时选 chat 并说明。
-5. 用户上传了素材时，倾向选择带媒体输入参数的模板（图生图/视频驱动），参数值填素材文件名（已上传）。${chainHint}${constraint}${attachmentHint}${shortcutHint}${titleRule}
+5. 用户上传了素材时，倾向选择带媒体输入参数的模板（图生图/视频驱动），参数值填素材文件名（已上传）。
+6. 存在「会话预设约束」段落时，其 intent 限制是**硬性规则**，违反的输出会被系统直接拒绝——你必须输出该 intent。${chainHint}${constraint}${attachmentHint}${shortcutHint}${titleRule}
 
 ## 模板库
 ${catalog}

@@ -276,14 +276,29 @@ export function createWorkbenchRouter(): express.Router {
       }
       send('plan', { plan, localIssues: issues })
 
+      // 预设意图约束是硬校验：codex 违反预设（如 text-to-image 预设下输出 text）
+      // 时立即拦截并回显，而不是继续执行/回复
+      const presetIssue = issues.find((i) => i.field === 'intent')
+      if (presetIssue) {
+        send('invalid', { issues: [presetIssue] })
+        finish()
+        return
+      }
+
       const local = validatePlanLocal(plan, templateLibrary.list())
+      if (!local.ok) {
+        // 结构性非法的 PLAN 也先于 reply/execution 拦截
+        send('invalid', { issues: local.issues })
+        finish()
+        return
+      }
       if (plan.intent === 'chat' || plan.intent === 'text') {
         send('reply', { intent: plan.intent, reply: plan.reply ?? '' })
         finish()
         return
       }
-      if (!local.ok || !local.template) {
-        send('invalid', { issues: local.issues })
+      if (!local.template) {
+        send('invalid', { issues: [{ field: 'templateId', message: '模板不存在' }] })
         finish()
         return
       }
