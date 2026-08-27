@@ -4,29 +4,60 @@
     :title="t('workbenchNewSession')"
     :ok-text="t('confirm')"
     :cancel-text="t('cancel')"
+    :ok-button-props="{ disabled: !selected }"
     @ok="create"
     @cancel="$emit('update:open', false)"
   >
     <div class="space-y-4 py-2">
       <div>
         <div class="text-sm text-slate-300 mb-2">{{ t('workbenchPresetPick') }}</div>
-        <div class="flex flex-wrap gap-2">
+        <!-- dsh preset 卡片列表：name + description + 意图标签，点选整卡 -->
+        <div class="space-y-2 max-h-72 overflow-y-auto pr-1">
           <button
-            v-for="p in presets"
+            v-for="p in sortedPresets"
             :key="p.id"
-            class="px-3 py-1.5 rounded-full border text-sm transition"
+            class="relative w-full text-left rounded-xl border p-3 transition flex items-start gap-3"
             :class="
               selectedId === p.id
-                ? 'bg-tech-blue/80 border-tech-blue text-white'
-                : 'border-slate-600 text-slate-300 hover:border-tech-blue'
+                ? 'border-tech-blue bg-tech-blue/10 ring-1 ring-tech-blue'
+                : 'border-slate-600 hover:border-slate-400 bg-slate-800/40'
             "
             @click="selectedId = p.id"
           >
-            <i :class="presetIcon(p)" class="mr-1"></i>{{ presetName(p) }}
+            <span
+              class="mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+              :class="selectedId === p.id ? 'bg-tech-blue/30' : 'bg-slate-700'"
+            >
+              <i
+                :class="[presetIcon(p), selectedId === p.id ? 'text-tech-blue' : 'text-slate-300']"
+                class="text-sm"
+              ></i>
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="flex items-center gap-2">
+                <span class="text-white text-sm font-medium truncate">{{ presetName(p) }}</span>
+                <span
+                  v-if="p.id === defaultPresetId"
+                  class="text-[10px] text-tech-cyan border border-tech-cyan/40 rounded px-1"
+                  >default</span
+                >
+                <span v-if="p.builtin" class="text-[10px] text-slate-500">builtin</span>
+              </span>
+              <span class="block text-xs text-slate-400 mt-0.5 leading-relaxed">
+                {{ presetDesc(p) }}
+              </span>
+              <span
+                v-if="p.intentHint"
+                class="inline-block mt-1 text-[10px] font-mono text-slate-500 border border-slate-700 rounded px-1.5 py-0.5"
+              >
+                /{{ p.id }} · intent: {{ p.intentHint }}
+              </span>
+            </span>
+            <i
+              class="fas fa-circle-check mt-1 shrink-0"
+              :class="selectedId === p.id ? 'text-tech-blue' : 'text-slate-600'"
+            ></i>
           </button>
-        </div>
-        <div v-if="selected" class="mt-2 text-xs text-slate-400">
-          {{ selected.description?.[lang] || selected.description?.zh }}
         </div>
       </div>
       <div>
@@ -48,10 +79,10 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:open', 'create'])
 
-const { t } = useI18n()
+const { t, getCurrentLanguage } = useI18n()
 const selectedId = ref(props.defaultPresetId)
 const title = ref('')
-const lang = useI18n().getCurrentLanguage?.() === 'en' ? 'en' : 'zh'
+const lang = computed(() => (getCurrentLanguage?.() === 'en' ? 'en' : 'zh'))
 
 watch(
   () => props.open,
@@ -63,10 +94,16 @@ watch(
   },
 )
 
+const sortedPresets = computed(() =>
+  [...props.presets].sort((a, b) => (a.order ?? 100) - (b.order ?? 100)),
+)
 const selected = computed(() => props.presets.find((p) => p.id === selectedId.value))
 
 function presetName(p) {
-  return p.name?.[lang] || p.name?.zh || p.id
+  return p.name?.[lang.value] || p.name?.zh || p.id
+}
+function presetDesc(p) {
+  return p.description?.[lang.value] || p.description?.zh || ''
 }
 function presetIcon(p) {
   if (p.intentHint === 'video') return 'fas fa-film'

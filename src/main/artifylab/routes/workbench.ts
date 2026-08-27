@@ -195,7 +195,7 @@ export function createWorkbenchRouter(): express.Router {
       force?: boolean
       attachments?: AttachmentMeta[]
     }
-    if (!sessionId || !input) {
+    if (!sessionId || (!input && !(attachments && attachments.length > 0))) {
       res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('sessionId and input required'))
       return
     }
@@ -233,7 +233,7 @@ export function createWorkbenchRouter(): express.Router {
       send('stage', { stage: 'deciding' })
       const { plan, issues, raw } = await workbenchService.decide(
         sessionId,
-        input,
+        input ?? '',
         () => {},
         attachments ?? []
       )

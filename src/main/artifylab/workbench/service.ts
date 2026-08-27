@@ -353,8 +353,9 @@ ${userInput}`
       userInput = slash.rest
     }
     const preset = (presetId ? this.getPreset(presetId) : undefined) ?? undefined
-    // 预设提示词模板展开（{input} 占位）
-    const effectiveInput = applyPromptTemplate(preset, userInput)
+    // 预设提示词模板展开（{input} 占位）；附件-only 输入给默认占位提示
+    const baseInput = userInput.trim() || '按我上传的素材生成'
+    const effectiveInput = applyPromptTemplate(preset, baseInput)
 
     this.appendMessage(sessionId, {
       role: 'user',
@@ -598,7 +599,10 @@ ${userInput}`
   // ---------------- 预设 CRUD（copy-dialog 语义） ----------------
 
   listPresets(): WorkbenchPreset[] {
-    return [...BUILTIN_PRESETS, ...(this.store.presets ?? [])]
+    // dsh preset.yml order 语义：按 order 升序，缺省排 100
+    return [...BUILTIN_PRESETS, ...(this.store.presets ?? [])].sort(
+      (a, b) => (a.order ?? 100) - (b.order ?? 100)
+    )
   }
 
   getPreset(id: string): WorkbenchPreset | null {

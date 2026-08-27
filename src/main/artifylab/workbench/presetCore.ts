@@ -13,6 +13,8 @@ export interface WorkbenchPreset {
   name: { zh: string; en: string }
   description: { zh: string; en: string }
   builtin: boolean
+  /** 排序权重（dsh preset.yml 的 order：列表按此升序，缺省 100） */
+  order?: number
   /** 决策提示词模板，{input} 占位符会被用户输入替换 */
   promptTemplate?: string
   /** 意图约束：锁定 codex 决策范围（preset=text-to-image 时 intent 只能 image） */
@@ -31,7 +33,8 @@ export const BUILTIN_PRESETS: WorkbenchPreset[] = [
       zh: '无约束，AI 自由决策意图与模板',
       en: 'No constraints; AI decides intent and template freely'
     },
-    builtin: true
+    builtin: true,
+    order: 1
   },
   {
     id: 'text-to-image',
@@ -41,6 +44,7 @@ export const BUILTIN_PRESETS: WorkbenchPreset[] = [
       en: 'Generate images from a text description'
     },
     builtin: true,
+    order: 2,
     intentHint: 'image',
     promptTemplate: '{input}'
   },
@@ -52,6 +56,7 @@ export const BUILTIN_PRESETS: WorkbenchPreset[] = [
       en: 'Upload reference images and restyle per description'
     },
     builtin: true,
+    order: 3,
     intentHint: 'image',
     promptTemplate: '以我上传的图片为参考：{input}'
   },
@@ -63,6 +68,7 @@ export const BUILTIN_PRESETS: WorkbenchPreset[] = [
       en: 'Generate video from text or images'
     },
     builtin: true,
+    order: 4,
     intentHint: 'video',
     promptTemplate: '{input}'
   }
@@ -91,7 +97,9 @@ export function clonePreset(
     id,
     name: { zh: nameZh || src.name.zh, en: nameZh || src.name.en },
     description: { ...src.description },
-    builtin: false
+    builtin: false,
+    // 自定义预设紧跟源预设之后（dsh order 语义）
+    order: (src.order ?? 100) + 0.5
   }
 }
 

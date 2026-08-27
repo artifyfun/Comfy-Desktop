@@ -14,7 +14,7 @@
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div
-          v-for="p in presets"
+          v-for="p in sortedPresets"
           :key="p.id"
           class="rounded-lg border p-3 relative"
           :class="p.id === defaultId ? 'border-tech-blue' : 'border-slate-600'"
@@ -29,8 +29,8 @@
               <div class="text-xs text-slate-400 mt-1 line-clamp-2">
                 {{ p.description?.[lang] || '' }}
               </div>
-              <div v-if="p.intentHint" class="text-[11px] text-slate-500 mt-1 font-mono">
-                intent: {{ p.intentHint }}
+              <div class="text-[11px] text-slate-500 mt-1 font-mono">
+                /{{ p.id }}<template v-if="p.intentHint"> · intent: {{ p.intentHint }}</template>
               </div>
             </div>
           </div>
@@ -93,6 +93,11 @@ const appStore = useAppStore()
 const lang = computed(() => (getCurrentLanguage?.() === 'en' ? 'en' : 'zh'))
 
 const copyOpen = ref(false)
+
+// dsh preset.yml order 语义：列表按 order 升序
+const sortedPresets = computed(() =>
+  [...props.presets].sort((a, b) => (a.order ?? 100) - (b.order ?? 100)),
+)
 const copyFrom = ref('')
 const copyId = ref('')
 const copyName = ref('')

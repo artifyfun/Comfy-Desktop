@@ -45,6 +45,10 @@ describe('presetCore', () => {
 
   describe('clonePreset', () => {
     const ids = new Set(['standard'])
+    it('内置预设带 order 排序值（dsh preset.yml 语义）', () => {
+      const orders = BUILTIN_PRESETS.map((p) => p.order)
+      expect(orders).toEqual([1, 2, 3, 4])
+    })
     it('复制内置生成自定义', () => {
       const p = clonePreset('text-to-image', 'my-t2i', '我的文生图', ids)
       expect(p).not.toBeNull()
@@ -52,6 +56,7 @@ describe('presetCore', () => {
       expect(p!.builtin).toBe(false)
       expect(p!.intentHint).toBe('image') // 继承约束
       expect(p!.name.zh).toBe('我的文生图')
+      expect(p!.order).toBe(2.5) // 紧跟源预设之后（dsh order 语义）
     })
     it('id 冲突/非法/未知源返回 null', () => {
       expect(clonePreset('text-to-image', 'standard', 'x', ids)).toBeNull()

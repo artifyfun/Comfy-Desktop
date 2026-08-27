@@ -1,59 +1,78 @@
 <template>
   <div
-    class="composer border-t border-slate-700 p-3 relative"
+    class="composer relative"
     @dragover.prevent="dragOver = true"
     @dragleave="dragOver = false"
     @drop.prevent="onDrop"
   >
     <div
       v-if="dragOver"
-      class="absolute inset-0 z-40 flex flex-col items-center justify-center bg-slate-900/90 border-2 border-dashed border-tech-blue rounded-lg"
+      class="absolute inset-0 z-40 flex flex-col items-center justify-center bg-slate-900/90 border-2 border-dashed border-tech-blue rounded-2xl"
     >
       <i class="fas fa-cloud-arrow-up text-3xl text-tech-blue mb-2"></i>
       <div class="text-sm text-slate-200">{{ t('workbenchDropHint') }}</div>
     </div>
 
-    <AttachmentRail
-      v-if="attachments.length"
-      :attachments="attachments"
-      @remove="(i) => $emit('remove-attachment', i)"
-    />
-
-    <SkillMenu
-      :open="slashOpen"
-      :items="filteredSkills"
-      :active-index="activeIndex"
-      @pick="onSkillPick"
-      @active="(i) => (activeIndex = i)"
-    />
-
-    <div class="flex gap-2 items-end">
-      <button
-        class="px-2 py-1 text-sm text-slate-300 hover:text-white rounded transition"
-        :title="t('workbenchUpload')"
-        :disabled="uploading"
-        @click="pickFile"
-      >
-        <i class="fas fa-paperclip" :class="{ 'animate-pulse': uploading }"></i>
-      </button>
-      <ModelMenu
-        :override="modelOverride"
-        @update:override="(v) => $emit('update:modelOverride', v)"
+    <!-- dsh composer 布局：圆角卡片，textarea 全宽在上，工具条在底 -->
+    <div class="rounded-2xl border border-slate-600 bg-slate-800 px-4 pt-3 pb-2 shadow-lg">
+      <!-- 附件行（缩略图在上） -->
+      <AttachmentRail
+        v-if="attachments.length"
+        :attachments="attachments"
+        @remove="(i) => $emit('remove-attachment', i)"
       />
+
+      <!-- 输入区：全宽 textarea，自适应长高 -->
       <textarea
         ref="textareaEl"
         v-model="draft"
         :placeholder="t('workbenchInputPlaceholder')"
         :disabled="busy"
-        rows="1"
-        class="flex-1 resize-none rounded-lg bg-slate-800 border border-slate-600 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-tech-blue max-h-32"
+        class="w-full bg-transparent border-none outline-none resize-none text-[14px] leading-[22px] text-white placeholder-slate-500 max-h-40 min-h-[66px] py-1"
         @input="autoResize"
         @keydown.enter.exact.prevent="onEnter"
         @keydown="onKeydown"
       ></textarea>
-      <a-button type="primary" :loading="busy" @click="$emit('send')">
-        <i class="fas fa-paper-plane"></i>
-      </a-button>
+
+      <!-- 技能菜单（浮层锚在卡片上方） -->
+      <SkillMenu
+        :open="slashOpen"
+        :items="filteredSkills"
+        :active-index="activeIndex"
+        @pick="onSkillPick"
+        @active="(i) => (activeIndex = i)"
+      />
+
+      <!-- 底部工具条：左（附件/模型）右（发送） -->
+      <div class="flex items-center gap-1 min-h-[32px] mt-1">
+        <button
+          class="w-8 h-8 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 flex items-center justify-center transition"
+          :title="t('workbenchUpload')"
+          :disabled="uploading"
+          @click="pickFile"
+        >
+          <i class="fas fa-paperclip" :class="{ 'animate-pulse': uploading }"></i>
+        </button>
+        <ModelMenu
+          :override="modelOverride"
+          @update:override="(v) => $emit('update:modelOverride', v)"
+        />
+        <div class="flex-1"></div>
+        <span v-if="slashOpen" class="text-[11px] text-slate-500 mr-2 hidden sm:inline">
+          ↑↓ {{ t('workbenchNavigate') }} · Tab/{{ t('confirm') }} · Esc
+        </span>
+        <button
+          class="w-8 h-8 rounded-full flex items-center justify-center transition disabled:opacity-40"
+          :class="
+            canSend ? 'bg-tech-blue text-white hover:brightness-110' : 'bg-slate-700 text-slate-400'
+          "
+          :disabled="!canSend"
+          :title="t('workbenchSend')"
+          @click="$emit('send')"
+        >
+          <i class="fas fa-arrow-up"></i>
+        </button>
+      </div>
     </div>
 
     <input
@@ -102,6 +121,13 @@ const slashOpen = ref(false)
 const slashQuery = ref('')
 const activeIndex = ref(0)
 
+const canSend = computed(
+  () =>
+    !props.busy &&
+    !props.uploading &&
+    (draft.value.trim() !== '' || props.attachments.some((a) => !a.uploading)),
+)
+
 // 本地过滤（键盘导航在 Composer 统一处理，SkillMenu 纯展示）
 const filteredSkills = computed(() => {
   const q = slashQuery.value.toLowerCase()
@@ -132,7 +158,7 @@ watch(
 function autoResize(e) {
   const el = e.target
   el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 128) + 'px'
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px'
 }
 
 function onEnter() {

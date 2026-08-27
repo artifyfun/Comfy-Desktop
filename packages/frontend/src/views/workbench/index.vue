@@ -510,18 +510,18 @@ function kindIcon(kind) {
 // ---------- 发送 ----------
 async function send() {
   const text = input.value.trim()
-  if (!text || busy.value) return
-  const attachments = draftAttachments.value
-    .filter((a) => !a.uploading)
-    .map((a) => ({
-      name: a.name,
-      subfolder: a.subfolder,
-      type: a.type,
-      kind: a.kind,
-      filename: a.filename,
-      size: a.size,
-      mime: a.mime,
-    }))
+  const readyAttachments = draftAttachments.value.filter((a) => !a.uploading)
+  // 文本或已上传附件至少其一即可发送（dsh 语义：附件可作为唯一输入）
+  if ((!text && readyAttachments.length === 0) || busy.value) return
+  const attachments = readyAttachments.map((a) => ({
+    name: a.name,
+    subfolder: a.subfolder,
+    type: a.type,
+    kind: a.kind,
+    filename: a.filename,
+    size: a.size,
+    mime: a.mime,
+  }))
   input.value = ''
   for (const a of draftAttachments.value) if (a._preview) URL.revokeObjectURL(a._preview)
   draftAttachments.value = []
