@@ -1,40 +1,79 @@
 <template>
   <div class="page-container bg-tech-dark">
-    <div id="app" class="pb-20 min-h-screen">
+    <div id="app" class="pb-20 min-h-screen flex flex-col">
       <AppHeader
         :first-nav-to="'/'"
         :first-nav-label="t('appCenter')"
         first-nav-icon="mr-2 fas fa-home"
       />
 
-      <main class="relative px-4 mx-auto mt-4 max-w-7xl sm:px-6 lg:px-8">
-        <div class="flex items-center mb-4 space-x-2">
-          <div class="w-8 h-8 text-2xl text-tech-blue">
-            <i class="fas fa-wand-magic-sparkles"></i>
-          </div>
-          <h1 class="text-2xl font-bold text-white tech-font">{{ t('workbench') }}</h1>
-          <a-tag color="blue">{{ t('workbenchBeta') }}</a-tag>
-        </div>
+      <div
+        class="flex flex-1 min-h-0 px-4 mx-auto mt-2 w-full max-w-[1600px] sm:px-6 lg:px-8 gap-4"
+      >
+        <!-- 左：会话侧栏 -->
+        <SessionSidebar
+          :sessions="sidebarSessions"
+          :current-id="sessionId"
+          :collapsed="sidebarCollapsed"
+          :show-archived="showArchived"
+          @select="selectSession"
+          @new-session="newDialogOpen = true"
+          @collapse="sidebarCollapsed = !sidebarCollapsed"
+          @rename="onRename"
+          @archive="(s) => setArchived(s, true)"
+          @unarchive="(s) => setArchived(s, false)"
+          @delete="onDelete"
+          @update:show-archived="(v) => (showArchived = v)"
+          @manage-presets="presetMgrOpen = true"
+        />
 
-        <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <!-- 左：对话流 -->
-          <section
-            class="lg:col-span-2 flex flex-col rounded-xl bg-slate-900/60 border border-slate-700 h-[calc(100vh-220px)]"
-          >
-            <!-- 消息区 -->
-            <div ref="messagesEl" class="flex-1 overflow-y-auto p-4 space-y-3">
-              <div v-if="messages.length === 0" class="text-center text-slate-400 mt-10">
-                <i class="fas fa-comments text-4xl mb-3 opacity-40"></i>
-                <p>{{ t('workbenchIntro') }}</p>
-              </div>
-              <div
-                v-for="(m, i) in messages"
-                :key="i"
-                class="flex"
-                :class="m.role === 'user' ? 'justify-end' : 'justify-start'"
-              >
+        <!-- 中：会话区 -->
+        <section
+          class="flex-1 min-w-0 flex flex-col rounded-xl bg-slate-900/60 border border-slate-700 h-[calc(100vh-160px)]"
+        >
+          <!-- 会话头 -->
+          <div class="flex items-center gap-2 px-4 h-12 border-b border-slate-700 shrink-0">
+            <a-tag v-if="sessionPreset" color="blue" class="!m-0">
+              <i class="fas fa-bolt mr-1"></i>{{ presetName(sessionPreset) }}
+            </a-tag>
+            <div class="flex-1 text-white text-sm truncate font-medium">
+              {{ currentSession?.title || t('workbench') }}
+            </div>
+            <a-button size="small" @click="panelOpen = !panelOpen">
+              <i class="fas fa-table-columns"></i>
+            </a-button>
+          </div>
+
+          <!-- 对话流（含执行卡内联） -->
+          <div ref="messagesEl" class="flex-1 overflow-y-auto p-4 space-y-3">
+            <div v-if="messages.length === 0" class="text-center text-slate-400 mt-10">
+              <i class="fas fa-wand-magic-sparkles text-4xl mb-3 opacity-40"></i>
+              <p>{{ t('workbenchIntro') }}</p>
+            </div>
+            <div
+              v-for="(m, i) in messages"
+              :key="i"
+              class="flex"
+              :class="m.role === 'user' ? 'justify-end' : 'justify-start'"
+            >
+              <div class="max-w-[85%] space-y-1">
+                <!-- 附件缩略图（用户消息） -->
+                <div v-if="m.attachments?.length" class="flex gap-1.5 flex-wrap justify-end">
+                  <div
+                    v-for="(a, j) in m.attachments"
+                    :key="j"
+                    class="w-12 h-12 rounded bg-slate-800 border border-slate-600 flex items-center justify-center overflow-hidden"
+                  >
+                    <img
+                      v-if="a.kind === 'image' && a._preview"
+                      :src="a._preview"
+                      class="w-full h-full object-cover"
+                    />
+                    <i v-else :class="kindIcon(a.kind)" class="text-slate-400"></i>
+                  </div>
+                </div>
                 <div
-                  class="max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words"
+                  class="rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words"
                   :class="messageClass(m)"
                 >
                   <template v-if="m.kind === 'card' && m.plan">
@@ -52,83 +91,105 @@
                 </div>
               </div>
             </div>
+          </div>
 
-            <!-- invalid issues 展示 -->
-            <div v-if="pendingIssues.length" class="px-4 pb-2">
-              <a-alert type="warning" show-icon class="text-left">
-                <template #message>{{ t('workbenchPlanInvalid') }}</template>
-                <template #description>
-                  <ul class="list-disc pl-4 text-xs">
-                    <li v-for="(issue, i) in pendingIssues" :key="i">
-                      {{ issue.field }}: {{ issue.message }}
-                    </li>
-                  </ul>
-                </template>
-              </a-alert>
-            </div>
+          <!-- invalid issues -->
+          <div v-if="pendingIssues.length" class="px-4 pb-2">
+            <a-alert type="warning" show-icon>
+              <template #message>{{ t('workbenchPlanInvalid') }}</template>
+              <template #description>
+                <ul class="list-disc pl-4 text-xs">
+                  <li v-for="(issue, i) in pendingIssues" :key="i">
+                    {{ issue.field }}: {{ issue.message }}
+                  </li>
+                </ul>
+              </template>
+            </a-alert>
+          </div>
 
-            <!-- 输入区 -->
-            <div class="border-t border-slate-700 p-3 flex gap-2">
-              <a-input
-                v-model:value="input"
-                :placeholder="t('workbenchInputPlaceholder')"
-                :disabled="busy"
-                @press-enter="send"
-              />
-              <a-button type="primary" :loading="busy" @click="send">
-                {{ t('send') }}
-              </a-button>
-            </div>
-          </section>
+          <!-- 富输入框 -->
+          <Composer
+            v-model="input"
+            :busy="busy"
+            :uploading="uploading"
+            :attachments="draftAttachments"
+            :skills="skills"
+            :model-override="modelOverride"
+            @send="send"
+            @upload-files="uploadFiles"
+            @remove-attachment="removeAttachment"
+            @update:model-override="saveModelOverride"
+          />
+        </section>
 
-          <!-- 右：产物区 -->
-          <section
-            class="flex flex-col rounded-xl bg-slate-900/60 border border-slate-700 h-[calc(100vh-220px)]"
+        <!-- 右：产物面板（可折叠） -->
+        <section
+          v-if="panelOpen"
+          class="w-72 shrink-0 flex flex-col rounded-xl bg-slate-900/60 border border-slate-700 h-[calc(100vh-160px)]"
+        >
+          <div
+            class="p-3 border-b border-slate-700 text-white font-semibold flex items-center justify-between"
           >
-            <div class="p-3 border-b border-slate-700 text-white font-semibold">
-              <i class="fas fa-photo-film mr-2 text-tech-blue"></i>{{ t('workbenchArtifacts') }}
+            <span
+              ><i class="fas fa-photo-film mr-2 text-tech-blue"></i
+              >{{ t('workbenchArtifacts') }}</span
+            >
+          </div>
+          <div class="flex-1 overflow-y-auto p-3 space-y-3">
+            <div v-if="artifacts.length === 0" class="text-center text-slate-400 mt-8 text-sm">
+              {{ t('workbenchNoArtifacts') }}
             </div>
-            <div class="flex-1 overflow-y-auto p-3 space-y-3">
-              <div v-if="artifacts.length === 0" class="text-center text-slate-400 mt-8 text-sm">
-                {{ t('workbenchNoArtifacts') }}
+            <div
+              v-for="(a, i) in artifacts"
+              :key="i"
+              class="rounded-lg border border-slate-700 bg-slate-800/50 p-2"
+            >
+              <div class="flex items-center justify-between mb-1">
+                <a-tag
+                  :color="
+                    a.status === 'success' ? 'green' : a.status === 'error' ? 'red' : 'processing'
+                  "
+                >
+                  {{ a.status }}
+                </a-tag>
+                <span class="text-xs text-slate-400 truncate max-w-[140px]">{{
+                  a.templateName
+                }}</span>
               </div>
-              <div
-                v-for="(a, i) in artifacts"
-                :key="i"
-                class="rounded-lg border border-slate-700 bg-slate-800/50 p-2"
-              >
-                <div class="flex items-center justify-between mb-1">
-                  <a-tag
-                    :color="
-                      a.status === 'success' ? 'green' : a.status === 'error' ? 'red' : 'processing'
-                    "
-                  >
-                    {{ a.status }}
-                  </a-tag>
-                  <span class="text-xs text-slate-400">{{ a.templateName }}</span>
-                </div>
-                <div v-if="a.outputs.length" class="text-xs text-slate-300 break-all">
-                  {{ a.outputs.join(' · ') }}
-                </div>
-                <div class="mt-2 flex gap-2">
-                  <a-button
-                    v-if="a.status === 'success'"
-                    size="small"
-                    type="primary"
-                    @click="openPublish(a)"
-                  >
-                    <i class="fas fa-bolt mr-1"></i>{{ t('workbenchPublish') }}
-                  </a-button>
-                  <a-button size="small" @click="openInComfy(a)" v-if="a.status === 'success'">
-                    {{ t('workbenchOpenOutput') }}
-                  </a-button>
-                </div>
+              <div v-if="a.outputs.length" class="text-xs text-slate-300 break-all">
+                {{ a.outputs.join(' · ') }}
+              </div>
+              <div class="mt-2 flex gap-2">
+                <a-button
+                  v-if="a.status === 'success'"
+                  size="small"
+                  type="primary"
+                  @click="openPublish(a)"
+                >
+                  <i class="fas fa-bolt mr-1"></i>{{ t('workbenchPublish') }}
+                </a-button>
               </div>
             </div>
-          </section>
-        </div>
-      </main>
+          </div>
+        </section>
+      </div>
     </div>
+
+    <!-- 新建会话（预设 chip） -->
+    <NewSessionDialog
+      v-model:open="newDialogOpen"
+      :presets="presets"
+      :default-preset-id="defaultPresetId"
+      @create="createSession"
+    />
+
+    <!-- 技能/预设管理 -->
+    <PresetManager
+      v-model:open="presetMgrOpen"
+      :presets="presets"
+      :default-id="defaultPresetId"
+      @changed="loadPresets"
+    />
 
     <!-- 固化弹窗 -->
     <a-modal
@@ -156,104 +217,274 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { message } from 'ant-design-vue'
 import { useI18n } from '@/utils/i18n'
 import { useAppStore } from '@/stores/appStore'
 import AppHeader from '@/views/apps/components/AppHeader.vue'
+import SessionSidebar from './components/SessionSidebar.vue'
+import Composer from './components/Composer.vue'
+import NewSessionDialog from './components/NewSessionDialog.vue'
+import PresetManager from './components/PresetManager.vue'
 
-const { t } = useI18n()
+const { t, getCurrentLanguage } = useI18n()
 const appStore = useAppStore()
-const input = ref('')
-const busy = ref(false)
-const messages = ref([])
-const pendingIssues = ref([])
-const artifacts = ref([])
-const sessionId = ref('')
-let pollTimer = null
-
-const messagesEl = ref(null)
-const origin = computed(() => appStore.config?.serverHost || window.location.origin)
-
-// 会话管理：路由 query 带会话 id，页面刷新可续
-import { useRoute, useRouter } from 'vue-router'
 const route = useRoute()
 const router = useRouter()
 
+const origin = computed(() => appStore.config?.serverHost || window.location.origin)
+const lang = computed(() => (getCurrentLanguage?.() === 'en' ? 'en' : 'zh'))
+
+// ---------- 会话状态 ----------
+const sessions = ref([])
+const sessionId = ref('')
+const messages = ref([])
+const artifacts = ref([])
+const pendingIssues = ref([])
+const input = ref('')
+const busy = ref(false)
+const uploading = ref(false)
+const draftAttachments = ref([])
+const skills = ref([])
+const presets = ref([])
+const defaultPresetId = ref('standard')
+const modelOverride = ref({})
+const sidebarCollapsed = ref(false)
+const showArchived = ref(false)
+const panelOpen = ref(true)
+const messagesEl = ref(null)
+const pollTimers = new Map()
+const newDialogOpen = ref(false)
+const presetMgrOpen = ref(false)
+
+const currentSession = computed(() => sessions.value.find((s) => s.id === sessionId.value))
+const sessionPreset = computed(() =>
+  currentSession.value?.presetId
+    ? presets.value.find((p) => p.id === currentSession.value.presetId)
+    : null,
+)
+const sidebarSessions = computed(() =>
+  sessions.value.map((s) => ({
+    ...s,
+    _running: (s.executions ?? []).some((e) => e.status === 'queued' || e.status === 'running'),
+  })),
+)
+
+// ---------- 初始化 ----------
 onMounted(async () => {
+  await Promise.all([loadSessions(), loadPresets(), loadSkills()])
   const sid = route.query.session
-  if (sid) {
-    const res = await fetch(`${origin.value}/api/workbench/session/${sid}`)
-    const json = await res.json()
-    if (res.ok && json?.success) {
-      sessionId.value = sid
-      restoreSession(json.data)
-      return
-    }
+  if (sid && sessions.value.some((s) => s.id === sid)) {
+    await selectSession({ id: sid })
+  } else {
+    await createSession({ presetId: defaultPresetId.value })
   }
-  await createSession()
+  document.addEventListener('keydown', onGlobalKey)
 })
 
-function restoreSession(session) {
-  messages.value = session.messages.map((m) => ({ ...m }))
-  for (const e of session.executions) {
-    artifacts.value.unshift({
-      promptId: e.promptId,
-      templateId: e.templateId,
-      templateName: e.templateId,
-      status: e.status,
-      outputs: e.outputs,
-    })
-    if (e.status === 'queued' || e.status === 'running') startPoll(e.promptId)
+onBeforeUnmount(() => {
+  for (const timer of pollTimers.values()) clearInterval(timer)
+  pollTimers.clear()
+  document.removeEventListener('keydown', onGlobalKey)
+})
+
+function onGlobalKey(e) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+    e.preventDefault()
+    newDialogOpen.value = true
   }
 }
 
-async function createSession() {
+async function loadSessions() {
+  const res = await fetch(`${origin.value}/api/workbench/sessions?archived=${showArchived.value}`)
+  const json = await res.json()
+  sessions.value = json?.data ?? []
+}
+
+async function loadPresets() {
+  const res = await fetch(`${origin.value}/api/workbench/presets`)
+  const json = await res.json()
+  presets.value = json?.data?.presets ?? []
+  defaultPresetId.value = json?.data?.default ?? 'standard'
+}
+
+async function loadSkills() {
+  const res = await fetch(`${origin.value}/api/workbench/skills`)
+  const json = await res.json()
+  skills.value = json?.data ?? []
+}
+
+async function selectSession(s) {
+  sessionId.value = s.id
+  router.replace({ query: { session: s.id } })
+  const res = await fetch(`${origin.value}/api/workbench/session/${s.id}`)
+  const json = await res.json()
+  if (!res.ok || !json?.success) return
+  const session = json.data
+  messages.value = session.messages ?? []
+  artifacts.value = [...(session.executions ?? [])].reverse().map((e) => ({
+    promptId: e.promptId,
+    templateId: e.templateId,
+    templateName: e.templateId,
+    status: e.status,
+    outputs: e.outputs ?? [],
+  }))
+  modelOverride.value = session.modelOverride ?? {}
+  pendingIssues.value = []
+  for (const e of session.executions ?? []) {
+    if (e.status === 'queued' || e.status === 'running') startPoll(e.promptId)
+  }
+  scrollToBottom()
+}
+
+async function createSession({ presetId, title }) {
   const res = await fetch(`${origin.value}/api/workbench/sessions/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title: '工作台' }),
+    body: JSON.stringify({ presetId, title }),
   })
   const json = await res.json()
-  sessionId.value = json.data.id
-  router.replace({ query: { session: sessionId.value } })
+  await loadSessions()
+  await selectSession({ id: json.data.id })
 }
 
-function messageClass(m) {
-  if (m.role === 'user') return 'bg-tech-blue/90 text-white'
-  if (m.kind === 'error') return 'bg-red-900/60 text-red-200'
-  if (m.kind === 'card') return 'bg-slate-800 text-slate-200 border border-slate-600'
-  return 'bg-slate-800/70 text-slate-200'
+async function onRename({ id, title }) {
+  await fetch(`${origin.value}/api/workbench/sessions/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, title }),
+  })
+  await loadSessions()
 }
 
-function cardText(plan) {
-  if (!plan) return ''
-  const p = plan.params ?? {}
-  const ps = Object.entries(p)
-    .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
-    .join('，')
-  return `${plan.intent} · ${plan.templateId ?? ''}${ps ? ' · ' + ps : ''}`
+async function setArchived(s, archived) {
+  await fetch(`${origin.value}/api/workbench/sessions/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: s.id, archived }),
+  })
+  await loadSessions()
+  if (sessionId.value === s.id && archived) {
+    const first = sessions.value.find((x) => !x.archived)
+    if (first) await selectSession(first)
+  }
 }
 
+async function onDelete(s) {
+  await fetch(`${origin.value}/api/workbench/sessions/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: s.id }),
+  })
+  await loadSessions()
+  if (sessionId.value === s.id) {
+    const first = sessions.value[0]
+    if (first) await selectSession(first)
+    else await createSession({})
+  }
+}
+
+async function saveModelOverride(v) {
+  modelOverride.value = v
+  if (!sessionId.value) return
+  await fetch(`${origin.value}/api/workbench/sessions/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: sessionId.value, modelOverride: v }),
+  })
+}
+
+// ---------- 附件 ----------
+async function uploadFiles(files) {
+  uploading.value = true
+  for (const f of files) {
+    const preview = f.type.startsWith('image/') ? URL.createObjectURL(f) : null
+    const kind = f.type.startsWith('image/')
+      ? 'image'
+      : f.type.startsWith('video/')
+        ? 'video'
+        : f.type.startsWith('audio/')
+          ? 'audio'
+          : 'file'
+    draftAttachments.value.push({
+      kind,
+      filename: f.name,
+      size: f.size,
+      mime: f.type,
+      uploading: true,
+      _preview: preview,
+    })
+    const idx = draftAttachments.value.length - 1
+    try {
+      const form = new FormData()
+      form.append('file', f)
+      const res = await fetch(`${origin.value}/api/workbench/upload`, {
+        method: 'POST',
+        body: form,
+      })
+      const json = await res.json()
+      if (!res.ok || !json?.success) throw new Error(json?.message || 'upload failed')
+      Object.assign(draftAttachments.value[idx], json.data, { uploading: false })
+    } catch (e) {
+      message.error(`${f.name}: ${e.message}`)
+      draftAttachments.value.splice(idx, 1)
+    }
+  }
+  uploading.value = false
+}
+
+function removeAttachment(i) {
+  const a = draftAttachments.value[i]
+  if (a?._preview) URL.revokeObjectURL(a._preview)
+  draftAttachments.value.splice(i, 1)
+}
+
+function kindIcon(kind) {
+  if (kind === 'video') return 'fas fa-film'
+  if (kind === 'audio') return 'fas fa-music'
+  if (kind === 'file') return 'fas fa-file'
+  return 'fas fa-image'
+}
+
+// ---------- 发送 ----------
 async function send() {
   const text = input.value.trim()
   if (!text || busy.value) return
+  const attachments = draftAttachments.value
+    .filter((a) => !a.uploading)
+    .map((a) => ({
+      name: a.name,
+      subfolder: a.subfolder,
+      type: a.type,
+      kind: a.kind,
+      filename: a.filename,
+      size: a.size,
+      mime: a.mime,
+    }))
   input.value = ''
+  for (const a of draftAttachments.value) if (a._preview) URL.revokeObjectURL(a._preview)
+  draftAttachments.value = []
   busy.value = true
   pendingIssues.value = []
-  messages.value.push({ role: 'user', kind: 'chat', text })
+  messages.value.push({
+    role: 'user',
+    kind: 'chat',
+    text,
+    attachments: attachments.length ? attachments : undefined,
+  })
   messages.value.push({ role: 'agent', kind: 'progress', text: t('workbenchDeciding') })
   scrollToBottom()
   try {
     const res = await fetch(`${origin.value}/api/workbench/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: sessionId.value, input: text }),
+      body: JSON.stringify({ sessionId: sessionId.value, input: text, attachments }),
     })
     if (!res.ok) {
       const j = await res.json().catch(() => null)
       throw new Error(j?.message || `HTTP ${res.status}`)
     }
-    // SSE 流
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let buf = ''
@@ -286,7 +517,6 @@ function handleSse(chunk) {
       }
     }
   }
-  // 移除 deciding 占位
   const last = messages.value[messages.value.length - 1]
   if (last && last.kind === 'progress' && last.text === t('workbenchDeciding')) {
     messages.value.pop()
@@ -298,8 +528,8 @@ function handleSse(chunk) {
   } else if (event === 'stage') {
     messages.value.push({ role: 'agent', kind: 'progress', text: stageText(data.stage) })
   } else if (event === 'submitted') {
-    const lastProgress = messages.value[messages.value.length - 1]
-    if (lastProgress && lastProgress.kind === 'progress') messages.value.pop()
+    const lp = messages.value[messages.value.length - 1]
+    if (lp && lp.kind === 'progress') messages.value.pop()
     messages.value.push({ role: 'agent', kind: 'chat', text: t('workbenchSubmitted') })
     artifacts.value.unshift({
       promptId: data.promptId,
@@ -318,6 +548,17 @@ function handleSse(chunk) {
     })
   } else if (event === 'error') {
     messages.value.push({ role: 'agent', kind: 'error', text: data.message || 'error' })
+  } else if (event === 'done') {
+    // 会话摘要 → 侧栏刷新（标题可能被自动生成更新）
+    if (data.session) {
+      const s = sessions.value.find((x) => x.id === data.session.id)
+      if (s) {
+        s.title = data.session.title
+        s.updatedAt = data.session.updatedAt
+      } else {
+        loadSessions()
+      }
+    }
   }
 }
 
@@ -357,6 +598,14 @@ function startPoll(promptId) {
         })
         scrollToBottom()
         stopPoll(promptId)
+        loadSessions().then(() => {
+          const s = sessions.value.find((x) => x.id === sessionId.value)
+          const exec = s?.executions?.find((e) => e.promptId === promptId)
+          if (exec) {
+            const art = artifacts.value.find((a) => a.promptId === promptId)
+            if (art) art.outputs = exec.outputs ?? []
+          }
+        })
       }
     } catch {
       /* 下轮重试 */
@@ -365,7 +614,6 @@ function startPoll(promptId) {
   pollTimers.set(promptId, setInterval(poll, 3000))
 }
 
-const pollTimers = new Map()
 function stopPoll(promptId) {
   const timer = pollTimers.get(promptId)
   if (timer) {
@@ -385,7 +633,7 @@ function extractFiles(outputs) {
   return files
 }
 
-// 固化
+// ---------- 固化 ----------
 const publishOpen = ref(false)
 const publishName = ref('')
 const publishBuildUi = ref(true)
@@ -418,15 +666,30 @@ async function doPublish() {
     messages.value.push({ role: 'agent', kind: 'chat', text: t('workbenchPublished') })
     router.push('/')
   } catch (e) {
-    messages.value.push({ role: 'agent', kind: 'error', text: e.message })
+    message.error(e.message)
   } finally {
     publishing.value = false
   }
 }
 
-function openInComfy(artifact) {
-  const url = `${appStore.config?.comfyHost || ''}`
-  if (url) window.open(url, '_blank')
+function presetName(p) {
+  return p?.name?.[lang.value] || p?.name?.zh || p?.id
+}
+
+function messageClass(m) {
+  if (m.role === 'user') return 'bg-tech-blue/90 text-white'
+  if (m.kind === 'error') return 'bg-red-900/60 text-red-200'
+  if (m.kind === 'card') return 'bg-slate-800 text-slate-200 border border-slate-600'
+  return 'bg-slate-800/70 text-slate-200'
+}
+
+function cardText(plan) {
+  if (!plan) return ''
+  const p = plan.params ?? {}
+  const ps = Object.entries(p)
+    .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
+    .join('，')
+  return `${plan.intent} · ${plan.templateId ?? ''}${ps ? ' · ' + ps : ''}`
 }
 
 function scrollToBottom() {
@@ -435,10 +698,7 @@ function scrollToBottom() {
   })
 }
 
-onBeforeUnmount(() => {
-  for (const timer of pollTimers.values()) clearInterval(timer)
-  pollTimers.clear()
-})
+watch(showArchived, loadSessions)
 </script>
 
 <style scoped>
