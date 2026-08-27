@@ -24,7 +24,7 @@ const PKG_BY_TRIPLE = {
   'x86_64-apple-darwin': '@openai/codex-darwin-x64',
   'aarch64-apple-darwin': '@openai/codex-darwin-arm64',
   'x86_64-unknown-linux-musl': '@openai/codex-linux-x64',
-  'aarch64-unknown-linux-musl': '@openai/codex-linux-arm64',
+  'aarch64-unknown-linux-musl': '@openai/codex-linux-arm64'
 }
 const TRIPLE_BY_TARGET = {
   'win32-x64': 'x86_64-pc-windows-msvc',
@@ -32,14 +32,16 @@ const TRIPLE_BY_TARGET = {
   'darwin-x64': 'x86_64-apple-darwin',
   'darwin-arm64': 'aarch64-apple-darwin',
   'linux-x64': 'x86_64-unknown-linux-musl',
-  'linux-arm64': 'aarch64-unknown-linux-musl',
+  'linux-arm64': 'aarch64-unknown-linux-musl'
 }
 
 function detectTriple() {
   if (process.env.CODEX_TARGET_TRIPLE) return process.env.CODEX_TARGET_TRIPLE
   const triple = TRIPLE_BY_TARGET[`${platform()}-${arch()}`]
   if (!triple) {
-    console.error(`[copy-codex-bin] 不支持的平台 ${platform()}-${arch()}，可用 CODEX_TARGET_TRIPLE 指定`)
+    console.error(
+      `[copy-codex-bin] 不支持的平台 ${platform()}-${arch()}，可用 CODEX_TARGET_TRIPLE 指定`
+    )
     process.exit(1)
   }
   return triple
@@ -59,7 +61,9 @@ function resolveVendorRoot(triple) {
     const platformPkgJsonPath = codexRequire.resolve(`${pkg}/package.json`)
     return join(dirname(platformPkgJsonPath), 'vendor', triple)
   } catch (err) {
-    console.error(`[copy-codex-bin] 找不到 ${pkg} —— 请先执行 pnpm install（需安装 optionalDependencies，含平台二进制）`)
+    console.error(
+      `[copy-codex-bin] 找不到 ${pkg} —— 请先执行 pnpm install（需安装 optionalDependencies，含平台二进制）`
+    )
     console.error(`  详情: ${err?.message ?? err}`)
     process.exit(1)
   }
@@ -68,7 +72,10 @@ function resolveVendorRoot(triple) {
 function main() {
   const triple = detectTriple()
   const src = resolveVendorRoot(triple)
-  const binName = platform() === 'win32' ? 'codex.exe' : 'codex'
+  // binName 必须从目标 triple 推导，不能用宿主 platform()：
+  // 跨平台拷贝（如 macOS 上 CODEX_TARGET_TRIPLE=...windows-msvc）时宿主是 darwin，
+  // 按 platform() 会找 `codex`，而 Windows 平台包里是 `codex.exe`
+  const binName = triple.includes('windows') ? 'codex.exe' : 'codex'
   const exe = join(src, 'bin', binName)
   if (!existsSync(exe)) {
     console.error(`[copy-codex-bin] ${src} 中缺少 ${binName}，平台包可能不完整`)
@@ -83,7 +90,9 @@ function main() {
     console.error(`[copy-codex-bin] 拷贝失败: ${src} -> ${dst}`)
     process.exit(1)
   }
-  console.log(`[copy-codex-bin] OK: ${triple} -> ${dst} (${(size / 1024 / 1024).toFixed(1)} MB, ${binName})`)
+  console.log(
+    `[copy-codex-bin] OK: ${triple} -> ${dst} (${(size / 1024 / 1024).toFixed(1)} MB, ${binName})`
+  )
 }
 
 main()

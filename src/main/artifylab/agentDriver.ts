@@ -128,12 +128,18 @@ function resolveDesignSystemDir(): string | null {
 
 // 给 Codex agent 的任务说明 + SKILL 约束（产出单文件 index.html，按 paramsNodes 生成控件）
 function buildSpec(input: BuildAppInput, hasDesignSystem: boolean): string {
+  // description 是 A UI 前端透传的宽类型值（可能是对象/数组），直接模板拼接会得到
+  // "[object Object]"，让 agent 拿到不可读的参数说明。非 string 一律 JSON 序列化。
+  const describeValue = (v: unknown): string => {
+    if (v == null) return ''
+    return typeof v === 'string' ? v : JSON.stringify(v)
+  }
   const params =
     input.paramsNodes && input.paramsNodes.length
       ? input.paramsNodes
           .map(
             (p) =>
-              `- ${p.name || p.type || 'param'}（${p.category || p.type || 'input'}）：${p.description || ''}`
+              `- ${p.name || p.type || 'param'}（${p.category || p.type || 'input'}）：${describeValue(p.description)}`
           )
           .join('\n')
       : '- （该应用无显式参数，生成纯展示 / 交互界面即可）'
@@ -166,7 +172,10 @@ export async function buildAppCode(
   on: (p: BuildProgress) => void,
   signal?: AbortSignal
 ): Promise<string> {
-  const dir = mkdtempSync(join(tmpdir(), `artify-build-${input.appId}-`))
+  // appId 来自 HTTP body，只做过 truthy 校验：含路径分隔符会让 mkdtempSync ENOENT，
+  // 敌意值可定向目录前缀。消毒为安全字符集（纯装饰性标识，非功能键）。
+  const safeId = input.appId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) || 'app'
+  const dir = mkdtempSync(join(tmpdir(), `artify-build-${safeId}-`))
   // 注入设计体系：把打包资产拷入 build 目录，让 Codex 在 sandbox 内能读到
   let hasDesignSystem = false
   const dsDir = resolveDesignSystemDir()
@@ -181,10 +190,13 @@ export async function buildAppCode(
   try {
     await runCodex(dir, input, on, signal, hasDesignSystem)
     const htmlPath = join(dir, 'index.html')
-    if (!existsSync(htmlPath)) {
+    // 不用 existsSync 预检（TOCTOU）：直接读，ENOENT 转成可操作的错误信息
+    let html: string
+    try {
+      html = readFileSync(htmlPath, 'utf8')
+    } catch {
       throw new Error('Codex 未生成 index.html（构建可能失败或被中断）')
     }
-    const html = readFileSync(htmlPath, 'utf8')
     on({ type: 'done', text: html })
     return html
   } finally {

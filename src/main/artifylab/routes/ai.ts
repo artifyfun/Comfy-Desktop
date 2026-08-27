@@ -11,6 +11,12 @@ interface TestConnectionRequest {
   model?: string
 }
 
+/** build-app 总超时：codex 挂死时兜底中止（与 batchRunner runItem 的 10min 一致）。 */
+const BUILD_APP_TIMEOUT_MS = 10 * 60 * 1000
+
+/** build-app 并发锁：同一时刻只允许一个 codex 构建（子进程/临时目录开销大）。 */
+let buildAppInFlight = false
+
 /**
  * AI 相关接口：连接测试 / 提示词优化 / 应用生成 / 代码修改（自 server.ts 平移）。
  */
@@ -143,11 +149,10 @@ export function createAiRouter(): express.Router {
         path: req.path
       })
 
-      // 设置流式响应头
+      // 设置流式响应头（Transfer-Encoding 由 Node 自动设置，手填经代理可能重复头）
       res.setHeader('Content-Type', 'text/plain')
       res.setHeader('Cache-Control', 'no-cache')
       res.setHeader('Connection', 'keep-alive')
-      res.setHeader('Transfer-Encoding', 'chunked')
       res.setHeader('X-Accel-Buffering', 'no')
       res.setHeader('X-Content-Type-Options', 'nosniff')
       res.setHeader('Keep-Alive', 'timeout=120')
@@ -210,42 +215,61 @@ export function createAiRouter(): express.Router {
 
   // 构建应用接口（Codex agent 驱动，替换一次性提示词）
   router.post('/api/build-app', async (req: express.Request, res: express.Response) => {
+    // 并发上限 1：codex 子进程 + 临时目录开销大，且同 app 并发构建结果互踩
+    if (buildAppInFlight) {
+      res
+        .status(HTTP_STATUS.CONFLICT)
+        .json(createErrorResponse('Another build is already running, please wait'))
+      return
+    }
     try {
       const { appId, name, description, paramsNodes, style, provider, apiKey, model } = req.body
       if (!appId) {
         return res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('Missing appId'))
       }
 
-      // 设置流式响应头（SSE）
+      // 设置流式响应头（SSE）。Transfer-Encoding 由 Node 自动设置，手填经代理可能重复头
       res.setHeader('Content-Type', 'text/event-stream')
       res.setHeader('Cache-Control', 'no-cache')
       res.setHeader('Connection', 'keep-alive')
-      res.setHeader('Transfer-Encoding', 'chunked')
       res.setHeader('X-Accel-Buffering', 'no')
       res.flushHeaders()
 
+      // 超时兜底：codex 挂死 + 客户端不断开时，await 永不 settle、finally 清理不执行，
+      // 子进程与临时目录泄漏。10min 与 batchRunner runItem 轮询超时一致。
       const ac = new AbortController()
-      req.on('close', () => ac.abort())
+      const timeout = setTimeout(() => ac.abort(), BUILD_APP_TIMEOUT_MS)
+      // res 'close' 在连接断开（客户端取消/掉线）与正常结束后都会触发；
+      // 结束后 abort 是 no-op，不影响已完成的结果
+      res.on('close', () => ac.abort())
 
-      const html = await buildAppCode(
-        { appId, name, description, paramsNodes, style, provider, apiKey, model },
-        (p) => {
-          if (!res.writableEnded) {
-            res.write(`data: ${JSON.stringify(p)}\n\n`)
-          }
-        },
-        ac.signal
-      )
-      if (!res.writableEnded) {
-        res.write(`event: done\ndata: ${JSON.stringify({ code: html })}\n\n`)
-        res.end()
+      buildAppInFlight = true
+      try {
+        const html = await buildAppCode(
+          { appId, name, description, paramsNodes, style, provider, apiKey, model },
+          (p) => {
+            if (!res.writableEnded) {
+              res.write(`data: ${JSON.stringify(p)}\n\n`)
+            }
+          },
+          ac.signal
+        )
+        if (!res.writableEnded) {
+          res.write(`event: done\ndata: ${JSON.stringify({ code: html })}\n\n`)
+          res.end()
+        }
+      } finally {
+        clearTimeout(timeout)
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      logger.error('build-app failed', error)
       if (!res.writableEnded) {
-        const message = error instanceof Error ? error.message : String(error)
         res.write(`event: error\ndata: ${JSON.stringify({ message })}\n\n`)
         res.end()
       }
+    } finally {
+      buildAppInFlight = false
     }
   })
 
