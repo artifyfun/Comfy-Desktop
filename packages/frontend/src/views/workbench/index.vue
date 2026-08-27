@@ -91,102 +91,132 @@
               <i class="fas fa-wand-magic-sparkles text-4xl mb-3 opacity-40"></i>
               <p>{{ t('workbenchIntro') }}</p>
             </div>
-            <div
-              v-for="(m, i) in messages"
-              :key="i"
-              class="flex"
-              :class="m.role === 'user' ? 'justify-end' : 'justify-start'"
-            >
-              <div class="max-w-[85%] space-y-1 group/msg relative">
-                <!-- 复制气泡（hover 出现,一键复制该条消息数据） -->
-                <button
-                  v-if="copyableText(m)"
-                  class="absolute -bottom-5 text-[11px] text-slate-500 hover:text-slate-200 transition opacity-0 group-hover/msg:opacity-100 flex items-center gap-1"
-                  :class="m.role === 'user' ? 'left-0' : 'right-0'"
-                  :title="t('workbenchCopyMessage')"
-                  @click="copyMessage(m, i)"
-                >
-                  <i :class="copiedIdx === i ? 'fas fa-check text-green-400' : 'far fa-copy'"></i>
-                  <span v-if="copiedIdx === i">{{ t('copied') }}</span>
-                </button>
-                <!-- 附件缩略图（用户消息） -->
-                <div v-if="m.attachments?.length" class="flex gap-1.5 flex-wrap justify-end">
-                  <div
-                    v-for="(a, j) in m.attachments"
-                    :key="j"
-                    class="w-12 h-12 rounded bg-slate-800 border border-slate-600 flex items-center justify-center overflow-hidden"
-                  >
-                    <img
-                      v-if="a.kind === 'image' && a._preview"
-                      :src="a._preview"
-                      class="w-full h-full object-cover"
-                    />
-                    <i v-else :class="kindIcon(a.kind)" class="text-slate-400"></i>
-                  </div>
-                </div>
-                <!-- 产物缩略图（artifact 消息内联，点击 lightbox） -->
-                <div
-                  v-if="m.kind === 'artifact' && m.outputFiles?.length"
-                  class="flex gap-2 flex-wrap"
-                >
-                  <div
-                    v-for="(f, j) in m.outputFiles"
-                    :key="j"
-                    class="w-24 h-24 rounded-lg overflow-hidden bg-slate-800 border border-slate-600 cursor-zoom-in hover:border-tech-blue transition flex items-center justify-center"
-                    @click="lightboxFile = f"
-                  >
-                    <img :src="viewUrl(f)" class="w-full h-full object-cover" loading="lazy" />
-                  </div>
-                </div>
-                <div
-                  class="rounded-lg px-3 py-2 text-sm break-words"
-                  :class="[
-                    messageClass(m),
-                    m.kind === 'chat' || m.kind === 'error' ? '' : 'whitespace-pre-wrap',
-                  ]"
-                >
-                  <template v-if="m.kind === 'card' && m.plan">
-                    <div class="font-semibold mb-1">
-                      <i class="fas fa-diagram-project mr-1"></i>{{ t('workbenchPlan') }}
-                    </div>
-                    <div class="text-xs opacity-80 mb-2">{{ m.plan.reason }}</div>
-                    <div class="text-xs">{{ cardText(m.plan) }}</div>
-                  </template>
-                  <template v-else-if="m.kind === 'progress'">
-                    <a-spin size="small" />
-                    <span class="ml-2">{{ m.text }}</span>
-                  </template>
-                  <!-- codex 工具条目折叠行（执行中 spinner，完成后可展开详情） -->
-                  <template v-else-if="m.kind === 'tool_item' && m.toolItem">
-                    <div class="flex items-center gap-2 min-w-0" @click.stop="toggleToolItem(m)">
-                      <a-spin v-if="toolItemRunning(m.toolItem)" size="small" />
-                      <i
-                        v-else
-                        :class="`fas ${toolItemSummary(m.toolItem).icon} text-tech-cyan`"
-                      ></i>
-                      <span class="font-mono text-xs truncate flex-1">{{
-                        toolItemSummary(m.toolItem).label
-                      }}</span>
-                      <i
-                        v-if="toolItemDetail(m.toolItem)"
-                        :class="`fas fa-chevron-${expandedToolIds.has(m.toolItem.id) ? 'down' : 'right'} text-[10px] opacity-60`"
-                      ></i>
-                    </div>
-                    <pre
-                      v-if="expandedToolIds.has(m.toolItem.id) && toolItemDetail(m.toolItem)"
-                      class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-black/40 border border-slate-700 p-2 whitespace-pre-wrap break-all text-slate-300 font-mono"
-                      >{{ toolItemDetail(m.toolItem) }}</pre
+            <template v-for="(m, i) in messages" :key="i">
+              <div v-if="showDateDivider(i)" class="w-full pt-1 pb-2 text-center shrink-0">
+                <span class="text-[11px] text-slate-500 bg-slate-900/80 rounded-full px-3 py-1">
+                  {{ dateDividerLabel(m.createdAt) }}
+                </span>
+              </div>
+              <div class="flex" :class="m.role === 'user' ? 'justify-end' : 'justify-start'">
+                <div class="max-w-[85%] space-y-1 group/msg">
+                  <!-- 附件缩略图（用户消息） -->
+                  <div v-if="m.attachments?.length" class="flex gap-1.5 flex-wrap justify-end">
+                    <div
+                      v-for="(a, j) in m.attachments"
+                      :key="j"
+                      class="w-12 h-12 rounded bg-slate-800 border border-slate-600 flex items-center justify-center overflow-hidden"
                     >
-                  </template>
-                  <!-- agent 文本走 markdown（dsh 同款 marked+DOMPurify）；用户消息保持纯文本 -->
-                  <WbMarkdown
-                    v-else-if="(m.kind === 'chat' || m.kind === 'error') && m.role === 'agent'"
-                    :source="m.text"
-                  />
-                  <template v-else>{{ m.text }}</template>
+                      <img
+                        v-if="a.kind === 'image' && a._preview"
+                        :src="a._preview"
+                        class="w-full h-full object-cover"
+                      />
+                      <i v-else :class="kindIcon(a.kind)" class="text-slate-400"></i>
+                    </div>
+                  </div>
+                  <!-- 产物缩略图（artifact 消息内联，点击 lightbox） -->
+                  <div
+                    v-if="m.kind === 'artifact' && m.outputFiles?.length"
+                    class="flex gap-2 flex-wrap"
+                  >
+                    <div
+                      v-for="(f, j) in m.outputFiles"
+                      :key="j"
+                      class="w-24 h-24 rounded-lg overflow-hidden bg-slate-800 border border-slate-600 cursor-zoom-in hover:border-tech-blue transition flex items-center justify-center"
+                      @click="lightboxFile = f"
+                    >
+                      <img :src="viewUrl(f)" class="w-full h-full object-cover" loading="lazy" />
+                    </div>
+                  </div>
+                  <div
+                    class="rounded-lg px-3 py-2 text-sm break-words"
+                    :class="[
+                      messageClass(m),
+                      m.kind === 'chat' || m.kind === 'error' ? '' : 'whitespace-pre-wrap',
+                    ]"
+                  >
+                    <template v-if="m.kind === 'card' && m.plan">
+                      <div class="font-semibold mb-1">
+                        <i class="fas fa-diagram-project mr-1"></i>{{ t('workbenchPlan') }}
+                      </div>
+                      <div class="text-xs opacity-80 mb-2">{{ m.plan.reason }}</div>
+                      <div class="text-xs">{{ cardText(m.plan) }}</div>
+                    </template>
+                    <template v-else-if="m.kind === 'progress'">
+                      <a-spin size="small" />
+                      <span class="ml-2">{{ m.text }}</span>
+                    </template>
+                    <!-- codex 工具条目折叠行（执行中 spinner，完成后可展开详情） -->
+                    <template v-else-if="m.kind === 'tool_item' && m.toolItem">
+                      <div class="flex items-center gap-2 min-w-0" @click.stop="toggleToolItem(m)">
+                        <a-spin v-if="toolItemRunning(m.toolItem)" size="small" />
+                        <i
+                          v-else
+                          :class="`fas ${toolItemSummary(m.toolItem).icon} text-tech-cyan`"
+                        ></i>
+                        <span class="font-mono text-xs truncate flex-1">{{
+                          toolItemSummary(m.toolItem).label
+                        }}</span>
+                        <i
+                          v-if="toolItemDetail(m.toolItem)"
+                          :class="`fas fa-chevron-${expandedToolIds.has(m.toolItem.id) ? 'down' : 'right'} text-[10px] opacity-60`"
+                        ></i>
+                      </div>
+                      <pre
+                        v-if="expandedToolIds.has(m.toolItem.id) && toolItemDetail(m.toolItem)"
+                        class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-black/40 border border-slate-700 p-2 whitespace-pre-wrap break-all text-slate-300 font-mono"
+                        >{{ toolItemDetail(m.toolItem) }}</pre
+                      >
+                    </template>
+                    <!-- agent 文本走 markdown（dsh 同款 marked+DOMPurify）；用户消息保持纯文本 -->
+                    <WbMarkdown
+                      v-else-if="(m.kind === 'chat' || m.kind === 'error') && m.role === 'agent'"
+                      :source="m.text"
+                    />
+                    <template v-else>{{ m.text }}</template>
+                  </div>
+                  <!-- dsh 式操作行:hover 浮出,贴气泡下方 -->
+                  <div
+                    class="flex items-center gap-3 text-[11px] text-slate-500 h-5 opacity-0 group-hover/msg:opacity-100 transition"
+                    :class="m.role === 'user' ? 'justify-end pr-1' : 'pl-1'"
+                  >
+                    <button
+                      v-if="copyableText(m)"
+                      class="hover:text-slate-200 flex items-center gap-1"
+                      :title="t('workbenchCopyMessage')"
+                      @click="copyMessage(m, i)"
+                    >
+                      <i
+                        :class="copiedIdx === i ? 'fas fa-check text-green-400' : 'far fa-copy'"
+                      ></i>
+                    </button>
+                    <span class="text-slate-600">{{ timeLabel(m.createdAt) }}</span>
+                    <!-- 分支导航:该消息存在兄弟变体时显示 ‹ v/N › -->
+                    <span v-if="m._variants > 1" class="flex items-center gap-1">
+                      <button
+                        class="hover:text-slate-200 px-0.5"
+                        :disabled="m._variant <= 0"
+                        :class="{ 'opacity-30 cursor-default': m._variant <= 0 }"
+                        :title="t('workbenchPrevVariant')"
+                        @click="switchVariant(m, -1)"
+                      >
+                        <i class="fas fa-chevron-left text-[9px]"></i>
+                      </button>
+                      <span class="tabular-nums">{{ m._variant + 1 }}/{{ m._variants }}</span>
+                      <button
+                        class="hover:text-slate-200 px-0.5"
+                        :disabled="m._variant >= m._variants - 1"
+                        :class="{ 'opacity-30 cursor-default': m._variant >= m._variants - 1 }"
+                        :title="t('workbenchNextVariant')"
+                        @click="switchVariant(m, 1)"
+                      >
+                        <i class="fas fa-chevron-right text-[9px]"></i>
+                      </button>
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+            </template>
           </div>
 
           <!-- invalid issues -->
@@ -1292,6 +1322,53 @@ function messageClass(m) {
   if (m.kind === 'error') return 'bg-red-900/60 text-red-200'
   if (m.kind === 'card') return 'bg-slate-800 text-slate-200 border border-slate-600'
   return 'bg-slate-800/70 text-slate-200'
+}
+
+// ---------- 日期分隔与时间标签（dsh 同款） ----------
+function sameDay(a, b) {
+  const da = new Date(a)
+  const db = new Date(b)
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  )
+}
+
+function showDateDivider(i) {
+  if (i === 0) return true
+  return !sameDay(messages.value[i - 1].createdAt, messages.value[i].createdAt)
+}
+
+function dateDividerLabel(ts) {
+  const d = new Date(ts)
+  const now = new Date()
+  const yest = new Date(now)
+  yest.setDate(now.getDate() - 1)
+  if (sameDay(ts, now)) return t('today')
+  if (sameDay(ts, yest)) return t('yesterday')
+  return `${d.getMonth() + 1}月${d.getDate()}日`
+}
+
+function timeLabel(ts) {
+  const d = new Date(ts)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// ---------- 会话分支（dsh ‹ n/N › 语义） ----------
+async function switchVariant(m, delta) {
+  const target = m._variant + delta
+  if (target < 0 || target >= m._variants) return
+  // 分叉父的下标按存储序:当前消息的 parentId 就是分叉父的 _idx
+  const parentIdx = m._idx !== undefined ? (m.parentId ?? -1) : -1
+  if (parentIdx < 0) return
+  const res = await fetch(`${origin.value}/api/workbench/session/${sessionId.value}/branch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messageIdx: parentIdx, variant: target }),
+  })
+  if (!res.ok) return
+  await selectSession({ id: sessionId.value })
 }
 
 // ---------- 气泡复制 ----------

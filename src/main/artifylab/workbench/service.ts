@@ -78,6 +78,12 @@ export interface WorkbenchMessage {
   role: 'user' | 'agent' | 'system'
   kind: WorkbenchMessageKind
   text: string
+  /** 分支树(dsh 同款):父消息在 messages[] 中的下标;-1 表示根(旧数据/首个用户消息) */
+  parentId?: number
+  /** 子分支下标列表(按创建序);单子时省略不存,节省存储 */
+  childrenIds?: number[]
+  /** 多子时当前激活的分支(决定 activePath 走向);与 childrenIds 同 length 对齐 */
+  activeChildIdx?: number
   plan?: WorkbenchPlan
   promptId?: string
   outputs?: string[]
@@ -129,6 +135,10 @@ export interface WorkbenchSession {
   createdAt: number
   updatedAt: number
   messages: WorkbenchMessage[]
+  /** 分支(dsh 同款):当前激活叶;undefined=旧线性数据,取最后一条 */
+  activeLeaf?: number
+  /** 上次分支操作时间(侧栏「已编辑」徽标用,可选) */
+  lastBranchAt?: number
   executions: WorkbenchExecution[]
   /** 创建时选定，会话期锁定（dsh agent-preset 语义） */
   presetId?: string
@@ -291,9 +301,72 @@ class WorkbenchService {
   appendMessage(sessionId: string, msg: Omit<WorkbenchMessage, 'createdAt'>): void {
     const session = this.getSession(sessionId)
     if (!session) return
-    session.messages.push({ ...msg, createdAt: Date.now() })
+    const msgs = session.messages
+    // 分支树(dsh 同款):新消息挂在当前 activeLeaf 链末端;无 activeLeaf 时挂最后一条
+    const parentIdx = session.activeLeaf !== undefined ? session.activeLeaf : msgs.length - 1
+    const node: WorkbenchMessage = {
+      ...msg,
+      createdAt: Date.now(),
+      parentId: msgs.length > 0 ? parentIdx : -1
+    }
+    if (msgs.length > 0) {
+      const parent = msgs[parentIdx]!
+      if (!parent.childrenIds) parent.childrenIds = [msgs.length]
+      else parent.childrenIds.push(msgs.length)
+    }
+    msgs.push(node)
+    session.activeLeaf = msgs.length - 1
     session.updatedAt = Date.now()
     this.flush()
+  }
+
+  /** 当前激活分支路径(根→叶下标序列);旧线性数据直接全量返回 */
+  activePath(sessionId: string): number[] {
+    const session = this.getSession(sessionId)
+    if (!session || session.messages.length === 0) return []
+    const msgs = session.messages
+    // 旧数据兼容:任一节点无 parentId 视为线性
+    if (msgs.every((m) => m.parentId === undefined)) return msgs.map((_, i) => i)
+    const leaf = session.activeLeaf !== undefined ? session.activeLeaf : msgs.length - 1
+    const path: number[] = []
+    let cur: number | undefined = leaf
+    const guard = new Set<number>()
+    while (cur !== undefined && cur >= 0 && !guard.has(cur)) {
+      guard.add(cur)
+      path.push(cur)
+      cur = msgs[cur]!.parentId
+    }
+    return path.reverse()
+  }
+
+  /**
+   * 分支切换:把某消息的第 variantIdx 个子分支设为激活,activeLeaf 移到该分支的末端叶。
+   * dsh 语义:切分支 = 从那个分叉点重新走另一条路到它自己的叶子。
+   */
+  switchBranch(sessionId: string, messageIdx: number, variantIdx: number): boolean {
+    const session = this.getSession(sessionId)
+    if (!session) return false
+    const msgs = session.messages
+    const target = msgs[messageIdx]
+    if (!target?.childrenIds || variantIdx < 0 || variantIdx >= target.childrenIds.length)
+      return false
+    target.activeChildIdx = variantIdx
+    // 沿该分支走到底:每层取 activeChildIdx(缺省 0)对应子节点
+    let cur = target.childrenIds[variantIdx]!
+    const guard = new Set<number>()
+    while (!guard.has(cur)) {
+      guard.add(cur)
+      session.activeLeaf = cur
+      const node = msgs[cur]!
+      if (!node.childrenIds?.length) break
+      const ai = node.activeChildIdx ?? 0
+      const next = node.childrenIds[Math.min(ai, node.childrenIds.length - 1)]!
+      cur = next
+    }
+    session.lastBranchAt = Date.now()
+    session.updatedAt = Date.now()
+    this.flush()
+    return true
   }
 
   /** 上一次执行的产物（链式输入源） */
@@ -394,8 +467,10 @@ class WorkbenchService {
       null,
       1
     )
-    const recent = session.messages
+    // 分支树(dsh 同款):decide 历史只走当前激活分支
+    const recent = this.activePath(session.id)
       .slice(-8)
+      .map((i) => session.messages[i]!)
       .map((m) => `${m.role}: ${m.text.slice(0, 200)}`)
       .join('\n')
     const lastExec = this.lastExecution(session.id)

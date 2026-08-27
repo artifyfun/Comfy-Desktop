@@ -97,7 +97,58 @@ export function createWorkbenchRouter(): express.Router {
       res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse('session not found'))
       return
     }
-    res.json(createSuccessResponse(session))
+    // 分支视图(dsh 同款):只投影当前激活路径,并附每条的导航信息(变体数/当前变体号)
+    const path = workbenchService.activePath(session.id)
+    const childCountOf = new Map<number, number>()
+    for (const m of session.messages) {
+      const pid = m.parentId ?? -1
+      if (pid >= 0) childCountOf.set(pid, (childCountOf.get(pid) ?? 0) + 1)
+    }
+    const activeVariantOf = new Map<number, number>()
+    for (const idx of path) {
+      const pid = session.messages[idx]?.parentId ?? -1
+      if (pid >= 0) {
+        const parent = session.messages[pid]!
+        const vi = (parent.childrenIds ?? []).indexOf(idx)
+        if (vi >= 0) activeVariantOf.set(pid, vi)
+      }
+    }
+    const viewMessages = path.map((idx) => {
+      const m = session.messages[idx]!
+      const pid = m.parentId ?? -1
+      return {
+        ...m,
+        _idx: idx,
+        _variants: pid >= 0 ? (childCountOf.get(pid) ?? 1) : 1,
+        _variant: pid >= 0 ? (activeVariantOf.get(pid) ?? 0) : 0
+      }
+    })
+    res.json(
+      createSuccessResponse({
+        ...session,
+        messages: viewMessages,
+        branchCount: session.messages.length
+      })
+    )
+  })
+
+  // 分支切换:把 idx 消息切到第 variant 个兄弟分支(dsh < > 语义)
+  router.post('/api/workbench/session/:id/branch', (req, res) => {
+    const { messageIdx, variant } = req.body as { messageIdx?: number; variant?: number }
+    const id = req.params.id ?? ''
+    if (typeof messageIdx !== 'number' || typeof variant !== 'number') {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(createErrorResponse('messageIdx and variant required'))
+      return
+    }
+    // 语义:前端传的是"分叉父消息下标 + 要去的变体号";父下标按存储序
+    const ok = workbenchService.switchBranch(id, messageIdx, variant)
+    if (!ok) {
+      res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse('branch not found'))
+      return
+    }
+    res.json(createSuccessResponse({ ok: true }))
   })
 
   // ---------------- 预设（copy-dialog 语义 CRUD） ----------------
