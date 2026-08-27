@@ -422,6 +422,17 @@ const translations = {
     workbenchPresetPick: '选择预设',
     workbenchSessionTitle: '会话标题（可选）',
     workbenchDocAsContext: '「{name}」将作为上下文提供给 AI（文档不参与工作流执行）',
+    workbenchSaveAs: '另存为',
+    workbenchFavorite: '收藏',
+    workbenchFavorited: '已收藏',
+    workbenchBatchProgress: '批量执行进度',
+    workbenchBatchDone: '批量任务完成：共 {total} 条，成功 {success} 条',
+    workbenchSavedTo: '已保存到 ',
+    workbenchSaveAsUnavailable: '远程 ComfyUI 的产物暂不支持另存为（仅同机可用）',
+    workbenchReferenceLocal: '引用本地文件（不复制，直接关联路径）',
+    workbenchAgentAccess: '工作台文件权限',
+    workbenchAgentAccessHint:
+      '标准档：产物可另存到任意目录、可引用本地文件，但 AI 不会直接改动你电脑上的文件。完全访问：AI 代理获得整台电脑的读写与命令执行能力（danger-full-access），请仅在理解风险后开启。',
     workbenchTitleAuto: '留空则 AI 自动生成',
     workbenchPresetDefaultHint: '默认预设',
     workbenchSetDefault: '设为默认',
@@ -1189,6 +1200,10 @@ const translations = {
     workbenchDocAsContext:
       '"{name}" will be provided to the AI as context (documents do not participate in workflow execution)',
     workbenchSaveAs: 'Save as',
+    workbenchFavorite: 'Favorite',
+    workbenchFavorited: 'Favorited',
+    workbenchBatchProgress: 'Batch progress',
+    workbenchBatchDone: 'Batch finished: {total} items, {success} succeeded',
     workbenchSavedTo: 'Saved to ',
     workbenchSaveAsUnavailable:
       'Save-as is unavailable for remote ComfyUI outputs (same-machine only)',

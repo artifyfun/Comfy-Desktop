@@ -49,6 +49,7 @@ import {
   type ExecutionResult
 } from '../mcp/executor'
 import { Codex, resolveCodexBaseUrl, resolveCodexBinary } from '../agentDriver'
+import { startBatch } from '../services/batchRunner'
 import { deriveAttachmentKind } from './presetCore'
 
 /** decide 过程回调：log=阶段文本；thread_event=codex 结构化事件（透传 SSE） */
@@ -101,6 +102,19 @@ export interface WorkbenchExecution {
   outputs: (WorkbenchOutputFile | string)[]
   status: ExecutionResult['status']
   startedAt: number
+  /** batch 编排执行:batchRunner 的 job id */
+  batchJobId?: string
+}
+
+/** 收藏的产物文件（跨会话收藏夹,落 workbench-sessions.json store 根） */
+export interface WorkbenchFavorite {
+  id: string
+  sessionId: string
+  promptId: string
+  templateId: string
+  file: WorkbenchOutputFile
+  note?: string
+  createdAt: number
 }
 
 /** 会话级模型覆盖（dsh ModelSelection 语义：per-session 可变，影响后续请求） */
@@ -129,6 +143,7 @@ interface SessionStore {
   sessions: WorkbenchSession[]
   presets?: WorkbenchPreset[]
   presetDefault?: string
+  favorites?: WorkbenchFavorite[]
 }
 
 const MAX_SESSIONS = 50
@@ -399,6 +414,15 @@ class WorkbenchService {
     const shortcutHint = opts.templateShortcut
       ? `\n## 用户显式指定模板\n必须使用 templateId="${opts.templateShortcut}"。`
       : ''
+    // 批量编排能力声明:模型可在识别出多行数据/多变体需求时输出 batch 计划
+    const batchRule = `
+## 批量编排（batch）
+用户需要多条产出（明确列出行、给表格/清单、要求 N 个变体）时，输出 batch 字段：
+"batch": { "items": [ {…参数行}, … ], "sharedParams": {…全批次共享覆盖} }
+- items 每行是一个参数对象，键=模板参数名，仅写与默认值不同的键；2~200 行
+- 行内值覆盖 sharedParams 覆盖模板默认值；未提到的参数用模板默认
+- 例：「这两个提示词各出一张图」→ items:[{"prompt":"A"},{"prompt":"B"}]
+`
     const titleRule = `
 ## 标题（可选）
 若为首条消息，可在 JSON 中加 "title":"≤15字会话标题"。`
@@ -420,7 +444,7 @@ class WorkbenchService {
 3. intent=chat 用于追问澄清或闲聊，回复放 reply。
 4. 模板库为空或不匹配时选 chat 并说明。
 5. 用户上传了素材时，倾向选择带媒体输入参数的模板（图生图/视频驱动），参数值填素材文件名（已上传）。
-6. 存在「会话预设约束」段落时，其 intent 限制是**硬性规则**，违反的输出会被系统直接拒绝——你必须输出该 intent。${chainHint}${constraint}${attachmentHint}${docHint}${shortcutHint}${titleRule}
+6. 存在「会话预设约束」段落时，其 intent 限制是**硬性规则**，违反的输出会被系统直接拒绝——你必须输出该 intent。${chainHint}${constraint}${attachmentHint}${docHint}${batchRule}${shortcutHint}${titleRule}
 
 ## 模板库
 ${catalog}
@@ -737,6 +761,149 @@ ${userInput}`
   }
 
   /** 固化：把模板+参数做成新 app（复用 appStore.createApp + appAssets 链路） */
+  /**
+   * 批量编排执行:PLAN.batch 存在时把模板+数据行投进 batchRunner 队列。
+   * 参数语义:模板默认参数 ← plan.params ← batch.sharedParams ← item 行
+   * (后者覆盖前者同名键)。附件/链式产物作为共享输入一次性填好。
+   * 返回 batch job id,进度走既有 /api/batch/status 轮询。
+   */
+  async executeBatch(
+    sessionId: string,
+    plan: WorkbenchPlan,
+    template: WorkflowTemplate,
+    attachments: AttachmentMeta[] = []
+  ): Promise<{ jobId: string; total: number }> {
+    const shared: Record<string, unknown> = {
+      ...(plan.params ?? {}),
+      ...(plan.batch?.sharedParams ?? {})
+    }
+    // 媒体槽位填充逻辑与单次 execute 完全一致(附件→槽位,链式→首槽)
+    const mediaSlots = template.paramsNodes
+      .filter(
+        (n) =>
+          n.category === 'input' && /image|video|audio|-uploader$/i.test(n.renderComponent ?? '')
+      )
+      .map((n) => ({
+        slot: { param: n.name ?? '', accept: acceptKindsFor(n.renderComponent ?? '') },
+        node: n
+      }))
+    if (plan.usePreviousOutput) {
+      const last = this.lastExecution(sessionId)
+      if (last && last.outputs.length > 0 && mediaSlots[0]) {
+        shared[mediaSlots[0]!.slot.param] = last.outputs[0]
+      }
+    }
+    if (attachments.length > 0 && mediaSlots.length > 0) {
+      const occupied = new Set(
+        mediaSlots.filter((m) => shared[m.slot.param] !== undefined).map((m) => m.slot.param)
+      )
+      const freeSlots = mediaSlots.filter((m) => !occupied.has(m.slot.param)).map((m) => m.slot)
+      const { assignments } = assignAttachmentsToSlots(attachments, freeSlots)
+      for (const a of assignments) {
+        if (a.slot.param) shared[a.slot.param] = this.resolveAttachmentRef(a.attachment)
+      }
+    }
+    // 数据行:行内值覆盖 shared 同名键;未知键(模板没有的参数名)丢弃并告警。
+    // 行内字段名直接用参数名(valueMap.key=参数名),类型转换按参数节点声明。
+    const inputNodes = template.paramsNodes.filter((n) => n.category === 'input')
+    const nodeByName = new Map(inputNodes.map((n) => [n.name, n]))
+    const items = (plan.batch?.items ?? []).map((row) => {
+      const clean: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(row ?? {})) {
+        if (nodeByName.has(k)) clean[k] = v
+        else logger.warn(`workbench batch: dropping unknown param key "${k}" from item row`)
+      }
+      return { ...shared, ...clean }
+    })
+    if (items.length < 2) throw new Error('batch items must be >= 2 after merging')
+    // mapping:模板的 param name → 工作流节点。valueMap.key=参数名 → buildItemPrompt
+    // 从行字典取值并按 valueType 转换;行内没有的键不会被写(prompt 保留模板默认值,
+    // 但我们的行是「shared 全量展开」,等价于逐行完整参数)
+    const inputsMapping = inputNodes.map((n, i) => ({
+      id: n.id,
+      key: n.name ?? `param${i}`,
+      category: 'input' as const,
+      valueType: n.selectedWidget?.type ?? n.type,
+      valueMap: { key: n.name ?? `param${i}` }
+    }))
+    const result = await startBatch({
+      prompt: template.prompt,
+      inputsMapping,
+      items,
+      appId: template.id,
+      appName: `工作台批量·${template.name}`
+    })
+    return { jobId: result.job.id, total: items.length }
+  }
+
+  /** 批量执行入会话记录(promptId=batch jobId,供产物轮询与链式引用识别) */
+  appendBatchExecution(sessionId: string, templateId: string, jobId: string, total: number): void {
+    this.appendMessage(sessionId, {
+      role: 'agent',
+      kind: 'chat',
+      text: `批量任务已入队：${total} 条（jobId ${jobId.slice(0, 8)}…），模板 ${templateId}`
+    })
+    const session = this.getSession(sessionId)
+    if (!session) return
+    session.executions = session.executions ?? []
+    session.executions.push({
+      promptId: jobId,
+      templateId,
+      params: { batch: true },
+      outputs: [],
+      status: 'queued',
+      startedAt: Date.now(),
+      batchJobId: jobId
+    })
+    this.flush()
+  }
+
+  // ---------------- 收藏（产物收藏夹，跨会话） ----------------
+
+  listFavorites(sessionId?: string): WorkbenchFavorite[] {
+    const all = this.store.favorites ?? []
+    return sessionId ? all.filter((f) => f.sessionId === sessionId) : all
+  }
+
+  addFavorite(input: {
+    sessionId: string
+    executionPromptId: string
+    file: WorkbenchOutputFile
+    note?: string
+  }): WorkbenchFavorite {
+    const fav: WorkbenchFavorite = {
+      id: randomUUID(),
+      sessionId: input.sessionId,
+      promptId: input.executionPromptId,
+      templateId:
+        this.getSession(input.sessionId)?.executions?.find(
+          (e) => e.promptId === input.executionPromptId
+        )?.templateId ?? '',
+      file: input.file,
+      note: input.note,
+      createdAt: Date.now()
+    }
+    // 去重:同会话同文件重复收藏视为幂等
+    const dup = (this.store.favorites ?? []).find(
+      (f) =>
+        f.sessionId === fav.sessionId &&
+        f.file.filename === fav.file.filename &&
+        (f.file.subfolder ?? '') === (fav.file.subfolder ?? '')
+    )
+    if (dup) return dup
+    this.store.favorites = [...(this.store.favorites ?? []), fav]
+    this.flush()
+    return fav
+  }
+
+  removeFavorite(id: string): boolean {
+    const before = (this.store.favorites ?? []).length
+    this.store.favorites = (this.store.favorites ?? []).filter((f) => f.id !== id)
+    const changed = this.store.favorites.length !== before
+    if (changed) this.flush()
+    return changed
+  }
+
   publishToApp(
     _sessionId: string,
     execution: WorkbenchExecution,

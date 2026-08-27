@@ -234,6 +234,22 @@
                   a.templateName
                 }}</span>
               </div>
+              <!-- 批量任务进度条 -->
+              <div v-if="a.batchStatus && a.batchStatus !== 'completed'" class="mb-2">
+                <div class="flex justify-between text-xs text-slate-400 mb-1">
+                  <span>{{ t('workbenchBatchProgress') }}</span>
+                  <span
+                    >{{ a.batchSuccess ?? 0 }}/{{ a.batchTotal ?? '?' }}（失败
+                    {{ a.batchFailed ?? 0 }}）</span
+                  >
+                </div>
+                <div class="h-1.5 rounded bg-slate-700 overflow-hidden">
+                  <div
+                    class="h-full bg-tech-blue transition-all"
+                    :style="{ width: (a.batchPercent ?? 0) + '%' }"
+                  ></div>
+                </div>
+              </div>
               <!-- 产物缩略图网格（ComfyUI /view 直出，点击 lightbox） -->
               <div v-if="a.files?.length" class="grid grid-cols-3 gap-1 mb-1">
                 <div
@@ -243,14 +259,23 @@
                   @click="lightboxFile = f"
                 >
                   <img :src="viewUrl(f)" class="w-full h-full object-cover" loading="lazy" />
-                  <button
-                    v-if="isElectron"
-                    class="absolute right-1 top-1 hidden group-hover/file:flex w-6 h-6 items-center justify-center rounded bg-black/60 text-slate-200 hover:text-white"
-                    :title="t('workbenchSaveAs')"
-                    @click.stop="saveArtifactAs(f)"
-                  >
-                    <i class="fas fa-download text-xs"></i>
-                  </button>
+                  <div class="absolute right-1 top-1 hidden group-hover/file:flex gap-1">
+                    <button
+                      v-if="isElectron"
+                      class="w-6 h-6 flex items-center justify-center rounded bg-black/60 text-slate-200 hover:text-white"
+                      :title="t('workbenchSaveAs')"
+                      @click.stop="saveArtifactAs(f)"
+                    >
+                      <i class="fas fa-download text-xs"></i>
+                    </button>
+                    <button
+                      class="w-6 h-6 flex items-center justify-center rounded bg-black/60 text-slate-200 hover:text-yellow-300"
+                      :title="t('workbenchFavorite')"
+                      @click.stop="favoriteArtifact(a, f)"
+                    >
+                      <i class="fas fa-star text-xs"></i>
+                    </button>
+                  </div>
                 </div>
               </div>
               <div v-else-if="a.outputs.length" class="text-xs text-slate-300 break-all">
@@ -544,7 +569,9 @@ async function selectSession(s) {
   modelOverride.value = session.modelOverride ?? {}
   pendingIssues.value = []
   for (const e of session.executions ?? []) {
-    if (e.status === 'queued' || e.status === 'running') startPoll(e.promptId)
+    if (e.batchJobId && (e.status === 'queued' || e.status === 'running'))
+      startBatchPoll(e.promptId)
+    else if (e.status === 'queued' || e.status === 'running') startPoll(e.promptId)
   }
   scrollToBottom()
 }
@@ -891,7 +918,8 @@ function handleSse(chunk) {
       outputs: [],
       files: [],
     })
-    startPoll(data.promptId)
+    if (data.batch?.jobId) startBatchPoll(data.batch.jobId)
+    else startPoll(data.promptId)
   } else if (event === 'invalid') {
     pendingIssues.value = data.issues ?? []
     messages.value.push({
@@ -922,6 +950,58 @@ function stageText(stage) {
     executing: t('workbenchExecuting'),
   }
   return map[stage] ?? stage
+}
+
+// 批量任务轮询:进度/产物经 batch API 汇入产物卡(同一张卡,进度条展示)
+function startBatchPoll(promptId) {
+  const poll = async () => {
+    try {
+      const res = await fetch(`${origin.value}/api/batch/status?id=${encodeURIComponent(promptId)}`)
+      const json = await res.json()
+      const job = json?.data?.job ?? json?.data
+      if (!job) return
+      const artifact = artifacts.value.find((a) => a.promptId === promptId)
+      if (!artifact) {
+        stopBatchPoll(promptId)
+        return
+      }
+      artifact.batchStatus = job.status
+      artifact.batchPercent = job.percent
+      artifact.batchSuccess = job.success
+      artifact.batchFailed = job.failed
+      artifact.batchTotal = job.total
+      const doneFiles = (job.results ?? [])
+        .filter((r) => r.success && r.files)
+        .flatMap((r) => r.files)
+      if (doneFiles.length) {
+        artifact.files = doneFiles
+        artifact.outputs = doneFiles.map((f) => f.filename)
+      }
+      if (['completed', 'stopped', 'failed'].includes(job.status)) {
+        artifact.status = job.status === 'completed' ? 'success' : 'error'
+        messages.value.push({
+          role: 'agent',
+          kind: job.status === 'completed' ? 'chat' : 'error',
+          text:
+            job.status === 'completed'
+              ? t('workbenchBatchDone', { total: job.total, success: job.success })
+              : `${t('workbenchFailed')}: 批量任务 ${job.status}`,
+        })
+        scrollToBottom()
+        stopBatchPoll(promptId)
+      }
+    } catch {
+      /* 下轮重试 */
+    }
+  }
+  poll()
+  pollTimers.set(`batch:${promptId}`, setInterval(poll, 2500))
+}
+
+function stopBatchPoll(promptId) {
+  const t = pollTimers.get(`batch:${promptId}`)
+  if (t) clearInterval(t)
+  pollTimers.delete(`batch:${promptId}`)
 }
 
 function startPoll(promptId) {
@@ -1000,6 +1080,22 @@ function extractFiles(outputs) {
 
 const comfyOrigin = computed(() => appStore.config?.comfyHost || 'http://127.0.0.1:8188')
 const lightboxFile = ref(null)
+
+// 收藏产物:跨会话收藏夹,缩略图区星星按钮
+async function favoriteArtifact(artifact, f) {
+  try {
+    const res = await fetch(`${origin.value}/api/workbench/favorites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: sessionId.value, promptId: artifact.promptId, file: f }),
+    })
+    const json = await res.json()
+    if (json?.ok) message.success(t('workbenchFavorited'))
+    else message.error(json?.message || 'favorite failed')
+  } catch (e) {
+    message.error(String(e?.message || e))
+  }
+}
 
 // A 权限:产物另存为(系统保存对话框)。仅同机 ComfyUI(settings.outputDir)可用;
 // sourcePath 校验在主进程侧(白名单 outputDir/inputDir)。

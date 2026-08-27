@@ -21,6 +21,16 @@ export interface WorkbenchPlan {
   reason?: string // codex 解释（展示给用户）
   /** P2e：首条消息时可带的会话标题（≤20 字，用户手改过不覆盖） */
   title?: string
+  /**
+   * 批量编排：items 数据行 + 每行差异参数。存在时走 batchRunner 队列
+   * （串行执行，进度经既有 batch 轮询通道），而非单次 executeApp。
+   * 每行 item 的键 = params 的参数名（覆盖同名默认值）。
+   */
+  batch?: {
+    items: Array<Record<string, unknown>>
+    /** 可选:全批次共享的 prompt 变体（如统一风格词），逐行覆盖 */
+    sharedParams?: Record<string, unknown>
+  }
 }
 
 export interface PlanValidationIssue {
@@ -204,6 +214,21 @@ export function validatePlanLocal(
     return { ok: false, issues }
   }
   if (plan.params) issues.push(...validateParams(template, plan.params))
+  // batch:2~200 行;每行必须是对象;items 行键应与模板参数有交集(纯噪音行直接拒)
+  if (plan.batch) {
+    const n = plan.batch.items?.length ?? 0
+    if (n < 2)
+      issues.push({ field: 'batch', message: 'batch.items 至少 2 行（单次执行不需要批量）' })
+    if (n > 200) issues.push({ field: 'batch', message: 'batch.items 上限 200 行，请分批' })
+    if (plan.batch.sharedParams) {
+      issues.push(
+        ...validateParams(template, plan.batch.sharedParams).map((i) => ({
+          ...i,
+          field: `batch.${i.field}`
+        }))
+      )
+    }
+  }
   return { ok: issues.length === 0, issues, template }
 }
 

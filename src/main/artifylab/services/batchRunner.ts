@@ -67,6 +67,8 @@ export interface BatchItemResult {
   success: boolean
   error?: string
   durationMs: number
+  /** 产物文件引用（ComfyUI history outputs;filename+subfolder+type,/view 直出） */
+  files?: Array<{ filename: string; subfolder?: string; type?: string }>
 }
 
 export type BatchJobStatus = 'queued' | 'running' | 'paused' | 'completed' | 'stopped' | 'failed'
@@ -307,7 +309,11 @@ export function buildItemPrompt(
 async function runItem(
   comfyOrigin: string,
   prompt: ComfyPrompt
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{
+  ok: boolean
+  error?: string
+  files?: Array<{ filename: string; subfolder?: string; type?: string }>
+}> {
   const clientId = randomUUID()
   let promptId: string
   try {
@@ -336,7 +342,21 @@ async function runItem(
     if (status?.status_str === 'error') {
       return { ok: false, error: JSON.stringify(status).slice(0, 500) }
     }
-    return { ok: true }
+    // 抽产物文件引用（与工作台 extractFiles 同构），供队列预览/收藏/另存为
+    const files: Array<{ filename: string; subfolder?: string; type?: string }> = []
+    const outputs = entry.outputs as Record<string, Record<string, unknown>> | undefined
+    for (const v of Object.values(outputs ?? {})) {
+      const o = v ?? {}
+      for (const key of ['images', 'gifs']) {
+        for (const it of (o[key] as
+          | Array<{ filename?: string; subfolder?: string; type?: string }>
+          | undefined) ?? []) {
+          if (it?.filename)
+            files.push({ filename: it.filename, subfolder: it.subfolder, type: it.type })
+        }
+      }
+    }
+    return { ok: true, files }
   }
 }
 
@@ -428,7 +448,8 @@ async function executeJob(job: BatchJob): Promise<'completed' | 'stopped' | 'pau
         index: currentIndex,
         success: res.ok,
         error: res.error,
-        durationMs
+        durationMs,
+        files: res.files
       })
       trim(job)
     }
