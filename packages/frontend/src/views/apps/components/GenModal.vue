@@ -27,13 +27,24 @@
       <div v-else>
         <div v-if="currentStep === 'style'">
           <a-button @click="handleCancel">{{ t('cancel') }}</a-button>
-          <a-button type="primary" :loading="optimizePromptLoading" :disabled="!canProceed" @click="handleStyleConfirm">
+          <a-button
+            type="primary"
+            :loading="optimizePromptLoading"
+            :disabled="!canProceed"
+            @click="handleStyleConfirm"
+          >
             {{ t('startBuild') }} <i class="fa-solid fa-chevron-right"></i>
           </a-button>
         </div>
         <div v-else>
-          <a-button v-if="!(genLoading || responseLoading || appStore.isLoading)" @click="handleBackToStyle"><i class="fa-solid fa-chevron-left"></i> {{ t('backToStyle') }}</a-button>
-          <a-button danger v-if="genLoading" @click="handleStopBuilding">{{ t('stopBuilding') }}</a-button>
+          <a-button
+            v-if="!(genLoading || responseLoading || appStore.isLoading)"
+            @click="handleBackToStyle"
+            ><i class="fa-solid fa-chevron-left"></i> {{ t('backToStyle') }}</a-button
+          >
+          <a-button danger v-if="genLoading" @click="handleStopBuilding">{{
+            t('stopBuilding')
+          }}</a-button>
           <a-button
             v-if="!(genLoading || responseLoading || appStore.isLoading)"
             @click="handleRebuild"
@@ -66,7 +77,7 @@
     </div>
 
     <!-- AI build step-based UI (original logic) -->
-    <div style="height: 100%;" v-else>
+    <div style="height: 100%" v-else>
       <div v-if="currentStep === 'style'" class="style-selection-container">
         <div class="style-selection-content">
           <div class="style-selection-header">
@@ -186,7 +197,11 @@
         <a-spin :tip="t('waitingAIResponse')" :spinning="responseLoading || appStore.isLoading">
           <splitpanes class="default-theme">
             <pane>
-              <CodeEditor ref="genEditorRef" :value="genApp.code" @change="$event => genApp.code = $event" />
+              <CodeEditor
+                ref="genEditorRef"
+                :value="genApp.code"
+                @change="($event) => (genApp.code = $event)"
+              />
             </pane>
             <pane>
               <Preview
@@ -391,9 +406,12 @@ const genAppCode = async () => {
         name: genApp.value.name,
         description: genApp.value.description,
         paramsNodes: (genApp.value.template && genApp.value.template.paramsNodes) || [],
-        style: buildStyle ? buildStyle[`${appStore.config.lang}_name`] || buildStyle.id : selectedStyleId.value,
+        style: buildStyle
+          ? buildStyle[`${appStore.config.lang}_name`] || buildStyle.id
+          : selectedStyleId.value,
         provider: appStore.config.provider || 'deepseek',
         apiKey: appStore.config.api_key,
+        baseUrl: appStore.config.base_url || '',
         model: appStore.config.buildModel || 'deepseek-v4-flash',
       }),
       headers: {
@@ -553,7 +571,8 @@ const handleOptimizePrompt = () => {
       height: auto;
     }
   }
-  &.local,&.ai {
+  &.local,
+  &.ai {
     .ant-modal-body {
       height: 100%;
       .editor-box {
@@ -774,7 +793,10 @@ const handleOptimizePrompt = () => {
   border-radius: 16px;
   overflow: hidden;
   cursor: pointer;
-  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .style-card:hover {

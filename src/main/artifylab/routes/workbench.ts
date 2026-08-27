@@ -199,7 +199,8 @@ export function createWorkbenchRouter(): express.Router {
             paramsNodes: template.paramsNodes,
             style,
             provider: 'deepseek',
-            apiKey: appStoreManager.getConfig().api_key
+            apiKey: appStoreManager.getConfig().api_key,
+            baseUrl: appStoreManager.getConfig().base_url || ''
           },
           () => {}
         )

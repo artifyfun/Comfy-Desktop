@@ -223,7 +223,8 @@ export function createAiRouter(): express.Router {
       return
     }
     try {
-      const { appId, name, description, paramsNodes, style, provider, apiKey, model } = req.body
+      const { appId, name, description, paramsNodes, style, provider, apiKey, model, baseUrl } =
+        req.body
       if (!appId) {
         return res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('Missing appId'))
       }
@@ -246,7 +247,7 @@ export function createAiRouter(): express.Router {
       buildAppInFlight = true
       try {
         const html = await buildAppCode(
-          { appId, name, description, paramsNodes, style, provider, apiKey, model },
+          { appId, name, description, paramsNodes, style, provider, apiKey, baseUrl, model },
           (p) => {
             if (!res.writableEnded) {
               res.write(`data: ${JSON.stringify(p)}\n\n`)

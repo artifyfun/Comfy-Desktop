@@ -24,7 +24,7 @@ import {
   type PlanValidationIssue
 } from './plan'
 import { executeApp, getExecutionStatus, type ExecutionResult } from '../mcp/executor'
-import { Codex, resolveCodexBinary, type BuildProgress } from '../agentDriver'
+import { Codex, resolveCodexBaseUrl, resolveCodexBinary, type BuildProgress } from '../agentDriver'
 
 export type WorkbenchMessageKind = 'chat' | 'card' | 'progress' | 'artifact' | 'error'
 
@@ -235,7 +235,10 @@ ${userInput}`
     const spec = this.buildDecisionSpec(userInput, session)
     const codex = new Codex({
       codexPathOverride: binary,
-      baseUrl: 'https://api.deepseek.com/v1',
+      // 显式注入 config.base_url（new-api 网关）> deepseek 默认
+      baseUrl: resolveCodexBaseUrl({
+        baseUrl: appStoreManager.getConfig().base_url || undefined
+      }),
       apiKey: appStoreManager.getConfig().api_key || process.env.CODEX_API_KEY || ''
     })
     const thread = codex.startThread({

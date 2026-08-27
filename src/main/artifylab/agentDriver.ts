@@ -49,6 +49,8 @@ export interface BuildAppInput {
   style?: string
   provider?: CodexProvider
   apiKey?: string
+  /** 自定义 OpenAI 兼容网关（如 new-api）：显式传入 > config.base_url > provider 默认 */
+  baseUrl?: string
   model?: string
   maxTurns?: number
 }
@@ -80,6 +82,18 @@ const API_BASE_URL: Partial<Record<CodexProvider, string>> = {
   groq: 'https://api.groq.com/openai/v1',
   ollama: 'http://localhost:11434/v1'
   // azure: 需用户填专属 base_url，走 openai 兼容路由需在 UI 传入
+}
+
+/**
+ * codex 走哪个 OpenAI 兼容端点。优先级：
+ * 1. input.baseUrl —— 显式传入。调用方负责注入 config.base_url
+ *    （routes/service 层已有 appStoreManager；agentDriver 保持无 electron
+ *    依赖，可单测）。new-api 等自定义网关走这里。
+ * 2. API_BASE_URL[provider] —— provider 内置默认。
+ */
+export function resolveCodexBaseUrl(input: Pick<BuildAppInput, 'baseUrl' | 'provider'>): string {
+  if (input.baseUrl) return input.baseUrl
+  return API_BASE_URL[input.provider ?? 'deepseek'] ?? API_BASE_URL.deepseek!
 }
 
 // target triple → 平台包/目录名，与 codex 的 PLATFORM_PACKAGE_BY_TARGET 一致
@@ -215,7 +229,6 @@ async function runCodex(
   const provider = input.provider || 'deepseek'
   const model = input.model || DEFAULT_MODEL[provider] || 'deepseek-v4-flash'
   const spec = buildSpec(input, !!hasDesignSystem)
-
   const binary = resolveCodexBinary()
   if (!binary) {
     throw new Error(
@@ -228,9 +241,10 @@ async function runCodex(
     // 内置二进制：生产走 resources/codex-bin，开发走 public/codex-bin；
     // 恒传 codexPathOverride（vendor SDK 不做 node_modules 兜底解析）
     codexPathOverride: binary,
-    // OpenAI 兼容路由：baseUrl → openai_base_url，apiKey → CODEX_API_KEY，
-    // 用户只填 key 即可，无需 ~/.codex/config.toml 自定义 provider
-    baseUrl: API_BASE_URL[provider],
+    // OpenAI 兼容路由：baseUrl → openai_base_url，apiKey → CODEX_API_KEY。
+    // baseUrl 优先级：显式传入（new-api 等自定义网关）> config.base_url（用户设置）
+    // > provider 内置默认（API_BASE_URL 表）
+    baseUrl: resolveCodexBaseUrl(input),
     apiKey: input.apiKey
   })
 
