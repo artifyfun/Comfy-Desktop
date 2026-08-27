@@ -86,7 +86,7 @@
           </div>
 
           <!-- 对话流（含执行卡内联） -->
-          <div ref="messagesEl" class="flex-1 overflow-y-auto p-4 space-y-3">
+          <div ref="messagesEl" class="flex-1 overflow-y-auto p-4 space-y-6">
             <div v-if="messages.length === 0" class="text-center text-slate-400 mt-10">
               <i class="fas fa-wand-magic-sparkles text-4xl mb-3 opacity-40"></i>
               <p>{{ t('workbenchIntro') }}</p>
@@ -97,7 +97,18 @@
               class="flex"
               :class="m.role === 'user' ? 'justify-end' : 'justify-start'"
             >
-              <div class="max-w-[85%] space-y-1">
+              <div class="max-w-[85%] space-y-1 group/msg relative">
+                <!-- 复制气泡（hover 出现,一键复制该条消息数据） -->
+                <button
+                  v-if="copyableText(m)"
+                  class="absolute -bottom-5 text-[11px] text-slate-500 hover:text-slate-200 transition opacity-0 group-hover/msg:opacity-100 flex items-center gap-1"
+                  :class="m.role === 'user' ? 'left-0' : 'right-0'"
+                  :title="t('workbenchCopyMessage')"
+                  @click="copyMessage(m, i)"
+                >
+                  <i :class="copiedIdx === i ? 'fas fa-check text-green-400' : 'far fa-copy'"></i>
+                  <span v-if="copiedIdx === i">{{ t('copied') }}</span>
+                </button>
                 <!-- 附件缩略图（用户消息） -->
                 <div v-if="m.attachments?.length" class="flex gap-1.5 flex-wrap justify-end">
                   <div
@@ -1281,6 +1292,41 @@ function messageClass(m) {
   if (m.kind === 'error') return 'bg-red-900/60 text-red-200'
   if (m.kind === 'card') return 'bg-slate-800 text-slate-200 border border-slate-600'
   return 'bg-slate-800/70 text-slate-200'
+}
+
+// ---------- 气泡复制 ----------
+const copiedIdx = ref(-1)
+let copiedTimer = null
+
+/** 该气泡的可复制数据:文本取原文,card/artifact 取结构化摘要,tool_item 取详情 */
+function copyableText(m) {
+  if (m.kind === 'progress') return ''
+  if (m.kind === 'tool_item') return m.toolItem ? JSON.stringify(m.toolItem, null, 2) : ''
+  if (m.kind === 'card' && m.plan) return JSON.stringify(m.plan, null, 2)
+  if (m.kind === 'artifact')
+    return [m.text, ...(m.outputFiles ?? []).map((f) => f.filename)].filter(Boolean).join('\n')
+  return m.text || ''
+}
+
+async function copyMessage(m, i) {
+  const text = copyableText(m)
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    // 非 https/权限拒绝兜底:隐藏 textarea 方案
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  }
+  copiedIdx.value = i
+  if (copiedTimer) clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => (copiedIdx.value = -1), 1500)
 }
 
 function cardText(plan) {
