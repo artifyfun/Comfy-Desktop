@@ -397,6 +397,8 @@ export function createWorkbenchRouter(): express.Router {
       const local = validatePlanLocal(plan, templateLibrary.list())
       if (!local.ok) {
         // 结构性非法的 PLAN 也先于 reply/execution 拦截
+        const errText = `PLAN 无效：${local.issues.map((i) => i.message).join('；')}`
+        workbenchService.appendMessage(sessionId, { role: 'agent', kind: 'error', text: errText })
         send('invalid', { issues: local.issues })
         finish()
         return
@@ -458,6 +460,8 @@ export function createWorkbenchRouter(): express.Router {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       logger.error('workbench chat failed', error)
+      // 错误落盘:重进会话仍可见（此前仅前端内存,刷新/切会话即丢）
+      workbenchService.appendMessage(sessionId, { role: 'agent', kind: 'error', text: message })
       send('error', { message })
       finish()
     } finally {

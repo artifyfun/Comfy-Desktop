@@ -619,9 +619,9 @@ const state = reactive({
     temperature: 0,
     api_key: '',
     base_url: 'https://api.deepseek.com/v1',
-    model: 'deepseek-v4-flash',
+    model: 'glm-5.3-flash',
     provider: 'deepseek', // 新增供应商字段
-    buildModel: 'deepseek-v4-flash', // 构建应用（Codex agent）使用的模型
+    buildModel: 'glm-5.3-flash', // 构建应用（Codex agent）使用的模型
     buildStyleId: 'tech', // 新增构建风格ID
     workbenchAgentAccess: 'standard', // 工作台 agent 文件权限档位
     ngrokAuthtoken: '', // 新增ngrok authtoken
@@ -645,6 +645,8 @@ const handleClickConfirm = () => {
 const getModelList = () => {
   if (state.config.provider === 'deepseek') {
     return ['deepseek-v4-flash', 'deepseek-v4-pro']
+  } else if (state.config.provider === 'zhipu') {
+    return ['glm-5.3-flash', 'glm-5.3', 'glm-5.3-air']
   } else if (state.config.provider === 'openai') {
     return ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']
   }
@@ -655,6 +657,8 @@ const getModelList = () => {
 const getDefaultBaseUrl = () => {
   if (state.config.provider === 'deepseek') {
     return 'https://api.deepseek.com/v1'
+  } else if (state.config.provider === 'zhipu') {
+    return 'https://open.bigmodel.cn/api/paas/v4'
   } else if (state.config.provider === 'openai') {
     return 'https://api.openai.com/v1'
   }

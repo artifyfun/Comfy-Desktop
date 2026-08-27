@@ -288,7 +288,7 @@ class WorkbenchService {
     return ok
   }
 
-  private appendMessage(sessionId: string, msg: Omit<WorkbenchMessage, 'createdAt'>): void {
+  appendMessage(sessionId: string, msg: Omit<WorkbenchMessage, 'createdAt'>): void {
     const session = this.getSession(sessionId)
     if (!session) return
     session.messages.push({ ...msg, createdAt: Date.now() })
@@ -520,7 +520,7 @@ ${userInput}`
       const proxy = await startWorkbenchProxy({
         upstreamBaseUrl,
         upstreamApiKey: cfg.api_key || '',
-        model: cfg.buildModel || 'deepseek-v4-flash'
+        model: cfg.buildModel || 'glm-5.3-flash'
       })
       this.proxyServer = proxy.server
       codexBaseUrl = proxy.baseUrl
@@ -557,7 +557,7 @@ ${userInput}`
       } catch {}
     }
     const thread = codex.startThread({
-      model: appStoreManager.getConfig().buildModel || 'deepseek-v4-flash',
+      model: appStoreManager.getConfig().buildModel || 'glm-5.3-flash',
       sandboxMode: agentAccess === 'full' ? 'danger-full-access' : 'workspace-write',
       workingDirectory: process.cwd(),
       skipGitRepoCheck: true
@@ -1016,7 +1016,7 @@ ${userInput}`
   listModels(): Array<{ id: string; label: string; role: 'decision' | 'build' }> {
     const config = appStoreManager.getConfig()
     const models: Array<{ id: string; label: string; role: 'decision' | 'build' }> = []
-    const decisionModel = config.buildModel || 'deepseek-v4-flash'
+    const decisionModel = config.buildModel || 'glm-5.3-flash'
     models.push({ id: decisionModel, label: `${decisionModel}（决策）`, role: 'decision' })
     const buildModel = config.buildModel || decisionModel
     if (buildModel !== decisionModel) {

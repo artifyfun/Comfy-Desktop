@@ -58,10 +58,10 @@ const getDefaultConfig = () => {
     temperature: 0,
     api_key: '',
     base_url: 'https://api.deepseek.com/v1',
-    model: 'deepseek-v4-flash',
+    model: 'glm-5.3-flash',
     provider: 'deepseek', // 供应商标识（设置弹窗供应商卡片用）
     workbenchAgentAccess: 'standard', // 工作台 agent 文件权限:'standard'|'full'
-    buildModel: 'deepseek-v4-flash', // 工作台 decide/构建 agent 模型
+    buildModel: 'glm-5.3-flash', // 工作台 decide/构建 agent 模型
     buildStyleId: 'tech', // 新增构建风格ID
     ngrokAuthtoken: '' // 新增ngrok authtoken
   }
