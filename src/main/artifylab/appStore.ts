@@ -49,6 +49,8 @@ const getDefaultConfig = () => {
   return {
     comfyHost: 'http://localhost:8188',
     serverHost: `http://localhost:${port}`,
+    /** server 绑定地址：默认仅回环（含 MCP token 面）。需要局域网访问时改为 '0.0.0.0'。 */
+    listenHost: '127.0.0.1',
     lang: 'zh',
     theme: 'dark',
     activeAppId: '',

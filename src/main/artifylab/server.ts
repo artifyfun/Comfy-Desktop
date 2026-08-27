@@ -20,6 +20,9 @@ import { createConfigRouter } from './routes/config'
 import { createProxyRouter } from './routes/proxy'
 import { createModelsRouter } from './routes/models'
 import { createBatchRouter } from './routes/batch'
+import { createMcpConfigRouter } from './routes/mcp'
+import { isLoopbackHost, resolveListenHost } from './config/listenHost'
+import appStoreManager from './appStore'
 
 // Load environment variables from .env file
 dotenv.config()
@@ -92,6 +95,8 @@ app.use(createProxyRouter())
 app.use(createModelsRouter())
 // 常驻批量任务（GET /api/batch/status 需在 history() 之前）
 app.use(createBatchRouter())
+// MCP 接入配置（GET /api/mcp/config 需在 history() 之前）
+app.use(createMcpConfigRouter())
 
 // 中间件配置
 app.use(history())
@@ -244,8 +249,16 @@ export function startServer(): Promise<HttpServer> {
     }
 
     function startActualServer(port: number) {
-      server = app.listen(port, () => {
-        logger.info(`Server is running on port ${port}`)
+      // Phase 0 安全加固：显式绑定地址，默认仅回环（此前无 host = 0.0.0.0，
+      // 整个 server 含 /mcp token 面暴露局域网）。config.listenHost 可放开（如 '0.0.0.0'）。
+      const host = resolveListenHost(appStoreManager.getConfig())
+      server = app.listen(port, host, () => {
+        logger.info(`Server is running at http://${host}:${port}`)
+        if (!isLoopbackHost(host)) {
+          logger.warn(
+            `Server is listening on ${host} (non-loopback) — the MCP endpoint and its token are reachable from the network`
+          )
+        }
         resolve(server!)
         // 启动后后台扫描 output 目录，增量补录存量图片到 gallery.db
         setTimeout(() => {
