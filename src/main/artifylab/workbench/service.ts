@@ -10,7 +10,8 @@
 import { join } from 'node:path'
 import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import type { Dirent } from 'node:fs'
 import appStoreManager from '../appStore'
 import { logger } from '../utils/logger'
 import { templateLibrary } from './templates'
@@ -35,6 +36,8 @@ import {
   type AttachmentMeta,
   type WorkbenchPreset
 } from './presetCore'
+import { renderEnvSnapshot, SELF_KNOWLEDGE_TEXT, type WorkbenchEnvSnapshot } from './selfKnowledge'
+import { get as getSetting } from '../../settings'
 import {
   executeApp,
   getExecutionStatus,
@@ -113,6 +116,25 @@ interface SessionStore {
 
 const MAX_SESSIONS = 50
 const FLUSH_DEBOUNCE_MS = 500
+
+/** 递归收集模型文件名（去重，cap 80，仅常见权重扩展） */
+function collectModelNames(dir: string, out: string[], depth: number): void {
+  if (depth > 3 || out.length >= 80) return
+  let entries: Dirent[]
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const e of entries) {
+    if (out.length >= 80) return
+    const full = join(dir, e.name)
+    if (e.isDirectory()) collectModelNames(full, out, depth + 1)
+    else if (/\.(safetensors|ckpt|pt|bin|gguf)$/i.test(e.name)) {
+      if (!out.includes(e.name)) out.push(e.name)
+    }
+  }
+}
 
 /** renderComponent → 该输入位可接受的素材类型（宽松匹配，兼容自绘组件命名） */
 function acceptKindsFor(renderComponent: string): AttachmentKind[] {
@@ -246,7 +268,68 @@ class WorkbenchService {
   }
 
   /** codex 决策提示词：模板清单 + 会话近史 + 用户输入 + 预设/附件/快捷方式 */
-  private buildDecisionSpec(
+  /**
+   * 环境快照（自我认知层）：聚合已固化技能 / 本地模型 / 显存 / 自定义节点。
+   * 各源独立容错——任何一路失败只影响自身段落，不阻断决策。
+   */
+  private async collectEnvSnapshot(): Promise<WorkbenchEnvSnapshot> {
+    // 已固化技能名
+    const appNames = appStoreManager
+      .getAllApps()
+      .map((a) => a.name)
+      .filter(Boolean)
+      .slice(0, 30)
+
+    // 本地模型（modelsDirs walk，仅文件名按类型分组）
+    const modelsByType: Record<string, string[]> = {}
+    try {
+      const dirs = (getSetting('modelsDirs') as string[] | undefined) ?? []
+      for (const base of dirs) {
+        for (const type of ['checkpoints', 'loras', 'vae', 'upscale_models', 'controlnet']) {
+          const typeDir = join(base, type)
+          if (!existsSync(typeDir)) continue
+          const names = (modelsByType[type] ??= [])
+          collectModelNames(typeDir, names, 0)
+        }
+      }
+    } catch (e) {
+      logger.debug('workbench env snapshot: model scan failed', e)
+    }
+
+    // VRAM + object_info 节点名（ComfyUI 未启动则跳过）
+    let vramGb: number | undefined
+    const customNodes: string[] = []
+    try {
+      const comfyOrigin = appStoreManager.getConfig().comfyHost
+      const [statsRes, infoRes] = await Promise.allSettled([
+        fetch(`${comfyOrigin}/system_stats`),
+        fetch(`${comfyOrigin}/object_info`)
+      ])
+      if (statsRes.status === 'fulfilled' && statsRes.value.ok) {
+        const stats = (await statsRes.value.json()) as {
+          devices?: Array<{ vram_total?: number }>
+        }
+        const total = stats.devices?.[0]?.vram_total
+        if (total) vramGb = Math.round(total / 1024 ** 3)
+      }
+      if (infoRes.status === 'fulfilled' && infoRes.value.ok) {
+        const info = (await infoRes.value.json()) as Record<string, unknown>
+        // object_info keys 含官方内置节点；筛出第三方特征（命名空间含 '/' 或非大写开头惯例不可靠，
+        // 这里用「非 ComfyUI 官方前缀白名单」的轻量判定）
+        const officialPrefixes =
+          /^(KSampler|CheckpointLoader|VAE|CLIPTextEncode|ControlNet|EmptyLatentImage|SaveImage|LoadImage|PreviewImage|LoraLoader|Conditioning|Latent|UNet|CLIP|DualCLIPLoader|StyleModel|Upscale|ImageScale|Fixed|Flip|PadForSDXL|CLIPVision|Inpaint|SetLatentNoiseMask|DiffusersLoader|unCLIPCheckpointLoader|GLIGEN|marduk)/
+        for (const key of Object.keys(info)) {
+          if (!officialPrefixes.test(key)) customNodes.push(key)
+        }
+      }
+    } catch (e) {
+      logger.debug('workbench env snapshot: comfy probe failed', e)
+    }
+
+    return { appNames, modelsByType, vramGb, customNodes: customNodes.slice(0, 60) }
+  }
+
+  private async buildDecisionSpec(
     userInput: string,
     session: WorkbenchSession,
     opts: {
@@ -254,7 +337,7 @@ class WorkbenchService {
       attachments?: readonly AttachmentMeta[]
       templateShortcut?: string
     } = {}
-  ): string {
+  ): Promise<string> {
     const templates = templateLibrary.list()
     const catalog = JSON.stringify(
       templates.map((t) => ({
@@ -296,7 +379,16 @@ class WorkbenchService {
     const titleRule = `
 ## 标题（可选）
 若为首条消息，可在 JSON 中加 "title":"≤15字会话标题"。`
-    return `你是 Artify 工作台的调度 agent。根据用户需求从模板库选择模板并填参数，输出**只含一个 JSON 对象**（无 markdown 代码块、无解释文字）：
+    // 自我认知 + 环境快照（AGENTS.md 语义：常驻能力说明与本地环境感知）
+    let envSection = ''
+    try {
+      const env = await this.collectEnvSnapshot()
+      envSection = `\n## 环境快照\n${renderEnvSnapshot(env)}\n`
+    } catch (e) {
+      logger.debug('workbench env snapshot render failed', e)
+    }
+    return `${SELF_KNOWLEDGE_TEXT}${envSection}
+根据用户需求从模板库选择模板并填参数，输出**只含一个 JSON 对象**（无 markdown 代码块、无解释文字）：
 {"intent":"image|video|audio|text|chat","templateId":"...","params":{...},"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text 时直接给用户的回复","title":"仅首条消息时提供"}
 
 规则：
@@ -375,7 +467,7 @@ ${userInput}`
     // codex 决策（复用 agentDriver 的 Codex SDK 直连；单轮，产出 JSON）
     const binary = resolveCodexBinary()
     if (!binary) throw new Error('codex binary not found (run scripts/copy-codex-bin.mjs)')
-    const spec = this.buildDecisionSpec(effectiveInput, session, {
+    const spec = await this.buildDecisionSpec(effectiveInput, session, {
       preset,
       attachments,
       templateShortcut
@@ -664,6 +756,11 @@ ${userInput}`
   }
 
   // ---------------- 技能清单（/ 触发器用：模板快捷方式；预设是点击选择的不参与） ----------------
+
+  /** 环境快照（前端「能力说明」可视化用，与决策注入同源） */
+  async getEnvSnapshot(): Promise<WorkbenchEnvSnapshot> {
+    return this.collectEnvSnapshot()
+  }
 
   listSkills(): Array<{
     id: string

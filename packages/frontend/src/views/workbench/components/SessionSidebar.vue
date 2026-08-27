@@ -122,6 +122,12 @@
         >
           <i class="fas fa-bolt w-4"></i>{{ t('workbenchManagePresets') }}
         </button>
+        <button
+          class="w-full text-left px-2 py-1.5 rounded text-sm text-slate-400 hover:text-white hover:bg-slate-800 flex items-center gap-2"
+          @click="$emit('show-env')"
+        >
+          <i class="fas fa-microchip w-4"></i>{{ t('workbenchEnvInfo') }}
+        </button>
       </div>
     </template>
   </aside>
@@ -147,6 +153,7 @@ const emit = defineEmits([
   'rename',
   'update:showArchived',
   'manage-presets',
+  'show-env',
 ])
 
 const { t } = useI18n()

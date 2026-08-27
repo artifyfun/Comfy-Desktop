@@ -176,6 +176,15 @@ export function createWorkbenchRouter(): express.Router {
     res.json(createSuccessResponse(workbenchService.listModels()))
   })
 
+  // 环境快照（工作台自我认知：技能/本地模型/显存/自定义节点）
+  router.get('/api/workbench/env', async (_req, res) => {
+    try {
+      res.json(createSuccessResponse(await workbenchService.getEnvSnapshot()))
+    } catch (e) {
+      res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json(createErrorResponse((e as Error).message))
+    }
+  })
+
   // ---------------- 附件上传（多素材） ----------------
 
   router.post('/api/workbench/upload', upload.single('file'), async (req: Request, res) => {

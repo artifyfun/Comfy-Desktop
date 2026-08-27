@@ -25,6 +25,7 @@
           @delete="onDelete"
           @update:show-archived="(v) => (showArchived = v)"
           @manage-presets="presetMgrOpen = true"
+          @show-env="showEnvDialog"
         />
 
         <!-- 中：会话区 -->
@@ -246,6 +247,59 @@
       :default-id="defaultPresetId"
       @changed="loadPresets"
     />
+
+    <!-- 工作台能力/环境说明（自我认知可视化） -->
+    <a-modal v-model:open="envOpen" :title="t('workbenchEnvInfo')" :footer="null" width="560px">
+      <div v-if="envLoading" class="py-8 text-center"><a-spin /></div>
+      <div v-else-if="envSnapshot" class="space-y-3 py-2">
+        <div>
+          <div class="text-xs text-slate-400 mb-1">{{ t('workbenchEnvSkills') }}</div>
+          <div class="flex flex-wrap gap-1.5">
+            <a-tag v-for="n in envSnapshot.appNames" :key="n" color="blue">{{ n }}</a-tag>
+            <span v-if="!envSnapshot.appNames.length" class="text-xs text-slate-500">—</span>
+          </div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-400 mb-1">{{ t('workbenchEnvModels') }}</div>
+          <div v-for="(names, type) in envSnapshot.modelsByType" :key="type" class="text-xs mb-1">
+            <span class="text-tech-cyan font-mono">{{ type }}</span
+            >：
+            <span class="text-slate-300"
+              >{{ names.slice(0, 12).join('、')
+              }}{{ names.length > 12 ? ` 等 ${names.length} 个` : '' }}</span
+            >
+          </div>
+          <div v-if="!Object.keys(envSnapshot.modelsByType).length" class="text-xs text-slate-500">
+            —（未配置 modelsDirs 或目录为空）
+          </div>
+        </div>
+        <div class="flex gap-4 text-xs">
+          <span class="text-slate-400"
+            >{{ t('workbenchEnvVram') }}:
+            <b class="text-white">{{
+              envSnapshot.vramGb ? `约 ${Math.round(envSnapshot.vramGb)}GB` : '—'
+            }}</b></span
+          >
+          <span class="text-slate-400"
+            >{{ t('workbenchEnvNodes') }}:
+            <b class="text-white">{{ envSnapshot.customNodes.length }}</b></span
+          >
+        </div>
+        <a-collapse ghost>
+          <a-collapse-panel
+            key="nodes"
+            :header="`${t('workbenchEnvNodes')} (${envSnapshot.customNodes.length})`"
+          >
+            <div class="text-xs text-slate-300 break-all leading-relaxed">
+              {{ envSnapshot.customNodes.join('、') || '—' }}
+            </div>
+          </a-collapse-panel>
+        </a-collapse>
+        <p class="text-xs text-slate-500 leading-relaxed border-t border-slate-700 pt-2">
+          {{ t('workbenchEnvHint') }}
+        </p>
+      </div>
+    </a-modal>
 
     <!-- Lightbox：产物大图/视频预览 -->
     <div
@@ -789,6 +843,23 @@ async function doPublish() {
 
 function presetName(p) {
   return p?.name?.[lang.value] || p?.name?.zh || p?.id
+}
+
+// ---------- 能力/环境说明（自我认知可视化） ----------
+const envOpen = ref(false)
+const envLoading = ref(false)
+const envSnapshot = ref(null)
+
+async function showEnvDialog() {
+  envOpen.value = true
+  envLoading.value = true
+  try {
+    const res = await fetch(`${origin.value}/api/workbench/env`)
+    const json = await res.json()
+    envSnapshot.value = json?.data ?? null
+  } finally {
+    envLoading.value = false
+  }
 }
 
 // dsh order 语义：预设列表按 order 升序
