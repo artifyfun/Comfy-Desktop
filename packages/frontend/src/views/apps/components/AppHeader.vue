@@ -1,6 +1,8 @@
 <template>
   <header class="relative px-4 py-6 mx-auto max-w-7xl sm:px-6 lg:px-8">
-    <div class="flex flex-col space-y-4 md:flex-row md:items-center md:justify-between md:space-y-0">
+    <div
+      class="flex flex-col space-y-4 md:flex-row md:items-center md:justify-between md:space-y-0"
+    >
       <!-- 左侧标题 -->
       <div class="flex items-center space-x-4">
         <div class="flex items-center space-x-3 cursor-pointer" @click="toggleAboutModal">
@@ -30,6 +32,13 @@
           >
             <i class="mr-2 fas fa-images"></i>
             {{ t('gallery') }}
+          </router-link>
+          <router-link
+            to="/workbench"
+            class="px-3 py-2 text-sm font-medium rounded-lg transition duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
+          >
+            <i class="mr-2 fas fa-wand-magic-sparkles"></i>
+            {{ t('workbench') }}
           </router-link>
         </nav>
         <!-- 语言切换 -->
@@ -67,11 +76,7 @@
     <About v-if="showAboutModal" @clickClose="toggleAboutModal" />
 
     <!-- 配置组件 -->
-    <Config
-      v-if="showConfigModal"
-      @cancel="toggleConfigModal"
-      @confirm="handleUpdateConfig"
-    />
+    <Config v-if="showConfigModal" @cancel="toggleConfigModal" @confirm="handleUpdateConfig" />
   </header>
 </template>
 
@@ -91,7 +96,7 @@ const appStore = useAppStore()
 const props = defineProps({
   firstNavTo: { type: String, default: '/' },
   firstNavLabel: { type: String, default: '' },
-  firstNavIcon: { type: String, default: 'mr-2 fas fa-th-large' }
+  firstNavIcon: { type: String, default: 'mr-2 fas fa-th-large' },
 })
 
 // 模态框状态

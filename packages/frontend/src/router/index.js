@@ -5,38 +5,42 @@ import { isElectron } from '@/utils'
 
 export const constantRoutes = [
   {
-    path: "/",
-    component: () => import("@/views/apps/index.vue"),
+    path: '/',
+    component: () => import('@/views/apps/index.vue'),
   },
   {
-    path: "/market",
-    component: () => import("@/views/market/index.vue"),
+    path: '/market',
+    component: () => import('@/views/market/index.vue'),
   },
   {
-    path: "/web",
-    component: () => import("@/views/web/index.vue"),
+    path: '/web',
+    component: () => import('@/views/web/index.vue'),
   },
   {
-    path: "/batch",
-    component: () => import("@/views/batch/index.vue"),
+    path: '/batch',
+    component: () => import('@/views/batch/index.vue'),
   },
   {
-    path: "/batch/detail",
-    component: () => import("@/views/batch/detail.vue"),
+    path: '/batch/detail',
+    component: () => import('@/views/batch/detail.vue'),
   },
   {
-    path: "/gallery",
-    component: () => import("@/views/gallery/index.vue"),
+    path: '/workbench',
+    component: () => import('@/views/workbench/index.vue'),
   },
   {
-    path: "/about",
-    component: () => import("@/views/about/index.vue"),
+    path: '/gallery',
+    component: () => import('@/views/gallery/index.vue'),
   },
   {
-    path: "/:pathMatch(.*)*",
-    component: () => import("@/views/404/index.vue"),
+    path: '/about',
+    component: () => import('@/views/about/index.vue'),
   },
-];
+  {
+    path: '/:pathMatch(.*)*',
+    component: () => import('@/views/404/index.vue'),
+  },
+]
 
 // for (const path in modules) {
 //   const name = path.replace(/^..\/views\//, '').replace(/\.vue$/, '');
@@ -51,19 +55,18 @@ export const constantRoutes = [
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: constantRoutes,
-});
+})
 
 // 全局前置守卫
 router.beforeEach((to, from, next) => {
   if (to.path === '/market') {
-
     if (!isElectron) {
-      next('/');
-      return;
+      next('/')
+      return
     }
   }
 
-  next();
-});
+  next()
+})
 
-export default router;
+export default router
