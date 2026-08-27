@@ -7,8 +7,10 @@
  *
  * 会话存储：userData/workbench-sessions.json（防抖落盘，模式抄 batch-queue）。
  */
+import { startWorkbenchProxy } from './workbenchProxy'
 import { join } from 'node:path'
 import { app } from 'electron'
+import type { Server as HttpServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
@@ -166,6 +168,8 @@ function sessionsPath(): string {
 class WorkbenchService {
   private store: SessionStore = { sessions: [] }
   private flushTimer: NodeJS.Timeout | null = null
+  /** decide 期间按需起的内嵌 responses→chat 转换代理（用完即关） */
+  private proxyServer?: HttpServer
 
   constructor() {
     this.load()
@@ -477,13 +481,31 @@ ${userInput}`
       attachments,
       templateShortcut
     })
+    // 内嵌 responses→chat 转换代理：上游无 /v1/responses（new-api 默认）时由
+    // 应用自身兜底翻译，用户无需安装任何外部代理。
+    const cfg = appStoreManager.getConfig()
+    const upstreamBaseUrl = cfg.base_url || 'https://api.deepseek.com/v1'
+    let codexBaseUrl = upstreamBaseUrl
+    if (!/^https:\/\/api\.deepseek\.com/.test(upstreamBaseUrl)) {
+      const proxy = await startWorkbenchProxy({
+        upstreamBaseUrl,
+        upstreamApiKey: cfg.api_key || '',
+        model: cfg.buildModel || 'deepseek-v4-flash'
+      })
+      this.proxyServer = proxy.server
+      codexBaseUrl = proxy.baseUrl
+      onProgress({
+        type: 'log',
+        text: `responses→chat 代理已就绪 ${proxy.baseUrl} → ${upstreamBaseUrl}`
+      })
+    }
     const codex = new Codex({
       codexPathOverride: binary,
       // 显式注入 config.base_url（new-api 网关）> deepseek 默认
       baseUrl: resolveCodexBaseUrl({
-        baseUrl: appStoreManager.getConfig().base_url || undefined
+        baseUrl: codexBaseUrl
       }),
-      apiKey: appStoreManager.getConfig().api_key || process.env.CODEX_API_KEY || '',
+      apiKey: cfg.api_key || process.env.CODEX_API_KEY || '',
       // 隔离 CODEX_HOME：应用自带打包二进制，不读用户级 ~/.codex/config.toml
       // （其中 model_provider=custom 等用户本地配置会劫持 base_url，实测 8317 案例）。
       // 临时干净 HOME + 显式 config 覆盖 = 完全自理，零外部依赖。
@@ -517,6 +539,11 @@ ${userInput}`
       onProgress({ type: 'log', text: 'deciding' })
     }
     const raw = rawLines.join('\n')
+    // decide 单轮结束即关内嵌代理（每次 decide 按需起、用完即停，端口不常驻）
+    if (this.proxyServer) {
+      this.proxyServer.close()
+      this.proxyServer = undefined
+    }
 
     const plan = WorkbenchService.parsePlanFromCodex(raw)
     if (!plan) {

@@ -53,12 +53,18 @@ importers:
       electron-updater:
         specifier: ^6.8.9
         version: 6.8.9
+      eventsource-parser:
+        specifier: ^4.1.0
+        version: 4.1.0
       express:
         specifier: ^4.21.2
         version: 4.22.2
       multer:
         specifier: ^2.2.0
         version: 2.2.0
+      nanoid:
+        specifier: ^6.0.1
+        version: 6.0.1
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0
@@ -80,6 +86,9 @@ importers:
       tar:
         specifier: ^7.5.22
         version: 7.5.22
+      undici:
+        specifier: ^8.10.0
+        version: 8.10.0
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -3304,6 +3313,10 @@ packages:
     resolution: {integrity: sha512-kJezFj9YFAMLeORyi7aCLxLbD5/qWMQnoMVlVPyHIll7lgRJCc3JVln9Vgl9nwQi0YkMnhdGTMNn7CkRRAptMg==}
     engines: {node: '>=18.0.0'}
 
+  eventsource-parser@4.1.0:
+    resolution: {integrity: sha512-+DHvQ1wLO//MK+1OZgcuXCbZFKgu3YjKPJt7n98rxX8vezL0ni+7s3ZQiM8bJkUEOk7MsuCycrPLj0FzUNf7Og==}
+    engines: {node: '>=22.12'}
+
   eventsource@3.0.7:
     resolution: {integrity: sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==}
     engines: {node: '>=18.0.0'}
@@ -4374,6 +4387,11 @@ packages:
   nanoid@5.1.16:
     resolution: {integrity: sha512-kVrnsrJqMR8+oLJnGEmSWw9BivK5mt7H3FZatVRjrc5wGqFYuBxX1yG7+A7Gi5AefkX6t/oCkizcQgpu0cY1dQ==}
     engines: {node: ^18 || >=20}
+    hasBin: true
+
+  nanoid@6.0.1:
+    resolution: {integrity: sha512-3wVS3i51pE2pi1k5FFL/95BGfVS0kSsvDVuGXHOtxox/TywUmtgq+3qiTOTbs9J7KfHaXPiN171k/A6dBnaXFw==}
+    engines: {node: ^22 || ^24 || >=26}
     hasBin: true
 
   nanopop@2.4.2:
@@ -5581,6 +5599,10 @@ packages:
 
   undici-types@7.16.0:
     resolution: {integrity: sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw==}
+
+  undici@8.10.0:
+    resolution: {integrity: sha512-HvltHd7avK13QIw/oLe4qoOLyoVSoafqJ2jYOrtMRBkbYT31eiBQ8O0ehRKZiEZCMEyLFQNIADpgCWC5fALvYQ==}
+    engines: {node: '>=22.19.0'}
 
   unicorn-magic@0.3.0:
     resolution: {integrity: sha512-+QBBXBCvifc56fsbuxZQ6Sic3wqqc3WWaqxs58gvJrcOuN83HGTCwz3oS5phzU9LthRNE9VrJCFCLUgHeeFnfA==}
@@ -9224,6 +9246,8 @@ snapshots:
 
   eventsource-parser@3.1.0: {}
 
+  eventsource-parser@4.1.0: {}
+
   eventsource@3.0.7:
     dependencies:
       eventsource-parser: 3.1.0
@@ -10348,6 +10372,8 @@ snapshots:
   nanoid@3.3.11: {}
 
   nanoid@5.1.16: {}
+
+  nanoid@6.0.1: {}
 
   nanopop@2.4.2: {}
 
@@ -11588,6 +11614,8 @@ snapshots:
   undici-types@6.21.0: {}
 
   undici-types@7.16.0: {}
+
+  undici@8.10.0: {}
 
   unicorn-magic@0.3.0: {}
 
