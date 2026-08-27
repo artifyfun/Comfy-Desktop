@@ -32,7 +32,20 @@ pnpm dev
   - macOS：`~/Library/Application Support/Artify/artify-apps.json` → `config.mcpToken`
   - Windows：`%APPDATA%\Artify\artify-apps.json`
 
-> 安全：MCP 路径仅监听本机回环，需 Bearer token。token 请勿提交到代码库。
+> **更简单的方式**：不再需要手翻配置文件——A UI 设置弹窗的「AI 接入」tab、或 C 界面侧边栏插头按钮打开的 MCP 面板，都会直接展示 URL / token / 一键复制的客户端配置片段，并可重置 token（见下节）。
+
+> 安全：server 默认**仅监听本机回环**（`127.0.0.1`），MCP 路径需 Bearer token。需要局域网访问时把 `artify-apps.json` 的 `config.listenHost` 改为 `0.0.0.0`（此时 MCP 端点对局域网可达，注意 token 保管）。token 请勿提交到代码库。
+
+---
+
+## 1.1 UI 配置入口
+
+| 入口 | 位置 |
+|---|---|
+| A UI | 设置弹窗 → **AI 接入** tab：endpoint / token（打码+reveal）/ 重置 token / 客户端配置片段（Claude Code 命令、Cursor JSON、通用 URL+token） |
+| C 界面 | ComfyUI 侧边栏插头按钮（`Connect an agent (MCP)`）→ MCP 配置面板，内容同上 |
+
+数据接口（A UI 前端用）：`GET /api/mcp/config`、`POST /api/mcp/regenerate-token`（重置后旧 token 立即失效，已连接客户端需更新）。
 
 ---
 
@@ -148,7 +161,6 @@ AI 客户端收到通知后自动重拉 `tools/list`，无需重连。
 - 无 WebSocket 实时进度，靠 `get_execution_status` 轮询 `/history` 判完成。
 - 无 `outputSchema` 完整声明（产物以 JSON 文本返回）。
 - 无 `tools/list` 分页（app 极多时可能撑大 LLM 上下文）。
-- token 从启动日志或配置文件读取，暂无 UI 展示。
 - 未做工具数量上限保护。
 
 完整阶段计划见 feasibility 文档第 7 节。
