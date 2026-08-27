@@ -259,37 +259,55 @@
                   @click="lightboxFile = f"
                 >
                   <img :src="viewUrl(f)" class="w-full h-full object-cover" loading="lazy" />
-                  <div class="absolute right-1 top-1 hidden group-hover/file:flex gap-1">
+                  <!-- hover 操作:单入口「⋯」dropdown,避免平铺 -->
+                  <a-dropdown
+                    :trigger="['click']"
+                    class="absolute right-1 top-1 hidden group-hover/file:block"
+                  >
                     <button
-                      v-if="isElectron"
-                      class="w-6 h-6 flex items-center justify-center rounded bg-black/60 text-slate-200 hover:text-white"
-                      :title="t('workbenchSaveAs')"
-                      @click.stop="saveArtifactAs(f)"
+                      class="w-6 h-6 flex items-center justify-center rounded bg-black/70 text-slate-200 hover:text-white"
+                      :title="t('workbenchFileActions')"
+                      @click.stop
                     >
-                      <i class="fas fa-download text-xs"></i>
+                      <i class="fas fa-ellipsis-h text-xs"></i>
                     </button>
-                    <button
-                      class="w-6 h-6 flex items-center justify-center rounded bg-black/60 text-slate-200 hover:text-yellow-300"
-                      :title="t('workbenchFavorite')"
-                      @click.stop="favoriteArtifact(a, f)"
-                    >
-                      <i class="fas fa-star text-xs"></i>
-                    </button>
-                  </div>
+                    <template #overlay>
+                      <a-menu @click="({ key }) => onFileAction(key, a, f)">
+                        <a-menu-item key="save" v-if="isElectron">
+                          <span class="flex items-center gap-2"
+                            ><i class="fas fa-download w-4"></i>{{ t('workbenchSaveAs') }}</span
+                          >
+                        </a-menu-item>
+                        <a-menu-item key="favorite">
+                          <span class="flex items-center gap-2"
+                            ><i class="fas fa-star w-4"></i>{{ t('workbenchFavorite') }}</span
+                          >
+                        </a-menu-item>
+                        <a-menu-item key="publish" v-if="a.status === 'success'">
+                          <span class="flex items-center gap-2"
+                            ><i class="fas fa-bolt w-4"></i>{{ t('workbenchPublish') }}</span
+                          >
+                        </a-menu-item>
+                        <a-menu-item key="open" v-if="isElectron">
+                          <span class="flex items-center gap-2"
+                            ><i class="fas fa-folder-open w-4"></i
+                            >{{ t('workbenchOpenInFolder') }}</span
+                          >
+                        </a-menu-item>
+                      </a-menu>
+                    </template>
+                  </a-dropdown>
                 </div>
               </div>
               <div v-else-if="a.outputs.length" class="text-xs text-slate-300 break-all">
                 {{ a.outputs.join(' · ') }}
               </div>
-              <div class="mt-2 flex gap-2">
-                <a-button
-                  v-if="a.status === 'success'"
-                  size="small"
-                  type="primary"
-                  @click="openPublish(a)"
-                >
-                  <i class="fas fa-bolt mr-1"></i>{{ t('workbenchPublish') }}
-                </a-button>
+              <!-- 卡级操作收敛到每文件 dropdown;此处仅保留批量终态徽标 -->
+              <div
+                v-if="a.batchStatus && ['completed', 'stopped', 'failed'].includes(a.batchStatus)"
+                class="mt-2 text-xs text-slate-400"
+              >
+                {{ a.batchStatus }} · {{ a.batchSuccess ?? 0 }}/{{ a.batchTotal ?? '?' }}
               </div>
             </div>
           </div>
@@ -1080,6 +1098,32 @@ function extractFiles(outputs) {
 
 const comfyOrigin = computed(() => appStore.config?.comfyHost || 'http://127.0.0.1:8188')
 const lightboxFile = ref(null)
+
+// 每文件操作 dropdown 分发
+function onFileAction(key, artifact, f) {
+  if (key === 'save') saveArtifactAs(f)
+  else if (key === 'favorite') favoriteArtifact(artifact, f)
+  else if (key === 'publish') openPublish(artifact)
+  else if (key === 'open') openInFolder(artifact, f)
+}
+
+// 在系统文件管理器中定位产物(同机 ComfyUI)
+async function openInFolder(artifact, f) {
+  try {
+    const outDir = outputDirInfo.value?.outputDir
+    if (!outDir) {
+      message.warning(t('workbenchSaveAsUnavailable'))
+      return
+    }
+    const api = window.electronAPI?.ArtifyLab
+    const full = `${outDir}/${f.subfolder ? f.subfolder + '/' : ''}${f.filename}`
+    if (api?.revealInFolder) await api.revealInFolder({ path: full })
+    else if (api?.openPath) await api.openPath(full)
+    else message.info(full)
+  } catch (e) {
+    message.error(String(e?.message || e))
+  }
+}
 
 // 收藏产物:跨会话收藏夹,缩略图区星星按钮
 async function favoriteArtifact(artifact, f) {

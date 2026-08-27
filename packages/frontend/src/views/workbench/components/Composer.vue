@@ -53,6 +53,14 @@
         >
           <i class="fas fa-paperclip" :class="{ 'animate-pulse': uploading }"></i>
         </button>
+        <button
+          v-if="isElectron"
+          class="w-8 h-8 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 flex items-center justify-center transition"
+          :title="t('workbenchReferenceLocal')"
+          @click="pickReference"
+        >
+          <i class="fas fa-link text-sm"></i>
+        </button>
         <ModelMenu
           :override="modelOverride"
           @update:override="(v) => $emit('update:modelOverride', v)"
@@ -74,15 +82,6 @@
         </button>
       </div>
     </div>
-
-    <button
-      v-if="isElectron"
-      class="flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-tech-cyan hover:bg-slate-800/60 transition"
-      :title="t('workbenchReferenceLocal')"
-      @click="pickReference"
-    >
-      <i class="fas fa-link text-sm"></i>
-    </button>
 
     <input
       ref="fileEl"

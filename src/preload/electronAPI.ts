@@ -17,6 +17,8 @@ export const electronAPI = {
       ipcRenderer.invoke('artify-saveArtifact', payload),
     referenceLocalFile: (payload: { filters?: { name: string; extensions: string[] }[] }) =>
       ipcRenderer.invoke('artify-referenceLocalFile', payload),
+    revealInFolder: (payload: { path: string }) =>
+      ipcRenderer.invoke('artify-revealInFolder', payload),
     getConfig: (data: Record<string, unknown>) => ipcRenderer.invoke('artify-getConfig', data),
     loadComfyUI: (data: Record<string, unknown>) => ipcRenderer.invoke('artify-loadComfyUI', data),
     loadArtifyLab: (data: Record<string, unknown>) =>

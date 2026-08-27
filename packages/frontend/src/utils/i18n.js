@@ -422,6 +422,8 @@ const translations = {
     workbenchPresetPick: '选择预设',
     workbenchSessionTitle: '会话标题（可选）',
     workbenchDocAsContext: '「{name}」将作为上下文提供给 AI（文档不参与工作流执行）',
+    workbenchFileActions: '文件操作',
+    workbenchOpenInFolder: '在文件夹中显示',
     workbenchSaveAs: '另存为',
     workbenchFavorite: '收藏',
     workbenchFavorited: '已收藏',
@@ -1200,6 +1202,8 @@ const translations = {
     workbenchDocAsContext:
       '"{name}" will be provided to the AI as context (documents do not participate in workflow execution)',
     workbenchSaveAs: 'Save as',
+    workbenchFileActions: 'File actions',
+    workbenchOpenInFolder: 'Reveal in folder',
     workbenchFavorite: 'Favorite',
     workbenchFavorited: 'Favorited',
     workbenchBatchProgress: 'Batch progress',

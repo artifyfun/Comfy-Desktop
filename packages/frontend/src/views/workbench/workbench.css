@@ -28,3 +28,49 @@
 .wb-tech-input .ant-input::placeholder {
   color: #64748b;
 }
+
+/* ---- 控件族扩展：工作台弹窗内所有原生控件统一为同一视觉语言 ---- */
+/* textarea（a-textarea / 原生） */
+textarea.wb-tech-input,
+.wb-tech-input textarea,
+.wb-tech-input.ant-input-affix-wrapper textarea {
+  background: transparent;
+  color: #fff;
+  resize: vertical;
+}
+
+/* select（原生下拉，Config 风格同源） */
+select.wb-tech-input {
+  appearance: none;
+  padding-right: 2rem;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 512' fill='%2364748b'%3E%3Cpath d='M137.4 374.6c12.5 12.5 32.8 12.5 45.3 0l128-128c9.2-9.2 11.9-22.9 6.9-34.9s-16.6-19.8-29.6-19.8L32 192c-12.9 0-24.6 7.8-29.6 19.8s-2.2 25.7 6.9 34.9l128 128z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 0.7rem;
+}
+
+select.wb-tech-input option {
+  background: #0f172a;
+  color: #fff;
+}
+
+/* checkbox / radio：accent 统一品牌蓝 */
+input[type='checkbox'].wb-tech-check,
+input[type='radio'].wb-tech-check {
+  accent-color: #0ea5e9;
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
+/* antd number / password 内层输入的继承兜底 */
+.wb-tech-input .ant-input-number-input,
+.wb-tech-input input {
+  background: transparent;
+  color: #fff;
+}
+
+.wb-tech-input .ant-input-number-input::placeholder,
+.wb-tech-input input::placeholder {
+  color: #64748b;
+}

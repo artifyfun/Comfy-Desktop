@@ -56,6 +56,24 @@ export function registerArtifyHandlers() {
     }
   )
 
+  // 在系统文件管理器中定位文件(showItemInFolder)。同 saveArtifact 的来源白名单。
+  ipcMain.handle('artify-revealInFolder', async (_event, payload: { path: string }) => {
+    try {
+      const src = String(payload?.path ?? '')
+      if (!src || !path.isAbsolute(src)) return { ok: false, error: 'invalid path' }
+      if (!fs.existsSync(src)) return { ok: false, error: 'file not found' }
+      const allowed = settingsOutputInputRoots()
+      const resolved = path.resolve(src)
+      if (!allowed.some((root) => resolved.startsWith(path.resolve(root) + path.sep))) {
+        return { ok: false, error: 'path outside ComfyUI output/input' }
+      }
+      shell.showItemInFolder(resolved)
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
+  })
+
   // B:本地文件引用登记。系统打开对话框由用户显式选择,返回绝对路径与元数据;
   // 不复制不转发——是否吃路径由执行链路按同机检测决定,否则回退上传。
   ipcMain.handle(

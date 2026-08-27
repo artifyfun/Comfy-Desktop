@@ -88,12 +88,7 @@
             :key="s.id"
             class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-700/40 cursor-pointer"
           >
-            <input
-              type="checkbox"
-              :value="s.id"
-              v-model="checkedSkills"
-              class="accent-blue-500 w-4 h-4"
-            />
+            <input type="checkbox" :value="s.id" v-model="checkedSkills" class="wb-tech-check" />
             <span class="text-sm text-white">{{ s.name }}</span>
             <span class="text-[11px] text-slate-500 font-mono">/{{ s.id }}</span>
             <span class="text-[11px] text-slate-400 truncate ml-auto">{{ s.description }}</span>
