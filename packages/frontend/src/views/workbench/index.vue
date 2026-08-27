@@ -135,6 +135,28 @@
                     <a-spin size="small" />
                     <span class="ml-2">{{ m.text }}</span>
                   </template>
+                  <!-- codex 工具条目折叠行（执行中 spinner，完成后可展开详情） -->
+                  <template v-else-if="m.kind === 'tool_item' && m.toolItem">
+                    <div class="flex items-center gap-2 min-w-0" @click.stop="toggleToolItem(m)">
+                      <a-spin v-if="toolItemRunning(m.toolItem)" size="small" />
+                      <i
+                        v-else
+                        :class="`fas ${toolItemSummary(m.toolItem).icon} text-tech-cyan`"
+                      ></i>
+                      <span class="font-mono text-xs truncate flex-1">{{
+                        toolItemSummary(m.toolItem).label
+                      }}</span>
+                      <i
+                        v-if="toolItemDetail(m.toolItem)"
+                        :class="`fas fa-chevron-${expandedToolIds.has(m.toolItem.id) ? 'down' : 'right'} text-[10px] opacity-60`"
+                      ></i>
+                    </div>
+                    <pre
+                      v-if="expandedToolIds.has(m.toolItem.id) && toolItemDetail(m.toolItem)"
+                      class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-black/40 border border-slate-700 p-2 whitespace-pre-wrap break-all text-slate-300 font-mono"
+                      >{{ toolItemDetail(m.toolItem) }}</pre
+                    >
+                  </template>
                   <!-- agent 文本走 markdown（dsh 同款 marked+DOMPurify）；用户消息保持纯文本 -->
                   <WbMarkdown
                     v-else-if="(m.kind === 'chat' || m.kind === 'error') && m.role === 'agent'"
@@ -363,7 +385,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { useI18n } from '@/utils/i18n'
@@ -469,6 +491,7 @@ async function loadSkills() {
 
 async function selectSession(s) {
   sessionId.value = s.id
+  toolItemIndex.clear() // 条目索引是 per-render 的，切会话必须清（防 upsert 错位）
   router.replace({ query: { session: s.id } })
   const res = await fetch(`${origin.value}/api/workbench/session/${s.id}`)
   const json = await res.json()
@@ -658,6 +681,91 @@ async function send() {
   }
 }
 
+// ---------- codex 条目流转写（抄 codex app-server/dsh transcript：
+// item.id → 消息行索引，started 占行，updated/completed 原位 upsert） ----------
+const toolItemIndex = new Map()
+
+function toolItemSummary(item) {
+  switch (item.type) {
+    case 'command_execution':
+      return { icon: 'fa-terminal', label: item.command }
+    case 'file_change':
+      return {
+        icon: 'fa-file-pen',
+        label: (item.changes || []).map((c) => c.path).join(', ') || 'file change',
+      }
+    case 'mcp_tool_call':
+      return { icon: 'fa-plug', label: `${item.server}/${item.tool}` }
+    case 'web_search':
+      return { icon: 'fa-magnifying-glass', label: item.query || 'web search' }
+    case 'reasoning':
+      return { icon: 'fa-brain', label: (item.text || '').slice(0, 80) }
+    case 'todo_list':
+      return { icon: 'fa-list-check', label: 'todo' }
+    case 'error':
+      return { icon: 'fa-triangle-exclamation', label: item.message || 'error' }
+    default:
+      return { icon: 'fa-circle-dot', label: item.type }
+  }
+}
+
+const expandedToolIds = reactive(new Set())
+
+function toggleToolItem(m) {
+  const id = m.toolItem?.id
+  if (!id || !toolItemDetail(m.toolItem)) return
+  if (expandedToolIds.has(id)) expandedToolIds.delete(id)
+  else expandedToolIds.add(id)
+}
+
+function toolItemRunning(item) {
+  // 各 item 的 in-flight 状态字段统一收口
+  return (
+    item.status === 'in_progress' ||
+    item.status === 'inProgress' ||
+    (item.type === 'command_execution' && item.exit_code === undefined) ||
+    false
+  )
+}
+
+function toolItemDetail(item) {
+  switch (item.type) {
+    case 'command_execution':
+      return item.aggregated_output || null
+    case 'file_change':
+      return (item.changes || []).map((c) => `${c.kind || 'update'}: ${c.path}`).join('\n') || null
+    case 'mcp_tool_call':
+      return item.result
+        ? JSON.stringify(item.result, null, 1)
+        : JSON.stringify(item.arguments ?? {}, null, 1)
+    case 'reasoning':
+      return item.text && item.text.length > 80 ? item.text : null
+    default:
+      return null
+  }
+}
+
+function handleThreadItem(evt) {
+  if (!evt || typeof evt !== 'object') return
+  const phase = evt.type // started | updated | completed
+  const item = evt.item
+  if (!item || !item.id) return
+  if (phase === 'started' && !toolItemIndex.has(item.id)) {
+    messages.value.push({ role: 'agent', kind: 'tool_item', text: '', toolItem: item })
+    toolItemIndex.set(item.id, messages.value.length - 1)
+    return
+  }
+  const idx = toolItemIndex.get(item.id)
+  if (idx === undefined) {
+    // 错过 started（如重连）——直接补一行
+    messages.value.push({ role: 'agent', kind: 'tool_item', text: '', toolItem: item })
+    toolItemIndex.set(item.id, messages.value.length - 1)
+    return
+  }
+  // 原位更新（Vue3 响应式数组元素替换）
+  messages.value[idx] = { ...messages.value[idx], toolItem: item }
+}
+
 function handleSse(chunk) {
   let event = 'message'
   let data = null
@@ -677,6 +785,8 @@ function handleSse(chunk) {
   }
   if (event === 'reply') {
     messages.value.push({ role: 'agent', kind: 'chat', text: data.reply || '' })
+  } else if (event === 'item') {
+    handleThreadItem(data.event)
   } else if (event === 'plan') {
     messages.value.push({ role: 'agent', kind: 'card', text: '', plan: data.plan })
   } else if (event === 'stage') {

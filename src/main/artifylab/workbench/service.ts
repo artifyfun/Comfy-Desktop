@@ -44,8 +44,21 @@ import {
   uploadMediaBuffer,
   type ExecutionResult
 } from '../mcp/executor'
-import { Codex, resolveCodexBaseUrl, resolveCodexBinary, type BuildProgress } from '../agentDriver'
+import { Codex, resolveCodexBaseUrl, resolveCodexBinary } from '../agentDriver'
 import { deriveAttachmentKind } from './presetCore'
+
+/** decide 过程回调：log=阶段文本；thread_event=codex 结构化事件（透传 SSE） */
+export type DecideProgressCallback = (
+  p:
+    | {
+        type: 'log'
+        text: string
+      }
+    | {
+        type: 'thread_event'
+        event: unknown
+      }
+) => void
 
 export type WorkbenchMessageKind =
   | 'chat'
@@ -432,7 +445,7 @@ ${userInput}`
   async decide(
     sessionId: string,
     rawInput: string,
-    onProgress: (p: BuildProgress) => void,
+    onProgress: DecideProgressCallback,
     attachments: AttachmentMeta[] = []
   ): Promise<{
     plan: WorkbenchPlan | null
@@ -486,19 +499,26 @@ ${userInput}`
       workingDirectory: process.cwd(),
       skipGitRepoCheck: true
     })
-    let raw = ''
     const { events } = await thread.runStreamed(spec)
+    // codex exec 的 JSONL 原始行（string 形态）——parsePlanFromCodex 容错解析用
+    const rawLines: string[] = []
     for await (const event of events) {
-      if (typeof event === 'string') raw += event
-      else {
-        try {
-          raw += JSON.stringify(event)
-        } catch {
-          /* ignore */
-        }
+      if (typeof event === 'string') {
+        rawLines.push(event)
+        onProgress({ type: 'log', text: 'deciding' })
+        continue
+      }
+      // 结构化 ThreadEvent：透传给路由层（SSE item 流，前端实时渲染
+      // 工具调用/文件改动/web 搜索/reasoning，抄 codex app-server 条目驱动模型）
+      onProgress({ type: 'thread_event', event })
+      try {
+        rawLines.push(JSON.stringify(event))
+      } catch {
+        /* ignore */
       }
       onProgress({ type: 'log', text: 'deciding' })
     }
+    const raw = rawLines.join('\n')
 
     const plan = WorkbenchService.parsePlanFromCodex(raw)
     if (!plan) {

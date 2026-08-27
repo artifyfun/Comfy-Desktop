@@ -260,7 +260,13 @@ export function createWorkbenchRouter(): express.Router {
       const { plan, issues, raw } = await workbenchService.decide(
         sessionId,
         input ?? '',
-        () => {},
+        (p) => {
+          // codex 结构化条目流透传（工具调用/文件改动/搜索/reasoning 实时可见，
+          // 抄 codex app-server 条目驱动模型）；普通 log 不再逐次刷「deciding」
+          if (p.type === 'thread_event') {
+            send('item', { event: p.event })
+          }
+        },
         attachments ?? []
       )
       if (!plan) {
