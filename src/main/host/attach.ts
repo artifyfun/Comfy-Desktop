@@ -43,7 +43,8 @@ const APP_VERSION = getAppVersion()
  *  external (legacy v1 desktop) installs do not. */
 const TERMINAL_INJECTION_SOURCE_IDS = new Set(['standalone', 'portable', 'git'])
 
-/** PostHog flag gating the Local MCP sidebar icon. */
+/** PostHog kill-switch for the Local MCP sidebar icon (Artify: default on;
+ *  an explicit `false` disables the injection). */
 const MCP_SIDEBAR_FLAG = 'mcp_sidebar_enabled'
 
 /** Entry point that triggered a zoom reset, tagged as `source` on the
@@ -436,8 +437,11 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     // `comfyTerminalContentScript.ts` for the dedupe guard.
     if (isLocal && TERMINAL_INJECTION_SOURCE_IDS.has(installation.sourceId)) {
       comfyContents.executeJavaScript(getComfyTerminalContentScript()).catch(() => {})
-      // Local MCP sidebar icon, flag-gated. Same install gate as the terminal.
-      if (getFlag(MCP_SIDEBAR_FLAG) === true) {
+      // Local MCP sidebar icon. Same install gate as the terminal.
+      // Artify fork: default ON — the button opens Artify's embedded-MCP
+      // config panel; the PostHog flag remains as a remote kill-switch
+      // (explicit `false` disables, absent/anything else enables).
+      if (getFlag(MCP_SIDEBAR_FLAG) !== false) {
         recordExposure(MCP_SIDEBAR_FLAG, 'enabled', 'cache')
         comfyContents.executeJavaScript(getMcpSidebarContentScript()).catch(() => {})
       }

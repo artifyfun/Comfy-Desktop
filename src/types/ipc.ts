@@ -585,6 +585,18 @@ export interface TerminalRestore {
   exited: boolean
 }
 
+/** Connection info for Artify's embedded MCP server (A UI apps exposed as
+ *  MCP tools) — shown by the mcp-setup panel and the A UI settings modal. */
+export interface McpConfigInfo {
+  url: string
+  token: string
+  /** Number of A UI apps currently exposed as `run__<id>` MCP tools. */
+  appCount: number
+  /** Address the artify server is bound to (default loopback). */
+  listenHost: string
+  loopback: boolean
+}
+
 /** Recognised native-crash flavour decoded from a Windows NTSTATUS exit code.
  *  `unknown` covers a decoded fault code we have no specific guidance for.
  *  Shared across the IPC boundary so producer (main decode) and consumer
@@ -1142,6 +1154,11 @@ export interface ElectronApi {
   terminalResize(installationId: string, cols: number, rows: number): Promise<void>
   /** Kill the current shell (if any) and start a fresh one. */
   terminalRestart(installationId: string): Promise<TerminalRestore>
+
+  // Artify embedded MCP server (A UI apps exposed as MCP tools)
+  /** Connection info for the embedded MCP server (endpoint/token/tool count).
+   *  `null` when the artify server layer is unavailable. */
+  getMcpConfig(): Promise<McpConfigInfo | null>
   /** Open a window for the install backing `installationId`. Focuses
    *  any existing install-backed window; otherwise opens a fresh
    *  chooser host so the user can pick the install from the dashboard.

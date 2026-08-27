@@ -64,6 +64,7 @@ export type {
   AppUpdateState,
   AppUpdateDownloadProgress,
   CloudUserTier,
+  McpConfigInfo,
   ElectronApi
 } from '../../../types/ipc'
 export { REQUIRES_STOPPED } from '../../../types/ipc'

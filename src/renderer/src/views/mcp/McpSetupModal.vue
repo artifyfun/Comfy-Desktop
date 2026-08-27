@@ -1,39 +1,73 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { ArrowUpRight, ChevronDown, ExternalLink, Terminal, X } from 'lucide-vue-next'
+import { computed, onMounted, ref } from 'vue'
+import { ExternalLink, Eye, EyeOff, X } from 'lucide-vue-next'
 import { emitTelemetryAction } from '../../lib/telemetry'
 import BaseModal from '../../components/ui/BaseModal.vue'
 import BaseCopyButton from '../../components/ui/BaseCopyButton.vue'
-import McpVideoPlayer from './McpVideoPlayer.vue'
+import type { McpConfigInfo } from '../../types/ipc'
 
 const emit = defineEmits<{
   close: []
-  openTerminal: []
 }>()
 
-type Path = 'have_agent' | 'no_agent'
-const path = ref<Path>('have_agent')
+/**
+ * Artify 内嵌 MCP 的配置弹窗（接管自官方 comfy-mcp 分发界面）。
+ *
+ * 数据来自主进程同进程直读（desktop2-get-mcp-config IPC）：
+ * endpoint / token / 已暴露的 app 工具数。每个 A UI app 都是一个
+ * `run__<id>` MCP 工具，app 增删后工具列表自动同步。
+ */
+const config = ref<McpConfigInfo | null>(null)
+const loadError = ref('')
 
-/** Where the agent runs, within "I have an agent". Both start collapsed. */
-type AgentMode = 'in_agent' | 'in_terminal'
-const openOption = ref<AgentMode | null>('in_agent')
-
-function toggleOption(next: AgentMode): void {
-  if (openOption.value === next) {
-    openOption.value = null
-    return
+onMounted(async () => {
+  try {
+    const info = await window.api?.getMcpConfig?.()
+    if (info) {
+      config.value = info
+    } else {
+      loadError.value = 'Embedded MCP server is not available right now.'
+    }
+  } catch {
+    loadError.value = 'Failed to load MCP connection info.'
   }
-  openOption.value = next
-  emitTelemetryAction('comfy.desktop.mcp.option_selected', { option: next })
+})
+
+const showToken = ref(false)
+
+const maskedToken = computed(() => {
+  const token = config.value?.token
+  if (!token) return ''
+  return showToken.value ? token : `${token.slice(0, 4)}${'•'.repeat(16)}`
+})
+
+interface Snippet {
+  key: string
+  label: string
+  cmd: string
 }
 
-const AGENT_CMD = 'pip install comfy-mcp && claude mcp add comfy-mcp -- comfy-mcp'
-const JSON_CMD = '{ "mcpServers": { "comfy-mcp": { "command": "comfy-mcp" } } }'
-const TERMINAL_CMD = `${AGENT_CMD} && claude`
-
-function trackCopy(client: string): void {
-  emitTelemetryAction('comfy.desktop.mcp.snippet_copied', { client })
-}
+const snippets = computed<Snippet[]>(() => {
+  const url = config.value?.url ?? ''
+  const token = config.value?.token ?? ''
+  return [
+    {
+      key: 'claude',
+      label: 'Claude Code (CLI)',
+      cmd: `claude mcp add --transport http artify ${url} --header "Authorization: Bearer ${token}"`
+    },
+    {
+      key: 'json',
+      label: 'Cursor / Claude Desktop (JSON)',
+      cmd: JSON.stringify(
+        { mcpServers: { artify: { url, headers: { Authorization: `Bearer ${token}` } } } },
+        null,
+        2
+      )
+    },
+    { key: 'generic', label: 'Generic (URL + token)', cmd: `URL: ${url}\nToken: ${token}` }
+  ]
+})
 
 /** `icon` is the agent's simple-icons monochrome path (24x24 viewBox). */
 const AGENTS = [
@@ -54,195 +88,122 @@ const AGENTS = [
   }
 ]
 
-const DOCS_URL = 'https://docs.comfy.org/agent-tools/mcp#local-comfy-mcp-connection'
-const VIDEO_SRC = 'https://media.comfy.org/website/mcp/launch-film.mp4'
-
-function selectPath(next: Path): void {
-  if (path.value === next) return
-  path.value = next
-  emitTelemetryAction('comfy.desktop.mcp.path_selected', { path: next })
-}
-
-function openTerminal(): void {
-  emitTelemetryAction('comfy.desktop.mcp.terminal_opened', {})
-  emit('openTerminal')
-  emit('close')
-}
-
-function openDocs(target: string): void {
-  emitTelemetryAction('comfy.desktop.mcp.docs_opened', { target })
-  if (target === 'agent_install') return
-  window.api?.openPath?.(DOCS_URL)
-}
-
-function dismiss(): void {
-  emitTelemetryAction('comfy.desktop.mcp.panel_dismissed', { stage: 'panel' })
-  emit('close')
+function trackCopy(client: string): void {
+  emitTelemetryAction('comfy.desktop.mcp.snippet_copied', { client })
 }
 </script>
 
 <template>
   <BaseModal
     :open="true"
-    size="xl"
-    aria-label="Connect an agent with Comfy MCP"
+    aria-label="Connect an agent with Artify MCP"
     :show-close-button="false"
     blur-overlay
     content-class="mcp-modal-panel"
-    @close="dismiss"
+    @close="emit('close')"
   >
     <div class="mcp-modal">
-      <section class="mcp-media">
-        <McpVideoPlayer :src="VIDEO_SRC" aria-label="How to connect an agent with Comfy MCP" />
-      </section>
-
       <section class="mcp-panel">
-        <button class="mcp-close" aria-label="Close" @click="dismiss">
+        <button class="mcp-close" aria-label="Close" @click="emit('close')">
           <X :size="16" />
         </button>
 
         <header class="mcp-head">
           <h2 class="mcp-title">Connect an agent via MCP</h2>
           <p class="mcp-lead">
-            Point your own AI agent at this ComfyUI over MCP, right inside the desktop terminal.
+            Every app you build in Artify is exposed as an MCP tool. Point your AI agent at the
+            embedded server below — no extra install needed.
           </p>
         </header>
 
-        <div class="mcp-seg" role="tablist" aria-label="Setup path">
-          <button
-            role="tab"
-            :aria-selected="path === 'have_agent'"
-            class="mcp-seg__btn"
-            :class="{ 'is-active': path === 'have_agent' }"
-            @click="selectPath('have_agent')"
-          >
-            I have an agent
-          </button>
-          <button
-            role="tab"
-            :aria-selected="path === 'no_agent'"
-            class="mcp-seg__btn"
-            :class="{ 'is-active': path === 'no_agent' }"
-            @click="selectPath('no_agent')"
-          >
-            I need one
-          </button>
-        </div>
+        <div v-if="loadError" class="mcp-error">{{ loadError }}</div>
 
-        <div class="mcp-body">
-          <div v-if="path === 'have_agent'" class="mcp-options">
-            <section class="mcp-option" :class="{ 'is-open': openOption === 'in_agent' }">
-              <button
-                type="button"
-                class="mcp-option__head"
-                :aria-expanded="openOption === 'in_agent'"
-                @click="toggleOption('in_agent')"
-              >
-                <span class="mcp-option__text">
-                  <span class="mcp-option__title">
-                    <ArrowUpRight class="mcp-option__glyph" :size="14" />
-                    Use Comfy in your agent
-                  </span>
-                  <span class="mcp-option__sub"
-                    >Copy the setup into the agent you already use.</span
-                  >
-                </span>
-                <ChevronDown class="mcp-option__chevron" :size="15" />
-              </button>
-              <div v-show="openOption === 'in_agent'" class="mcp-steps">
-                <div class="mcp-cmd">
-                  <code class="mcp-cmd__text">{{ AGENT_CMD }}</code>
-                  <BaseCopyButton
-                    :value="AGENT_CMD"
-                    :size="14"
-                    aria-label="Copy connect command"
-                    class="mcp-cmd__copy"
-                    @click="trackCopy('claude_code')"
-                  />
-                </div>
-                <p class="mcp-alt">
-                  Using Cursor or Claude Desktop?
-                  <BaseCopyButton
-                    :value="JSON_CMD"
-                    :size="13"
-                    aria-label="Copy the JSON config"
-                    class="mcp-alt__copy"
-                    @click="trackCopy('json')"
-                  />
-                  <span>Copy the JSON config</span>
-                </p>
-              </div>
-            </section>
-
-            <section class="mcp-option" :class="{ 'is-open': openOption === 'in_terminal' }">
-              <button
-                type="button"
-                class="mcp-option__head"
-                :aria-expanded="openOption === 'in_terminal'"
-                @click="toggleOption('in_terminal')"
-              >
-                <span class="mcp-option__text">
-                  <span class="mcp-option__title">
-                    <Terminal class="mcp-option__glyph" :size="14" />
-                    Use your agent inside the Comfy terminal
-                  </span>
-                  <span class="mcp-option__sub"
-                    >Open the terminal below and run the setup there.</span
-                  >
-                </span>
-                <ChevronDown class="mcp-option__chevron" :size="15" />
-              </button>
-              <div v-show="openOption === 'in_terminal'" class="mcp-cmd">
-                <code class="mcp-cmd__text">{{ TERMINAL_CMD }}</code>
-                <BaseCopyButton
-                  :value="TERMINAL_CMD"
-                  :size="14"
-                  aria-label="Copy terminal command"
-                  class="mcp-cmd__copy"
-                  @click="trackCopy('terminal_one_liner')"
-                />
-              </div>
-              <button
-                v-show="openOption === 'in_terminal'"
-                class="mcp-btn mcp-btn--outline mcp-option__cta"
-                @click="openTerminal"
-              >
-                Open terminal
-              </button>
-            </section>
+        <template v-else-if="config">
+          <div v-if="!config.loopback" class="mcp-warn">
+            The server is listening on {{ config.listenHost }} (non-loopback): the MCP endpoint is
+            reachable from your network. Keep the token safe.
           </div>
 
-          <div v-else class="mcp-agents">
-            <p class="mcp-agents__hint">
-              Comfy MCP works with any agent that speaks MCP. Install one, then switch back to
-              connect.
-            </p>
-            <div class="mcp-agents__list">
-              <a
-                v-for="agent in AGENTS"
-                :key="agent.label"
-                class="mcp-agent"
-                :href="agent.href"
-                target="_blank"
-                rel="noreferrer"
-                @click="openDocs('agent_install')"
-              >
-                <svg class="mcp-agent__logo" viewBox="0 0 24 24" aria-hidden="true">
-                  <path :d="agent.icon" />
-                </svg>
-                <span class="mcp-agent__name">{{ agent.label }}</span>
-                <span class="mcp-agent__meta">Install guide</span>
-                <ExternalLink class="mcp-agent__ext" :size="14" />
-              </a>
+          <div class="mcp-field">
+            <span class="mcp-field__label">Endpoint</span>
+            <div class="mcp-cmd">
+              <code class="mcp-cmd__text">{{ config.url }}</code>
+              <BaseCopyButton
+                :value="config.url"
+                :size="14"
+                aria-label="Copy endpoint URL"
+                class="mcp-cmd__copy"
+                @click="trackCopy('endpoint')"
+              />
             </div>
           </div>
-        </div>
+
+          <div class="mcp-field">
+            <span class="mcp-field__label">Token</span>
+            <div class="mcp-cmd">
+              <code class="mcp-cmd__text">{{ maskedToken }}</code>
+              <button
+                class="mcp-token__toggle"
+                :aria-label="showToken ? 'Hide token' : 'Show token'"
+                @click="showToken = !showToken"
+              >
+                <EyeOff v-if="showToken" :size="14" />
+                <Eye v-else :size="14" />
+              </button>
+              <BaseCopyButton
+                :value="config.token"
+                :size="14"
+                aria-label="Copy token"
+                class="mcp-cmd__copy"
+                @click="trackCopy('token')"
+              />
+            </div>
+          </div>
+
+          <div class="mcp-field">
+            <span class="mcp-field__label">Client setup</span>
+            <div class="mcp-steps">
+              <div v-for="snippet in snippets" :key="snippet.key" class="mcp-snippet">
+                <span class="mcp-snippet__label">{{ snippet.label }}</span>
+                <div class="mcp-cmd">
+                  <pre class="mcp-cmd__pre">{{ snippet.cmd }}</pre>
+                  <BaseCopyButton
+                    :value="snippet.cmd"
+                    :size="14"
+                    :aria-label="`Copy ${snippet.label} config`"
+                    class="mcp-cmd__copy"
+                    @click="trackCopy(snippet.key)"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p class="mcp-note">
+            <strong>{{ config.appCount }}</strong> app{{ config.appCount === 1 ? '' : 's' }}
+            currently exposed as tools. Creating or deleting apps updates the tool list
+            automatically — no restart needed.
+          </p>
+        </template>
+
+        <div v-else class="mcp-note">Loading connection info…</div>
 
         <footer class="mcp-actions">
-          <button class="mcp-btn mcp-btn--soft" @click="openDocs('mcp_local')">
-            Read the docs
-            <ExternalLink :size="14" />
-          </button>
+          <span class="mcp-actions__hint">Need an agent?</span>
+          <a
+            v-for="agent in AGENTS"
+            :key="agent.label"
+            class="mcp-agent"
+            :href="agent.href"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <svg class="mcp-agent__logo" viewBox="0 0 24 24" aria-hidden="true">
+              <path :d="agent.icon" />
+            </svg>
+            <span>{{ agent.label }}</span>
+            <ExternalLink :size="12" />
+          </a>
         </footer>
       </section>
     </div>
@@ -251,8 +212,8 @@ function dismiss(): void {
 
 <style scoped>
 :global(.base-modal-panel.mcp-modal-panel) {
-  width: min(100%, 1040px);
-  max-width: min(100%, 1040px);
+  width: min(100%, 620px);
+  max-width: min(100%, 620px);
   min-height: 0;
   max-height: min(720px, calc(100vh - 64px));
 }
@@ -262,19 +223,12 @@ function dismiss(): void {
 }
 
 .mcp-modal {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  display: flex;
   width: 100%;
   height: 100%;
   overflow: hidden;
   color: var(--text);
   font-family: var(--font-sans);
-}
-
-.mcp-media {
-  position: relative;
-  min-height: 100%;
-  background: #000;
 }
 
 .mcp-panel {
@@ -283,9 +237,10 @@ function dismiss(): void {
   flex-direction: column;
   gap: 16px;
   min-width: 0;
-  padding: 40px 36px 30px;
+  padding: 32px 32px 24px;
   overflow: auto;
 }
+
 .mcp-close {
   position: absolute;
   top: 18px;
@@ -321,287 +276,141 @@ function dismiss(): void {
 .mcp-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 24px;
+  font-size: 22px;
   line-height: 1.18;
   font-weight: 600;
   letter-spacing: -0.01em;
 }
 .mcp-lead {
   margin: 0;
-  font-size: 14px;
-  line-height: 1.55;
-  color: color-mix(in oklab, var(--neutral-100) 62%, transparent);
-}
-
-.mcp-seg {
-  display: inline-flex;
-  align-self: flex-start;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 10px;
-  background: color-mix(in oklab, var(--neutral-100) 5%, transparent);
-  border: 1px solid color-mix(in oklab, var(--neutral-100) 7%, transparent);
-}
-.mcp-seg__btn {
-  border: 0;
-  cursor: pointer;
-  padding: 7px 16px;
-  border-radius: 7px;
   font-size: 13px;
-  font-weight: 600;
-  background: transparent;
-  color: color-mix(in oklab, var(--neutral-100) 52%, transparent);
-  transition:
-    background 140ms ease,
-    color 140ms ease;
-}
-.mcp-seg__btn:hover {
-  color: color-mix(in oklab, var(--neutral-100) 82%, transparent);
-}
-.mcp-seg__btn.is-active {
-  background: color-mix(in oklab, var(--neutral-100) 12%, transparent);
-  color: var(--text);
+  line-height: 1.55;
+  color: color-mix(in oklab, var(--text) 68%, transparent);
 }
 
-.mcp-body {
-  min-height: 262px;
-}
-
-.mcp-options {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.mcp-option {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 14px;
+.mcp-error,
+.mcp-warn {
+  padding: 10px 14px;
   border-radius: 10px;
-  border: 1px solid color-mix(in oklab, var(--neutral-100) 8%, transparent);
-  background: transparent;
-  transition:
-    background 140ms ease,
-    border-color 140ms ease;
-}
-.mcp-option.is-open {
-  background: color-mix(in oklab, var(--neutral-100) 3.5%, transparent);
-  border-color: color-mix(in oklab, var(--neutral-100) 12%, transparent);
-}
-.mcp-option__head {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  font: inherit;
-}
-.mcp-option:not(.is-open):hover {
-  border-color: color-mix(in oklab, var(--neutral-100) 16%, transparent);
-}
-.mcp-option__chevron {
-  flex: none;
-  margin-top: 8px;
-  margin-left: auto;
-  color: color-mix(in oklab, var(--neutral-100) 45%, transparent);
-  transition: transform 160ms ease;
-}
-.mcp-option.is-open .mcp-option__chevron {
-  transform: rotate(180deg);
-}
-.mcp-option__glyph {
-  flex: none;
-  color: var(--text);
-}
-.mcp-option__text {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-.mcp-option__title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-size: 14.5px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-}
-.mcp-option__sub {
-  margin: 0;
-  font-size: 12.5px;
-  line-height: 1.45;
-  color: color-mix(in oklab, var(--neutral-100) 55%, transparent);
-}
-.mcp-option__cta {
-  align-self: flex-start;
-}
-.mcp-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding-bottom: 2px;
-}
-.mcp-alt {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  font-size: 12px;
-  color: color-mix(in oklab, var(--neutral-100) 48%, transparent);
-}
-.mcp-alt__copy {
-  flex: none;
-}
-.mcp-cmd {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-}
-.mcp-cmd__text {
-  flex: 1;
-  min-width: 0;
-  overflow-x: auto;
-  white-space: nowrap;
-  align-content: center;
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 12.5px;
   line-height: 1.5;
-  padding: 9px 14px;
-  border-radius: 8px;
-  background: var(--brand-surface-bg);
-  border: 1px solid var(--brand-surface-border);
-  color: color-mix(in oklab, var(--neutral-100) 90%, transparent);
-  scrollbar-width: none;
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
-  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
 }
-.mcp-cmd__text::-webkit-scrollbar {
-  display: none;
+.mcp-error {
+  background: color-mix(in oklab, #f87171 12%, transparent);
+  color: #f87171;
+}
+.mcp-warn {
+  background: color-mix(in oklab, #fbbf24 12%, transparent);
+  color: #fbbf24;
+}
+
+.mcp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.mcp-field__label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--text) 55%, transparent);
+}
+
+.mcp-cmd {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklab, var(--neutral-100) 14%, transparent);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--neutral-100) 5%, transparent);
+}
+.mcp-cmd__text,
+.mcp-cmd__pre {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 .mcp-cmd__copy {
   flex: none;
-  width: 32px;
-  height: 32px;
-  align-self: center;
-  padding: 0;
-  border: 1px solid var(--brand-surface-border);
-  border-radius: 7px;
-  background: var(--brand-surface-bg);
 }
-.mcp-cmd__copy:hover {
-  background: var(--brand-surface-bg-hover);
-  border-color: var(--brand-surface-border);
-}
-
-.mcp-agents {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.mcp-agents__hint {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.5;
-  color: color-mix(in oklab, var(--neutral-100) 62%, transparent);
-}
-.mcp-agents__list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.mcp-agent {
+.mcp-token__toggle {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 13px 16px;
-  border-radius: 8px;
-  text-decoration: none;
-  color: var(--text);
-  background: var(--brand-surface-bg);
-  border: 1px solid var(--brand-surface-border);
-  transition: background 140ms ease;
-}
-.mcp-agent:hover {
-  background: var(--brand-surface-bg-hover);
-}
-.mcp-agent__logo {
+  justify-content: center;
   flex: none;
-  width: 16px;
-  height: 16px;
-  fill: var(--text);
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  background: transparent;
+  color: color-mix(in oklab, var(--text) 60%, transparent);
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
-.mcp-agent__name {
-  font-size: 13.5px;
-  font-weight: 600;
+.mcp-token__toggle:hover {
+  background: color-mix(in oklab, var(--neutral-100) 8%, transparent);
+  color: var(--text);
 }
-.mcp-agent__meta {
+
+.mcp-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mcp-snippet__label {
+  display: block;
+  margin-bottom: 6px;
   font-size: 12px;
-  color: color-mix(in oklab, var(--neutral-100) 48%, transparent);
+  color: color-mix(in oklab, var(--text) 62%, transparent);
 }
-.mcp-agent__ext {
-  margin-left: auto;
+
+.mcp-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: color-mix(in oklab, var(--text) 60%, transparent);
 }
 
 .mcp-actions {
   display: flex;
-  gap: 10px;
-  margin-top: auto;
-  padding-top: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in oklab, var(--neutral-100) 12%, transparent);
 }
-.mcp-btn {
+.mcp-actions__hint {
+  font-size: 12.5px;
+  color: color-mix(in oklab, var(--text) 55%, transparent);
+}
+.mcp-agent {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 0;
-  cursor: pointer;
-  height: 40px;
-  padding: 0 22px;
-  border-radius: 10px;
-  font-size: 13.5px;
-  font-weight: 600;
-}
-.mcp-btn--outline,
-.mcp-btn--soft {
-  height: 34px;
-  padding: 0 16px;
   font-size: 12.5px;
+  color: color-mix(in oklab, var(--text) 75%, transparent);
+  text-decoration: none;
+  transition: color 120ms ease;
+}
+.mcp-agent:hover {
   color: var(--text);
 }
-.mcp-btn--outline {
-  background: transparent;
-  border: 1px solid color-mix(in oklab, var(--neutral-100) 28%, transparent);
-  transition:
-    background 140ms ease,
-    border-color 140ms ease;
-}
-.mcp-btn--soft {
-  background: color-mix(in oklab, var(--neutral-100) 8%, transparent);
-  border: 0;
-  transition: background 140ms ease;
-}
-.mcp-btn--soft:hover {
-  background: color-mix(in oklab, var(--neutral-100) 13%, transparent);
-}
-.mcp-btn--outline:hover {
-  background: color-mix(in oklab, var(--neutral-100) 7%, transparent);
-  border-color: color-mix(in oklab, var(--neutral-100) 42%, transparent);
-}
-
-@media (max-width: 800px) {
-  .mcp-modal {
-    grid-template-columns: 1fr;
-    max-height: calc(100vh - 64px);
-  }
-  .mcp-media {
-    aspect-ratio: 16 / 9;
-    min-height: 0;
-  }
+.mcp-agent__logo {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
 }
 </style>

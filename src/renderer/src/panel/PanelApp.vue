@@ -348,15 +348,6 @@ function handleMcpClose(): void {
   window.api.closeCurrentPanel()
 }
 
-/**
- * Handles the "Open terminal" CTA.
- * Switches to the console tab, and restores the canvas when closed.
- */
-function handleMcpOpenTerminal(): void {
-  if (!installationId) return
-  window.api.openInstancePicker({ installationId, initialTab: 'console' })
-}
-
 /** Composite the live ComfyUI canvas through while an overlay panel (feedback
  *  or MCP setup) is mounted. */
 watch(
@@ -648,11 +639,7 @@ onUnmounted(() => {
       />
     </template>
 
-    <McpSetupModal
-      v-if="activePanel === 'mcp-setup'"
-      @close="handleMcpClose"
-      @open-terminal="handleMcpOpenTerminal"
-    />
+    <McpSetupModal v-if="activePanel === 'mcp-setup'" @close="handleMcpClose" />
 
     <FeedbackModal :open="feedbackOpen" :url="feedbackUrl" @close="closeFeedback" />
 
