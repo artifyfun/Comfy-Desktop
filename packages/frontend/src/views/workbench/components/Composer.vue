@@ -19,7 +19,13 @@
       @remove="(i) => $emit('remove-attachment', i)"
     />
 
-    <SkillMenu :open="slashOpen" :skills="skills" :query="slashQuery" @pick="onSkillPick" />
+    <SkillMenu
+      :open="slashOpen"
+      :items="filteredSkills"
+      :active-index="activeIndex"
+      @pick="onSkillPick"
+      @active="(i) => (activeIndex = i)"
+    />
 
     <div class="flex gap-2 items-end">
       <button
@@ -94,6 +100,16 @@ const fileEl = ref(null)
 const textareaEl = ref(null)
 const slashOpen = ref(false)
 const slashQuery = ref('')
+const activeIndex = ref(0)
+
+// 本地过滤（键盘导航在 Composer 统一处理，SkillMenu 纯展示）
+const filteredSkills = computed(() => {
+  const q = slashQuery.value.toLowerCase()
+  if (!q) return props.skills
+  return props.skills.filter(
+    (s) => s.id.toLowerCase().includes(q) || s.name.toLowerCase().includes(q),
+  )
+})
 
 // "/" 触发：光标前文本以 / 开头（词首）时弹技能菜单
 watch(
@@ -109,6 +125,7 @@ watch(
     const m = before.match(/(?:^|\s)\/([a-zA-Z0-9_:-]*)$/)
     slashOpen.value = !!m
     slashQuery.value = m?.[1] ?? ''
+    activeIndex.value = 0
   },
 )
 
@@ -119,15 +136,26 @@ function autoResize(e) {
 }
 
 function onEnter() {
-  if (!slashOpen.value) emit('send')
-  else slashOpen.value = false
+  if (slashOpen.value && filteredSkills.value.length) {
+    onSkillPick(filteredSkills.value[activeIndex.value])
+  } else if (!slashOpen.value) {
+    emit('send')
+  }
 }
 
 function onKeydown(e) {
-  if (slashOpen.value && ['ArrowDown', 'ArrowUp', 'Tab'].includes(e.key)) {
+  if (!slashOpen.value) return
+  if (e.key === 'ArrowDown') {
     e.preventDefault()
-    const menu = document.querySelector('.skill-menu-item[data-idx]')
-    menu?.focus?.()
+    activeIndex.value = Math.min(activeIndex.value + 1, filteredSkills.value.length - 1)
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    activeIndex.value = Math.max(activeIndex.value - 1, 0)
+  } else if (e.key === 'Tab') {
+    e.preventDefault()
+    if (filteredSkills.value.length) onSkillPick(filteredSkills.value[activeIndex.value])
+  } else if (e.key === 'Escape') {
+    slashOpen.value = false
   }
 }
 

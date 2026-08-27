@@ -123,6 +123,7 @@
 
           <!-- 富输入框 -->
           <Composer
+            ref="composerEl"
             v-model="input"
             :busy="busy"
             :uploading="uploading"
@@ -216,13 +217,22 @@
       @changed="loadPresets"
     />
 
-    <!-- Lightbox：产物大图预览 -->
+    <!-- Lightbox：产物大图/视频预览 -->
     <div
       v-if="lightboxFile"
       class="fixed inset-0 z-[100] bg-black/85 flex items-center justify-center"
       @click="lightboxFile = null"
     >
+      <video
+        v-if="isVideoFile(lightboxFile)"
+        :src="viewUrl(lightboxFile)"
+        controls
+        autoplay
+        class="max-w-[90vw] max-h-[90vh] rounded-lg shadow-2xl"
+        @click.stop
+      ></video>
       <img
+        v-else
         :src="viewUrl(lightboxFile)"
         class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
       />
@@ -297,6 +307,7 @@ const sidebarCollapsed = ref(false)
 const showArchived = ref(false)
 const panelOpen = ref(true)
 const messagesEl = ref(null)
+const composerEl = ref(null)
 const pollTimers = new Map()
 const newDialogOpen = ref(false)
 const presetMgrOpen = ref(false)
@@ -336,6 +347,10 @@ function onGlobalKey(e) {
   if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
     e.preventDefault()
     newDialogOpen.value = true
+  } else if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    // 聚焦输入框（对话主场景）
+    e.preventDefault()
+    composerEl.value?.querySelector('textarea')?.focus()
   }
 }
 
@@ -696,6 +711,10 @@ const lightboxFile = ref(null)
 
 function viewUrl(f) {
   return `${comfyOrigin.value}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? '')}&type=${encodeURIComponent(f.type ?? 'output')}`
+}
+
+function isVideoFile(f) {
+  return /\.(mp4|webm|mov|gif)$/i.test(f?.filename ?? '')
 }
 
 // ---------- 固化 ----------
