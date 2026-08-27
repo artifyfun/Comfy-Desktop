@@ -40,6 +40,7 @@ import {
   type WorkbenchPreset
 } from './presetCore'
 import { renderEnvSnapshot, SELF_KNOWLEDGE_TEXT, type WorkbenchEnvSnapshot } from './selfKnowledge'
+import { extractDocText, isDocumentAttachment, renderDocContext } from './docContext'
 import { get as getSetting } from '../../settings'
 import {
   executeApp,
@@ -393,6 +394,8 @@ class WorkbenchService {
     const attachmentHint = opts.attachments?.length
       ? `\n## 用户上传素材（已上传，可作媒体输入）\n${attachmentSummary(opts.attachments)}`
       : ''
+    // 文档类附件的正文内容:大模型在决策时直接阅读(pdf/txt/md/json 等)
+    const docHint = opts.attachments?.length ? renderDocContext(opts.attachments) : ''
     const shortcutHint = opts.templateShortcut
       ? `\n## 用户显式指定模板\n必须使用 templateId="${opts.templateShortcut}"。`
       : ''
@@ -417,7 +420,7 @@ class WorkbenchService {
 3. intent=chat 用于追问澄清或闲聊，回复放 reply。
 4. 模板库为空或不匹配时选 chat 并说明。
 5. 用户上传了素材时，倾向选择带媒体输入参数的模板（图生图/视频驱动），参数值填素材文件名（已上传）。
-6. 存在「会话预设约束」段落时，其 intent 限制是**硬性规则**，违反的输出会被系统直接拒绝——你必须输出该 intent。${chainHint}${constraint}${attachmentHint}${shortcutHint}${titleRule}
+6. 存在「会话预设约束」段落时，其 intent 限制是**硬性规则**，违反的输出会被系统直接拒绝——你必须输出该 intent。${chainHint}${constraint}${attachmentHint}${docHint}${shortcutHint}${titleRule}
 
 ## 模板库
 ${catalog}
@@ -847,6 +850,11 @@ ${userInput}`
   async uploadAttachment(buffer: Buffer, filename: string, mime?: string): Promise<AttachmentMeta> {
     const comfyOrigin = appStoreManager.getConfig().comfyHost
     const uploaded = await uploadMediaBuffer(comfyOrigin, buffer, filename, mime)
+    // 文档类(pdf/txt/md/json…):上传即抽取文本进内存缓存,decide 时注入 spec
+    // 供大模型阅读。抽取失败不阻断上传(ComfyUI 侧文件已就位)。
+    if (isDocumentAttachment(filename, mime)) {
+      await extractDocText(uploaded.name, buffer, filename, mime)
+    }
     return {
       name: uploaded.name,
       subfolder: uploaded.subfolder,
