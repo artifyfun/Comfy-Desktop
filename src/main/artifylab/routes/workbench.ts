@@ -150,6 +150,22 @@ export function createWorkbenchRouter(): express.Router {
     res.json(createSuccessResponse({ default: id }))
   })
 
+  // 预设挂技能（dsh preset skills/ 目录语义：捆绑模板推荐池）
+  router.post('/api/workbench/presets/skills', (req, res) => {
+    const { id, skillIds } = req.body as { id?: string; skillIds?: string[] }
+    if (!id || !Array.isArray(skillIds)) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('id and skillIds required'))
+      return
+    }
+    try {
+      res.json(createSuccessResponse(workbenchService.updatePresetSkills(id, skillIds)))
+    } catch (e) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(createErrorResponse(e instanceof Error ? e.message : 'update failed'))
+    }
+  })
+
   // ---------------- 技能清单（/ 触发器）与模型 ----------------
 
   router.get('/api/workbench/skills', (_req, res) => {

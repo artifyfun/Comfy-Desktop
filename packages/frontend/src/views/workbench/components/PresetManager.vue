@@ -30,7 +30,24 @@
                 {{ p.description?.[lang] || '' }}
               </div>
               <div class="text-[11px] text-slate-500 mt-1 font-mono">
-                /{{ p.id }}<template v-if="p.intentHint"> · intent: {{ p.intentHint }}</template>
+                intent: {{ p.intentHint || 'free'
+                }}<template v-if="p.order != null"> · order: {{ p.order }}</template>
+              </div>
+              <!-- 捆绑技能（dsh preset skills/ 语义） -->
+              <div v-if="!p.builtin" class="mt-2">
+                <div class="flex items-center gap-1 flex-wrap">
+                  <span class="text-[11px] text-slate-500">{{ t('workbenchPresetSkills') }}:</span>
+                  <a-tag v-for="s in p.skillIds ?? []" :key="s" class="!m-0 !text-[11px]">
+                    {{ skillName(s) }}
+                  </a-tag>
+                  <span v-if="!p.skillIds?.length" class="text-[11px] text-slate-600">—</span>
+                  <button
+                    class="text-[11px] text-tech-blue hover:underline ml-1"
+                    @click="openSkills(p)"
+                  >
+                    {{ t('workbenchPresetEditSkills') }}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -51,6 +68,38 @@
           </div>
         </div>
       </div>
+
+      <!-- 技能勾选弹层（预设捆绑技能） -->
+      <a-modal
+        :open="skillsOpen"
+        :title="`${t('workbenchPresetEditSkills')} — ${editingPreset?.name?.[lang] || editingPreset?.id || ''}`"
+        :ok-text="t('confirm')"
+        :cancel-text="t('cancel')"
+        :ok-button-props="{ loading: savingSkills }"
+        @ok="saveSkills"
+        @cancel="skillsOpen = false"
+      >
+        <div v-if="skillsList.length === 0" class="text-sm text-slate-400 py-4 text-center">
+          {{ t('workbenchSkillsEmptyLib') }}
+        </div>
+        <div v-else class="space-y-1 max-h-80 overflow-y-auto">
+          <label
+            v-for="s in skillsList"
+            :key="s.id"
+            class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-700/40 cursor-pointer"
+          >
+            <input
+              type="checkbox"
+              :value="s.id"
+              v-model="checkedSkills"
+              class="accent-blue-500 w-4 h-4"
+            />
+            <span class="text-sm text-white">{{ s.name }}</span>
+            <span class="text-[11px] text-slate-500 font-mono">/{{ s.id }}</span>
+            <span class="text-[11px] text-slate-400 truncate ml-auto">{{ s.description }}</span>
+          </label>
+        </div>
+      </a-modal>
 
       <!-- 复制对话框 -->
       <a-modal
@@ -87,6 +136,50 @@ const props = defineProps({
   defaultId: { type: String, default: 'standard' },
 })
 const emit = defineEmits(['update:open', 'changed'])
+
+// ---------- 技能捆绑编辑（dsh preset skills/ 语义） ----------
+const skillsOpen = ref(false)
+const editingPreset = ref(null)
+const checkedSkills = ref([])
+const savingSkills = ref(false)
+const skillsList = ref([])
+
+async function loadSkillsList() {
+  const res = await fetch(`${origin.value}/api/workbench/skills`)
+  const json = await res.json()
+  skillsList.value = json?.data ?? []
+}
+
+function skillName(id) {
+  return skillsList.value.find((s) => s.id === id)?.name || id
+}
+
+async function openSkills(p) {
+  editingPreset.value = p
+  checkedSkills.value = [...(p.skillIds ?? [])]
+  if (skillsList.value.length === 0) await loadSkillsList()
+  skillsOpen.value = true
+}
+
+async function saveSkills() {
+  savingSkills.value = true
+  try {
+    const res = await fetch(`${origin.value}/api/workbench/presets/skills`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: editingPreset.value.id, skillIds: checkedSkills.value }),
+    })
+    const json = await res.json()
+    if (!res.ok || !json?.success) throw new Error(json?.message || 'save failed')
+    skillsOpen.value = false
+    message.success(t('workbenchSaved'))
+    emit('changed')
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    savingSkills.value = false
+  }
+}
 
 const { t, getCurrentLanguage } = useI18n()
 const appStore = useAppStore()

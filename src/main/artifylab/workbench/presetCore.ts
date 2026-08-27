@@ -21,6 +21,8 @@ export interface WorkbenchPreset {
   intentHint?: WorkbenchIntent
   /** 预推荐模板 id（codex 优先选它） */
   preferredTemplateId?: string
+  /** 预设捆绑的技能（模板 id 清单，dsh preset 的 skills/ 目录语义） */
+  skillIds?: string[]
   /** 默认参数（决策时作为 params 基线） */
   defaultParams?: Record<string, unknown>
 }
@@ -125,6 +127,10 @@ export function presetConstraintText(preset: WorkbenchPreset | undefined): strin
   }
   if (preset.preferredTemplateId) {
     parts.push(`prefer template "${preset.preferredTemplateId}" unless clearly unusable`)
+  }
+  if (preset.skillIds?.length) {
+    // dsh preset skills 语义：捆绑技能=推荐池（软约束，非强制唯一）
+    parts.push(`prefer skills (templates) [${preset.skillIds.join(', ')}] when suitable`)
   }
   if (preset.defaultParams && Object.keys(preset.defaultParams).length > 0) {
     parts.push(`default params baseline: ${JSON.stringify(preset.defaultParams)}`)

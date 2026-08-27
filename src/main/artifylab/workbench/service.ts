@@ -626,6 +626,21 @@ ${userInput}`
     return preset
   }
 
+  /** 预设挂技能（dsh preset skills/ 语义）。内置预设不可改，返回更新后预设。 */
+  updatePresetSkills(id: string, skillIds: string[]): WorkbenchPreset {
+    if (BUILTIN_PRESETS.some((p) => p.id === id)) throw new Error('builtin preset is readonly')
+    const list = this.store.presets ?? []
+    const idx = list.findIndex((p) => p.id === id)
+    if (idx === -1) throw new Error(`preset not found: ${id}`)
+    // 只保留真实存在的模板 id（技能=模板快捷方式）
+    const valid = new Set(templateLibrary.list().map((t) => t.id))
+    const next = [...new Set(skillIds)].filter((s) => valid.has(s))
+    const updated = { ...list[idx]!, skillIds: next }
+    this.store.presets = list.with(idx, updated)
+    this.flush()
+    return updated
+  }
+
   deletePreset(id: string): boolean {
     // 内置不可删（dsh 同款：shipped preset 不归用户管理）
     if (BUILTIN_PRESETS.some((p) => p.id === id)) return false
