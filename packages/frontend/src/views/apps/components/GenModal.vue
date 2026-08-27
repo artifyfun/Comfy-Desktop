@@ -359,7 +359,7 @@ const handleBackToStyle = () => {
   currentStep.value = 'style'
 }
 
-// 生成应用代码的方法
+// 生成应用代码的方法（Codex agent 驱动，替换一次性提示词）
 const genAppCode = async () => {
   const apiKey = appStore.config.api_key
   if (!apiKey) {
@@ -370,11 +370,6 @@ const genAppCode = async () => {
     return
   }
   const buildStyle = appStore.buildStyles.find((item) => item.id === selectedStyleId.value)
-  const prompt = {
-    ...genPrompt(genApp.value, buildStyle, appStore.config),
-    assistantPrompt: customStyleCode.value,
-    userPrompt: customFunctionCode.value,
-  }
   genApp.value.code = ''
   abortControllerRef.value = new AbortController()
   const signal = abortControllerRef.value.signal
@@ -383,25 +378,23 @@ const genAppCode = async () => {
   const setCode = (code) => {
     genApp.value.code = code
   }
-
   const handleFinalCode = (finalDoc) => {
     setCode(finalDoc)
     genLoading.value = false
   }
 
-  let contentResponse = ''
-  let lastRenderTime = 0
-
   try {
-    const request = await fetch(`${appStore.config.serverHost}/api/generate-app`, {
+    const request = await fetch(`${appStore.config.serverHost}/api/build-app`, {
       method: 'POST',
       body: JSON.stringify({
-        max_tokens: appStore.config.max_tokens,
-        temperature: appStore.config.temperature,
-        api_key: appStore.config.api_key,
-        base_url: appStore.config.base_url,
-        model: appStore.config.model,
-        prompt,
+        appId: genApp.value.id || `tmp-${Date.now()}`,
+        name: genApp.value.name,
+        description: genApp.value.description,
+        paramsNodes: (genApp.value.template && genApp.value.template.paramsNodes) || [],
+        style: buildStyle ? buildStyle[`${appStore.config.lang}_name`] || buildStyle.id : selectedStyleId.value,
+        provider: appStore.config.provider || 'deepseek',
+        apiKey: appStore.config.api_key,
+        model: appStore.config.buildModel || 'deepseek-v4-flash',
       }),
       headers: {
         'Content-Type': 'application/json',
@@ -412,24 +405,8 @@ const genAppCode = async () => {
     if (request && request.body) {
       if (!request.ok) {
         try {
-          if (request.status === 429) {
-            try {
-              const rateLimitData = await request.json()
-              if (rateLimitData.message) {
-                showError(rateLimitData.message)
-              } else if (rateLimitData.waitTimeMinutes) {
-                showError(t('rateLimitWaitMinutes', { minutes: rateLimitData.waitTimeMinutes }))
-              } else {
-                showError(t('rateLimitExceeded'))
-              }
-            } catch (parseError) {
-              showError(t('rateLimitExceeded'))
-            }
-            return
-          }
-
           const res = await request.json()
-          showError(res.message)
+          showError(res.message || t('aiRequestFailed'))
         } catch (parseError) {
           showError(t('processingResponseFailed'))
         }
@@ -442,81 +419,53 @@ const genAppCode = async () => {
       genLoading.value = true
       const reader = request.body.getReader()
       const decoder = new TextDecoder('utf-8')
+      let buffer = ''
 
       const read = async () => {
         try {
           const { done, value } = await reader.read()
           if (done) {
-            const finalDoc = contentResponse.match(/<!DOCTYPE html>[\s\S]*<\/html>/)?.[0]
-            if (finalDoc) {
-              handleFinalCode(finalDoc)
-            } else if (contentResponse.includes('<html') && contentResponse.includes('<body')) {
-              let fixedHtml = contentResponse
-              if (!fixedHtml.includes('</body>')) {
-                fixedHtml += '\n</body>'
-              }
-              if (!fixedHtml.includes('</html>')) {
-                fixedHtml += '\n</html>'
-              }
-              setCode(fixedHtml)
-            }
             abortControllerRef.value = null
             return
           }
-
-          const chunk = decoder.decode(value, { stream: true })
-          contentResponse += chunk
-
-          let newHtml = null
-          const doctypeMatch = contentResponse.match(/<!DOCTYPE html>[\s\S]*/)
-          if (doctypeMatch) {
-            newHtml = doctypeMatch[0]
-          } else {
-            const htmlMatch = contentResponse.match(/<html[\s\S]*/)
-            if (htmlMatch) {
-              newHtml = htmlMatch[0]
-            } else {
-              const bodyMatch = contentResponse.match(/<body[\s\S]*/)
-              if (bodyMatch) {
-                newHtml = bodyMatch[0]
+          buffer += decoder.decode(value, { stream: true })
+          // 按 SSE 事件块（空行分隔）解析
+          const blocks = buffer.split('\n\n')
+          buffer = blocks.pop() || ''
+          for (const block of blocks) {
+            const lines = block.split('\n').filter((l) => l.trim())
+            let eventName = 'message'
+            const dataLines = []
+            for (const line of lines) {
+              if (line.startsWith('event:')) eventName = line.slice(6).trim()
+              else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
+            }
+            if (!dataLines.length) continue
+            const dataStr = dataLines.join('\n')
+            try {
+              const payload = JSON.parse(dataStr)
+              if (eventName === 'done' && payload.code) {
+                handleFinalCode(payload.code)
+              } else if (eventName === 'error') {
+                showError(payload.message || t('aiResponseError'))
+                genLoading.value = false
+                responseLoading.value = false
               }
+              // type==='log' 的进度事件暂不渲染 UI（构建完成后统一展示结果）
+            } catch {
+              // 忽略非 JSON 数据
             }
           }
-
-          if (newHtml) {
-            let partialDoc = newHtml
-            if (!partialDoc.includes('</body>') && partialDoc.includes('<body')) {
-              partialDoc += '\n</body>'
-            }
-            if (!partialDoc.includes('</html>')) {
-              partialDoc += '\n</html>'
-            }
-
-            const now = Date.now()
-            if (now - lastRenderTime > 1000) {
-              setCode(partialDoc)
-              lastRenderTime = now
-            }
-          }
-
           read()
         } catch (error) {
           if (error.name === 'AbortError') {
-            if (contentResponse && contentResponse.includes('<html')) {
-              let fixedHtml = contentResponse
-              if (!fixedHtml.includes('</body>')) {
-                fixedHtml += '\n</body>'
-              }
-              if (!fixedHtml.includes('</html>')) {
-                fixedHtml += '\n</html>'
-              }
-              setCode(fixedHtml)
-            }
+            // 用户取消，保留已生成部分
           } else {
             showError(error.message || t('aiResponseError'))
           }
           abortControllerRef.value = null
           genLoading.value = false
+          responseLoading.value = false
         }
       }
 

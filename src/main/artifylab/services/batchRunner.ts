@@ -69,7 +69,13 @@ export interface BatchItemResult {
   durationMs: number
 }
 
-export type BatchJobStatus = 'queued' | 'running' | 'completed' | 'stopped' | 'failed'
+export type BatchJobStatus = 'queued' | 'running' | 'paused' | 'completed' | 'stopped' | 'failed'
+
+/** 队列级配置（浮层/详情页即时生效）：autoShutdown 武装会话级关机，notifyUrl 应用到活跃任务 */
+export interface QueueConfigPayload {
+  autoShutdown?: boolean
+  notifyUrl?: string
+}
 
 /** 队列中的一个任务（含提交参数 + 进度统计 + 日志/结果） */
 export interface BatchJob {
@@ -113,6 +119,8 @@ export interface BatchStatus {
   updatedAt: string
   appId?: string
   appName?: string
+  autoShutdown?: boolean
+  notifyUrl?: string
   logs: Array<{ time: string; type: string; message: string }>
   results: BatchItemResult[]
 }
@@ -126,6 +134,9 @@ export interface BatchJobSummary {
   status: BatchJobStatus
   appId?: string
   appName?: string
+  /** 任务级配置（详情页展示用，均为小字段） */
+  autoShutdown?: boolean
+  notifyUrl?: string
   total: number
   processed: number
   success: number
@@ -152,6 +163,25 @@ const jobs: BatchJob[] = []
 let pumping = false
 /** 当前任务 items 循环是否在执行（stop 时置 false 作为中断信号） */
 let executing = false
+/**
+ * 用户手动暂停标志：pauseBatch 置 true（并置 executing=false 中断），
+ * resumeBatch 置 false。executeJob 据此返回 'paused'（区别于 stop 的 'stopped'）。
+ * 同一时刻最多一个任务被暂停（串行队列），故用布尔即可。
+ */
+let manualPaused = false
+/**
+ * 最近一次被"继续"的暂停任务 id：executeJob 消费它做无条件 free（防御暂停期间
+ * 用户在 C 界面加载的模型残留），消费后置 null。
+ */
+let resumedJobId: string | null = null
+/**
+ * 队列级配置（/api/batch/config 写入）：autoShutdown 立即武装/解除会话级关机意图；
+ * notifyUrl 应用到所有排队/运行任务（任务完成时读最新值）。
+ */
+const queueConfig: { autoShutdown: boolean; notifyUrl: string } = {
+  autoShutdown: false,
+  notifyUrl: ''
+}
 /** 队列空闲后 autoShutdown 是否已触发（新任务入队时重置） */
 let autoShutdownHandled = false
 let loaded = false
@@ -287,7 +317,10 @@ async function runItem(
   }
   const pollStart = Date.now()
   for (;;) {
-    if (!executing) return { ok: false, error: 'stopped' }
+    // 暂停与停止都通过 executing=false 中断；错误文案区分，便于用户理解
+    if (manualPaused || !executing) {
+      return { ok: false, error: manualPaused ? 'paused' : 'stopped' }
+    }
     if (Date.now() - pollStart > MAX_ITEM_POLL_MS) {
       return { ok: false, error: `timeout: no history entry within ${MAX_ITEM_POLL_MS / 60000}min` }
     }
@@ -307,8 +340,8 @@ async function runItem(
   }
 }
 
-/** 执行单个任务的全部 items；返回终态（stopped 表示被用户中断） */
-async function executeJob(job: BatchJob): Promise<'completed' | 'stopped' | 'failed'> {
+/** 执行单个任务的全部 items；返回终态（stopped=用户中断，paused=用户暂停可继续） */
+async function executeJob(job: BatchJob): Promise<'completed' | 'stopped' | 'paused' | 'failed'> {
   executing = true
   try {
     const comfyOrigin = artifyUtils.getConfig().comfy_origin
@@ -316,16 +349,22 @@ async function executeJob(job: BatchJob): Promise<'completed' | 'stopped' | 'fai
     // 本会话实际执行过 autoShutdown 任务（仅记录"本次真正跑的"，历史残留不计入）
     if (job.autoShutdown) sessionAutoShutdown = true
 
+    // 暂停后恢复标记：立即消费（无论 freeEnabled），供下方显存清理决策
+    const isResume = resumedJobId === job.id
+    if (isResume) resumedJobId = null
+
     // 任务前置清理显存：
     //  - 会话首个任务（队列从空闲开始跑的第一次）：无条件 /free，防 C 界面残留模型；
-    //  - 后续任务：与上次执行的工作流不同才 /free（同工作流跳过，避免无谓重载）。
+    //  - 暂停后恢复（resumeBatch 置 resumedJobId）：也无条件 /free——用户暂停期间
+    //    很可能去 C 界面操作过，指纹感知不到，同工作流判定会跳过清理，模型叠加易 OOM；
+    //  - 其余任务：与上次执行的工作流不同才 /free（同工作流跳过，避免无谓重载）。
     // 失败仅记日志不阻断任务。
     if (freeEnabled) {
       const wfKey = resolveWorkflowKey(job.appId, job.prompt)
       const isSessionFirst = sessionFirstFree
       sessionFirstFree = false
       try {
-        if (isSessionFirst) {
+        if (isSessionFirst || isResume) {
           await forceFreeAndTrack(comfyOrigin, wfKey)
         } else {
           await freeIfWorkflowChanged(comfyOrigin, wfKey)
@@ -336,13 +375,17 @@ async function executeJob(job: BatchJob): Promise<'completed' | 'stopped' | 'fai
       }
     }
 
-    const items = job.items.slice(job.startFrom - 1)
-    const startFrom = job.startFrom
+    // job.processed 为 1-based 最后已完成项；下一项索引 = processed+1。
+    // 支持暂停/停止后"继续"：从上次进度接着跑，不重跑已完成项。
+    // 注意 processedBase 必须在循环前固定：循环内 job.processed 会增长，
+    // 若用其计算 currentIndex 会造成索引复合递增（跳号）。
+    const processedBase = job.processed
+    const items = job.items.slice(processedBase)
     for (let i = 0; i < items.length; i++) {
-      if (!executing) return 'stopped'
+      if (manualPaused || !executing) return manualPaused ? 'paused' : 'stopped'
       const data = items[i]
       if (!data) continue
-      const currentIndex = startFrom + i
+      const currentIndex = processedBase + i + 1
       let preview = String(currentIndex)
       try {
         preview = JSON.stringify(data).slice(0, 100)
@@ -389,7 +432,8 @@ async function executeJob(job: BatchJob): Promise<'completed' | 'stopped' | 'fai
       })
       trim(job)
     }
-    return executing ? 'completed' : 'stopped'
+    // 最后一项被暂停/停止中断时循环会自然结束：须按 manualPaused 区分 paused/stopped
+    return manualPaused ? 'paused' : executing ? 'completed' : 'stopped'
   } catch (e) {
     logger.error('batch job crashed', e)
     pushLog(job, 'error', (e as Error).message)
@@ -414,9 +458,18 @@ async function pump(): Promise<void> {
       pushLog(job, 'info', 'batch started')
       saveQueueSoon()
       const outcome = await executeJob(job)
-      job.finishedAt = nowIso()
       job.updatedAt = nowIso()
       job.currentPreview = ''
+      // 暂停：任务保持进度，不取下一个任务；等用户手动"继续"后重新入队
+      if (outcome === 'paused') {
+        job.status = 'paused'
+        job.finishedAt = undefined
+        pushLog(job, 'info', 'batch paused by user')
+        // 暂停态立即落盘（防崩溃丢失"暂停中"状态，被误恢复为 running）
+        flushQueue()
+        break
+      }
+      job.finishedAt = nowIso()
       if (outcome === 'completed') {
         job.status = 'completed'
         pushLog(
@@ -432,9 +485,11 @@ async function pump(): Promise<void> {
         job.status = 'failed'
         pushLog(job, 'error', 'batch failed')
       }
-      saveQueueSoon()
+      // 终态立即同步落盘：进度变化走防抖即可，但"完成/失败"必须即时保存，
+      // 否则任务刚完成就关机/崩溃时，重启恢复会把它误判为 running → failed。
+      flushQueue()
     }
-    if (!jobs.some((j) => j.status === 'queued' || j.status === 'running')) {
+    if (!jobs.some((j) => ['queued', 'running', 'paused'].includes(j.status))) {
       // 队列空闲：下一轮会话的首个任务重新无条件 free（期间用户可能去过 C 界面）
       sessionFirstFree = true
       await finishActionsWhenIdle()
@@ -550,7 +605,7 @@ export function loadQueue(): void {
         j.logs.unshift({
           time: new Date().toLocaleTimeString(),
           type: 'error',
-          message: 'app restarted; running task interrupted'
+          message: `应用重启导致中断（实际可能已部分完成，进度 ${j.processed}/${j.total}）`
         })
       }
       jobs.push(j)
@@ -586,6 +641,8 @@ export function getBatchStatus(): BatchStatus | null {
     updatedAt: job.updatedAt,
     appId: job.appId,
     appName: job.appName,
+    autoShutdown: job.autoShutdown,
+    notifyUrl: job.notifyUrl,
     logs: [...job.logs],
     results: [...job.results]
   }
@@ -598,6 +655,8 @@ export function listBatchQueue(): BatchJobSummary[] {
     status: j.status,
     appId: j.appId,
     appName: j.appName,
+    autoShutdown: j.autoShutdown,
+    notifyUrl: j.notifyUrl,
     total: j.total,
     processed: j.processed,
     success: j.success,
@@ -635,6 +694,7 @@ export function isQueuePaused(): boolean {
 export function resumeQueue(): boolean {
   const wasPaused = queuePaused
   queuePaused = false
+  manualPaused = false // 恢复队列 = 解除所有暂停语义，排队任务开始依次执行
   if (wasPaused) {
     logger.info('batch queue resumed by user')
     saveQueueSoon()
@@ -648,12 +708,14 @@ export async function startBatch(
   opts: BatchStartOptions
 ): Promise<{ job: BatchJob; queue: BatchJobSummary[] }> {
   ensureLoaded()
-  const activeCount = jobs.filter((j) => j.status === 'queued' || j.status === 'running').length
+  const activeCount = jobs.filter((j) => ['queued', 'running', 'paused'].includes(j.status)).length
   if (activeCount >= MAX_QUEUED) {
     throw new Error(`batch queue is full (max ${MAX_QUEUED})`)
   }
   if (opts.autoShutdown) autoShutdownHandled = false
-  // 用户主动提交新任务 = 明确操作意图，视为恢复队列（解除重启后的暂停）
+  // 用户主动提交新任务 = 明确操作意图：解除重启暂停 + 解除手动暂停（新的一轮）
+  manualPaused = false
+  resumedJobId = null // 清除上一轮可能残留的恢复标记
   if (queuePaused) {
     queuePaused = false
     logger.info('batch queue unpaused by new submission')
@@ -692,11 +754,70 @@ export async function startBatch(
 }
 
 /**
+ * 重新运行已结束的批量任务（一键重跑，无需重新编排队列）：
+ *  - 仅允许终态任务（completed/stopped/failed）重跑；queued/running/paused 拒绝（未结束）
+ *  - 完整复刻原任务配置：prompt / inputsMapping / items / startFrom / autoShutdown / notifyUrl / appId / appName
+ *  - prompt/items 共享引用（buildItemPrompt 内部 structuredClone 保护原对象，只读安全）
+ *  - 视为用户主动的新一轮：解除重启暂停/手动暂停，重置 userStopped，队列满抛错
+ *  - 返回 null = 不存在或不可重跑；队列满抛 Error('batch queue is full')
+ */
+export async function rerunBatchJob(
+  id: string
+): Promise<{ job: BatchJob; queue: BatchJobSummary[] } | null> {
+  ensureLoaded()
+  const src = jobs.find((j) => j.id === id)
+  if (!src) return null
+  if (!['completed', 'stopped', 'failed'].includes(src.status)) return null
+
+  const activeCount = jobs.filter((j) => ['queued', 'running', 'paused'].includes(j.status)).length
+  if (activeCount >= MAX_QUEUED) {
+    throw new Error(`batch queue is full (max ${MAX_QUEUED})`)
+  }
+  if (src.autoShutdown) autoShutdownHandled = false
+  // 用户主动重跑 = 明确操作意图：解除暂停语义，视为新的一轮
+  manualPaused = false
+  resumedJobId = null
+  queuePaused = false
+  userStopped = false
+
+  const startFrom = Math.max(1, src.startFrom ?? 1)
+  const now = nowIso()
+  const job: BatchJob = {
+    id: randomUUID(),
+    status: 'queued',
+    prompt: src.prompt,
+    inputsMapping: src.inputsMapping,
+    items: src.items,
+    startFrom,
+    notifyUrl: src.notifyUrl,
+    autoShutdown: src.autoShutdown,
+    appId: src.appId,
+    appName: src.appName,
+    total: src.items.length,
+    processed: startFrom - 1,
+    success: 0,
+    failed: 0,
+    percent: 0,
+    currentIndex: startFrom - 1,
+    currentPreview: '',
+    createdAt: now,
+    updatedAt: now,
+    logs: [],
+    results: []
+  }
+  jobs.push(job)
+  saveQueueSoon()
+  void pump()
+  return { job, queue: listBatchQueue() }
+}
+
+/**
  * 停止：默认只停当前运行任务（interrupt + 由调度置 stopped），排队任务继续；
  * stopAll 时全部 queued 任务批量标 stopped。任何用户停止动作都会抑制 autoShutdown。
  */
 export async function stopBatch(opts?: { stopAll?: boolean }): Promise<BatchStatus | null> {
   userStopped = true
+  manualPaused = false // 停止优先于暂停：中断后按 stopped 处理，而不是 paused
   const active = jobs.find((j) => j.status === 'running')
   if (active) {
     executing = false
@@ -709,7 +830,8 @@ export async function stopBatch(opts?: { stopAll?: boolean }): Promise<BatchStat
   }
   if (opts?.stopAll) {
     for (const j of jobs) {
-      if (j.status === 'queued') {
+      // 暂停任务也属于"全部"：一并停止（保留在队列中便于查看记录）
+      if (j.status === 'queued' || j.status === 'paused') {
         j.status = 'stopped'
         j.finishedAt = nowIso()
         j.updatedAt = nowIso()
@@ -721,13 +843,14 @@ export async function stopBatch(opts?: { stopAll?: boolean }): Promise<BatchStat
   return getBatchStatus()
 }
 
-/** 取消：排队任务移出队列；运行任务等价 stop。幂等，不存在返回 false */
+/** 取消：排队任务移出队列；运行任务等价 stop；暂停任务移出队列。幂等，不存在返回 false */
 export async function cancelBatchJob(id: string): Promise<boolean> {
   const idx = jobs.findIndex((j) => j.id === id)
   if (idx === -1) return false
   const j = jobs[idx]
   if (!j) return false
-  if (j.status === 'queued') {
+  if (j.status === 'queued' || j.status === 'paused') {
+    if (j.status === 'paused') manualPaused = false
     jobs.splice(idx, 1)
     // 最后一个排队任务被取消后，若队列已空则同步解除暂停态（避免横幅残留）
     if (queuePaused && !jobs.some((x) => x.status === 'queued')) queuePaused = false
@@ -742,18 +865,40 @@ export async function cancelBatchJob(id: string): Promise<boolean> {
   return false
 }
 
-/** 清空已结束任务（queued/running 保留），返回移除数量 */
+/** 清空已结束任务（queued/running/paused 保留），返回移除数量 */
 export function clearBatchQueue(): number {
-  const removed = jobs.filter((j) => j.status !== 'queued' && j.status !== 'running').length
+  const removed = jobs.filter(
+    (j) => j.status !== 'queued' && j.status !== 'running' && j.status !== 'paused'
+  ).length
   if (removed > 0) {
     jobs.splice(
       0,
       jobs.length,
-      ...jobs.filter((j) => j.status === 'queued' || j.status === 'running')
+      ...jobs.filter(
+        (j) => j.status === 'queued' || j.status === 'running' || j.status === 'paused'
+      )
     )
     saveQueueSoon()
   }
   return removed
+}
+
+/**
+ * 按 id 删除任意任务（含终态记录）：排队/暂停/已完成/失败/停止均可移除；
+ * 运行中任务请先停止/暂停（避免 pump 对已脱离队列的 job 写状态造成竞态）。
+ * 不存在返回 false。
+ */
+export function deleteBatchJob(id: string): boolean {
+  const idx = jobs.findIndex((j) => j.id === id)
+  if (idx === -1) return false
+  const j = jobs[idx]
+  if (!j) return false
+  if (j.status === 'running') return false
+  if (j.status === 'paused') manualPaused = false
+  jobs.splice(idx, 1)
+  if (queuePaused && !jobs.some((x) => x.status === 'queued')) queuePaused = false
+  saveQueueSoon()
+  return true
 }
 
 /**
@@ -783,6 +928,83 @@ export function moveBatchJob(id: string, toTop = true): boolean {
 
 function ensureLoaded(): void {
   if (!loaded) loadQueue()
+}
+
+/**
+ * 暂停当前运行任务（或指定 id 的运行任务）：
+ * 中断 ComfyUI + 置 executing=false 让 executeJob 返回 'paused'，
+ * 任务保持进度与队列位置，可 resumeBatch 继续。非停止（不抑制 autoShutdown）。
+ * 无运行任务返回 null。
+ */
+export async function pauseBatch(id?: string): Promise<BatchJob | null> {
+  const job = id
+    ? jobs.find((j) => j.id === id && j.status === 'running')
+    : jobs.find((j) => j.status === 'running')
+  if (!job) return null
+  manualPaused = true
+  executing = false
+  try {
+    await stopExecution(artifyUtils.getConfig().comfy_origin)
+  } catch (e) {
+    logger.error('batch pause interrupt failed', e)
+  }
+  pushLog(job, 'info', 'pausing…')
+  saveQueueSoon()
+  return job
+}
+
+/**
+ * 继续执行已暂停任务：恢复 queued 状态并触发调度，从上次进度接着跑。
+ * 不存在（未暂停/已被删除）返回 false。
+ */
+export function resumeBatch(id: string): boolean {
+  const job = jobs.find((j) => j.id === id && j.status === 'paused')
+  if (!job) return false
+  manualPaused = false
+  // 用户点"继续" = 明确的人工操作：同时解除重启恢复后的队列暂停态，
+  // 否则 queuePaused=true 时 pump 直接 return，任务会卡在 queued 不执行
+  queuePaused = false
+  job.status = 'queued'
+  job.finishedAt = undefined
+  job.updatedAt = nowIso()
+  // 标记恢复：executeJob 对恢复任务做无条件 free（防御暂停期间 C 界面残留模型）
+  resumedJobId = job.id
+  pushLog(job, 'info', 'resumed by user')
+  saveQueueSoon()
+  void pump()
+  return true
+}
+
+/**
+ * 队列级配置（浮层/详情页即时生效）：
+ *  - autoShutdown：立即武装/解除会话级关机意图（sessionAutoShutdown），
+ *    并同步到所有排队/运行/暂停任务（暂停任务恢复执行时读最新值，避免旧配置残留）
+ *  - autoShutdownHandled 同步：开启 = 允许本轮再触发一次关机；关闭 = 禁止触发
+ *    （否则本会话已触发过一次关机后，仅通过配置开启不会再触发）
+ *  - notifyUrl：同步到所有排队/运行/暂停任务（完成通知读取最新值），空串 = 关闭
+ */
+export function setQueueConfig(cfg: QueueConfigPayload): void {
+  if (typeof cfg.autoShutdown === 'boolean') {
+    queueConfig.autoShutdown = cfg.autoShutdown
+    sessionAutoShutdown = cfg.autoShutdown
+    autoShutdownHandled = !cfg.autoShutdown
+  }
+  if (typeof cfg.notifyUrl === 'string') {
+    queueConfig.notifyUrl = cfg.notifyUrl.trim()
+  }
+  for (const j of jobs) {
+    if (j.status === 'queued' || j.status === 'running' || j.status === 'paused') {
+      if (typeof cfg.autoShutdown === 'boolean') j.autoShutdown = cfg.autoShutdown
+      if (typeof cfg.notifyUrl === 'string') {
+        j.notifyUrl = queueConfig.notifyUrl || undefined
+      }
+    }
+  }
+  saveQueueSoon()
+}
+
+export function getQueueConfig(): { autoShutdown: boolean; notifyUrl: string } {
+  return { ...queueConfig }
 }
 
 // 进程退出前同步落盘一次：防抖只防 2s 内合并 IO，退出瞬间的最近状态靠这里兜底。

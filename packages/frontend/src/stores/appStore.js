@@ -41,6 +41,7 @@ const getDefaultConfig = () => {
     base_url: 'https://api.deepseek.com/v1',
     model: 'deepseek-reasoner',
     provider: 'deepseek', // 新增供应商字段
+    buildModel: 'deepseek-v4-flash', // 构建应用（Codex agent）使用的模型
     buildStyleId: 'tech', // 新增构建风格ID
     ngrokAuthtoken: '', // 新增ngrok authtoken
   }

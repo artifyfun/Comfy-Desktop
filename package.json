@@ -1,6 +1,6 @@
 {
   "name": "artify-desktop",
-  "version": "1.0.44",
+  "version": "1.0.45",
   "description": "Artify Desktop - Make AI easier to use.",
   "author": {
     "name": "ArtifyFun",
@@ -23,7 +23,7 @@
     "dev": "node scripts/dev.mjs",
     "predev:bootstrap": "node -e \"const fs=require('fs'),p=process.platform==='win32'?'win-x64':process.platform==='darwin'?'mac-arm64':'linux-x64';if(!fs.existsSync('bootstrap-python/'+p)){console.log('Building bootstrap python...');require('child_process').execSync('node scripts/build-bootstrap-python.mjs',{stdio:'inherit'})}\"",
     "dev:bootstrap": "node -e \"process.env.COMFY_FORCE_BOOTSTRAP_GIT='1';require('child_process').execSync('electron-vite dev',{stdio:'inherit',env:process.env})\"",
-    "build": "pnpm run build:frontend && pnpm run typecheck && electron-vite build",
+    "build": "node scripts/copy-codex-bin.mjs && pnpm run build:frontend && pnpm run typecheck && electron-vite build",
     "start": "electron-vite preview",
     "postinstall": "node ./scripts/postinstall.mjs",
     "todesktop:beforeInstall": "./scripts/todesktop-beforeInstall.cjs",
@@ -102,6 +102,7 @@
     "@datadog/datadog-ci": "^5.9.0",
     "@electron/rebuild": "^3.7.2",
     "@eslint/js": "^10.0.1",
+    "@openai/codex": "^0.149.1",
     "@pinia/testing": "^1.0.3",
     "@playwright/test": "^1.58.2",
     "@tailwindcss/vite": "^4.1.8",

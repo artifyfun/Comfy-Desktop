@@ -1,6 +1,6 @@
 // batchRunner 顶层 import artifyUtils(→ server → electron),测试环境无 electron
 // 二进制,这里 mock 掉模块副作用部分;executor 也 mock,只测引擎行为与纯函数。
-import { describe, expect, it, vi, beforeEach, beforeAll, afterAll } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -158,6 +158,8 @@ afterAll(() => {
 
 describe('batch queue engine', () => {
   let lastWfKey: string | null
+  /** 默认 fetch 守卫：测试进程内一切真实网络请求都被它拦截（见 beforeEach） */
+  let fetchGuard: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     // 固定 mock 对象，只重置行为；resetModules 拿到干净 jobs 队列；
@@ -181,6 +183,18 @@ describe('batch queue engine', () => {
     })
     vi.resetModules()
     fs.rmSync(queueFile, { force: true })
+    // ===== 安全护栏：默认屏蔽全部真实 fetch =====
+    // 测试进程内任何 /api/shutdown、/api/notify 请求都必须经过 mock：
+    // 本机 Comfy-Desktop 若正在运行（server 端口 3008），未屏蔽的真实请求
+    // 会真的触发关机/推送。需要断言 fetch 的测试在体内覆盖此 stub。
+    fetchGuard = vi.fn().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchGuard)
+  })
+
+  afterEach(() => {
+    // 兜底：测试体内的 unstubAllGlobals() 可能清掉了默认 stub，
+    // 而收尾阶段的后台任务（pump / notifyJob 异步残留）绝不能发真实请求。
+    vi.stubGlobal('fetch', fetchGuard)
   })
 
   it('enqueues instead of rejecting when another task is queued', async () => {
@@ -459,5 +473,307 @@ describe('batch queue engine', () => {
     await new Promise((r) => setTimeout(r, 100))
     expect(fetchSpy.mock.calls.some(([u]) => String(u).includes('/api/shutdown'))).toBe(false)
     vi.unstubAllGlobals()
+  })
+
+  // ---------- 暂停 / 继续 / 删除出队 / 队列级配置 ----------
+
+  it('pause keeps progress and resume continues from where it stopped', async () => {
+    const mod = await import('./batchRunner')
+    const r = await mod.startBatch(mkOpts({ items: [{ i: 1 }, { i: 2 }, { i: 3 }] }))
+    await waitFor(() => mod.listBatchQueue().find((j) => j.id === r.job.id)?.status === 'running')
+    // 运行中暂停：任务进入 paused（保留进度），不取下一个排队任务
+    expect(await mod.pauseBatch()).not.toBeNull()
+    await waitFor(() => mod.listBatchQueue().find((j) => j.id === r.job.id)?.status === 'paused')
+    const paused = mod.listBatchQueue().find((j) => j.id === r.job.id)
+    expect(paused?.status).toBe('paused')
+    expect(paused && paused.processed >= 0).toBe(true)
+    // 队列里没有第二个任务被启动
+    // 继续：从进度处恢复并跑完
+    expect(mod.resumeBatch(r.job.id)).toBe(true)
+    await waitFor(() => mod.listBatchQueue().find((j) => j.id === r.job.id)?.status === 'completed')
+    const done = mod.listBatchQueue().find((j) => j.id === r.job.id)
+    expect(done?.processed).toBe(done?.total)
+    await settleQueue(mod)
+  })
+
+  it('pause returns null when nothing is running; resume false for non-paused job', async () => {
+    const mod = await import('./batchRunner')
+    expect(await mod.pauseBatch()).toBeNull()
+    expect(mod.resumeBatch('nope')).toBe(false)
+  })
+
+  it('cancel removes a paused job (dequeue)', async () => {
+    const mod = await import('./batchRunner')
+    const r = await mod.startBatch(mkOpts())
+    await waitFor(() => mod.listBatchQueue().find((j) => j.id === r.job.id)?.status === 'running')
+    await mod.pauseBatch()
+    await waitFor(() => mod.listBatchQueue().find((j) => j.id === r.job.id)?.status === 'paused')
+    expect(await mod.cancelBatchJob(r.job.id)).toBe(true)
+    expect(mod.listBatchQueue()).toHaveLength(0)
+    // 删除暂停任务后新提交不受残留 manualPaused 影响：能正常跑完
+    const r2 = await mod.startBatch(mkOpts())
+    await waitFor(
+      () => mod.listBatchQueue().find((j) => j.id === r2.job.id)?.status === 'completed'
+    )
+    await settleQueue(mod)
+  })
+
+  it('delete removes any non-running job (incl. finished records)', async () => {
+    const mod = await import('./batchRunner')
+    const r1 = await mod.startBatch(mkOpts())
+    const r2 = await mod.startBatch(mkOpts())
+    // 排队任务可删除
+    expect(mod.deleteBatchJob(r2.job.id)).toBe(true)
+    expect(mod.listBatchQueue()).toHaveLength(1)
+    // 等 r1 跑完，终态记录也可删除
+    await waitFor(() =>
+      mod.listBatchQueue().every((j) => j.status !== 'queued' && j.status !== 'running')
+    )
+    expect(mod.deleteBatchJob(r1.job.id)).toBe(true)
+    expect(mod.listBatchQueue()).toHaveLength(0)
+  })
+
+  it('delete refuses a running job', async () => {
+    const mod = await import('./batchRunner')
+    const r = await mod.startBatch(mkOpts())
+    await waitFor(() => mod.listBatchQueue().find((j) => j.id === r.job.id)?.status === 'running')
+    expect(mod.deleteBatchJob(r.job.id)).toBe(false)
+    expect(mod.listBatchQueue()).toHaveLength(1)
+    await settleQueue(mod)
+  })
+
+  it('resume forces a defensive free (C-UI leftover protection)', async () => {
+    const mod = await import('./batchRunner')
+    const r = await mod.startBatch(mkOpts({ appId: 'resume-free' }))
+    await waitFor(() => mod.listBatchQueue().find((j) => j.id === r.job.id)?.status === 'running')
+    // 首次执行 = 会话首个 → forceFreeAndTrack 1 次
+    expect(mocks.forceFreeAndTrack).toHaveBeenCalledTimes(1)
+    await mod.pauseBatch()
+    await waitFor(() => mod.listBatchQueue().find((j) => j.id === r.job.id)?.status === 'paused')
+    // 暂停后恢复：即使同工作流，也必须无条件 free（暂停期间可能去过 C 界面）
+    mod.resumeBatch(r.job.id)
+    await waitFor(() => mod.listBatchQueue().find((j) => j.id === r.job.id)?.status === 'completed')
+    expect(mocks.forceFreeAndTrack).toHaveBeenCalledTimes(2)
+    await settleQueue(mod)
+  })
+
+  it('setQueueConfig applies shutdown/notify to active jobs and arms shutdown', async () => {
+    const mod = await import('./batchRunner')
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchSpy)
+    await mod.startBatch(mkOpts({ appId: 'a' }))
+    await mod.startBatch(mkOpts({ appId: 'b' }))
+    mod.setQueueConfig({ autoShutdown: true, notifyUrl: 'https://api.day.app/x' })
+    const q = mod.listBatchQueue()
+    for (const j of q) {
+      expect(j.autoShutdown).toBe(true)
+      expect(j.notifyUrl).toBe('https://api.day.app/x')
+    }
+    // 会话级关机意图已武装：任务本身未开关机，但配置了 → 自然跑完触发一次关机
+    await waitFor(() => fetchSpy.mock.calls.some(([u]) => String(u).includes('/api/shutdown')))
+    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/api/shutdown'))).toHaveLength(1)
+    vi.unstubAllGlobals()
+  })
+
+  it('setQueueConfig re-arms shutdown after a previous session already fired it', async () => {
+    const mod = await import('./batchRunner')
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchSpy)
+    // 第一轮：autoShutdown 任务跑完触发关机（autoShutdownHandled=true）
+    await mod.startBatch(mkOpts({ autoShutdown: true }))
+    await waitFor(() => fetchSpy.mock.calls.some(([u]) => String(u).includes('/api/shutdown')))
+    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/api/shutdown'))).toHaveLength(1)
+    // 第二轮：仅通过队列配置重新开启关机，提交普通任务 → 应再次触发
+    mod.setQueueConfig({ autoShutdown: true })
+    await mod.startBatch(mkOpts({ appId: 'plain' }))
+    await waitFor(
+      () => fetchSpy.mock.calls.filter(([u]) => String(u).includes('/api/shutdown')).length >= 2
+    )
+    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/api/shutdown'))).toHaveLength(2)
+    vi.unstubAllGlobals()
+  })
+
+  it('setQueueConfig applies config to paused jobs too (resume uses latest values)', async () => {
+    const mod = await import('./batchRunner')
+    const r = await mod.startBatch(mkOpts({ appId: 'p' }))
+    await waitFor(() => mod.listBatchQueue().find((j) => j.id === r.job.id)?.status === 'running')
+    await mod.pauseBatch()
+    await waitFor(() => mod.listBatchQueue().find((j) => j.id === r.job.id)?.status === 'paused')
+    mod.setQueueConfig({ autoShutdown: true, notifyUrl: 'https://api.day.app/paused' })
+    const p = mod.listBatchQueue().find((j) => j.id === r.job.id)
+    expect(p?.autoShutdown).toBe(true)
+    expect(p?.notifyUrl).toBe('https://api.day.app/paused')
+    await settleQueue(mod)
+  })
+
+  it('resumeBatch unpauses a restart-paused queue (no deadlock)', async () => {
+    vi.resetModules()
+    fs.writeFileSync(
+      queueFile,
+      JSON.stringify([
+        {
+          id: 'q1',
+          status: 'queued',
+          startFrom: 1,
+          total: 1,
+          processed: 0,
+          success: 0,
+          failed: 0,
+          percent: 0,
+          currentIndex: 0,
+          currentPreview: '',
+          createdAt: 'now',
+          updatedAt: 'now',
+          prompt: {},
+          inputsMapping: [],
+          items: [{ a: 1 }],
+          logs: [],
+          results: []
+        },
+        {
+          id: 'p1',
+          status: 'paused',
+          startFrom: 1,
+          total: 2,
+          processed: 1,
+          success: 1,
+          failed: 0,
+          percent: 50,
+          currentIndex: 1,
+          currentPreview: '1: {"a":1}',
+          createdAt: 'now',
+          updatedAt: 'now',
+          prompt: {},
+          inputsMapping: [],
+          items: [{ a: 1 }, { a: 2 }],
+          logs: [],
+          results: []
+        }
+      ])
+    )
+    const mod = await import('./batchRunner')
+    mod.loadQueue()
+    expect(mod.isQueuePaused()).toBe(true)
+    // 用户只点暂停任务的"继续"：应解除重启暂停态，两个任务都能跑完
+    expect(mod.resumeBatch('p1')).toBe(true)
+    expect(mod.isQueuePaused()).toBe(false)
+    await waitFor(() => mod.listBatchQueue().every((j) => j.status === 'completed'))
+    // p1 从进度 1 继续，只处理剩余 1 项
+    const done = mod.listBatchQueue().find((j) => j.id === 'p1')
+    expect(done?.processed).toBe(2)
+    expect(done?.success).toBe(2)
+    await mod.stopBatch({ stopAll: true })
+  })
+
+  it('setQueueConfig autoShutdown=false disarms session shutdown mid-run', async () => {
+    const mod = await import('./batchRunner')
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchSpy)
+    // 任务自带 autoShutdown，但队列配置随后显式关闭 → 不触发关机
+    await mod.startBatch(mkOpts({ autoShutdown: true }))
+    mod.setQueueConfig({ autoShutdown: false })
+    await waitFor(() =>
+      mod.listBatchQueue().every((j) => j.status !== 'queued' && j.status !== 'running')
+    )
+    await new Promise((r) => setTimeout(r, 100))
+    expect(fetchSpy.mock.calls.some(([u]) => String(u).includes('/api/shutdown'))).toBe(false)
+    vi.unstubAllGlobals()
+  })
+
+  // ---------- 重新运行（rerun） ----------
+
+  it('rerun clones a finished job with its full config and re-executes it', async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetchSpy) // 屏蔽 notifyJob / shutdown 的真实本机请求
+    const mod = await import('./batchRunner')
+    const opts = mkOpts({
+      appId: 'rerun-app',
+      appName: 'rerun-name',
+      autoShutdown: true,
+      notifyUrl: 'https://api.day.app/rerun',
+      startFrom: 2,
+      items: [{ a: 1 }, { a: 2 }, { a: 3 }]
+    })
+    const r = await mod.startBatch(opts)
+    await waitFor(() => mod.listBatchQueue().find((j) => j.id === r.job.id)?.status === 'completed')
+    const rerun = await mod.rerunBatchJob(r.job.id)
+    expect(rerun).not.toBeNull()
+    expect(rerun!.job.id).not.toBe(r.job.id)
+    // pump 同步启动：队头任务可能已被标为 running（与 startBatch 返回时序一致）
+    expect(['queued', 'running']).toContain(rerun!.job.status)
+    // 完整复刻原配置
+    expect(rerun!.job.appId).toBe('rerun-app')
+    expect(rerun!.job.appName).toBe('rerun-name')
+    expect(rerun!.job.autoShutdown).toBe(true)
+    expect(rerun!.job.notifyUrl).toBe('https://api.day.app/rerun')
+    expect(rerun!.job.startFrom).toBe(2)
+    expect(rerun!.job.total).toBe(3)
+    expect(rerun!.job.processed).toBe(1) // startFrom-1
+    expect(rerun!.job.success).toBe(0)
+    expect(rerun!.job.failed).toBe(0)
+    // 重新跑完
+    await waitFor(
+      () => mod.listBatchQueue().find((j) => j.id === rerun!.job.id)?.status === 'completed'
+    )
+    const done = mod.listBatchQueue().find((j) => j.id === rerun!.job.id)
+    expect(done?.processed).toBe(3)
+    await settleQueue(mod)
+    vi.unstubAllGlobals()
+  }, 20000)
+
+  it('rerun rejects active jobs and unknown ids', async () => {
+    const mod = await import('./batchRunner')
+    expect(await mod.rerunBatchJob('nope')).toBeNull()
+    const r = await mod.startBatch(mkOpts())
+    await waitFor(() => mod.listBatchQueue().find((j) => j.id === r.job.id)?.status === 'running')
+    expect(await mod.rerunBatchJob(r.job.id)).toBeNull() // running 不可重跑
+    await settleQueue(mod)
+  })
+
+  it('rerun rejects when queue is full', async () => {
+    vi.resetModules()
+    // 持久化注入：1 个已完成任务（可 rerun 的 src）+ MAX_QUEUED 个排队任务（占满活跃名额）
+    const mkJob = (id: string, status: string, items: Array<Record<string, unknown>>) => ({
+      id,
+      status,
+      startFrom: 1,
+      total: items.length,
+      processed: status === 'completed' ? items.length : 0,
+      success: status === 'completed' ? items.length : 0,
+      failed: 0,
+      percent: status === 'completed' ? 100 : 0,
+      currentIndex: 0,
+      currentPreview: '',
+      createdAt: 'now',
+      updatedAt: 'now',
+      prompt: {},
+      inputsMapping: [],
+      items,
+      logs: [],
+      results: []
+    })
+    const jobs = [
+      mkJob('done-1', 'completed', [{ a: 1 }]),
+      ...Array.from({ length: 20 }, (_, i) => mkJob(`q-${i}`, 'queued', [{ a: 1 }]))
+    ]
+    fs.writeFileSync(queueFile, JSON.stringify(jobs))
+    const mod = await import('./batchRunner')
+    mod.loadQueue()
+    // src 存在（done-1）但队列已满 → 抛 queue is full
+    await expect(mod.rerunBatchJob('done-1')).rejects.toThrow(/queue is full/)
+  })
+
+  it('default fetch guard intercepts shutdown path (never real POST)', async () => {
+    // 不显式 stub fetch：依赖 beforeEach 的默认守卫。
+    // 若守卫失效，finishActionsWhenIdle 会真实 POST localhost:3008/api/shutdown，
+    // 本机 Comfy-Desktop 在运行时会真的关机——本测试证明该路径只走 mock。
+    fetchGuard.mockClear()
+    const mod = await import('./batchRunner')
+    await mod.startBatch(mkOpts({ autoShutdown: true }))
+    await waitFor(() => fetchGuard.mock.calls.some(([u]) => String(u).includes('/api/shutdown')))
+    // 请求确实被守卫（mock）接收并返回空响应，从未发往本机 server
+    const shutdownCalls = fetchGuard.mock.calls.filter(([u]) => String(u).includes('/api/shutdown'))
+    expect(shutdownCalls.length).toBe(1)
+    expect(String(shutdownCalls[0]![0])).toMatch(/^http:\/\/localhost:\d+\/api\/shutdown$/)
   })
 })
