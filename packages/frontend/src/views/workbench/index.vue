@@ -16,6 +16,7 @@
           :current-id="sessionId"
           :collapsed="sidebarCollapsed"
           :show-archived="showArchived"
+          :archived-count="archivedCount"
           @select="selectSession"
           @new-session="newDialogOpen = true"
           @collapse="sidebarCollapsed = !sidebarCollapsed"
@@ -358,6 +359,29 @@
       </button>
     </div>
 
+    <!-- 归档/删除 确认弹窗（破坏性操作统一二次确认） -->
+    <a-modal
+      :open="!!confirmState"
+      :title="
+        confirmState?.kind === 'delete'
+          ? t('workbenchDeleteConfirmTitle')
+          : t('workbenchArchiveConfirmTitle')
+      "
+      :ok-text="confirmState?.kind === 'delete' ? t('delete') : t('workbenchArchive')"
+      :cancel-text="t('cancel')"
+      :ok-button-props="{ danger: confirmState?.kind === 'delete' }"
+      @ok="onConfirmOk"
+      @cancel="confirmState = null"
+    >
+      <p class="text-sm text-slate-300">
+        {{
+          confirmState?.kind === 'delete'
+            ? t('workbenchDeleteConfirmBody', { title: confirmState?.session?.title || '' })
+            : t('workbenchArchiveConfirmBody', { title: confirmState?.session?.title || '' })
+        }}
+      </p>
+    </a-modal>
+
     <!-- 固化弹窗 -->
     <a-modal
       v-model:open="publishOpen"
@@ -421,6 +445,7 @@ const defaultPresetId = ref('standard')
 const modelOverride = ref({})
 const sidebarCollapsed = ref(false)
 const showArchived = ref(false)
+const confirmState = ref(null) // { kind:'archive'|'delete', session }
 const panelOpen = ref(true)
 const messagesEl = ref(null)
 const composerEl = ref(null)
@@ -535,7 +560,23 @@ async function onRename({ id, title }) {
   await loadSessions()
 }
 
-async function setArchived(s, archived) {
+// 归档走确认弹窗（dsh/Codex 惯例：破坏性视图操作需二次确认；单会话级操作）
+function setArchived(s, archived) {
+  if (!archived) return doSetArchived(s, false)
+  const running = (s.executions ?? []).some((e) => e.status === 'queued' || e.status === 'running')
+  if (!running) return doSetArchived(s, true)
+  confirmState.value = { kind: 'archive', session: s }
+}
+
+async function onConfirmOk() {
+  const st = confirmState.value
+  confirmState.value = null
+  if (!st) return
+  if (st.kind === 'archive') await doSetArchived(st.session, true)
+  else await doDelete(st.session)
+}
+
+async function doSetArchived(s, archived) {
   await fetch(`${origin.value}/api/workbench/sessions/update`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -548,7 +589,11 @@ async function setArchived(s, archived) {
   }
 }
 
-async function onDelete(s) {
+function onDelete(s) {
+  confirmState.value = { kind: 'delete', session: s }
+}
+
+async function doDelete(s) {
   await fetch(`${origin.value}/api/workbench/sessions/delete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1028,7 +1073,22 @@ function scrollToBottom() {
   })
 }
 
-watch(showArchived, loadSessions)
+// 归档徽章计数独立于当前过滤视图
+const allCounts = ref({ total: 0, archived: 0 })
+async function loadArchiveCount() {
+  try {
+    const res = await fetch(`${origin.value}/api/workbench/sessions`)
+    const json = await res.json()
+    const list = json?.data ?? []
+    allCounts.value = { total: list.length, archived: list.filter((x) => x.archived).length }
+  } catch {}
+}
+const archivedCount = computed(() => allCounts.value.archived)
+watch(showArchived, () => {
+  loadSessions()
+  loadArchiveCount()
+})
+onMounted(loadArchiveCount)
 </script>
 
 <style scoped>

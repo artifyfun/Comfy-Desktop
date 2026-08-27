@@ -37,13 +37,29 @@
       </div>
 
       <!-- 归档切换 -->
-      <div class="px-2 pb-1 flex justify-end">
+      <!-- 归档视图切换（ChatGPT/dsh 语义：查看已归档会话，非批量操作） -->
+      <div class="px-2 pb-1 flex items-center justify-between">
+        <template v-if="!showArchived">
+          <span />
+          <button
+            class="text-[11px] px-2 py-0.5 rounded flex items-center gap-1.5 text-slate-500 hover:text-slate-300 transition"
+            :title="t('workbenchArchivedView')"
+            @click="$emit('update:showArchived', true)"
+          >
+            <i class="fas fa-box-archive"></i>{{ t('workbenchArchivedView') }}
+            <span
+              v-if="archivedCount > 0"
+              class="text-[10px] leading-none px-1.5 py-0.5 rounded-full bg-slate-700 text-slate-300"
+              >{{ archivedCount }}</span
+            >
+          </button>
+        </template>
         <button
-          class="text-[11px] px-2 py-0.5 rounded"
-          :class="showArchived ? 'text-tech-cyan' : 'text-slate-500 hover:text-slate-300'"
-          @click="$emit('update:showArchived', !showArchived)"
+          v-else
+          class="flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded text-tech-cyan hover:bg-slate-800 transition"
+          @click="$emit('update:showArchived', false)"
         >
-          <i class="fas fa-box-archive mr-1"></i>{{ t('workbenchArchived') }}
+          <i class="fas fa-arrow-left text-[10px]"></i>{{ t('workbenchBackToSessions') }}
         </button>
       </div>
 
@@ -158,6 +174,7 @@ const props = defineProps({
   currentId: { type: String, default: '' },
   collapsed: { type: Boolean, default: false },
   showArchived: { type: Boolean, default: false },
+  archivedCount: { type: Number, default: 0 },
 })
 const emit = defineEmits([
   'select',
