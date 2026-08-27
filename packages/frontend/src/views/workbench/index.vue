@@ -629,6 +629,11 @@ async function uploadFiles(files) {
         : f.type.startsWith('audio/')
           ? 'audio'
           : 'file'
+    if (kind === 'file') {
+      // 文档类：不参与工作流媒体槽位（ComfyUI 不吃文档），仅作为 AI 决策上下文。
+      // 明示给用户，避免"传了却没被用"的困惑。
+      message.info(t('workbenchDocAsContext', { name: f.name }))
+    }
     draftAttachments.value.push({
       kind,
       filename: f.name,

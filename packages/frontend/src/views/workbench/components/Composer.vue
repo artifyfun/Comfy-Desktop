@@ -79,7 +79,7 @@
       ref="fileEl"
       type="file"
       multiple
-      accept="image/*,video/*,audio/*"
+      accept="image/*,video/*,audio/*,.pdf,.txt,.md,.json"
       class="hidden"
       @change="onFileChange"
     />

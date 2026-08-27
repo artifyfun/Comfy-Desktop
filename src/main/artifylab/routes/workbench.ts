@@ -201,9 +201,14 @@ export function createWorkbenchRouter(): express.Router {
       )
       res.status(HTTP_STATUS.CREATED).json(createSuccessResponse(meta))
     } catch (e) {
-      res
-        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-        .json(createErrorResponse(e instanceof Error ? e.message : 'upload failed'))
+      const raw = e instanceof Error ? e.message : 'upload failed'
+      // ComfyUI 离线是上传失败的最常见根因（上传=转发 ComfyUI /upload/image），
+      // undici 的底层 "fetch failed" 对用户没有信息量，翻译成可行动的提示
+      const message = /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(raw)
+        ? `无法连接 ComfyUI（${appStoreManager.getConfig().comfyHost}），请先启动 ComfyUI 再上传`
+        : raw
+      logger.warn('workbench upload failed', e)
+      res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json(createErrorResponse(message))
     }
   })
 

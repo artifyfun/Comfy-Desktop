@@ -421,6 +421,7 @@ const translations = {
     workbenchManagePresets: '技能与预设管理',
     workbenchPresetPick: '选择预设',
     workbenchSessionTitle: '会话标题（可选）',
+    workbenchDocAsContext: '「{name}」将作为上下文提供给 AI（文档不参与工作流执行）',
     workbenchTitleAuto: '留空则 AI 自动生成',
     workbenchPresetDefaultHint: '默认预设',
     workbenchSetDefault: '设为默认',
@@ -1185,6 +1186,8 @@ const translations = {
     workbenchManagePresets: 'Skills & Presets',
     workbenchPresetPick: 'Pick a preset',
     workbenchSessionTitle: 'Session title (optional)',
+    workbenchDocAsContext:
+      '"{name}" will be provided to the AI as context (documents do not participate in workflow execution)',
     workbenchTitleAuto: 'Leave empty for AI auto title',
     workbenchPresetDefaultHint: 'Default preset',
     workbenchSetDefault: 'Set default',
