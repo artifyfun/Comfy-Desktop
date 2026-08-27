@@ -484,9 +484,11 @@ ${userInput}`
         baseUrl: appStoreManager.getConfig().base_url || undefined
       }),
       apiKey: appStoreManager.getConfig().api_key || process.env.CODEX_API_KEY || '',
-      // 用户级 ~/.codex/config.toml 可能定义 model_provider="custom"（如 cliproxy），
-      // provider 级 base_url 优先于 --config openai_base_url，导致 8317 劫持。
-      // 强制回内置 openai provider 让 baseUrl 覆盖真正生效。
+      // 隔离 CODEX_HOME：应用自带打包二进制，不读用户级 ~/.codex/config.toml
+      // （其中 model_provider=custom 等用户本地配置会劫持 base_url，实测 8317 案例）。
+      // 临时干净 HOME + 显式 config 覆盖 = 完全自理，零外部依赖。
+      env: { ...process.env, CODEX_HOME: app.getPath('temp') },
+      // 双保险：即使泄露进 provider 配置，也强制回内置 openai 让 baseUrl 生效
       config: { model_provider: 'openai' }
     })
     const thread = codex.startThread({
