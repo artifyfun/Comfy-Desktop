@@ -113,10 +113,10 @@
       >
         <a-form layout="vertical">
           <a-form-item label="ID">
-            <a-input v-model:value="copyId" placeholder="my-preset" />
+            <a-input v-model:value="copyId" placeholder="my-preset" class="wb-tech-input" />
           </a-form-item>
           <a-form-item :label="t('appName')">
-            <a-input v-model:value="copyName" />
+            <a-input v-model:value="copyName" class="wb-tech-input" />
           </a-form-item>
         </a-form>
       </a-modal>

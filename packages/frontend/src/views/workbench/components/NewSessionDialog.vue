@@ -62,7 +62,12 @@
       </div>
       <div>
         <div class="text-sm text-slate-300 mb-1">{{ t('workbenchSessionTitle') }}</div>
-        <a-input v-model:value="title" :placeholder="t('workbenchTitleAuto')" allow-clear />
+        <a-input
+          v-model:value="title"
+          :placeholder="t('workbenchTitleAuto')"
+          allow-clear
+          class="wb-tech-input"
+        />
       </div>
     </div>
   </a-modal>

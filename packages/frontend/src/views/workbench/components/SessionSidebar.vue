@@ -32,7 +32,7 @@
         <input
           v-model="query"
           :placeholder="t('workbenchSearchSessions')"
-          class="w-full px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-tech-blue"
+          class="wb-tech-input w-full px-3 py-1.5 text-sm focus:outline-none"
         />
       </div>
 

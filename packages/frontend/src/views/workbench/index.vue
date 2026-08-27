@@ -288,6 +288,7 @@
           <a-input
             v-model:value="publishName"
             :placeholder="t('workbenchPublishNamePlaceholder')"
+            class="wb-tech-input"
           />
         </a-form-item>
         <a-form-item :label="t('workbenchPublishUi')">
@@ -844,4 +845,9 @@ watch(showArchived, loadSessions)
 .bg-tech-blue\/90 {
   background-color: rgba(59, 130, 246, 0.9);
 }
+</style>
+
+<style>
+/* 工作台全局小样式（modal 传送 body，需非 scoped） */
+@import './workbench.css';
 </style>

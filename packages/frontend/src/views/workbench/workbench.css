@@ -1,0 +1,30 @@
+/*
+ * 工作台统一输入框样式（与 app 列表 AppSearch 的 tech-input 同源）：
+ * 深蓝透明底 + 石板描边 + 天蓝聚焦环。用于工作台内所有小输入框
+ * （会话搜索/新建标题/预设表单/固化弹窗）；主输入框是 Composer 卡片。
+ * 全局挂载（modal 传送到 body 外，父级 scoped 命不中）。
+ */
+.wb-tech-input,
+.wb-tech-input .ant-input {
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(56, 70, 102, 0.6);
+  border-radius: 0.5rem;
+  color: #fff;
+  transition:
+    background 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+.wb-tech-input:focus,
+.wb-tech-input:focus-within,
+.wb-tech-input .ant-input:focus,
+.wb-tech-input .ant-input-focused {
+  border-color: #0ea5e9;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+}
+
+.wb-tech-input ::placeholder,
+.wb-tech-input .ant-input::placeholder {
+  color: #64748b;
+}
