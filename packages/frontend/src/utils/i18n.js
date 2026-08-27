@@ -122,6 +122,22 @@ const translations = {
     shareApps: '应用分享',
     quickActions: '快捷操作',
 
+    // AI 接入（MCP）
+    aiAccess: 'AI 接入',
+    mcpIntro: '把 Artify 的应用暴露给 AI 客户端（Claude Code / Cursor 等），每个应用自动变成一个可调用的 MCP 工具。',
+    mcpEndpoint: 'MCP 端点',
+    mcpToken: '访问 Token',
+    mcpRegenerate: '重置',
+    mcpRegenerateConfirm: '重置后旧 Token 立即失效，所有已连接的 AI 客户端需要更新配置。确定重置吗？',
+    mcpTokenRegenerated: 'Token 已重置',
+    mcpClientSnippets: '客户端配置',
+    mcpClaudeCode: 'Claude Code（命令行）',
+    mcpCursorJson: 'Cursor / Claude Desktop（JSON）',
+    mcpGeneric: '通用（URL + Token）',
+    mcpAppCount: '已暴露为 MCP 工具的应用',
+    mcpAutoSync: '在主页新建或删除应用后，工具列表自动更新，无需重启。',
+    mcpLanWarning: '服务正在监听非回环地址：MCP 端点在局域网可达，请妥善保管 Token。',
+
     // 应用风格
     appStyle: '应用风格',
     appStyleDescription: '自定义应用界面样式，支持HTML和CSS代码',
@@ -764,6 +780,22 @@ const translations = {
     buildConfig: 'Build Config',
     shareApps: 'Share Apps',
     quickActions: 'Quick Actions',
+
+    // AI Access (MCP)
+    aiAccess: 'AI Access',
+    mcpIntro: 'Expose your Artify apps to AI clients (Claude Code / Cursor, etc.) — every app automatically becomes a callable MCP tool.',
+    mcpEndpoint: 'MCP Endpoint',
+    mcpToken: 'Access Token',
+    mcpRegenerate: 'Reset',
+    mcpRegenerateConfirm: 'The old token will be invalidated immediately and every connected AI client must update its config. Reset anyway?',
+    mcpTokenRegenerated: 'Token has been reset',
+    mcpClientSnippets: 'Client Setup',
+    mcpClaudeCode: 'Claude Code (CLI)',
+    mcpCursorJson: 'Cursor / Claude Desktop (JSON)',
+    mcpGeneric: 'Generic (URL + Token)',
+    mcpAppCount: 'Apps exposed as MCP tools',
+    mcpAutoSync: 'Creating or deleting apps on the home page updates the tool list automatically — no restart needed.',
+    mcpLanWarning: 'The server is listening on a non-loopback address: the MCP endpoint is reachable from your network. Keep the token safe.',
 
     // 应用风格
     appStyle: 'App Style',

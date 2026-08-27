@@ -268,7 +268,114 @@
                 </div>
               </div>
 
-              <!-- Tab3: 分享配置 -->
+              <!-- Tab3: AI 接入（MCP） -->
+              <div v-if="activeTab === 'mcp'">
+                <div v-if="mcpLoading" class="py-4 text-slate-400">
+                  {{ t('loading') }}
+                </div>
+                <div
+                  v-else-if="mcpError"
+                  class="p-3 text-sm rounded-lg bg-red-500/20 border border-red-500/30 text-red-400"
+                >
+                  {{ mcpError }}
+                </div>
+                <template v-else-if="mcp">
+                  <p class="mb-4 text-xs leading-5 text-slate-400">
+                    {{ t('mcpIntro') }}
+                  </p>
+
+                  <!-- 局域网监听告警 -->
+                  <div
+                    v-if="!mcp.loopback"
+                    class="p-3 mb-4 text-xs rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300"
+                  >
+                    <i class="mr-1 fas fa-exclamation-triangle"></i>
+                    {{ t('mcpLanWarning') }}
+                  </div>
+
+                  <!-- 端点 -->
+                  <div class="mb-4">
+                    <label class="block mb-2 text-slate-300">{{ t('mcpEndpoint') }}</label>
+                    <div class="flex items-center gap-2">
+                      <code
+                        class="flex-1 px-3 py-2 text-xs text-cyan-200 break-all rounded-lg bg-black/30"
+                        >{{ mcp.url }}</code
+                      >
+                      <button
+                        @click="copyText(mcp.url)"
+                        class="px-3 py-2 text-xs text-white rounded-lg transition duration-200 bg-gradient-to-r from-tech-blue to-tech-cyan hover:opacity-90"
+                      >
+                        <i class="fas fa-copy"></i>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Token -->
+                  <div class="mb-4">
+                    <label class="block mb-2 text-slate-300">{{ t('mcpToken') }}</label>
+                    <div class="flex items-center gap-2">
+                      <code
+                        class="flex-1 px-3 py-2 text-xs text-cyan-200 break-all rounded-lg bg-black/30"
+                        >{{ maskedMcpToken }}</code
+                      >
+                      <button
+                        @click="showMcpToken = !showMcpToken"
+                        class="px-3 py-2 text-xs text-slate-300 rounded-lg border border-slate-600 hover:text-white"
+                      >
+                        <i :class="showMcpToken ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                      </button>
+                      <button
+                        @click="copyText(mcp.token)"
+                        class="px-3 py-2 text-xs text-white rounded-lg transition duration-200 bg-gradient-to-r from-tech-blue to-tech-cyan hover:opacity-90"
+                      >
+                        <i class="fas fa-copy"></i>
+                      </button>
+                      <button
+                        @click="regenerateMcpToken"
+                        :disabled="mcpRegenerating"
+                        class="px-3 py-2 text-xs text-red-300 rounded-lg border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 disabled:opacity-50"
+                      >
+                        <i
+                          :class="mcpRegenerating ? 'fas fa-spinner fa-spin' : 'fas fa-rotate'"
+                        ></i>
+                        {{ t('mcpRegenerate') }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- 客户端配置 snippet -->
+                  <div class="mb-4">
+                    <label class="block mb-2 text-slate-300">{{ t('mcpClientSnippets') }}</label>
+                    <div class="space-y-2">
+                      <div v-for="snippet in mcpSnippets" :key="snippet.key">
+                        <div class="mb-1 text-xs text-slate-400">{{ snippet.label }}</div>
+                        <div class="relative">
+                          <pre
+                            class="pt-2 pr-14 pb-2 pl-3 text-[11px] leading-4 text-cyan-200 break-all whitespace-pre-wrap rounded-lg bg-black/30 max-h-28 overflow-y-auto"
+                            >{{ snippet.cmd }}</pre
+                          >
+                          <button
+                            @click="copyText(snippet.cmd)"
+                            class="absolute top-1.5 right-1.5 px-2 py-1 text-[11px] text-white rounded transition duration-200 bg-gradient-to-r from-tech-blue to-tech-cyan hover:opacity-90"
+                          >
+                            <i class="fas fa-copy"></i>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 工具数说明 -->
+                  <div class="text-xs text-slate-400">
+                    <i class="mr-1 fas fa-circle-info"></i>
+                    {{ t('mcpAppCount') }}:
+                    <span class="font-bold text-tech-cyan">{{ mcp.appCount }}</span>
+                    <span class="block mt-1 text-slate-500">{{ t('mcpAutoSync') }}</span>
+                  </div>
+                </template>
+              </div>
+
+              <!-- Tab4: 分享配置 -->
               <div v-if="activeTab === 'share'">
                 <div>
                   <label class="block mb-2 text-slate-300">{{ t('ngrokAuthtoken') }}</label>
@@ -389,7 +496,7 @@
                 </div>
               </div>
 
-              <!-- Tab4: 快捷操作 -->
+              <!-- Tab5: 快捷操作 -->
               <div v-if="activeTab === 'quick'">
                 <div class="space-y-4">
                   <div class="grid grid-cols-1 gap-3">
@@ -470,7 +577,7 @@
                 </div>
               </div>
 
-              <div class="pt-4" v-if="!['quick'].includes(activeTab)">
+              <div class="pt-4" v-if="!['quick', 'mcp'].includes(activeTab)">
                 <button
                   @click="handleClickConfirm"
                   class="py-3 w-full font-medium text-white bg-gradient-to-r rounded-lg transition cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
@@ -487,7 +594,7 @@
 </template>
 
 <script setup name="ConfigModal">
-import { reactive, onMounted, ref } from 'vue'
+import { reactive, onMounted, ref, watch, computed } from 'vue'
 import { t } from '@/utils/i18n'
 import { showError, showSuccess, uuidv4 } from '@/utils'
 import { useAppStore } from '@/stores/appStore'
@@ -498,6 +605,7 @@ const appStore = useAppStore()
 const tabs = [
   { key: 'base', label: t('baseConfig') },
   // { key: 'build', label: t('buildConfig') },
+  { key: 'mcp', label: t('aiAccess') },
   { key: 'share', label: t('shareApps') },
   { key: 'quick', label: t('quickActions') },
 ]
@@ -653,6 +761,96 @@ const testConnection = async () => {
 const ngrokTestLoading = ref(false)
 const ngrokTestResult = ref(null)
 const shareUrl = ref('')
+
+// —— AI 接入（MCP）——
+const mcp = ref(null)
+const mcpLoading = ref(false)
+const mcpError = ref('')
+const showMcpToken = ref(false)
+const mcpRegenerating = ref(false)
+
+const loadMcpConfig = async () => {
+  if (mcpLoading.value) return
+  mcpLoading.value = true
+  mcpError.value = ''
+  try {
+    const res = await fetch(`${state.config.serverHost}/api/mcp/config`)
+    const { ok, data, message } = await res.json()
+    if (ok) {
+      mcp.value = data
+    } else {
+      mcpError.value = message || t('requestFail')
+    }
+  } catch (e) {
+    mcpError.value = t('requestFail') + ': ' + (e.message || e.toString())
+  } finally {
+    mcpLoading.value = false
+  }
+}
+
+watch(activeTab, (tab) => {
+  if (tab === 'mcp' && !mcp.value) loadMcpConfig()
+})
+
+const maskedMcpToken = computed(() => {
+  const token = mcp.value?.token
+  if (!token) return ''
+  return showMcpToken.value ? token : token.slice(0, 4) + '•'.repeat(16)
+})
+
+const mcpSnippets = computed(() => {
+  const url = mcp.value?.url || ''
+  const token = mcp.value?.token || ''
+  return [
+    {
+      key: 'claude',
+      label: t('mcpClaudeCode'),
+      cmd: `claude mcp add --transport http artify ${url} --header "Authorization: Bearer ${token}"`,
+    },
+    {
+      key: 'json',
+      label: t('mcpCursorJson'),
+      cmd: JSON.stringify(
+        { mcpServers: { artify: { url, headers: { Authorization: `Bearer ${token}` } } } },
+        null,
+        2
+      ),
+    },
+    { key: 'generic', label: t('mcpGeneric'), cmd: `URL: ${url}\nToken: ${token}` },
+  ]
+})
+
+const copyText = async (text) => {
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    showSuccess('copySuccess')
+  } catch (e) {
+    showError('copyFailed')
+  }
+}
+
+const regenerateMcpToken = async () => {
+  if (mcpRegenerating.value) return
+  if (!window.confirm(t('mcpRegenerateConfirm'))) return
+  mcpRegenerating.value = true
+  try {
+    const res = await fetch(`${state.config.serverHost}/api/mcp/regenerate-token`, {
+      method: 'POST',
+    })
+    const { ok, data } = await res.json()
+    if (ok && data?.token && mcp.value) {
+      mcp.value.token = data.token
+      showSuccess('mcpTokenRegenerated')
+    } else {
+      showError('requestFail')
+    }
+  } catch (e) {
+    showError('requestFail')
+  } finally {
+    mcpRegenerating.value = false
+  }
+}
 
 const testNgrok = async () => {
   if (!state.config.ngrokAuthtoken) {
