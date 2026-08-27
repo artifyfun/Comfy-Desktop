@@ -23,10 +23,35 @@ import {
   type WorkbenchPlan,
   type PlanValidationIssue
 } from './plan'
-import { executeApp, getExecutionStatus, type ExecutionResult } from '../mcp/executor'
+import {
+  assignAttachmentsToSlots,
+  attachmentSummary,
+  applyPromptTemplate,
+  clonePreset,
+  parseSlashToken,
+  presetConstraintText,
+  BUILTIN_PRESETS,
+  type AttachmentKind,
+  type AttachmentMeta,
+  type WorkbenchPreset
+} from './presetCore'
+import {
+  executeApp,
+  getExecutionStatus,
+  uploadMediaBuffer,
+  type ExecutionResult
+} from '../mcp/executor'
 import { Codex, resolveCodexBaseUrl, resolveCodexBinary, type BuildProgress } from '../agentDriver'
+import { deriveAttachmentKind } from './presetCore'
 
-export type WorkbenchMessageKind = 'chat' | 'card' | 'progress' | 'artifact' | 'error'
+export type WorkbenchMessageKind =
+  | 'chat'
+  | 'card'
+  | 'progress'
+  | 'artifact'
+  | 'error'
+  | 'invalid'
+  | 'title'
 
 export interface WorkbenchMessage {
   role: 'user' | 'agent' | 'system'
@@ -35,6 +60,7 @@ export interface WorkbenchMessage {
   plan?: WorkbenchPlan
   promptId?: string
   outputs?: string[]
+  attachments?: AttachmentMeta[]
   createdAt: number
 }
 
@@ -47,6 +73,12 @@ export interface WorkbenchExecution {
   startedAt: number
 }
 
+/** 会话级模型覆盖（dsh ModelSelection 语义：per-session 可变，影响后续请求） */
+export interface SessionModelOverride {
+  decisionModel?: string
+  buildModel?: string
+}
+
 export interface WorkbenchSession {
   id: string
   title: string
@@ -54,14 +86,32 @@ export interface WorkbenchSession {
   updatedAt: number
   messages: WorkbenchMessage[]
   executions: WorkbenchExecution[]
+  /** 创建时选定，会话期锁定（dsh agent-preset 语义） */
+  presetId?: string
+  modelOverride?: SessionModelOverride
+  /** 归档：侧栏不显示，数据保留 */
+  archived?: boolean
+  /** 用户手动改过标题（自动生成不覆盖） */
+  titleLocked?: boolean
 }
 
 interface SessionStore {
   sessions: WorkbenchSession[]
+  presets?: WorkbenchPreset[]
+  presetDefault?: string
 }
 
 const MAX_SESSIONS = 50
 const FLUSH_DEBOUNCE_MS = 500
+
+/** renderComponent → 该输入位可接受的素材类型（宽松匹配，兼容自绘组件命名） */
+function acceptKindsFor(renderComponent: string): AttachmentKind[] {
+  const rc = renderComponent.toLowerCase()
+  if (rc.includes('video')) return ['video', 'image'] // VHS 等视频位常可吃图
+  if (rc.includes('audio')) return ['audio']
+  if (rc.includes('image')) return ['image']
+  return ['image', 'video', 'audio'] // 未知上传器：全类型
+}
 
 function sessionsPath(): string {
   return join(app.getPath('userData'), 'workbench-sessions.json')
@@ -108,24 +158,45 @@ class WorkbenchService {
     }, FLUSH_DEBOUNCE_MS)
   }
 
-  listSessions(): WorkbenchSession[] {
-    return [...this.store.sessions].sort((a, b) => b.updatedAt - a.updatedAt)
+  listSessions(archived?: boolean): WorkbenchSession[] {
+    return [...this.store.sessions]
+      .filter((s) => (archived === undefined ? true : !!s.archived === archived))
+      .sort((a, b) => b.updatedAt - a.updatedAt)
   }
 
   getSession(id: string): WorkbenchSession | null {
     return this.store.sessions.find((s) => s.id === id) ?? null
   }
 
-  createSession(title = '新会话'): WorkbenchSession {
+  createSession(opts: { title?: string; presetId?: string } = {}): WorkbenchSession {
     const session: WorkbenchSession = {
       id: randomUUID(),
-      title,
+      title: opts.title || '新会话',
       createdAt: Date.now(),
       updatedAt: Date.now(),
       messages: [],
-      executions: []
+      executions: [],
+      presetId: opts.presetId
     }
     this.store.sessions.unshift(session)
+    this.flush()
+    return session
+  }
+
+  /** 会话元信息更新（标题/模型覆盖/归档；dsh 语义：模型可变，预设锁定） */
+  updateSession(
+    id: string,
+    patch: { title?: string; modelOverride?: SessionModelOverride; archived?: boolean }
+  ): WorkbenchSession | null {
+    const session = this.getSession(id)
+    if (!session) return null
+    if (patch.title !== undefined) {
+      session.title = patch.title
+      session.titleLocked = true
+    }
+    if (patch.modelOverride !== undefined) session.modelOverride = patch.modelOverride
+    if (patch.archived !== undefined) session.archived = patch.archived
+    session.updatedAt = Date.now()
     this.flush()
     return session
   }
@@ -153,8 +224,16 @@ class WorkbenchService {
     return session.executions[session.executions.length - 1]!
   }
 
-  /** codex 决策提示词：模板清单 + 会话近史 + 用户输入 */
-  private buildDecisionSpec(userInput: string, session: WorkbenchSession): string {
+  /** codex 决策提示词：模板清单 + 会话近史 + 用户输入 + 预设/附件/快捷方式 */
+  private buildDecisionSpec(
+    userInput: string,
+    session: WorkbenchSession,
+    opts: {
+      preset?: WorkbenchPreset
+      attachments?: readonly AttachmentMeta[]
+      templateShortcut?: string
+    } = {}
+  ): string {
     const templates = templateLibrary.list()
     const catalog = JSON.stringify(
       templates.map((t) => ({
@@ -183,15 +262,29 @@ class WorkbenchService {
     const chainHint = lastExec
       ? `\n## 上一次执行产物\n模板 ${lastExec.templateId}，promptId ${lastExec.promptId}，产物 ${lastExec.outputs.join('、') || '（无）'}。usePreviousOutput=true 时可将其作为图/视频输入。`
       : ''
+    const constraint =
+      opts.preset && presetConstraintText(opts.preset)
+        ? `\n## 会话预设约束（必须遵守）\n${presetConstraintText(opts.preset)}`
+        : ''
+    const attachmentHint = opts.attachments?.length
+      ? `\n## 用户上传素材（已上传，可作媒体输入）\n${attachmentSummary(opts.attachments)}`
+      : ''
+    const shortcutHint = opts.templateShortcut
+      ? `\n## 用户显式指定模板\n必须使用 templateId="${opts.templateShortcut}"。`
+      : ''
+    const titleRule = `
+## 标题（可选）
+若为首条消息，可在 JSON 中加 "title":"≤15字会话标题"。`
     return `你是 Artify 工作台的调度 agent。根据用户需求从模板库选择模板并填参数，输出**只含一个 JSON 对象**（无 markdown 代码块、无解释文字）：
-{"intent":"image|video|audio|text|chat","templateId":"...","params":{...},"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text 时直接给用户的回复"}
+{"intent":"image|video|audio|text|chat","templateId":"...","params":{...},"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text 时直接给用户的回复","title":"仅首条消息时提供"}
 
 规则：
 1. intent=image/video/audio 必须从下列模板中选 templateId，params 只用模板声明的参数，数值遵守 min/max，枚举必须完全匹配可选值。
 2. intent=text 走纯文本生成（文案/起名/总结等），把生成结果放 reply。
 3. intent=chat 用于追问澄清或闲聊，回复放 reply。
 4. 模板库为空或不匹配时选 chat 并说明。
-${chainHint}
+5. 用户上传了素材时，倾向选择带媒体输入参数的模板（图生图/视频驱动），参数值填素材文件名（已上传）。${chainHint}${constraint}${attachmentHint}${shortcutHint}${titleRule}
+
 ## 模板库
 ${catalog}
 
@@ -219,20 +312,55 @@ ${userInput}`
   /**
    * 会话主入口：决策 → 校验 → （由调用方决定执行）。
    * 返回 PLAN 与校验结果；SSE 流与执行由路由层编排（分层：服务不持有 res）。
+   *
+   * P2：支持 attachments（多素材）/ 斜杠 token（预设/模板快捷方式）/
+   * 会话预设约束注入。
    */
   async decide(
     sessionId: string,
-    userInput: string,
-    onProgress: (p: BuildProgress) => void
-  ): Promise<{ plan: WorkbenchPlan | null; issues: PlanValidationIssue[]; raw: string }> {
+    rawInput: string,
+    onProgress: (p: BuildProgress) => void,
+    attachments: AttachmentMeta[] = []
+  ): Promise<{
+    plan: WorkbenchPlan | null
+    issues: PlanValidationIssue[]
+    raw: string
+    resolved: { input: string; presetId?: string; templateShortcut?: string }
+  }> {
     const session = this.getSession(sessionId)
     if (!session) throw new Error(`session not found: ${sessionId}`)
-    this.appendMessage(sessionId, { role: 'user', kind: 'chat', text: userInput })
+
+    // --- 输入预处理：斜杠 token（技能）> 会话预设 ---
+    const slash = parseSlashToken(rawInput, this.listPresets(), templateLibrary.list())
+    let presetId = session.presetId
+    let templateShortcut: string | undefined
+    let userInput = rawInput
+    if (slash?.kind === 'preset') {
+      presetId = slash.id
+      userInput = slash.rest
+    } else if (slash?.kind === 'template') {
+      templateShortcut = slash.id
+      userInput = slash.rest
+    }
+    const preset = (presetId ? this.getPreset(presetId) : undefined) ?? undefined
+    // 预设提示词模板展开（{input} 占位）
+    const effectiveInput = applyPromptTemplate(preset, userInput)
+
+    this.appendMessage(sessionId, {
+      role: 'user',
+      kind: 'chat',
+      text: rawInput,
+      attachments: attachments.length ? attachments : undefined
+    })
 
     // codex 决策（复用 agentDriver 的 Codex SDK 直连；单轮，产出 JSON）
     const binary = resolveCodexBinary()
     if (!binary) throw new Error('codex binary not found (run scripts/copy-codex-bin.mjs)')
-    const spec = this.buildDecisionSpec(userInput, session)
+    const spec = this.buildDecisionSpec(effectiveInput, session, {
+      preset,
+      attachments,
+      templateShortcut
+    })
     const codex = new Codex({
       codexPathOverride: binary,
       // 显式注入 config.base_url（new-api 网关）> deepseek 默认
@@ -266,11 +394,34 @@ ${userInput}`
       return {
         plan: null,
         issues: [{ field: 'plan', message: 'codex 未输出可解析的 JSON PLAN' }],
-        raw
+        raw,
+        resolved: { input: effectiveInput, presetId, templateShortcut }
       }
     }
+    // 模板快捷方式：强制锁定 templateId（技能语义：用户显式点名）
+    if (templateShortcut) plan.templateId = templateShortcut
+    // 会话预设意图约束：codex 违反时本地校验会拦（下面 validatePlanLocal 前
+    // 先人工补一条 issue，给出明确错误指向预设）
+    const presetIssues: PlanValidationIssue[] = []
+    if (preset?.intentHint && plan.intent !== preset.intentHint) {
+      presetIssues.push({
+        field: 'intent',
+        message: `预设 ${preset.id} 锁定 intent=${preset.intentHint}，但决策为 ${plan.intent}`
+      })
+    }
     const validation = validatePlanLocal(plan, templateLibrary.list())
-    return { plan, issues: validation.issues, raw }
+    // P2e：标题自动生成（PLAN 顺带 title 字段，用户手改过则不覆盖）
+    if (plan.title && session.title !== plan.title && !session.titleLocked) {
+      session.title = plan.title.slice(0, 20)
+      session.updatedAt = Date.now()
+      this.flush()
+    }
+    return {
+      plan,
+      issues: [...presetIssues, ...validation.issues],
+      raw,
+      resolved: { input: effectiveInput, presetId, templateShortcut }
+    }
   }
 
   /** 网络侧校验（object_info/models/VRAM），decision 后、执行前调用 */
@@ -288,23 +439,47 @@ ${userInput}`
     return issues
   }
 
-  /** 执行 PLAN（媒体类）。链式：上次产物为 media 参数源。 */
+  /** 执行 PLAN（媒体类）。链式：上次产物为 media 参数源；附件按序填充媒体输入位。 */
   async execute(
     sessionId: string,
     plan: WorkbenchPlan,
-    template: WorkflowTemplate
+    template: WorkflowTemplate,
+    attachments: AttachmentMeta[] = []
   ): Promise<WorkbenchExecution> {
     const comfyOrigin = appStoreManager.getConfig().comfyHost
     const args: Record<string, unknown> = { ...(plan.params ?? {}) }
+    // 媒体输入位：input 类参数中渲染组件为媒体上传器的（图/视频/音频）
+    const mediaSlots = template.paramsNodes
+      .filter(
+        (n) =>
+          n.category === 'input' && /image|video|audio|-uploader$/i.test(n.renderComponent ?? '')
+      )
+      .map((n) => ({
+        slot: { param: n.name ?? '', accept: acceptKindsFor(n.renderComponent ?? '') },
+        node: n
+      }))
     // 链式：把上次产物作为第一个媒体输入参数（图→视频典型）
     if (plan.usePreviousOutput) {
       const last = this.lastExecution(sessionId)
       if (last && last.outputs.length > 0) {
-        const mediaInput = template.paramsNodes.find(
-          (n) =>
-            n.category === 'input' && /image|video|audio|-uploader$/i.test(n.renderComponent ?? '')
+        const first = mediaSlots[0]
+        if (first) args[first.slot.param] = last.outputs[0]
+      }
+    }
+    // 附件按序填充剩余媒体输入位（一附件一位，多余忽略并记录）
+    if (attachments.length > 0) {
+      const occupied = new Set(
+        mediaSlots.filter((m) => args[m.slot.param] !== undefined).map((m) => m.slot.param)
+      )
+      const freeSlots = mediaSlots.filter((m) => !occupied.has(m.slot.param)).map((m) => m.slot)
+      const { assignments, ignored } = assignAttachmentsToSlots(attachments, freeSlots)
+      for (const a of assignments) {
+        if (a.slot.param) args[a.slot.param] = a.attachment.name
+      }
+      if (ignored.length > 0) {
+        logger.warn(
+          `workbench: ${ignored.length} attachments unassigned (no free matching slot): ${ignored.map((a) => a.filename).join(', ')}`
         )
-        if (mediaInput && mediaInput.name) args[mediaInput.name] = last.outputs[0]
       }
     }
     const result = await executeApp(toPseudoApp(template), args, comfyOrigin)
@@ -404,6 +579,106 @@ ${userInput}`
     logger.info(`workbench: published app ${newApp.id} from ${template.id}`)
     // html 由调用方（路由）另走 build-app 存资产；此处只建骨架
     return newApp.id
+  }
+
+  // ---------------- 预设 CRUD（copy-dialog 语义） ----------------
+
+  listPresets(): WorkbenchPreset[] {
+    return [...BUILTIN_PRESETS, ...(this.store.presets ?? [])]
+  }
+
+  getPreset(id: string): WorkbenchPreset | null {
+    return this.listPresets().find((p) => p.id === id) ?? null
+  }
+
+  createPreset(opts: { from?: string; id: string; name?: string }): WorkbenchPreset {
+    const existing = new Set(this.listPresets().map((p) => p.id))
+    const preset = clonePreset(opts.from ?? 'standard', opts.id, opts.name ?? '', existing)
+    if (!preset) throw new Error('预设 id 非法或已存在')
+    this.store.presets = [...(this.store.presets ?? []), preset]
+    this.flush()
+    return preset
+  }
+
+  deletePreset(id: string): boolean {
+    // 内置不可删（dsh 同款：shipped preset 不归用户管理）
+    if (BUILTIN_PRESETS.some((p) => p.id === id)) return false
+    const before = this.store.presets?.length ?? 0
+    this.store.presets = (this.store.presets ?? []).filter((p) => p.id !== id)
+    const ok = (this.store.presets?.length ?? 0) < before
+    if (ok) this.flush()
+    if (this.store.presetDefault === id) this.store.presetDefault = undefined
+    return ok
+  }
+
+  setDefaultPreset(id: string): boolean {
+    if (!this.listPresets().some((p) => p.id === id)) return false
+    this.store.presetDefault = id
+    this.flush()
+    return true
+  }
+
+  getDefaultPresetId(): string {
+    return this.store.presetDefault ?? BUILTIN_PRESETS[0]!.id
+  }
+
+  // ---------------- 技能清单（/ 触发器用：预设 + 模板快捷方式） ----------------
+
+  listSkills(): Array<{
+    id: string
+    kind: 'preset' | 'template'
+    name: string
+    description: string
+    intentHint?: string
+    mediaType?: string
+  }> {
+    const lang = appStoreManager.getConfig().lang === 'en' ? 'en' : 'zh'
+    const presets = this.listPresets().map((p) => ({
+      id: p.id,
+      kind: 'preset' as const,
+      name: p.name[lang],
+      description: p.description[lang],
+      intentHint: p.intentHint
+    }))
+    const templates = templateLibrary.list().map((t) => ({
+      id: t.id,
+      kind: 'template' as const,
+      name: t.name,
+      description: t.description,
+      mediaType: t.mediaType
+    }))
+    return [...presets, ...templates]
+  }
+
+  // ---------------- 可选模型派生（config + 网关常见模型） ----------------
+
+  listModels(): Array<{ id: string; label: string; role: 'decision' | 'build' }> {
+    const config = appStoreManager.getConfig()
+    const models: Array<{ id: string; label: string; role: 'decision' | 'build' }> = []
+    const decisionModel = config.buildModel || 'deepseek-v4-flash'
+    models.push({ id: decisionModel, label: `${decisionModel}（决策）`, role: 'decision' })
+    const buildModel = config.buildModel || decisionModel
+    if (buildModel !== decisionModel) {
+      models.push({ id: buildModel, label: `${buildModel}（构建）`, role: 'build' })
+    }
+    return models
+  }
+
+  // ---------------- 附件上传（多素材：图/视频/音频） ----------------
+
+  /** 上传单个媒体文件到 ComfyUI，返回附件元数据 */
+  async uploadAttachment(buffer: Buffer, filename: string, mime?: string): Promise<AttachmentMeta> {
+    const comfyOrigin = appStoreManager.getConfig().comfyHost
+    const uploaded = await uploadMediaBuffer(comfyOrigin, buffer, filename, mime)
+    return {
+      name: uploaded.name,
+      subfolder: uploaded.subfolder,
+      type: uploaded.type,
+      kind: deriveAttachmentKind(filename, mime),
+      filename,
+      size: buffer.length,
+      mime
+    }
   }
 }
 

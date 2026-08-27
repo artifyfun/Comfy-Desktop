@@ -116,8 +116,33 @@ export async function uploadMedia(
   const blob = await blobRes.blob()
   if (blob.size > MAX_MEDIA_BYTES)
     throw new Error(`media too large: ${blob.size} bytes (max ${MAX_MEDIA_BYTES})`)
+  return uploadMediaBlob(comfyOrigin, blob, `upload.${mimeToExt(blob.type)}`)
+}
+
+/**
+ * 工作台附件上传：Buffer 直传 ComfyUI，保留原始文件名（LoadImage/VHS 等
+ * widget 按文件名引用）。图/视频/音频统一走 /upload/image——ComfyUI 依据
+ * 已注册的输入扩展名白名单校验（装了 VHS 后 mp4/webm 等均可），不支持
+ * 的环境会收到 400 并向上抛。
+ */
+export async function uploadMediaBuffer(
+  comfyOrigin: string,
+  data: Buffer,
+  filename: string,
+  mime = 'application/octet-stream'
+): Promise<{ name: string; subfolder: string; type: string }> {
+  if (data.length > MAX_MEDIA_BYTES)
+    throw new Error(`media too large: ${data.length} bytes (max ${MAX_MEDIA_BYTES})`)
+  return uploadMediaBlob(comfyOrigin, new Blob([new Uint8Array(data)], { type: mime }), filename)
+}
+
+async function uploadMediaBlob(
+  comfyOrigin: string,
+  blob: Blob,
+  filename: string
+): Promise<{ name: string; subfolder: string; type: string }> {
   const form = new FormData()
-  form.append('image', blob, `upload.${mimeToExt(blob.type)}`)
+  form.append('image', blob, filename)
   form.append('overwrite', 'true')
   const res = await fetchTimeout(`${comfyOrigin}/upload/image`, { method: 'POST', body: form })
   if (!res.ok) throw new Error(`uploadMedia HTTP ${res.status}`)

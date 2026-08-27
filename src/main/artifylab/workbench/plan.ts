@@ -19,6 +19,8 @@ export interface WorkbenchPlan {
   /** 会话内链式：引用上一次执行的产物（图→视频） */
   usePreviousOutput?: boolean
   reason?: string // codex 解释（展示给用户）
+  /** P2e：首条消息时可带的会话标题（≤20 字，用户手改过不覆盖） */
+  title?: string
 }
 
 export interface PlanValidationIssue {
