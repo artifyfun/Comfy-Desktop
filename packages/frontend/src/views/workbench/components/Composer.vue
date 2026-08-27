@@ -46,22 +46,37 @@
 
       <!-- 底部工具条：左（附件/模型）右（发送） -->
       <div class="flex items-center gap-1 min-h-[32px] mt-1">
-        <button
-          class="w-8 h-8 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 flex items-center justify-center transition"
-          :title="t('workbenchUpload')"
-          :disabled="uploading"
-          @click="pickFile"
-        >
-          <i class="fas fa-paperclip" :class="{ 'animate-pulse': uploading }"></i>
-        </button>
-        <button
-          v-if="isElectron"
-          class="w-8 h-8 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 flex items-center justify-center transition"
-          :title="t('workbenchReferenceLocal')"
-          @click="pickReference"
-        >
-          <i class="fas fa-link text-sm"></i>
-        </button>
+        <!-- 附件单入口:下拉选「上传实体 / 引用本地路径」,不再并排两个按钮 -->
+        <a-dropdown :trigger="['click']">
+          <button
+            class="w-8 h-8 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 flex items-center justify-center transition"
+            :title="t('workbenchAttach')"
+            :disabled="uploading"
+            @click.prevent
+          >
+            <i class="fas fa-paperclip" :class="{ 'animate-pulse': uploading }"></i>
+          </button>
+          <template #overlay>
+            <a-menu @click="onAttachMenu">
+              <a-menu-item key="upload">
+                <span class="flex flex-col">
+                  <span class="flex items-center gap-2">
+                    <i class="fas fa-cloud-arrow-up w-4"></i>{{ t('workbenchUpload') }}
+                  </span>
+                  <span class="text-[11px] text-slate-500">{{ t('workbenchUploadHint') }}</span>
+                </span>
+              </a-menu-item>
+              <a-menu-item v-if="isElectron" key="reference">
+                <span class="flex flex-col">
+                  <span class="flex items-center gap-2">
+                    <i class="fas fa-link w-4"></i>{{ t('workbenchReferenceLocal') }}
+                  </span>
+                  <span class="text-[11px] text-slate-500">{{ t('workbenchReferenceHint') }}</span>
+                </span>
+              </a-menu-item>
+            </a-menu>
+          </template>
+        </a-dropdown>
         <ModelMenu
           :override="modelOverride"
           @update:override="(v) => $emit('update:modelOverride', v)"
@@ -217,6 +232,11 @@ function onSkillPick(skill) {
 
 function pickFile() {
   fileEl.value?.click()
+}
+
+function onAttachMenu({ key }) {
+  if (key === 'upload') pickFile()
+  else if (key === 'reference') pickReference()
 }
 
 // B 权限:引用本地文件(不复制,登记绝对路径;执行时按同机检测决定直通或回退上传)
