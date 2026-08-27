@@ -28,6 +28,14 @@ export interface KnownSettings {
   /** Legacy "check for updates on startup" toggle. No longer gated on a setting;
    *  kept in the schema so existing settings.json files don't lose data. */
   autoUpdate?: boolean
+  /**
+   * 工作台 agent 沙箱档位:
+   * - 'standard'(默认): A+B —— 产物另存为(系统保存对话框) + 本地文件引用;
+   *   decide 沙箱保持 workspace-write,不直接写用户目录
+   * - 'full': C —— 完全放开,decide 沙箱 danger-full-access,agent 可读写
+   *   用户电脑任意路径(仅当用户显式开启;风险自担)
+   */
+  workbenchAgentAccess?: 'standard' | 'full'
   /** When true (default), Desktop updates download and install silently; when
    *  false, the user is prompted before any download/install. */
   autoInstallUpdates?: boolean
@@ -101,6 +109,7 @@ type DefaultedSettingKey =
   | 'cacheDir'
   | 'maxCachedDownloads'
   | 'onAppClose'
+  | 'workbenchAgentAccess'
   | 'modelsDirs'
   | 'inputDir'
   | 'outputDir'
@@ -300,7 +309,8 @@ export const defaults: SettingsDefaults = {
   modelsDirs: [path.join(SHARED_ROOT, 'models')],
   inputDir: path.join(SHARED_ROOT, 'input'),
   outputDir: path.join(SHARED_ROOT, 'output'),
-  installDir: builtinDefaultInstallDir()
+  installDir: builtinDefaultInstallDir(),
+  workbenchAgentAccess: 'standard'
 }
 
 const systemDefault = defaults.modelsDirs[0]!

@@ -13,6 +13,10 @@ import { ipcRenderer } from 'electron'
 export const electronAPI = {
   ArtifyLab: {
     selectFile: (data: Record<string, unknown>) => ipcRenderer.invoke('artify-selectFile', data),
+    saveArtifact: (payload: { sourcePath: string; suggestedName?: string; title?: string }) =>
+      ipcRenderer.invoke('artify-saveArtifact', payload),
+    referenceLocalFile: (payload: { filters?: { name: string; extensions: string[] }[] }) =>
+      ipcRenderer.invoke('artify-referenceLocalFile', payload),
     getConfig: (data: Record<string, unknown>) => ipcRenderer.invoke('artify-getConfig', data),
     loadComfyUI: (data: Record<string, unknown>) => ipcRenderer.invoke('artify-loadComfyUI', data),
     loadArtifyLab: (data: Record<string, unknown>) =>

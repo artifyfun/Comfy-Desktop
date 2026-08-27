@@ -193,6 +193,8 @@ export interface AttachmentMeta {
   filename: string
   size: number
   mime?: string
+  /** B 权限:本地文件引用的绝对路径（未上传实体;执行时同机检测直通） */
+  localPath?: string
 }
 
 /** 从 mime/扩展名派生素材类型 */

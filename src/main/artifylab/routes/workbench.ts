@@ -28,6 +28,7 @@ import { validatePlanLocal } from '../workbench/plan'
 import type { AttachmentMeta } from '../workbench/presetCore'
 import { buildAppCode } from '../agentDriver'
 import appStoreManager from '../appStore'
+import { get as getSetting } from '../../settings'
 
 /** chat SSE 总超时：决策 + 校验 + 提交（轮询产物由前端持续 poll，不占此窗口） */
 const CHAT_TIMEOUT_MS = 5 * 60 * 1000
@@ -186,6 +187,17 @@ export function createWorkbenchRouter(): express.Router {
   })
 
   // ---------------- 附件上传（多素材） ----------------
+
+  // 工作台运行环境:产物磁盘根目录(同机 ComfyUI 时另存为按钮的数据源)。
+  // 只暴露 outputDir 一个字符串,无敏感信息。
+  router.get('/api/workbench/runtime', (_req: Request, res) => {
+    try {
+      const outputDir = getSetting('outputDir') as string | undefined
+      res.json(createSuccessResponse({ outputDir: outputDir ?? null }))
+    } catch (e) {
+      res.json(createSuccessResponse({ outputDir: null }))
+    }
+  })
 
   router.post('/api/workbench/upload', upload.single('file'), async (req: Request, res) => {
     const file = req.file

@@ -1188,6 +1188,14 @@ const translations = {
     workbenchSessionTitle: 'Session title (optional)',
     workbenchDocAsContext:
       '"{name}" will be provided to the AI as context (documents do not participate in workflow execution)',
+    workbenchSaveAs: 'Save as',
+    workbenchSavedTo: 'Saved to ',
+    workbenchSaveAsUnavailable:
+      'Save-as is unavailable for remote ComfyUI outputs (same-machine only)',
+    workbenchReferenceLocal: 'Reference local file (no copy, link by path)',
+    workbenchAgentAccess: 'Workbench file access',
+    workbenchAgentAccessHint:
+      'Standard: save outputs anywhere and reference local files; the AI never modifies your files directly. Full access: the agent gets read/write and command execution on this machine (danger-full-access) — enable only if you understand the risk.',
     workbenchTitleAuto: 'Leave empty for AI auto title',
     workbenchPresetDefaultHint: 'Default preset',
     workbenchSetDefault: 'Set default',

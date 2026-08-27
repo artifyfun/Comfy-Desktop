@@ -519,9 +519,22 @@ ${userInput}`
       // 双保险：即使泄露进 provider 配置，也强制回内置 openai 让 baseUrl 生效
       config: { model_provider: 'openai' }
     })
+    // 沙箱档位:'standard'(默认)仅工作目录可写;'full' 完全放开(C 权限,
+    // 用户显式开启)。档位读取失败一律回退 standard,宁可少权不可多权。
+    let agentAccess: 'standard' | 'full' = 'standard'
+    try {
+      const fromSettings = getSetting('workbenchAgentAccess')
+      const fromConfig = appStoreManager.getConfig().workbenchAgentAccess
+      agentAccess = (fromSettings ?? fromConfig) === 'full' ? 'full' : 'standard'
+    } catch {
+      try {
+        agentAccess =
+          appStoreManager.getConfig().workbenchAgentAccess === 'full' ? 'full' : 'standard'
+      } catch {}
+    }
     const thread = codex.startThread({
       model: appStoreManager.getConfig().buildModel || 'deepseek-v4-flash',
-      sandboxMode: 'workspace-write',
+      sandboxMode: agentAccess === 'full' ? 'danger-full-access' : 'workspace-write',
       workingDirectory: process.cwd(),
       skipGitRepoCheck: true
     })
@@ -636,7 +649,8 @@ ${userInput}`
       const freeSlots = mediaSlots.filter((m) => !occupied.has(m.slot.param)).map((m) => m.slot)
       const { assignments, ignored } = assignAttachmentsToSlots(attachments, freeSlots)
       for (const a of assignments) {
-        if (a.slot.param) args[a.slot.param] = a.attachment.name
+        if (!a.slot.param) continue
+        args[a.slot.param] = this.resolveAttachmentRef(a.attachment)
       }
       if (ignored.length > 0) {
         logger.warn(
@@ -847,6 +861,16 @@ ${userInput}`
   // ---------------- 附件上传（多素材：图/视频/音频） ----------------
 
   /** 上传单个媒体文件到 ComfyUI，返回附件元数据 */
+  /**
+   * 附件→工作流参数值。引用类附件(localPath):同机可访问时用绝对路径直通
+   * (省一次复制,配合支持绝对路径的加载器);否则回退 ComfyUI 实体名。
+   * 全档位可用(B 权限不需要 full)。
+   */
+  private resolveAttachmentRef(a: AttachmentMeta): string {
+    if (a.localPath && existsSync(a.localPath)) return a.localPath
+    return a.name
+  }
+
   async uploadAttachment(buffer: Buffer, filename: string, mime?: string): Promise<AttachmentMeta> {
     const comfyOrigin = appStoreManager.getConfig().comfyHost
     const uploaded = await uploadMediaBuffer(comfyOrigin, buffer, filename, mime)

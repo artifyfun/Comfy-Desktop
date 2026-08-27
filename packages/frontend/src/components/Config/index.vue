@@ -196,6 +196,45 @@
                     />
                     <p class="mt-1.5 text-xs text-slate-400">{{ t('buildModelHint') }}</p>
                   </div>
+
+                  <!-- 工作台 agent 文件权限 -->
+                  <div class="pt-4 mt-4 border-t border-slate-700">
+                    <label class="block mb-2 text-slate-300">{{ t('workbenchAgentAccess') }}</label>
+                    <div class="flex space-x-3">
+                      <button
+                        type="button"
+                        @click="state.config.workbenchAgentAccess = 'standard'"
+                        :class="{
+                          'bg-tech-blue/80': state.config.workbenchAgentAccess !== 'full',
+                          'bg-slate-700/60 hover:bg-slate-600':
+                            state.config.workbenchAgentAccess === 'full',
+                        }"
+                        class="flex-1 p-3 rounded-lg transition duration-300"
+                      >
+                        <div class="text-sm font-medium">标准（推荐）</div>
+                        <div class="mt-1 text-xs text-left leading-4 opacity-80">
+                          产物另存到任意目录 · 引用本地文件参与工作流 · agent 不直接写你的文件
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        @click="state.config.workbenchAgentAccess = 'full'"
+                        :class="{
+                          'bg-red-500/70': state.config.workbenchAgentAccess === 'full',
+                          'bg-slate-700/60 hover:bg-slate-600':
+                            state.config.workbenchAgentAccess !== 'full',
+                        }"
+                        class="flex-1 p-3 rounded-lg transition duration-300"
+                      >
+                        <div class="text-sm font-medium">完全访问</div>
+                        <div class="mt-1 text-xs text-left leading-4 opacity-80">
+                          agent
+                          可读写电脑任意路径与执行命令，风险自担。仅在你明确需要本地批处理等场景时开启。
+                        </div>
+                      </button>
+                    </div>
+                    <p class="mt-1.5 text-xs text-slate-400">{{ t('workbenchAgentAccessHint') }}</p>
+                  </div>
                 </div>
               </div>
 
@@ -584,6 +623,7 @@ const state = reactive({
     provider: 'deepseek', // 新增供应商字段
     buildModel: 'deepseek-v4-flash', // 构建应用（Codex agent）使用的模型
     buildStyleId: 'tech', // 新增构建风格ID
+    workbenchAgentAccess: 'standard', // 工作台 agent 文件权限档位
     ngrokAuthtoken: '', // 新增ngrok authtoken
   },
 })

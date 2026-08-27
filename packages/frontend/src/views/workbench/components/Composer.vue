@@ -75,6 +75,15 @@
       </div>
     </div>
 
+    <button
+      v-if="isElectron"
+      class="flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-tech-cyan hover:bg-slate-800/60 transition"
+      :title="t('workbenchReferenceLocal')"
+      @click="pickReference"
+    >
+      <i class="fas fa-link text-sm"></i>
+    </button>
+
     <input
       ref="fileEl"
       type="file"
@@ -87,6 +96,7 @@
 </template>
 
 <script setup>
+import { isElectron } from '@/utils'
 import { ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from '@/utils/i18n'
 import AttachmentRail from './AttachmentRail.vue'
@@ -105,6 +115,7 @@ const emit = defineEmits([
   'update:modelValue',
   'send',
   'upload-files',
+  'reference-files',
   'remove-attachment',
   'update:modelOverride',
 ])
@@ -206,6 +217,39 @@ function onSkillPick(skill) {
 
 function pickFile() {
   fileEl.value?.click()
+}
+
+// B 权限:引用本地文件(不复制,登记绝对路径;执行时按同机检测决定直通或回退上传)
+async function pickReference() {
+  try {
+    const api = window.electronAPI?.ArtifyLab
+    if (!api?.referenceLocalFile) return
+    const r = await api.referenceLocalFile({
+      filters: [
+        {
+          name: '媒体与文档',
+          extensions: [
+            'png',
+            'jpg',
+            'jpeg',
+            'webp',
+            'gif',
+            'mp4',
+            'webm',
+            'mp3',
+            'wav',
+            'pdf',
+            'txt',
+            'md',
+            'json',
+          ],
+        },
+      ],
+    })
+    if (r?.ok && r.items?.length) emit('reference-files', r.items)
+  } catch (e) {
+    // 用户取消或 IPC 不可用:静默
+  }
 }
 
 function onFileChange(e) {

@@ -194,6 +194,7 @@
             :model-override="modelOverride"
             @send="send"
             @upload-files="uploadFiles"
+            @reference-files="referenceLocalFiles"
             @remove-attachment="removeAttachment"
             @update:model-override="saveModelOverride"
           />
@@ -238,10 +239,18 @@
                 <div
                   v-for="(f, j) in a.files"
                   :key="j"
-                  class="aspect-square rounded overflow-hidden bg-slate-900 border border-slate-600 cursor-zoom-in hover:border-tech-blue transition"
+                  class="group/file relative aspect-square rounded overflow-hidden bg-slate-900 border border-slate-600 cursor-zoom-in hover:border-tech-blue transition"
                   @click="lightboxFile = f"
                 >
                   <img :src="viewUrl(f)" class="w-full h-full object-cover" loading="lazy" />
+                  <button
+                    v-if="isElectron"
+                    class="absolute right-1 top-1 hidden group-hover/file:flex w-6 h-6 items-center justify-center rounded bg-black/60 text-slate-200 hover:text-white"
+                    :title="t('workbenchSaveAs')"
+                    @click.stop="saveArtifactAs(f)"
+                  >
+                    <i class="fas fa-download text-xs"></i>
+                  </button>
                 </div>
               </div>
               <div v-else-if="a.outputs.length" class="text-xs text-slate-300 break-all">
@@ -661,6 +670,34 @@ async function uploadFiles(files) {
   uploading.value = false
 }
 
+// B 权限:引用本地文件(不复制)。登记为附件,localPath 供执行链路同机直通;
+// 上限 200MB 与上传一致。
+function referenceLocalFiles(items) {
+  for (const it of items) {
+    if (it.size > 200 * 1024 * 1024) {
+      message.error(`${it.filename}: 文件超过 200MB 上限`)
+      continue
+    }
+    const ext = (it.filename.split('.').pop() || '').toLowerCase()
+    const kind = ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)
+      ? 'image'
+      : ['mp4', 'webm', 'mov'].includes(ext)
+        ? 'video'
+        : ['mp3', 'wav', 'ogg', 'flac'].includes(ext)
+          ? 'audio'
+          : 'file'
+    draftAttachments.value.push({
+      kind,
+      filename: it.filename,
+      size: it.size,
+      mime: '',
+      localPath: it.path,
+      uploading: false,
+      _preview: kind === 'image' ? null : null,
+    })
+  }
+}
+
 function removeAttachment(i) {
   const a = draftAttachments.value[i]
   if (a?._preview) URL.revokeObjectURL(a._preview)
@@ -688,6 +725,7 @@ async function send() {
     filename: a.filename,
     size: a.size,
     mime: a.mime,
+    localPath: a.localPath,
   }))
   input.value = ''
   for (const a of draftAttachments.value) if (a._preview) URL.revokeObjectURL(a._preview)
@@ -963,6 +1001,39 @@ function extractFiles(outputs) {
 const comfyOrigin = computed(() => appStore.config?.comfyHost || 'http://127.0.0.1:8188')
 const lightboxFile = ref(null)
 
+// A 权限:产物另存为(系统保存对话框)。仅同机 ComfyUI(settings.outputDir)可用;
+// sourcePath 校验在主进程侧(白名单 outputDir/inputDir)。
+async function saveArtifactAs(f) {
+  try {
+    const outDir = outputDirInfo.value?.outputDir
+    const sourcePath = outDir
+      ? `${outDir}/${f.subfolder ? f.subfolder + '/' : ''}${f.filename}`
+      : null
+    if (!sourcePath) {
+      message.warning(t('workbenchSaveAsUnavailable'))
+      return
+    }
+    const r = await window.electronAPI.ArtifyLab.saveArtifact({
+      sourcePath,
+      suggestedName: f.filename,
+    })
+    if (r?.ok) message.success(t('workbenchSavedTo') + r.savedTo)
+    else if (r?.error !== 'canceled') message.error(r?.error || 'save failed')
+  } catch (e) {
+    message.error(String(e?.message || e))
+  }
+}
+
+// 同机 ComfyUI 的产物磁盘根(/view 只能给 URL,另存为需要真实路径)
+const outputDirInfo = ref(null)
+async function loadOutputDir() {
+  try {
+    const res = await fetch(`${origin.value}/api/workbench/runtime`)
+    const json = await res.json()
+    outputDirInfo.value = json?.data ?? null
+  } catch {}
+}
+
 function viewUrl(f) {
   return `${comfyOrigin.value}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? '')}&type=${encodeURIComponent(f.type ?? 'output')}`
 }
@@ -1023,7 +1094,7 @@ async function showEnvDialog() {
   envOpen.value = true
   envLoading.value = true
   try {
-    const res = await fetch(`${origin.value}/api/workbench/env`)
+    const res = await fetch(`${origin.value}/api/workbench/runtime`)
     const json = await res.json()
     envSnapshot.value = json?.data ?? null
   } finally {
@@ -1093,7 +1164,10 @@ watch(showArchived, () => {
   loadSessions()
   loadArchiveCount()
 })
-onMounted(loadArchiveCount)
+onMounted(() => {
+  loadArchiveCount()
+  loadOutputDir()
+})
 </script>
 
 <style scoped>

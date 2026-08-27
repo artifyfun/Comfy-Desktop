@@ -6,6 +6,18 @@ import artifyUtils from '.'
 import { fetchWithRetry } from './utils/fetch'
 import { get as getSetting } from '../settings'
 
+/** 产物另存为的合法来源根:settings 配置的 output/input 目录 */
+function settingsOutputInputRoots(): string[] {
+  const roots: string[] = []
+  try {
+    const out = getSetting('outputDir')
+    const inp = getSetting('inputDir')
+    if (typeof out === 'string' && out) roots.push(out)
+    if (typeof inp === 'string' && inp) roots.push(inp)
+  } catch {}
+  return roots
+}
+
 export function registerArtifyHandlers() {
   ipcMain.handle('artify-selectFile', async (_event, _data) => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -15,6 +27,58 @@ export function registerArtifyHandlers() {
       return filePaths[0]
     }
   })
+
+  // —— 工作台文件权限(A/B 档默认可用) ——
+  // A:产物另存为。系统保存对话框 + 复制,不涉及 agent 写用户目录。
+  ipcMain.handle(
+    'artify-saveArtifact',
+    async (_event, payload: { sourcePath: string; suggestedName?: string; title?: string }) => {
+      try {
+        const src = String(payload?.sourcePath ?? '')
+        if (!src || !path.isAbsolute(src)) return { ok: false, error: 'invalid source path' }
+        if (!fs.existsSync(src)) return { ok: false, error: 'source file not found' }
+        // 只允许从 ComfyUI 的 output/input 目录取产物,防止被诱导读任意系统文件
+        const allowed = settingsOutputInputRoots()
+        const resolved = path.resolve(src)
+        if (!allowed.some((root) => resolved.startsWith(path.resolve(root) + path.sep))) {
+          return { ok: false, error: 'source path outside ComfyUI output/input' }
+        }
+        const { canceled, filePath } = await dialog.showSaveDialog({
+          title: payload.title || '保存产物',
+          defaultPath: payload.suggestedName || path.basename(resolved)
+        })
+        if (canceled || !filePath) return { ok: false, error: 'canceled' }
+        await fs.promises.copyFile(resolved, filePath)
+        return { ok: true, savedTo: filePath }
+      } catch (e) {
+        return { ok: false, error: (e as Error).message }
+      }
+    }
+  )
+
+  // B:本地文件引用登记。系统打开对话框由用户显式选择,返回绝对路径与元数据;
+  // 不复制不转发——是否吃路径由执行链路按同机检测决定,否则回退上传。
+  ipcMain.handle(
+    'artify-referenceLocalFile',
+    async (_event, payload: { filters?: { name: string; extensions: string[] }[] }) => {
+      try {
+        const { canceled, filePaths } = await dialog.showOpenDialog({
+          properties: ['openFile', 'multiSelections'],
+          filters: payload?.filters
+        })
+        if (canceled || filePaths.length === 0) return { ok: false, error: 'canceled' }
+        const items = await Promise.all(
+          filePaths.map(async (p) => {
+            const st = await fs.promises.stat(p)
+            return { path: p, filename: path.basename(p), size: st.size }
+          })
+        )
+        return { ok: true, items }
+      } catch (e) {
+        return { ok: false, error: (e as Error).message }
+      }
+    }
+  )
 
   ipcMain.handle('artify-getConfig', async (_event, _data) => {
     return artifyUtils.getConfig()
