@@ -4,7 +4,7 @@ export const CONFIG = {
   PORT_RANGE: parseInt(process.env.PORT_RANGE || '10'), // 端口自动选择范围
 
   // OpenAI 配置
-  MODEL_ID: process.env.OPENAI_MODEL || 'gpt-4o',
+  MODEL_ID: process.env.OPENAI_MODEL || 'gpt-5.6',
   OPENAI_BASE_URL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
   DEFAULT_MAX_TOKENS: parseInt(process.env.DEFAULT_MAX_TOKENS || '64000'),
   DEFAULT_TEMPERATURE: parseFloat(process.env.DEFAULT_TEMPERATURE || '0'),

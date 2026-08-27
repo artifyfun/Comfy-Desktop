@@ -63,10 +63,10 @@ export interface BuildProgress {
 // 不同 provider 的默认模型（agent loop 用 chat 类模型，不用 reasoner）
 const DEFAULT_MODEL: Record<CodexProvider, string> = {
   deepseek: 'deepseek-v4-flash',
-  openai: 'gpt-5',
-  openrouter: 'deepseek/deepseek-chat',
-  azure: 'gpt-5',
-  ollama: 'deepseek-coder-v2',
+  openai: 'gpt-5.6',
+  openrouter: 'deepseek/deepseek-v4-flash',
+  azure: 'gpt-5.6',
+  ollama: 'qwen3:14b',
   gemini: 'gemini-2.5-pro',
   xai: 'grok-4',
   groq: 'llama-3.3-70b'

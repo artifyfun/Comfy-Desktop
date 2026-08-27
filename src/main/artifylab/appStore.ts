@@ -58,7 +58,7 @@ const getDefaultConfig = () => {
     temperature: 0,
     api_key: '',
     base_url: 'https://api.deepseek.com/v1',
-    model: 'deepseek-reasoner',
+    model: 'deepseek-v4-flash',
     provider: 'deepseek', // 供应商标识（设置弹窗供应商卡片用）
     buildModel: 'deepseek-v4-flash', // 工作台 decide/构建 agent 模型
     buildStyleId: 'tech', // 新增构建风格ID

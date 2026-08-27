@@ -580,7 +580,7 @@ const state = reactive({
     temperature: 0,
     api_key: '',
     base_url: 'https://api.deepseek.com/v1',
-    model: 'deepseek-reasoner',
+    model: 'deepseek-v4-flash',
     provider: 'deepseek', // 新增供应商字段
     buildModel: 'deepseek-v4-flash', // 构建应用（Codex agent）使用的模型
     buildStyleId: 'tech', // 新增构建风格ID
@@ -599,12 +599,14 @@ const handleClickConfirm = () => {
 }
 
 // 获取当前供应商的模型列表
+// 官方现役模型（2026-04 起）：
+// DeepSeek V4 系列（deepseek-chat/reasoner 旧名 2026-07-24 停用，不再列出）
+// OpenAI GPT-5.6 家族（gpt-5.6 别名默认指向 sol）
 const getModelList = () => {
   if (state.config.provider === 'deepseek') {
-    // deepseek-coder 已并入 chat；补现役 v3.2 系列命名
-    return ['deepseek-chat', 'deepseek-reasoner', 'deepseek-v3.2-exp']
+    return ['deepseek-v4-flash', 'deepseek-v4-pro']
   } else if (state.config.provider === 'openai') {
-    return ['gpt-4.1', 'gpt-4o', 'gpt-4o-mini']
+    return ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']
   }
   return []
 }
