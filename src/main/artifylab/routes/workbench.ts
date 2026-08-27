@@ -4,11 +4,11 @@
  * - GET  /api/workbench/templates        模板清单（含元数据与模型可用性）
  * - GET  /api/workbench/sessions         会话列表（?archived=true 过滤归档）
  * - POST /api/workbench/sessions/create  建会话（title + presetId）
- * - POST /api/workbench/sessions/update  会话元信息（title/modelOverride/archived）
+ * - POST /api/workbench/sessions/update  会话元信息（title/modelOverride/archived/presetId）
  * - POST /api/workbench/sessions/delete  删会话
  * - GET  /api/workbench/presets          预设清单 + 默认预设
  * - POST /api/workbench/presets/*        预设 CRUD（copy-dialog 语义）
- * - GET  /api/workbench/skills           技能清单（/ 触发器：预设+模板）
+ * - GET  /api/workbench/skills           技能清单（/ 触发器：模板快捷方式，预设点击选择不参与）
  * - GET  /api/workbench/models           可选模型
  * - POST /api/workbench/upload           附件上传（多素材：图/视频/音频）
  * - POST /api/workbench/chat             SSE：决策→校验→执行；done 事件带会话摘要
@@ -57,17 +57,18 @@ export function createWorkbenchRouter(): express.Router {
   })
 
   router.post('/api/workbench/sessions/update', (req, res) => {
-    const { id, title, modelOverride, archived } = req.body as {
+    const { id, title, modelOverride, archived, presetId } = req.body as {
       id?: string
       title?: string
       modelOverride?: { decisionModel?: string; buildModel?: string }
       archived?: boolean
+      presetId?: string
     }
     if (!id) {
       res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('id is required'))
       return
     }
-    const updated = workbenchService.updateSession(id, { title, modelOverride, archived })
+    const updated = workbenchService.updateSession(id, { title, modelOverride, archived, presetId })
     if (!updated) {
       res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse('session not found'))
       return

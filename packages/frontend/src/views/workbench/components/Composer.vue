@@ -87,7 +87,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from '@/utils/i18n'
 import AttachmentRail from './AttachmentRail.vue'
 import ModelMenu from './ModelMenu.vue'
@@ -186,11 +186,22 @@ function onKeydown(e) {
 }
 
 function onSkillPick(skill) {
-  // dsh 语义：pick 落字面 /name 到输入框（token 与手输等价，后端 gesture 识别）
-  const v = props.modelValue.replace(/(?:^|\s)\/([a-zA-Z0-9_:-]*)$/, '')
-  emit('update:modelValue', `${v} /${skill.id} `.replace(/^\s+/, ''))
+  // 单选替换（dsh 语义）：移除已有任意 /token（全文），落唯一 /name，
+  // 保留用户其余文本；光标落在 token 后继续输入
+  const cleaned = props.modelValue.replace(/(?:^|\s)\/[a-zA-Z0-9_:-]+/g, '')
+  emit(
+    'update:modelValue',
+    `${cleaned.trim()} ${cleaned.trim() ? '' : ''}/${skill.id} `.trimStart(),
+  )
   slashOpen.value = false
-  textareaEl.value?.focus()
+  nextTick(() => {
+    const el = textareaEl.value
+    if (el) {
+      const pos = el.value.length
+      el.focus()
+      el.setSelectionRange(pos, pos)
+    }
+  })
 }
 
 function pickFile() {

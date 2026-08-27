@@ -33,9 +33,39 @@
         >
           <!-- 会话头 -->
           <div class="flex items-center gap-2 px-4 h-12 border-b border-slate-700 shrink-0">
-            <a-tag v-if="sessionPreset" color="blue" class="!m-0">
-              <i class="fas fa-bolt mr-1"></i>{{ presetName(sessionPreset) }}
-            </a-tag>
+            <!-- 预设 chip：点击切换（dsh preset 模式） -->
+            <a-dropdown :trigger="['click']">
+              <button
+                class="flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs transition"
+                :class="
+                  sessionPreset
+                    ? 'border-tech-blue/60 bg-tech-blue/10 text-tech-blue'
+                    : 'border-slate-600 text-slate-300 hover:border-slate-400'
+                "
+                :title="t('workbenchPresetSwitch')"
+              >
+                <i :class="sessionPreset ? presetIcon(sessionPreset) : 'fas fa-bolt'"></i>
+                {{ sessionPreset ? presetName(sessionPreset) : t('workbenchPresetPick') }}
+                <i class="fas fa-chevron-down text-[9px] opacity-60"></i>
+              </button>
+              <template #overlay>
+                <a-menu @click="onPresetMenu">
+                  <a-menu-item v-for="p in sortedPresets" :key="p.id">
+                    <span class="flex items-center gap-2">
+                      <i :class="presetIcon(p)" class="w-4 text-tech-blue"></i>
+                      <span>{{ presetName(p) }}</span>
+                      <i
+                        v-if="currentSession?.presetId === p.id"
+                        class="fas fa-check text-tech-blue ml-auto"
+                      ></i>
+                    </span>
+                    <div class="text-[11px] text-slate-400 whitespace-normal leading-snug mt-0.5">
+                      {{ p.description?.[lang] || p.description?.zh }}
+                    </div>
+                  </a-menu-item>
+                </a-menu>
+              </template>
+            </a-dropdown>
             <div class="flex-1 text-white text-sm truncate font-medium">
               {{ currentSession?.title || t('workbench') }}
             </div>
@@ -758,6 +788,31 @@ async function doPublish() {
 
 function presetName(p) {
   return p?.name?.[lang.value] || p?.name?.zh || p?.id
+}
+
+// dsh order 语义：预设列表按 order 升序
+const sortedPresets = computed(() =>
+  [...presets.value].sort((a, b) => (a.order ?? 100) - (b.order ?? 100)),
+)
+
+function presetIcon(p) {
+  if (p?.intentHint === 'video') return 'fas fa-film'
+  if (p?.intentHint === 'image') return 'fas fa-image'
+  return 'fas fa-bolt'
+}
+
+// 预设点击切换（dsh 模式）：会话级 presetId 立即生效
+async function onPresetMenu({ key }) {
+  if (!sessionId.value || sessionId.value === key) return
+  await fetch(`${origin.value}/api/workbench/sessions/update`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: sessionId.value, presetId: key }),
+  })
+  await loadSessions()
+  // 本地会话对象同步（selectSession 会重新拉详情）
+  const s = sessions.value.find((x) => x.id === sessionId.value)
+  if (s) Object.assign(currentSession.value ?? {}, { presetId: key })
 }
 
 function messageClass(m) {

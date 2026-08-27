@@ -135,9 +135,9 @@ export function presetConstraintText(preset: WorkbenchPreset | undefined): strin
 // ---------- 斜杠触发（技能 = 预设 + 模板快捷方式） ----------
 
 export interface SlashToken {
-  /** 命中的预设 id 或模板 id（kind 区分） */
+  /** 命中的模板 id（技能）；预设点击选择，不参与斜杠 */
   id: string
-  kind: 'preset' | 'template'
+  kind: 'template'
   /** token 后剩余文本（不含 token 本身） */
   rest: string
 }
@@ -147,13 +147,18 @@ export interface SlashToken {
  * whitespace 分界的 /name token，可出现在任意位置）。
  * 未命中返回 null。
  */
+/**
+ * 解析斜杠 token（dsh skill 语义：仅技能=模板快捷方式，单选）。
+ *
+ * 预设不参与斜杠——预设是点击选择的（会话级），见 NewSessionDialog/
+ * 会话头 chip。模板 id 含冒号（app:xxx），字符类需含 ':'；仍要求
+ * whitespace 分界，url 中的 /path（前邻非空白）不会被误命中。
+ */
 export function parseSlashToken(
   text: string,
-  presets: readonly { id: string }[],
+  _presets: readonly { id: string }[],
   templates: readonly { id: string }[]
 ): SlashToken | null {
-  // 模板 id 含冒号（app:xxx），字符类需含 ':'；仍要求 whitespace 分界，
-  // url 中的 /path（前邻非空白）不会被误命中
   const re = /(?:^|\s)\/([a-zA-Z0-9][a-zA-Z0-9_:-]*)/g
   let m: RegExpExecArray | null
   while ((m = re.exec(text))) {
@@ -161,9 +166,6 @@ export function parseSlashToken(
     const tokenLen = m[0].length
     const before = text.slice(0, m.index)
     const rest = text.slice(m.index + tokenLen)
-    if (presets.some((p) => p.id.toLowerCase() === name)) {
-      return { id: name, kind: 'preset', rest: (before + ' ' + rest).trim() }
-    }
     if (templates.some((t) => t.id.toLowerCase() === name)) {
       return { id: name, kind: 'template', rest: (before + ' ' + rest).trim() }
     }

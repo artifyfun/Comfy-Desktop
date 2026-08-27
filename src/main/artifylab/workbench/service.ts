@@ -196,7 +196,12 @@ class WorkbenchService {
   /** 会话元信息更新（标题/模型覆盖/归档；dsh 语义：模型可变，预设锁定） */
   updateSession(
     id: string,
-    patch: { title?: string; modelOverride?: SessionModelOverride; archived?: boolean }
+    patch: {
+      title?: string
+      modelOverride?: SessionModelOverride
+      archived?: boolean
+      presetId?: string
+    }
   ): WorkbenchSession | null {
     const session = this.getSession(id)
     if (!session) return null
@@ -206,6 +211,12 @@ class WorkbenchService {
     }
     if (patch.modelOverride !== undefined) session.modelOverride = patch.modelOverride
     if (patch.archived !== undefined) session.archived = patch.archived
+    // 预设点击切换（dsh 模式）：仅接受已存在预设
+    if (patch.presetId !== undefined) {
+      if (patch.presetId === '' || this.getPreset(patch.presetId)) {
+        session.presetId = patch.presetId || undefined
+      }
+    }
     session.updatedAt = Date.now()
     this.flush()
     return session
@@ -340,15 +351,12 @@ ${userInput}`
     const session = this.getSession(sessionId)
     if (!session) throw new Error(`session not found: ${sessionId}`)
 
-    // --- 输入预处理：斜杠 token（技能）> 会话预设 ---
-    const slash = parseSlashToken(rawInput, this.listPresets(), templateLibrary.list())
-    let presetId = session.presetId
+    // --- 输入预处理：斜杠 token（技能=模板快捷方式，单选）> 会话预设 ---
+    const slash = parseSlashToken(rawInput, [], templateLibrary.list())
+    const presetId = session.presetId
     let templateShortcut: string | undefined
     let userInput = rawInput
-    if (slash?.kind === 'preset') {
-      presetId = slash.id
-      userInput = slash.rest
-    } else if (slash?.kind === 'template') {
+    if (slash?.kind === 'template') {
       templateShortcut = slash.id
       userInput = slash.rest
     }
@@ -640,24 +648,15 @@ ${userInput}`
     return this.store.presetDefault ?? BUILTIN_PRESETS[0]!.id
   }
 
-  // ---------------- 技能清单（/ 触发器用：预设 + 模板快捷方式） ----------------
+  // ---------------- 技能清单（/ 触发器用：模板快捷方式；预设是点击选择的不参与） ----------------
 
   listSkills(): Array<{
     id: string
-    kind: 'preset' | 'template'
+    kind: 'template'
     name: string
     description: string
-    intentHint?: string
     mediaType?: string
   }> {
-    const lang = appStoreManager.getConfig().lang === 'en' ? 'en' : 'zh'
-    const presets = this.listPresets().map((p) => ({
-      id: p.id,
-      kind: 'preset' as const,
-      name: p.name[lang],
-      description: p.description[lang],
-      intentHint: p.intentHint
-    }))
     const templates = templateLibrary.list().map((t) => ({
       id: t.id,
       kind: 'template' as const,
@@ -665,7 +664,7 @@ ${userInput}`
       description: t.description,
       mediaType: t.mediaType
     }))
-    return [...presets, ...templates]
+    return templates
   }
 
   // ---------------- 可选模型派生（config + 网关常见模型） ----------------

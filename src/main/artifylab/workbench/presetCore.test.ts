@@ -122,20 +122,12 @@ describe('presetCore', () => {
   describe('parseSlashToken', () => {
     const presets = [{ id: 't2i' }, { id: 'video-gen' }]
     const templates = [{ id: 'app:flux' }]
-    it('行首 token 命中预设', () => {
-      expect(parseSlashToken('/t2i 一只猫', presets, templates)).toEqual({
-        id: 't2i',
-        kind: 'preset',
-        rest: '一只猫'
-      })
+    it('预设不参与斜杠（点击选择，dsh 模式）', () => {
+      // /t2i 是预设 id，但现在斜杠只匹配技能（模板）；预设 id 的 token 不命中
+      expect(parseSlashToken('/t2i 一只猫', presets, templates)).toBeNull()
+      expect(parseSlashToken('帮我 /video-gen 做个视频', presets, templates)).toBeNull()
     })
-    it('句中 token（whitespace 分界）', () => {
-      const r = parseSlashToken('帮我 /video-gen 做个视频', presets, templates)
-      expect(r?.kind).toBe('preset')
-      expect(r?.rest).toContain('帮我')
-      expect(r?.rest).toContain('做个视频')
-    })
-    it('模板快捷方式命中', () => {
+    it('模板快捷方式命中（技能）', () => {
       expect(parseSlashToken('/app:flux 猫', presets, templates)).toEqual({
         id: 'app:flux',
         kind: 'template',
@@ -143,10 +135,10 @@ describe('presetCore', () => {
       })
     })
     it('大小写不敏感', () => {
-      expect(parseSlashToken('/T2I 猫', presets, templates)?.id).toBe('t2i')
+      expect(parseSlashToken('/APP:FLUX 猫', presets, templates)?.id).toBe('app:flux')
     })
     it('未知 token / 非分界（如 url 路径）不命中', () => {
-      expect(parseSlashToken('看 http://x.com/t2i 这个', presets, templates)).toBeNull()
+      expect(parseSlashToken('看 http://x.com/flux 这个', presets, templates)).toBeNull()
       expect(parseSlashToken('/unknown 猫', presets, templates)).toBeNull()
     })
   })
