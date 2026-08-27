@@ -17,6 +17,13 @@ export function getOrCreateMcpToken(): string {
   return token
 }
 
+/** 重置 token：旧 token 立即失效（所有已配置的 MCP 客户端需更新）。 */
+export function regenerateMcpToken(): string {
+  const token = randomBytes(32).toString('hex')
+  appStoreManager.saveConfig({ [CONFIG_KEY]: token })
+  return token
+}
+
 /** 校验 Authorization: Bearer <token> 或 ?token=<token> query。 */
 export function validateMcpToken(req: {
   headers: Record<string, string | string[] | undefined>
