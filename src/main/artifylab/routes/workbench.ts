@@ -404,6 +404,12 @@ export function createWorkbenchRouter(): express.Router {
         return
       }
       if (plan.intent === 'chat' || plan.intent === 'text') {
+        // 回复落盘:重进会话可见（此前只发 SSE 不存储,历史只剩用户气泡）
+        workbenchService.appendMessage(sessionId, {
+          role: 'agent',
+          kind: 'chat',
+          text: plan.reply ?? ''
+        })
         send('reply', { intent: plan.intent, reply: plan.reply ?? '' })
         finish()
         return
@@ -438,6 +444,11 @@ export function createWorkbenchRouter(): express.Router {
           batch: { jobId, total },
           template: local.template.name
         })
+        workbenchService.appendMessage(sessionId, {
+          role: 'agent',
+          kind: 'chat',
+          text: `批量任务已入队：${total} 条，模板「${local.template.name}」。进度可在批量任务面板查看。`
+        })
         send('reply', {
           intent: plan.intent,
           reply: `批量任务已入队：${total} 条，模板「${local.template.name}」。进度可在批量任务面板查看。`
@@ -451,6 +462,12 @@ export function createWorkbenchRouter(): express.Router {
         local.template,
         attachments ?? []
       )
+      // 单次执行提交提示落盘(与前端 workbenchSubmitted 文案一致)
+      workbenchService.appendMessage(sessionId, {
+        role: 'agent',
+        kind: 'chat',
+        text: '已提交到 ComfyUI 队列'
+      })
       send('submitted', {
         promptId: execution.promptId,
         templateId: execution.templateId,
