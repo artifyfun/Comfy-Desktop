@@ -18,6 +18,7 @@ import { templateLibrary } from './templates'
 import { toPseudoApp, type WorkflowTemplate } from './templateCore'
 import {
   checkVram,
+  parsePlanFromCodexText,
   validateAgainstObjectInfo,
   validateModels,
   validatePlanLocal,
@@ -423,16 +424,7 @@ ${userInput}`
 
   /** 从 codex 原始输出提取第一个 JSON 对象（容错：markdown 包裹/前后杂文） */
   static parsePlanFromCodex(raw: string): WorkbenchPlan | null {
-    const start = raw.indexOf('{')
-    const end = raw.lastIndexOf('}')
-    if (start === -1 || end === -1 || end <= start) return null
-    try {
-      const obj = JSON.parse(raw.slice(start, end + 1)) as WorkbenchPlan
-      if (!obj || typeof obj !== 'object' || !('intent' in obj)) return null
-      return obj
-    } catch {
-      return null
-    }
+    return parsePlanFromCodexText(raw)
   }
 
   /**
@@ -491,7 +483,11 @@ ${userInput}`
       baseUrl: resolveCodexBaseUrl({
         baseUrl: appStoreManager.getConfig().base_url || undefined
       }),
-      apiKey: appStoreManager.getConfig().api_key || process.env.CODEX_API_KEY || ''
+      apiKey: appStoreManager.getConfig().api_key || process.env.CODEX_API_KEY || '',
+      // 用户级 ~/.codex/config.toml 可能定义 model_provider="custom"（如 cliproxy），
+      // provider 级 base_url 优先于 --config openai_base_url，导致 8317 劫持。
+      // 强制回内置 openai provider 让 baseUrl 覆盖真正生效。
+      config: { model_provider: 'openai' }
     })
     const thread = codex.startThread({
       model: appStoreManager.getConfig().buildModel || 'deepseek-v4-flash',

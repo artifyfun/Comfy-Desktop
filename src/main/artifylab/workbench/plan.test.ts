@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { validatePlanLocal, type WorkbenchPlan } from './plan'
+import { parsePlanFromCodexText, validatePlanLocal, type WorkbenchPlan } from './plan'
 import type { WorkflowTemplate } from './templateCore'
 
 function makeTemplate(): WorkflowTemplate {
@@ -167,5 +167,53 @@ describe('parsePlanFromCodex（经 service 静态方法同逻辑）', () => {
   })
   it('无 JSON 返回 null', () => {
     expect(parse('抱歉我不明白')).toBeNull()
+  })
+})
+
+describe('parsePlanFromCodexText（真实 decide 输出形态回归）', () => {
+  const planLine = (text: string) =>
+    JSON.stringify({
+      type: 'item.completed',
+      item: { id: 'item_3', type: 'agent_message', text }
+    })
+
+  it('ThreadEvent NDJSON：从 agent_message.text 提取 PLAN', () => {
+    const raw = [
+      JSON.stringify({ type: 'thread.started', thread_id: 'x' }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: { id: 'i0', type: 'error', message: 'meta not found' }
+      }),
+      JSON.stringify({ type: 'turn.started' }),
+      JSON.stringify({
+        type: 'item.completed',
+        item: { id: 'i2', type: 'reasoning', text: '用户要画猫…' }
+      }),
+      planLine('{"intent":"image","templateId":"app:t1","params":{},"reason":"画图","reply":""}'),
+      JSON.stringify({ type: 'turn.completed', usage: { total_tokens: 100 } })
+    ].join('\n')
+    expect(parsePlanFromCodexText(raw)).toMatchObject({ intent: 'image', templateId: 'app:t1' })
+  })
+
+  it('NDJSON 多条 agent_message：取最后一条有效的', () => {
+    const raw = [
+      planLine('我理解你想画图'),
+      planLine('{"intent":"chat","reason":"模板为空"}')
+    ].join('\n')
+    expect(parsePlanFromCodexText(raw)).toMatchObject({ intent: 'chat' })
+  })
+
+  it('纯文本形态（text-delta 流）：整体提取 {...}', () => {
+    expect(parsePlanFromCodexText('好的：{"intent":"text"} 完成')).toMatchObject({ intent: 'text' })
+  })
+
+  it('markdown 围栏包裹仍可用', () => {
+    expect(parsePlanFromCodexText('```json\n{"intent":"audio"}\n```')).toMatchObject({
+      intent: 'audio'
+    })
+  })
+
+  it('无 PLAN 返回 null', () => {
+    expect(parsePlanFromCodexText(JSON.stringify({ type: 'turn.failed', error: 'x' }))).toBeNull()
   })
 })

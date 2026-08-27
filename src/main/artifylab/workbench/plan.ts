@@ -206,3 +206,45 @@ export function validatePlanLocal(
   if (plan.params) issues.push(...validateParams(template, plan.params))
   return { ok: issues.length === 0, issues, template }
 }
+
+/**
+ * 从 codex 原始输出中提取 PLAN。
+ * 兼容两种形态：
+ * 1. 结构化 ThreadEvent NDJSON（responses 协议经代理/网关时）——取最后一条
+ *    item.completed 的 agent_message.text 再提 JSON；
+ * 2. 模型原生文本输出（text-delta 流）——整体找首个可解析的 {...}。
+ */
+export function parsePlanFromCodexText(raw: string): WorkbenchPlan | null {
+  for (const line of raw.split('\n').reverse()) {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('{')) continue
+    try {
+      const evt = JSON.parse(trimmed) as {
+        type?: string
+        item?: { type?: string; text?: unknown }
+      }
+      if (evt.type === 'item.completed' && evt.item?.type === 'agent_message') {
+        const text = typeof evt.item.text === 'string' ? evt.item.text : ''
+        const plan = extractPlanJson(text)
+        if (plan) return plan
+      }
+    } catch {
+      /* 非 NDJSON 形态的行忽略 */
+    }
+  }
+  return extractPlanJson(raw)
+}
+
+/** 从纯文本中提取首个可解析且含 intent 字段的 PLAN JSON 对象 */
+function extractPlanJson(text: string): WorkbenchPlan | null {
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start === -1 || end === -1 || end <= start) return null
+  try {
+    const obj = JSON.parse(text.slice(start, end + 1)) as WorkbenchPlan
+    if (!obj || typeof obj !== 'object' || !('intent' in obj)) return null
+    return obj
+  } catch {
+    return null
+  }
+}
