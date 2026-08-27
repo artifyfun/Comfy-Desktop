@@ -7,14 +7,15 @@
   >
     <div
       v-if="dragOver"
-      class="absolute inset-0 z-40 flex flex-col items-center justify-center bg-slate-900/90 border-2 border-dashed border-tech-blue rounded-2xl"
+      class="absolute inset-0 z-40 flex flex-col items-center justify-center bg-slate-900/90 border-2 border-dashed border-tech-blue rounded-xl"
     >
       <i class="fas fa-cloud-arrow-up text-3xl text-tech-blue mb-2"></i>
       <div class="text-sm text-slate-200">{{ t('workbenchDropHint') }}</div>
     </div>
 
     <!-- dsh composer 布局：圆角卡片，textarea 全宽在上，工具条在底 -->
-    <div class="rounded-2xl border border-slate-600 bg-slate-800 px-4 pt-3 pb-2 shadow-lg">
+    <!-- 圆角与中间面板 rounded-xl 一致，内层按 3px 内收对齐 border 重叠 -->
+    <div class="rounded-xl border border-slate-600 bg-slate-800 px-4 pt-3 pb-2 shadow-lg">
       <!-- 附件行（缩略图在上） -->
       <AttachmentRail
         v-if="attachments.length"

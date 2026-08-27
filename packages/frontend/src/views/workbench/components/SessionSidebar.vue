@@ -1,7 +1,7 @@
 <template>
   <aside
-    class="session-sidebar flex flex-col bg-slate-900/80 border-r border-slate-700 transition-all duration-300"
-    :class="collapsed ? 'w-14' : 'w-60'"
+    class="session-sidebar flex flex-col bg-slate-900/80 border-r border-slate-700 transition-all duration-300 shrink-0"
+    :class="collapsed ? 'w-0 overflow-hidden border-r-0' : 'w-60 h-[calc(100vh-160px)]'"
   >
     <!-- 品牌行 + 折叠 -->
     <div class="flex items-center justify-between px-2 h-12 border-b border-slate-700">

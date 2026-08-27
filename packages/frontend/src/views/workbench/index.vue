@@ -35,6 +35,15 @@
         >
           <!-- 会话头 -->
           <div class="flex items-center gap-2 px-4 h-12 border-b border-slate-700 shrink-0">
+            <!-- 侧栏折叠时:展开入口收进本面板左上角（侧栏 0 宽,不再占位） -->
+            <button
+              v-if="sidebarCollapsed"
+              class="w-7 h-7 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center transition shrink-0"
+              :title="t('workbenchExpandSidebar')"
+              @click="sidebarCollapsed = false"
+            >
+              <i class="fas fa-bars-staggered text-sm"></i>
+            </button>
             <!-- 预设 chip：点击切换（dsh preset 模式） -->
             <a-dropdown :trigger="['click']">
               <button
