@@ -12,10 +12,25 @@
  * - 记忆工具同 workbench memory intent 语义（key 幂等，≤500 字）。
  */
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
-import { templateLibrary } from '../workbench/templates'
-import { validatePlanLocal, type WorkbenchPlan } from '../workbench/plan'
+import {
+  validateNodeOverrides,
+  validateNodeOverridesLocal,
+  validatePlanLocal,
+  validateAgainstObjectInfo,
+  type WorkbenchPlan,
+  type PlanValidationIssue
+} from '../workbench/plan'
 import { workbenchService } from '../workbench/service'
+import type { ComfyPrompt, ParamNode } from '../appStore'
+import appStoreManager from '../appStore'
 import type { ToolHandler, ToolRegistry } from './tools'
+
+/** /object_info 的节点输入 schema（widget 定义），本地镜像 plan.ts */
+interface ObjectInfoNode {
+  input?: {
+    required?: Record<string, [unknown, Record<string, unknown>?] | [unknown]>
+  }
+}
 
 /** 当前 decide 会话（工具执行上下文）。decide 开始时置位，结束后清空。 */
 let currentDecideSession: string | null = null
@@ -49,7 +64,47 @@ function toPlan(args: Record<string, unknown>): WorkbenchPlan {
     templateId: args.template_id ? String(args.template_id) : undefined,
     params: (args.params as Record<string, unknown>) ?? {},
     usePreviousOutput: Boolean(args.use_previous_output),
+    nodeOverrides: args.node_overrides as WorkbenchPlan['nodeOverrides'],
     reason: args.reason ? String(args.reason) : undefined
+  }
+}
+
+/** wait=true 轮询到终态（wb_execute_template / wb_run_workflow 共用） */
+async function pollUntilDone(
+  sessionId: string,
+  promptId: string
+): Promise<{
+  ok: boolean
+  stage: string
+  prompt_id: string
+  outputs?: unknown
+  outputs_text?: string
+  error?: string
+}> {
+  const deadline = Date.now() + 10 * 60 * 1000
+  for (;;) {
+    const r = await workbenchService.pollExecution(sessionId, promptId)
+    if (r.status === 'success') {
+      return {
+        ok: true,
+        stage: 'completed',
+        prompt_id: promptId,
+        outputs: r.outputs,
+        outputs_text: r.outputsText.slice(0, 2000)
+      }
+    }
+    if (r.status === 'error') {
+      return { ok: false, stage: 'failed', prompt_id: promptId, error: r.error }
+    }
+    if (Date.now() > deadline) {
+      return {
+        ok: false,
+        stage: 'timeout',
+        prompt_id: promptId,
+        error: '10min 超时，可用 wb_poll_execution 稍后再查'
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000))
   }
 }
 
@@ -62,9 +117,10 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: true }
     },
-    fn: async () =>
-      text(
-        templateLibrary.list().map((t) => ({
+    fn: async () => {
+      const sessionId = requireSession()
+      return text(
+        workbenchService.listTemplates(sessionId).map((t) => ({
           id: t.id,
           name: t.name,
           description: t.description,
@@ -80,6 +136,7 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
             }))
         }))
       )
+    }
   },
   {
     tool: {
@@ -94,10 +151,19 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
             enum: ['image', 'video', 'audio'],
             description: '生成意图（决定校验口径）'
           },
-          template_id: { type: 'string', description: '模板 id（wb_list_templates 里查）' },
+          template_id: {
+            type: 'string',
+            description: '模板 id（wb_list_templates 里查；会话变体 id 也可）'
+          },
           params: {
             type: 'object',
             description: '模板参数（键=参数名；仅写与默认值不同的键）',
+            additionalProperties: true
+          },
+          node_overrides: {
+            type: 'object',
+            description:
+              '节点级参数覆盖：{"节点id": {"class_type": "KSampler", "widgetOverrides": {"steps": 40}}}。只改直接值字段，链接引用不能直写。可先用 wb_list_nodes 查 schema。',
             additionalProperties: true
           },
           use_previous_output: {
@@ -118,7 +184,7 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
     fn: async (args) => {
       const sessionId = requireSession()
       const plan = toPlan(args)
-      const validation = validatePlanLocal(plan, templateLibrary.list())
+      const validation = validatePlanLocal(plan, workbenchService.listTemplates(sessionId))
       if (validation.issues.length > 0 || !validation.template) {
         return text({ ok: false, stage: 'validation', issues: validation.issues })
       }
@@ -132,32 +198,308 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
           status: execution.status
         })
       }
-      // wait=true：轮询到终态（与前端 poll 通道同一 service 方法，产物自动落会话）
-      const deadline = Date.now() + 10 * 60 * 1000
-      for (;;) {
-        const r = await workbenchService.pollExecution(sessionId, execution.promptId)
-        if (r.status === 'success') {
-          return text({
-            ok: true,
-            stage: 'completed',
-            prompt_id: execution.promptId,
-            outputs: r.outputs,
-            outputs_text: r.outputsText.slice(0, 2000)
-          })
-        }
-        if (r.status === 'error') {
-          return text({ ok: false, stage: 'failed', prompt_id: execution.promptId, error: r.error })
-        }
-        if (Date.now() > deadline) {
-          return text({
-            ok: false,
-            stage: 'timeout',
-            prompt_id: execution.promptId,
-            error: '10min 超时，可用 wb_poll_execution 稍后再查'
-          })
-        }
-        await new Promise((resolve) => setTimeout(resolve, 3000))
+      return text(await pollUntilDone(sessionId, execution.promptId))
+    }
+  },
+  {
+    tool: {
+      name: 'wb_list_nodes',
+      description:
+        '读取模板的完整节点图：节点 id / class_type / 可写 widget（直接值字段，附 /object_info 的类型/枚举/范围）。改节点参数（node_overrides）前先查这里。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          template_id: {
+            type: 'string',
+            description: '模板 id（wb_list_templates 里查；会话变体 id 也可）'
+          }
+        },
+        required: ['template_id'],
+        additionalProperties: false
+      },
+      annotations: { readOnlyHint: true }
+    },
+    fn: async (args) => {
+      const sessionId = requireSession()
+      const template = workbenchService.resolveTemplate(sessionId, String(args.template_id))
+      if (!template) return text({ ok: false, error: 'template not found' })
+      let info: Record<string, ObjectInfoNode> | null = null
+      try {
+        const ctrl = new AbortController()
+        const timer = setTimeout(() => ctrl.abort(), 10000)
+        const res = await fetch(`${appStoreManager.getConfig().comfyHost}/object_info`, {
+          signal: ctrl.signal
+        })
+        clearTimeout(timer)
+        if (res.ok) info = (await res.json()) as Record<string, ObjectInfoNode>
+      } catch {
+        /* schema 补充失败不阻断：只有 current 值 */
       }
+      const nodes = Object.entries(template.prompt).map(([id, n]) => {
+        const schema = info?.[n.class_type]?.input?.required ?? {}
+        return {
+          id,
+          class_type: n.class_type,
+          widgets: Object.entries(n.inputs)
+            .filter(([, v]) => !Array.isArray(v))
+            .map(([k, v]) => {
+              const spec = schema[k]
+              const meta = (Array.isArray(spec) ? (spec[1] ?? {}) : {}) as {
+                min?: number
+                max?: number
+              }
+              const combo = Array.isArray(spec) ? spec[0] : undefined
+              return {
+                name: k,
+                current: v,
+                type: Array.isArray(combo) ? 'COMBO' : String(combo ?? '?'),
+                ...(Array.isArray(combo) ? { options: combo } : {}),
+                ...(meta.min != null ? { min: meta.min } : {}),
+                ...(meta.max != null ? { max: meta.max } : {})
+              }
+            })
+        }
+      })
+      return text({ ok: true, template_id: template.id, nodes })
+    }
+  },
+  {
+    tool: {
+      name: 'wb_set_node_params',
+      description:
+        '预览校验某节点的参数覆盖（不执行）：本地规则（节点存在/类型匹配/字段存在/非链接）+ /object_info（类型/枚举/范围）。返回 issue 列表，全过才可入 node_overrides。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          template_id: { type: 'string' },
+          node_id: { type: 'string', description: 'prompt 节点 id（wb_list_nodes 里查）' },
+          class_type: { type: 'string', description: '节点类型（防串号，可选但推荐）' },
+          params: {
+            type: 'object',
+            description: '要覆盖的 widget 键值',
+            additionalProperties: true
+          }
+        },
+        required: ['template_id', 'node_id', 'params'],
+        additionalProperties: false
+      },
+      annotations: { readOnlyHint: true }
+    },
+    fn: async (args) => {
+      const sessionId = requireSession()
+      const template = workbenchService.resolveTemplate(sessionId, String(args.template_id))
+      if (!template) return text({ ok: false, error: 'template not found' })
+      const nodeOverrides = {
+        [String(args.node_id)]: {
+          class_type: args.class_type ? String(args.class_type) : undefined,
+          widgetOverrides: args.params as Record<string, unknown>
+        }
+      }
+      const local = validateNodeOverridesLocal(template.prompt, nodeOverrides)
+      let issues: PlanValidationIssue[] = local
+      if (local.length === 0) {
+        issues = await validateNodeOverrides(
+          appStoreManager.getConfig().comfyHost,
+          template.prompt,
+          nodeOverrides
+        )
+      }
+      return text({ ok: issues.length === 0, issues })
+    }
+  },
+  {
+    tool: {
+      name: 'wb_validate_workflow',
+      description:
+        '校验一个 API 格式 workflow JSON（自建工作流）：节点结构、链接完整性（引用节点存在）、节点类型已安装（/object_info）。错误可迭代修正后重试。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workflow: {
+            type: 'object',
+            description:
+              'API 格式：{"节点id": {"class_type": "节点类名", "inputs": {"参数": 值 或 ["上游id", 端口]}}}',
+            additionalProperties: true
+          }
+        },
+        required: ['workflow'],
+        additionalProperties: false
+      },
+      annotations: { readOnlyHint: true }
+    },
+    fn: async (args) => {
+      const workflow = args.workflow as ComfyPrompt
+      if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow))
+        return text({ ok: false, error: 'workflow（API prompt 对象）required' })
+      const size = Object.keys(workflow).length
+      if (size === 0) return text({ ok: false, error: 'workflow 为空' })
+      if (size > 200) return text({ ok: false, error: `节点数超限（${size}/200）` })
+      const localIssues: PlanValidationIssue[] = []
+      for (const [id, n] of Object.entries(workflow)) {
+        if (
+          !n ||
+          typeof n !== 'object' ||
+          !n.class_type ||
+          !n.inputs ||
+          typeof n.inputs !== 'object'
+        ) {
+          localIssues.push({
+            field: `workflow.${id}`,
+            message: '节点结构非法（需 class_type + inputs）'
+          })
+          continue
+        }
+        for (const [k, v] of Object.entries(n.inputs)) {
+          if (Array.isArray(v) && v.length >= 2 && typeof v[0] === 'string') {
+            if (!(v[0] in workflow))
+              localIssues.push({
+                field: `workflow.${id}.${k}`,
+                message: `链接指向不存在的节点 ${v[0]}`
+              })
+          }
+        }
+      }
+      const remote = await validateAgainstObjectInfo(
+        appStoreManager.getConfig().comfyHost,
+        workflow
+      )
+      return text({
+        ok: localIssues.length + remote.length === 0,
+        issues: [...localIssues, ...remote],
+        node_count: size
+      })
+    }
+  },
+  {
+    tool: {
+      name: 'wb_run_workflow',
+      description:
+        '直接运行一个 API 格式 workflow JSON（自建/粘贴/改过的工作流），不依赖固化模板。校验→提交→（wait=true 阻塞到完成返回产物）。产物自动落会话。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          workflow: {
+            type: 'object',
+            description:
+              'API 格式：{"节点id": {"class_type": "节点类名", "inputs": {"参数": 值 或 ["上游id", 端口]}}}',
+            additionalProperties: true
+          },
+          name: { type: 'string', description: '工作流名称（便于会话/产物识别，可选）' },
+          seed: { type: 'number', description: '显式 seed（缺省随机）' },
+          randomize_seed: { type: 'boolean', description: '强制随机 seed' },
+          node_overrides: {
+            type: 'object',
+            description: '节点级覆盖（同 node_overrides 语义）',
+            additionalProperties: true
+          },
+          wait: { type: 'boolean', description: 'true=阻塞到完成（推荐）' }
+        },
+        required: ['workflow'],
+        additionalProperties: false
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false }
+    },
+    fn: async (args) => {
+      const sessionId = requireSession()
+      const workflow = args.workflow as ComfyPrompt
+      if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow))
+        return text({ ok: false, error: 'workflow（API prompt 对象）required' })
+      const remote = await validateAgainstObjectInfo(
+        appStoreManager.getConfig().comfyHost,
+        workflow
+      )
+      if (remote.length > 0) return text({ ok: false, stage: 'validation', issues: remote })
+      const execution = await workbenchService.executeWorkflow(sessionId, workflow, {
+        name: args.name ? String(args.name) : undefined,
+        seed: args.seed != null ? Number(args.seed) : null,
+        randomizeSeed: Boolean(args.randomize_seed),
+        nodeOverrides: args.node_overrides as WorkbenchPlan['nodeOverrides']
+      })
+      workbenchService.markOrchestrated(sessionId)
+      if (args.wait === false) {
+        return text({ ok: true, stage: 'submitted', prompt_id: execution.promptId })
+      }
+      return text(await pollUntilDone(sessionId, execution.promptId))
+    }
+  },
+  {
+    tool: {
+      name: 'wb_clone_template',
+      description:
+        '把模板克隆为会话级变体（可叠加 node_overrides 固化进新 prompt）。返回新模板 id，可继续改/执行/固化。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          template_id: { type: 'string' },
+          node_overrides: {
+            type: 'object',
+            description: '要固化进副本的节点覆盖（可选）',
+            additionalProperties: true
+          }
+        },
+        required: ['template_id'],
+        additionalProperties: false
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false }
+    },
+    fn: async (args) => {
+      const sessionId = requireSession()
+      try {
+        const t = workbenchService.cloneTemplate(
+          sessionId,
+          String(args.template_id),
+          args.node_overrides as WorkbenchPlan['nodeOverrides']
+        )
+        if (!t) return text({ ok: false, error: 'template not found' })
+        return text({
+          ok: true,
+          template_id: t.id,
+          name: t.name,
+          node_count: Object.keys(t.prompt).length
+        })
+      } catch (e) {
+        return text({ ok: false, error: e instanceof Error ? e.message : String(e) })
+      }
+    }
+  },
+  {
+    tool: {
+      name: 'wb_publish_workflow',
+      description:
+        '把自建/修改过的 workflow 固化为新 App（进模板库，长期复用）。复用现有 app 固化链路。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: '新 App 名称' },
+          workflow: {
+            type: 'object',
+            description: 'API 格式 workflow',
+            additionalProperties: true
+          },
+          params_nodes: {
+            type: 'array',
+            description: '可选：显式参数 schema（缺省按输出节点推断）',
+            items: { type: 'object' }
+          }
+        },
+        required: ['name', 'workflow'],
+        additionalProperties: false
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false }
+    },
+    fn: async (args) => {
+      requireSession()
+      const name = String(args.name ?? '').trim()
+      if (!name) return text({ ok: false, error: 'name required' })
+      const workflow = args.workflow as ComfyPrompt
+      if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow))
+        return text({ ok: false, error: 'workflow（API prompt 对象）required' })
+      const app = workbenchService.publishWorkflow(
+        name,
+        workflow,
+        args.params_nodes as ParamNode[] | undefined
+      )
+      return text({ ok: !!app, app_id: app?.id, name })
     }
   },
   {

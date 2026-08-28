@@ -17,7 +17,7 @@ export interface WorkflowTemplate {
   requiredModels?: string[]
   knowledge?: string
   chainable?: boolean
-  source: 'builtin' | 'app'
+  source: 'builtin' | 'app' | 'session'
   appId?: string
 }
 

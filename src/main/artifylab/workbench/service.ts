@@ -14,7 +14,7 @@ import type { Server as HttpServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
-import appStoreManager from '../appStore'
+import appStoreManager, { type App, type ComfyPrompt, type ParamNode } from '../appStore'
 import { logger } from '../utils/logger'
 import { templateLibrary } from './templates'
 import { toPseudoApp, type WorkflowTemplate } from './templateCore'
@@ -23,6 +23,7 @@ import {
   parsePlanFromCodexText,
   validateAgainstObjectInfo,
   validateModels,
+  validateNodeOverrides,
   validatePlanLocal,
   type WorkbenchPlan,
   type PlanValidationIssue
@@ -45,8 +46,11 @@ import { get as getSetting } from '../../settings'
 import { getOrCreateMcpToken } from '../mcp/auth'
 import { beginWorkbenchToolContext, endWorkbenchToolContext } from '../mcp/workbenchTools'
 import {
+  applyNodeOverrides,
   executeApp,
+  executePrompt,
   getExecutionStatus,
+  inferOutputNodeIds,
   uploadMediaBuffer,
   type ExecutionResult
 } from '../mcp/executor'
@@ -633,7 +637,22 @@ class WorkbenchService {
 1. wb_list_templates 看可用模板（研究类需求可用你的 shell 联网检索，结论作为后续 prompt 输入）。
 2. wb_execute_template(template_id, params, wait=true) 逐步执行；链式步骤传 use_previous_output=true 自动引用上一步产物。
 3. 每步产物自动落会话（用户实时可见）；全部完成后，最终回复（agent_message）输出：完整编排总结 + 交付文案（若需要）+ 仍输出 PLAN JSON（intent 标记为最后一个生成步骤，系统会跳过重复执行）。
-用户偏好/硬件等跨会话事实可用 wb_remember/wb_forget 沉淀。`
+用户偏好/硬件等跨会话事实可用 wb_remember/wb_forget 沉淀。
+
+## 节点级控制（wb_* 工具 + node_overrides）
+用户要求**更精细的参数**（改采样步数/CFG/尺寸/换模型/改任意节点参数，模板未暴露的）时：
+1. wb_list_nodes(template_id) 查模板节点图与可写 widget（含类型/枚举/范围，源自 ComfyUI /object_info）。
+2. 在 PLAN 里带 node_overrides 精确覆盖：{"节点id": {"class_type": "KSampler", "widgetOverrides": {"steps": 40, "cfg": 7}}}；wb_execute_template 同样接受 node_overrides。
+3. **链接型字段**（值是 ["nodeId", slot] 引用）不能直接赋值——改它上游节点的输出参数。
+4. 校验失败会打回原因（字段不存在/类型错/越界/是链接），按提示修正后重试。
+模板参数够用时**优先用 params（省 token）**；确实要动模板未暴露的节点才用 node_overrides。
+
+## 工作流创作（wb_* 工具）
+现有模板无法表达需求时（要自定义节点连线/组合）：
+1. wb_list_templates 确认没有可用的；wb_validate_workflow(workflow) 先校验你的 API 格式 workflow JSON（节点类型/链接完整性，可迭代修正）。
+2. wb_run_workflow(workflow, wait=true) 直接运行；seed/node_overrides 可传。产物自动落会话。
+3. 效果好的可 wb_publish_workflow(name, workflow) 固化为新模板，供后续复用。
+API 格式：{"节点id": {"class_type": "节点类名", "inputs": {"参数名": 值 或 ["上游id", 端口号]}}}；链接字段值为 ["上游节点id", 输出端口下标]。`
       : ''
     // 跨会话记忆注入(dsh memory 语义):读取段 + 自我更新授权
     const memorySection = this.renderMemoryContext()
@@ -932,7 +951,7 @@ ${userInput}`
 
   /** 网络侧校验（object_info/models/VRAM），decision 后、执行前调用 */
   async validateRemote(
-    _plan: WorkbenchPlan,
+    plan: WorkbenchPlan,
     template: WorkflowTemplate | null
   ): Promise<PlanValidationIssue[]> {
     const comfyOrigin = appStoreManager.getConfig().comfyHost
@@ -940,6 +959,11 @@ ${userInput}`
     if (template) {
       issues.push(...(await validateAgainstObjectInfo(comfyOrigin, template.prompt)))
       issues.push(...(await validateModels(comfyOrigin, template)))
+      // 节点级覆盖网络校验（/object_info widget 类型/枚举/范围）
+      if (plan.nodeOverrides)
+        issues.push(
+          ...(await validateNodeOverrides(comfyOrigin, template.prompt, plan.nodeOverrides))
+        )
     }
     issues.push(...(await checkVram(comfyOrigin)))
     return issues
@@ -989,7 +1013,7 @@ ${userInput}`
         )
       }
     }
-    const result = await executeApp(toPseudoApp(template), args, comfyOrigin)
+    const result = await executeApp(toPseudoApp(template), args, comfyOrigin, plan.nodeOverrides)
     const execution: WorkbenchExecution = {
       promptId: result.prompt_id,
       templateId: template.id,
@@ -1010,6 +1034,117 @@ ${userInput}`
       })
     }
     return execution
+  }
+
+  // ---------- P1 能力：裸工作流执行 / 会话模板派生 / 固化 ----------
+
+  /** 会话级派生模板（wb_clone_template）：模板副本 + 节点覆盖，仅本会话可见 */
+  private sessionTemplates = new Map<string, WorkflowTemplate[]>()
+  private sessionTemplateSeq = 0
+
+  /** 模板解析：模板库优先，其次会话级派生模板 */
+  resolveTemplate(sessionId: string, templateId: string): WorkflowTemplate | null {
+    const base = templateLibrary.get(templateId)
+    if (base) return base
+    return this.sessionTemplates.get(sessionId)?.find((t) => t.id === templateId) ?? null
+  }
+
+  /** 校验/编排用的模板清单（模板库 + 本会话派生模板） */
+  listTemplates(sessionId: string): WorkflowTemplate[] {
+    return [...templateLibrary.list(), ...(this.sessionTemplates.get(sessionId) ?? [])]
+  }
+
+  /** 克隆模板为会话级变体：把 nodeOverrides 固化进新 prompt（后续可直接跑/再改/固化） */
+  cloneTemplate(
+    sessionId: string,
+    templateId: string,
+    nodeOverrides?: WorkbenchPlan['nodeOverrides']
+  ): WorkflowTemplate | null {
+    const base = this.resolveTemplate(sessionId, templateId)
+    if (!base) return null
+    const prompt = structuredClone(base.prompt)
+    if (nodeOverrides) {
+      const errors = applyNodeOverrides(prompt, nodeOverrides)
+      if (errors.length > 0) throw new Error(`nodeOverrides 校验失败：\n${errors.join('\n')}`)
+    }
+    let list = this.sessionTemplates.get(sessionId)
+    if (!list) {
+      list = []
+      this.sessionTemplates.set(sessionId, list)
+    }
+    const t: WorkflowTemplate = {
+      ...base,
+      id: `session:${sessionId}:${++this.sessionTemplateSeq}`,
+      name: `${base.name} (变体)`,
+      prompt,
+      source: 'session',
+      appId: undefined
+    }
+    list.push(t)
+    return t
+  }
+
+  /** 裸工作流执行（wb_run_workflow）：任意 API prompt 直跑，产物落会话 */
+  async executeWorkflow(
+    sessionId: string,
+    workflow: ComfyPrompt,
+    opts: {
+      name?: string
+      seed?: number | null
+      randomizeSeed?: boolean
+      nodeOverrides?: WorkbenchPlan['nodeOverrides']
+    } = {}
+  ): Promise<WorkbenchExecution> {
+    const comfyOrigin = appStoreManager.getConfig().comfyHost
+    const result = await executePrompt(comfyOrigin, workflow, {
+      seed: opts.seed,
+      randomizeSeed: opts.randomizeSeed,
+      nodeOverrides: opts.nodeOverrides,
+      workflowKey: opts.name
+    })
+    const execution: WorkbenchExecution = {
+      promptId: result.prompt_id,
+      templateId: opts.name ?? 'session:workflow',
+      params: {},
+      outputs: [],
+      status: result.status,
+      startedAt: Date.now()
+    }
+    const session = this.getSession(sessionId)
+    if (session) {
+      session.executions.push(execution)
+      this.appendMessage(sessionId, {
+        role: 'agent',
+        kind: 'card',
+        text: `执行工作流 ${opts.name ?? '（自建）'}`,
+        promptId: execution.promptId
+      })
+    }
+    return execution
+  }
+
+  /**
+   * 固化为新 App（wb_publish_workflow / 前端固化）：workflow prompt + 可选
+   * paramsNodes（缺省按输出节点推断）→ createApp。复用现有 publish 链路。
+   */
+  publishWorkflow(name: string, workflow: ComfyPrompt, paramsNodes?: ParamNode[]): App | null {
+    const inferred = paramsNodes?.length
+      ? paramsNodes
+      : inferOutputNodeIds(workflow).map((id) => ({
+          id: Number(id) || 0,
+          category: 'output' as const,
+          type: 'output',
+          name: 'result',
+          renderComponent: 'image-uploader',
+          selectedWidget: { id, name: 'images' }
+        }))
+    const newApp = appStoreManager.createApp({
+      name,
+      description: name,
+      template: { prompt: workflow, paramsNodes: inferred, workflow: undefined }
+    })
+    logger.info(`workbench: published app ${newApp.id} from raw workflow "${name}"`)
+    return newApp
   }
 
   /** 查询执行状态并回填产物（SSE 轮询用） */

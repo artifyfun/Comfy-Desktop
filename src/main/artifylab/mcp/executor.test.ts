@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
+  applyNodeOverrides,
   executeApp,
+  executePrompt,
   getExecutionStatus,
   extractOutputs,
   assertSafeMediaUrl,
   getSeed,
+  inferOutputNodeIds,
   freeIfWorkflowChanged,
   forceFreeAndTrack,
   resolveWorkflowKey,
@@ -285,6 +288,108 @@ describe('getExecutionStatus', () => {
     const outputs = res.outputs as Record<string, unknown>
     expect(Object.keys(outputs)).toEqual(['9'])
     expect((outputs['9'] as { filename: string }).filename).toBe('a.png')
+  })
+})
+
+describe('applyNodeOverrides', () => {
+  const prompt: ComfyPrompt = {
+    '12': { class_type: 'KSampler', inputs: { steps: 20, cfg: 7, seed: 1 } },
+    '13': {
+      class_type: 'CLIPTextEncode',
+      inputs: { text: 'hello', clip: ['4', 1] }
+    }
+  }
+
+  it('覆盖直接值字段', () => {
+    const p = structuredClone(prompt)
+    const errors = applyNodeOverrides(p, {
+      '12': { class_type: 'KSampler', widgetOverrides: { steps: 40, cfg: 6.5 } }
+    })
+    expect(errors).toEqual([])
+    expect(p['12']!.inputs.steps).toBe(40)
+    expect(p['12']!.inputs.cfg).toBe(6.5)
+    // 未覆盖字段保持
+    expect(p['12']!.inputs.seed).toBe(1)
+  })
+
+  it('拒绝链接引用字段与不存在的节点/字段', () => {
+    const p = structuredClone(prompt)
+    const errors = applyNodeOverrides(p, {
+      '12': { widgetOverrides: { nonexistent: 1 } },
+      '99': { widgetOverrides: { a: 1 } },
+      '13': { widgetOverrides: { clip: ['4', 0] } }
+    })
+    expect(errors).toEqual([
+      'nodeOverrides: 节点 12 无输入 nonexistent',
+      'nodeOverrides: 字段 13.clip 是链接引用，不能直接赋值（请改上游节点）',
+      'nodeOverrides: 节点不存在 99'
+    ])
+    // 失败项不写入
+    expect(p['13']!.inputs.clip).toEqual(['4', 1])
+  })
+
+  it('class_type 不匹配拒绝整节点', () => {
+    const p = structuredClone(prompt)
+    const errors = applyNodeOverrides(p, {
+      '12': { class_type: 'VAEDecode', widgetOverrides: { steps: 40 } }
+    })
+    expect(errors.length).toBe(1)
+    expect(p['12']!.inputs.steps).toBe(20)
+  })
+})
+
+describe('inferOutputNodeIds', () => {
+  it('找出 Save/Preview/Video/Audio 类输出节点', () => {
+    const ids = inferOutputNodeIds({
+      '1': { class_type: 'KSampler', inputs: {} },
+      '2': { class_type: 'SaveImage', inputs: { images: ['1', 0] } },
+      '3': { class_type: 'VHS_VideoCombine', inputs: { images: ['1', 0] } }
+    })
+    expect(ids).toEqual(['2', '3'])
+  })
+})
+
+describe('executePrompt', () => {
+  it('提交裸工作流并返回 prompt_id（输出节点自动推断）', async () => {
+    const workflow: ComfyPrompt = {
+      '1': { class_type: 'KSampler', inputs: { seed: 123, steps: 20 } },
+      '2': { class_type: 'SaveImage', inputs: { images: ['1', 0] } }
+    }
+    let posted: unknown = null
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes('/prompt')) {
+        posted = JSON.parse(String(init?.body))
+        return new Response(JSON.stringify({ prompt_id: 'raw-1' }), { status: 200 })
+      }
+      throw new Error(`unexpected: ${url}`)
+    })
+    const res = await executePrompt('http://127.0.0.1:8188', workflow, { seed: 123 })
+    expect(res.prompt_id).toBe('raw-1')
+    const prompt = (posted as { prompt: ComfyPrompt }).prompt
+    // seed 显式生效
+    expect(prompt['1']!.inputs.seed).toBe(123)
+    // 节点覆盖生效
+  })
+
+  it('node_overrides 生效且失败项抛错', async () => {
+    const workflow: ComfyPrompt = {
+      '1': { class_type: 'KSampler', inputs: { steps: 20 } }
+    }
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('/prompt'))
+        return new Response(JSON.stringify({ prompt_id: 'raw-2' }), { status: 200 })
+      throw new Error(`unexpected: ${url}`)
+    })
+    const res = await executePrompt('http://127.0.0.1:8188', workflow, {
+      nodeOverrides: { '1': { class_type: 'KSampler', widgetOverrides: { steps: 40 } } }
+    })
+    expect(res.prompt_id).toBe('raw-2')
+    // 失败场景：链接字段
+    await expect(
+      executePrompt('http://127.0.0.1:8188', workflow, {
+        nodeOverrides: { '1': { widgetOverrides: { not_here: 1 } } }
+      })
+    ).rejects.toThrow(/nodeOverrides 校验失败/)
   })
 })
 

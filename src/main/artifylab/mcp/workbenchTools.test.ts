@@ -14,9 +14,36 @@ vi.mock('../workbench/service', () => {
     remembered: [] as Array<{ key: string; value: string }>,
     forgotten: [] as string[]
   }
+  const mockTemplate = {
+    id: 'app:t2i',
+    name: '文生图',
+    description: 'd',
+    mediaType: 'image',
+    chainable: false,
+    prompt: {
+      '12': { class_type: 'KSampler', inputs: { steps: 20, cfg: 7 } }
+    },
+    paramsNodes: [
+      {
+        id: 1,
+        name: 'prompt',
+        category: 'input',
+        type: 'string',
+        renderComponent: 'text',
+        selectedWidget: { name: 'prompt', type: 'string' }
+      }
+    ],
+    source: 'app',
+    appId: 't2i'
+  }
   return {
     workbenchService: {
       getSession: vi.fn((id: string) => (id === 's1' ? { id } : null)),
+      listTemplates: vi.fn(() => [mockTemplate]),
+      resolveTemplate: vi.fn((_sid: string, id: string) =>
+        id === 'app:t2i' ? mockTemplate : null
+      ),
+      cloneTemplate: vi.fn(() => ({ ...mockTemplate, id: 'session:s1:1' })),
       execute: vi.fn(async (sessionId: string, plan: { templateId?: string }) => {
         calls.executed.push({ sessionId, templateId: plan.templateId })
         return {
@@ -28,6 +55,16 @@ vi.mock('../workbench/service', () => {
           startedAt: 0
         }
       }),
+      executeWorkflow: vi.fn(async (sessionId: string) => ({
+        promptId: 'pw1',
+        templateId: 'session:workflow',
+        params: {},
+        outputs: [],
+        status: 'success',
+        startedAt: 0,
+        sessionId
+      })),
+      publishWorkflow: vi.fn(() => ({ id: 'app:new1', name: '新应用' })),
       pollExecution: vi.fn(async () => ({
         status: 'success',
         outputs: [{ filename: 'a.png' }],
@@ -44,6 +81,12 @@ vi.mock('../workbench/service', () => {
     __calls: calls
   }
 })
+
+vi.mock('../appStore', () => ({
+  default: {
+    getConfig: () => ({ comfyHost: 'http://127.0.0.1:8188' })
+  }
+}))
 
 vi.mock('../workbench/templates', () => ({
   templateLibrary: {

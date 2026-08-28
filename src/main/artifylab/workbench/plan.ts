@@ -27,6 +27,19 @@ export interface WorkbenchPlan {
   }
   templateId?: string
   params?: Record<string, unknown>
+  /**
+   * 节点级参数覆盖（P1 能力）：按 prompt 节点 id 覆盖任意节点的 widget 值
+   * （如 KSampler 的 steps/cfg），不限于 paramsNodes 声明的 input。
+   * class_type 用于防串号；widgetOverrides 只接受"直接值"字段，链接引用
+   * （["nodeId", slot]）字段拒绝直写。校验走 /object_info 的 widget schema。
+   */
+  nodeOverrides?: Record<
+    string,
+    {
+      class_type?: string
+      widgetOverrides?: Record<string, unknown>
+    }
+  >
   /** 会话内链式：引用上一次执行的产物（图→视频） */
   usePreviousOutput?: boolean
   reason?: string // codex 解释（展示给用户）
@@ -126,6 +139,143 @@ export async function validateAgainstObjectInfo(
   } catch (e) {
     // ComfyUI 未启动等：不阻断（执行时 executor 会给出真实错误）
     logger.warn('workbench object_info check failed', e)
+    return []
+  }
+}
+
+/**
+ * 节点覆盖的本地校验（同步、不发网络）：节点存在 → class_type 匹配 →
+ * 字段存在 → 非链接引用。执行端的 applyNodeOverrides 与这里必须同一套规则。
+ */
+export function validateNodeOverridesLocal(
+  prompt: ComfyPrompt,
+  nodeOverrides?: Record<string, { class_type?: string; widgetOverrides?: Record<string, unknown> }>
+): PlanValidationIssue[] {
+  const issues: PlanValidationIssue[] = []
+  if (!nodeOverrides) return issues
+  for (const [nodeId, cfg] of Object.entries(nodeOverrides)) {
+    const node = prompt[nodeId]
+    if (!node) {
+      issues.push({ field: `nodeOverrides.${nodeId}`, message: `节点不存在: ${nodeId}` })
+      continue
+    }
+    if (cfg.class_type && node.class_type !== cfg.class_type) {
+      issues.push({
+        field: `nodeOverrides.${nodeId}.class_type`,
+        message: `节点 ${nodeId} 类型不匹配：期望 ${cfg.class_type}，实际 ${node.class_type}`
+      })
+    }
+    for (const [k, v] of Object.entries(cfg.widgetOverrides ?? {})) {
+      if (!(k in node.inputs)) {
+        issues.push({
+          field: `nodeOverrides.${nodeId}.${k}`,
+          message: `节点 ${nodeId} 无输入 ${k}`
+        })
+        continue
+      }
+      if (Array.isArray(node.inputs[k])) {
+        issues.push({
+          field: `nodeOverrides.${nodeId}.${k}`,
+          message: `字段 ${k} 是链接引用（["nodeId", slot]），不能直接赋值——请改它的上游节点`
+        })
+        continue
+      }
+      // 值可 JSON 序列化（防函数/undefined 混入）
+      if (typeof v === 'function' || v === undefined) {
+        issues.push({ field: `nodeOverrides.${nodeId}.${k}`, message: `值不可序列化` })
+      }
+    }
+  }
+  return issues
+}
+
+/** /object_info 的节点输入 schema（widget 定义） */
+interface ObjectInfoNode {
+  input?: {
+    required?: Record<string, [unknown, Record<string, unknown>?] | [unknown]>
+  }
+}
+
+/**
+ * 节点覆盖的网络校验（/object_info widget schema）：
+ * 类型（INT/FLOAT/STRING/BOOLEAN/COMBO）+ 枚举（COMBO values）+ 范围（min/max）。
+ * ComfyUI 不可达时降级放行（执行时 executor 会给出真实错误）。
+ */
+export async function validateNodeOverrides(
+  comfyOrigin: string,
+  prompt: ComfyPrompt,
+  nodeOverrides?: Record<string, { class_type?: string; widgetOverrides?: Record<string, unknown> }>
+): Promise<PlanValidationIssue[]> {
+  if (!nodeOverrides) return []
+  const issues: PlanValidationIssue[] = []
+  try {
+    const res = await fetchTimeout(`${comfyOrigin}/object_info`)
+    if (!res.ok) return []
+    const info = (await res.json()) as Record<string, ObjectInfoNode>
+    for (const [nodeId, cfg] of Object.entries(nodeOverrides)) {
+      const node = prompt[nodeId]
+      if (!node || !cfg.widgetOverrides) continue
+      const schema = info[node.class_type]?.input?.required ?? {}
+      for (const [k, v] of Object.entries(cfg.widgetOverrides)) {
+        const spec = schema[k]
+        if (!spec || !Array.isArray(spec)) {
+          issues.push({
+            field: `nodeOverrides.${nodeId}.${k}`,
+            message: `/object_info 未声明节点 ${node.class_type} 的输入 ${k}`
+          })
+          continue
+        }
+        const meta = (spec[1] ?? {}) as { min?: number; max?: number; options?: unknown }
+        const combo = spec[0]
+        if (Array.isArray(combo)) {
+          // COMBO：枚举校验
+          const values = combo.map(String)
+          if (!values.includes(String(v))) {
+            issues.push({
+              field: `nodeOverrides.${nodeId}.${k}`,
+              message: `枚举不匹配：${node.class_type}.${k} 可选 ${values.join('/')}，得到 ${String(v)}`
+            })
+          }
+          continue
+        }
+        const t = String(combo)
+        if (t === 'INT' || t === 'FLOAT' || t === 'NUMBER') {
+          if (typeof v !== 'number' || !Number.isFinite(v)) {
+            issues.push({
+              field: `nodeOverrides.${nodeId}.${k}`,
+              message: `${node.class_type}.${k} 期望数字，得到 ${typeof v}`
+            })
+            continue
+          }
+          if (meta.min != null && v < meta.min)
+            issues.push({
+              field: `nodeOverrides.${nodeId}.${k}`,
+              message: `${node.class_type}.${k} 小于最小值 ${meta.min}`
+            })
+          if (meta.max != null && v > meta.max)
+            issues.push({
+              field: `nodeOverrides.${nodeId}.${k}`,
+              message: `${node.class_type}.${k} 大于最大值 ${meta.max}`
+            })
+        } else if (t === 'BOOLEAN') {
+          if (typeof v !== 'boolean')
+            issues.push({
+              field: `nodeOverrides.${nodeId}.${k}`,
+              message: `${node.class_type}.${k} 期望布尔，得到 ${typeof v}`
+            })
+        } else if (t !== 'STRING' && t !== 'TEXT' && typeof v !== 'string') {
+          // 其余字符串类宽松（数字可字符串化）
+          if (v !== null && typeof v !== 'number')
+            issues.push({
+              field: `nodeOverrides.${nodeId}.${k}`,
+              message: `${node.class_type}.${k} 期望字符串，得到 ${typeof v}`
+            })
+        }
+      }
+    }
+    return issues
+  } catch (e) {
+    logger.warn('workbench node overrides object_info check failed', e)
     return []
   }
 }
@@ -240,6 +390,10 @@ export function validatePlanLocal(
     return { ok: false, issues }
   }
   if (plan.params) issues.push(...validateParams(template, plan.params))
+  // 节点级覆盖本地校验（节点存在/类型匹配/字段存在/非链接）；网络侧
+  // （/object_info 类型/枚举/范围）由编排层在 validateRemote 阶段补验。
+  if (plan.nodeOverrides)
+    issues.push(...validateNodeOverridesLocal(template.prompt, plan.nodeOverrides))
   // batch:2~200 行;每行必须是对象;items 行键应与模板参数有交集(纯噪音行直接拒)
   if (plan.batch) {
     const n = plan.batch.items?.length ?? 0

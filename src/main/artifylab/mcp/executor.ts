@@ -32,6 +32,72 @@ export function getSeed(n = 15): number {
   return Number(num)
 }
 
+/** 从 workflow prompt 推断输出节点 id（无 paramsNodes 的裸工作流执行用）：
+ *  输出类节点（Save 系列 / Preview / Video / Audio）即产物出口。 */
+export function inferOutputNodeIds(prompt: ComfyPrompt): string[] {
+  return Object.entries(prompt)
+    .filter(([, n]) => /Save|Preview|Video|Audio/i.test(n.class_type))
+    .map(([id]) => id)
+}
+
+/**
+ * seed 处理（M2 语义）：显式 seed 生效（未强制 randomize 时用 seed；NaN 拒绝），
+ * 否则全图 seed 字段随机化。对 prompt 原地修改。
+ */
+function applySeed(prompt: ComfyPrompt, args: Record<string, unknown>): void {
+  const hasSeed = args.seed != null
+  const randomize = args.randomize_seed ?? !hasSeed
+  const seedArg = hasSeed ? Number(args.seed) : null
+  if (seedArg != null && !Number.isFinite(seedArg)) throw new Error('seed must be a finite number')
+  for (const node of Object.values(prompt)) {
+    for (const k of Object.keys(node.inputs)) {
+      const isSeedField = k.toLowerCase().includes('seed') && typeof node.inputs[k] === 'number'
+      if (!isSeedField) continue
+      if (randomize) node.inputs[k] = getSeed()
+      else if (seedArg != null) node.inputs[k] = seedArg
+    }
+  }
+}
+
+/**
+ * 节点级参数覆盖合并（P1）：按 nodeId 覆盖任意节点的 widget 直接值。
+ * 只接受"直接值"字段；链接引用（["nodeId", slot]）拒绝。返回无法合并的错误
+ * 列表（可读），成功项原地写入 prompt。与 plan.validateNodeOverridesLocal
+ * 同规则——这里在提交前兜底执行（防止绕过校验层直接调 executePrompt）。
+ */
+export function applyNodeOverrides(
+  prompt: ComfyPrompt,
+  nodeOverrides?: Record<string, { class_type?: string; widgetOverrides?: Record<string, unknown> }>
+): string[] {
+  const errors: string[] = []
+  if (!nodeOverrides) return errors
+  for (const [nodeId, cfg] of Object.entries(nodeOverrides)) {
+    const node = prompt[nodeId]
+    if (!node) {
+      errors.push(`nodeOverrides: 节点不存在 ${nodeId}`)
+      continue
+    }
+    if (cfg.class_type && node.class_type !== cfg.class_type) {
+      errors.push(
+        `nodeOverrides: 节点 ${nodeId} 类型不匹配（期望 ${cfg.class_type}，实际 ${node.class_type}）`
+      )
+      continue
+    }
+    for (const [k, v] of Object.entries(cfg.widgetOverrides ?? {})) {
+      if (!(k in node.inputs)) {
+        errors.push(`nodeOverrides: 节点 ${nodeId} 无输入 ${k}`)
+        continue
+      }
+      if (Array.isArray(node.inputs[k])) {
+        errors.push(`nodeOverrides: 字段 ${nodeId}.${k} 是链接引用，不能直接赋值（请改上游节点）`)
+        continue
+      }
+      node.inputs[k] = v
+    }
+  }
+  return errors
+}
+
 function isMediaRender(rc?: string): boolean {
   return rc === 'image-uploader' || rc === 'audio-uploader' || rc === 'video-uploader'
 }
@@ -160,12 +226,14 @@ async function uploadMediaBlob(
 
 /**
  * 提交 app 执行（异步，决策 #7）。返回 { prompt_id, status:'queued' }。
- * 步骤：seed 处理 → media 上传 → 普通 input 合并 → queuePrompt。
+ * 步骤：seed 处理 → media 上传 → 普通 input 合并 → 节点覆盖 → queuePrompt。
+ * @param nodeOverrides 节点级参数覆盖（P1），校验失败会 throw（绕过校验层时的兜底）
  */
 export async function executeApp(
   app: App,
   args: Record<string, unknown>,
-  comfyOrigin: string
+  comfyOrigin: string,
+  nodeOverrides?: Record<string, { class_type?: string; widgetOverrides?: Record<string, unknown> }>
 ): Promise<ExecutionResult> {
   const template = app.template
   if (!template?.prompt)
@@ -183,18 +251,7 @@ export async function executeApp(
   }
 
   // 1. seed（M2：显式 seed 生效——传了 seed 且未强制 randomize 时用 seed；NaN 拒绝）
-  const hasSeed = args.seed != null
-  const randomize = args.randomize_seed ?? !hasSeed
-  const seedArg = hasSeed ? Number(args.seed) : null
-  if (seedArg != null && !Number.isFinite(seedArg)) throw new Error('seed must be a finite number')
-  for (const node of Object.values(prompt)) {
-    for (const k of Object.keys(node.inputs)) {
-      const isSeedField = k.toLowerCase().includes('seed') && typeof node.inputs[k] === 'number'
-      if (!isSeedField) continue
-      if (randomize) node.inputs[k] = getSeed()
-      else if (seedArg != null) node.inputs[k] = seedArg
-    }
-  }
+  applySeed(prompt, args)
 
   // 2. media 参数：base64/URL → upload → 填回 widget（移植 useWorkflow.js:314-325）
   for (const n of inputs) {
@@ -218,9 +275,75 @@ export async function executeApp(
     }
   }
 
+  // 3.5 节点级覆盖（P1）：只在本次执行副本上生效，不污染模板
+  if (nodeOverrides) {
+    const errors = applyNodeOverrides(prompt, nodeOverrides)
+    if (errors.length > 0) throw new Error(`nodeOverrides 校验失败：\n${errors.join('\n')}`)
+  }
+
   // 4. 提交 + 记录 app 映射（只存 paramsNodes，带上限淘汰最旧条目；H2）
   const promptId = await queuePrompt(comfyOrigin, prompt, clientId)
   promptAppMap.set(promptId, template.paramsNodes ?? [])
+  if (promptAppMap.size > MAX_PROMPT_ENTRIES) {
+    const oldest = promptAppMap.keys().next().value
+    if (oldest != null) promptAppMap.delete(oldest)
+  }
+  return { prompt_id: promptId, status: 'queued' }
+}
+
+/**
+ * 裸工作流执行（P1 创作能力）：直接提交任意 API 格式 prompt JSON，不依赖
+ * 固化模板。seed/节点覆盖/输出节点推断与 executeApp 同一套语义。
+ * @param paramsNodes 可选（产物提取白名单）；缺省时按 Save/Preview 类节点推断输出。
+ */
+export async function executePrompt(
+  comfyOrigin: string,
+  rawPrompt: ComfyPrompt,
+  opts: {
+    seed?: number | null
+    randomizeSeed?: boolean
+    nodeOverrides?: Record<
+      string,
+      { class_type?: string; widgetOverrides?: Record<string, unknown> }
+    >
+    paramsNodes?: ParamNode[]
+    workflowKey?: string
+  } = {}
+): Promise<ExecutionResult> {
+  const prompt: ComfyPrompt = structuredClone(rawPrompt)
+  const clientId = randomUUID()
+
+  try {
+    await freeIfWorkflowChanged(
+      comfyOrigin,
+      resolveWorkflowKey(opts.workflowKey ?? 'session:custom', prompt)
+    )
+  } catch (e) {
+    logger.warn('free before prompt execution failed', e)
+  }
+
+  applySeed(prompt, {
+    seed: opts.seed,
+    randomize_seed: opts.randomizeSeed
+  })
+  if (opts.nodeOverrides) {
+    const errors = applyNodeOverrides(prompt, opts.nodeOverrides)
+    if (errors.length > 0) throw new Error(`nodeOverrides 校验失败：\n${errors.join('\n')}`)
+  }
+
+  const promptId = await queuePrompt(comfyOrigin, prompt, clientId)
+  // 产物提取白名单：显式 paramsNodes 优先，缺省按输出节点推断
+  const outputNodes: ParamNode[] = opts.paramsNodes?.length
+    ? opts.paramsNodes
+    : inferOutputNodeIds(prompt).map((id) => ({
+        id: Number(id) || 0,
+        type: 'output',
+        name: 'result',
+        category: 'output' as const,
+        renderComponent: 'image-uploader',
+        selectedWidget: { id, name: 'images' }
+      }))
+  promptAppMap.set(promptId, outputNodes)
   if (promptAppMap.size > MAX_PROMPT_ENTRIES) {
     const oldest = promptAppMap.keys().next().value
     if (oldest != null) promptAppMap.delete(oldest)

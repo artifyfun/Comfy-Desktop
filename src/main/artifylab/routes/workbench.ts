@@ -508,7 +508,7 @@ export function createWorkbenchRouter(): express.Router {
         return
       }
 
-      const local = validatePlanLocal(plan, templateLibrary.list())
+      const local = validatePlanLocal(plan, workbenchService.listTemplates(sessionId))
       if (!local.ok) {
         // 结构性非法的 PLAN 也先于 reply/execution 拦截
         const errText = `PLAN 无效：${local.issues.map((i) => i.message).join('；')}`
