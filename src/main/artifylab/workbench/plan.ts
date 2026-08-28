@@ -90,7 +90,24 @@ function validateParams(
       continue
     }
     const widgetType = node.selectedWidget?.type
-    if (widgetType === 'number' || widgetType === 'float' || widgetType === 'int') {
+    // 媒体参数（renderComponent 为 image/video/audio-uploader）：值只能是
+    // data:/http(s) URL 或「素材文件名/路径」形态，绝不能是描述文本。否则
+    // 中文提示词会被原样写进 LoadImageFromPath 的 image 槽 → No such file。
+    // 此校验在 executor 提交前拦截，模型恢复轮能立即看到明确问题。
+    const rc = String(node.renderComponent ?? '').toLowerCase()
+    if (rc.includes('uploader') && typeof v === 'string') {
+      const looksLikeUrl = /^(data:|https?:)/i.test(v)
+      const looksLikeFile =
+        /\.(png|jpe?g|webp|gif|bmp|mp4|webm|mov|mp3|wav|flac|safetensors|bin)$/i.test(v)
+      const hasChinese = /[\u4e00-\u9fff]/.test(v)
+      if (!looksLikeUrl && !looksLikeFile) {
+        const hint = hasChinese
+          ? `收到文本描述（含中文），但该参数是 ${node.renderComponent ?? '媒体上传'}，只能传已上传素材的文件名或 data:/http(s) URL`
+          : `该参数是 ${node.renderComponent ?? '媒体上传'}，只能传素材文件名或 data:/http(s) URL`
+        issues.push({ field: `params.${k}`, message: hint })
+        continue
+      }
+    } else if (widgetType === 'number' || widgetType === 'float' || widgetType === 'int') {
       if (typeof v !== 'number' || !Number.isFinite(v)) {
         issues.push({ field: `params.${k}`, message: `期望数字，得到 ${typeof v}` })
         continue

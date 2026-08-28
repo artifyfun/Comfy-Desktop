@@ -270,11 +270,17 @@ export const getRenderComponent = (node) => {
           return 'input-number'
         }
         case 'combo': {
-          if (type === 'LoadImage' && selectedWidget.name === 'image') {
+          // 图片/视频/音频加载类 widget → 上传控件。type 前缀匹配以兼容
+          // 自定义节点（LoadImageFromPath、LoadImageBase64 等）：只认
+          // `LoadImage` 会把图片加载节点误判成 select/customtext，
+          // 模型把中文提示词当文件名传进 image 槽 → No such file。
+          const t = String(type ?? '').toLowerCase()
+          const w = String(selectedWidget.name ?? '').toLowerCase()
+          if (t.includes('loadimage') || (t.includes('load') && w === 'image')) {
             return 'image-uploader'
-          } else if (type === 'LoadAudio' && selectedWidget.name === 'audio') {
+          } else if (t.includes('loadaudio') || (t.includes('load') && w === 'audio')) {
             return 'audio-uploader'
-          } else if (type === 'LoadVideo' && selectedWidget.name === 'file') {
+          } else if (t.includes('loadvideo') || (t.includes('load') && w === 'file')) {
             return 'video-uploader'
           } else {
             return 'select'

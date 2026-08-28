@@ -964,10 +964,20 @@ async function autoRecover(errorText) {
   recoverCount.value++
   recovering.value = true
   try {
+    const err = errorText || ''
+    // 媒体路径类失败（No such file / LoadImageFromPath 等）几乎都是「把
+    // 提示词文本传进了素材文件槽」——给模型明确的诊断方向，别再盲目重试。
+    const pathErr =
+      /No such file|LoadImageFromPath|LoadVideoFromPath|LoadAudioFromPath|ENOENT|is not a file/i.test(
+        err,
+      )
+        ? `\n\n诊断提示：该失败是「文件/路径不存在」，通常是模板的某个参数是素材文件槽（rc=*-uploader，节点 LoadImage/LoadVideo 等），却收到了提示词文本。先想清楚这个模板到底接不接文本——若它只接图片/视频素材，就换一个真正的文生图模板；若没有合适模板，用 wb_list_nodes 查节点图 + node_overrides 改造，或 wb_run_workflow 自组工作流，不要重试同样的传参。`
+        : ''
     const hint =
       `${t('workbenchAutoRecoverIntro')}\n\n` +
-      `上次执行失败信息：${(errorText || '').slice(0, 800)}\n\n` +
-      t('workbenchAutoRecoverAsk')
+      `上次执行失败信息：${err.slice(0, 800)}\n\n` +
+      t('workbenchAutoRecoverAsk') +
+      pathErr
     await runChat(hint, [], {
       userBubble: null,
       progressText: t('workbenchAutoRecovering'),

@@ -155,6 +155,28 @@ describe('executeApp', () => {
     await executeApp(app, { cfg: 7.5 }, ORIGIN)
     expect(submittedPrompt()['2']!.inputs.cfg).toBe(7.5)
   })
+
+  it('把中文提示词传进 LoadImageFromPath 图片槽 → 提交前拦截并给出可操作提示', async () => {
+    // 模板元数据缺失 renderComponent（自定义加载节点未被识别为媒体上传）：
+    // 参数被声明成普通文本，但实际 widget 属于图片加载节点——文本形态值
+    // 原样写进去就是 No such file，必须在提交前拦下。
+    const app = makeApp({ '9': { class_type: 'LoadImageFromPath', inputs: { image: '' } } }, [
+      {
+        id: 9,
+        category: 'input',
+        type: 'LoadImageFromPath',
+        name: 'prompt',
+        renderComponent: 'textarea',
+        selectedWidget: { name: 'image', type: 'combo' }
+      }
+    ])
+    await expect(
+      executeApp(app, { prompt: '中国仙侠风格，美女刺客全身定妆照，冷冽剑意' }, ORIGIN)
+    ).rejects.toThrow(/LoadImageFromPath.*提示词文本/)
+    // 合规的文件名/URL 形态放行
+    await executeApp(app, { prompt: 'beauty.png' }, ORIGIN)
+    expect(submittedPrompt()['9']!.inputs.image).toBe('beauty.png')
+  })
 })
 
 describe('getExecutionStatus', () => {

@@ -102,6 +102,19 @@ function isMediaRender(rc?: string): boolean {
   return rc === 'image-uploader' || rc === 'audio-uploader' || rc === 'video-uploader'
 }
 
+/** 判断字符串值是否"疑似媒体路径/URL"（而不是提示词文本） */
+function looksLikeMediaValue(v: string): boolean {
+  if (/^(data:|https?:)/i.test(v)) return true
+  return /\.(png|jpe?g|webp|gif|bmp|mp4|webm|mov|mp3|wav|flac)$/i.test(v)
+}
+
+/** 判断字符串值是否"疑似描述文本"：含中文，或长文本（>40 且带空格/逗号/顿号） */
+function looksLikeTextBlob(v: string): boolean {
+  if (/[\u4e00-\u9fff]/.test(v)) return true
+  if (v.length <= 40) return false
+  return /[\s,，、。]/.test(v)
+}
+
 /** 带超时的 fetch（L4：避免无响应 URL 挂死工具调用） */
 function fetchTimeout(url: string, init: RequestInit = {}, ms = 60000): Promise<Response> {
   const ctrl = new AbortController()
@@ -271,6 +284,21 @@ export async function executeApp(
     if (v == null) continue
     const widget = n.selectedWidget?.name
     if (widget != null && prompt[n.id]?.inputs) {
+      // 兜底：目标 widget 属于图片/音视频「加载」类节点，但该参数未被
+      // 识别为媒体上传（自定义节点元数据缺 renderComponent）——文本形态值
+      // 原样写进去就是 No such file。提交前拦截并给出可操作提示，让恢复轮
+      // 知道是「把提示词传进了图片输入」，而不是盲目换模板重试。
+      const cls = String(prompt[n.id]!.class_type ?? '').toLowerCase()
+      const isLoader =
+        cls.includes('loadimage') || cls.includes('loadaudio') || cls.includes('loadvideo')
+      if (isLoader && typeof v === 'string' && !looksLikeMediaValue(v) && looksLikeTextBlob(v)) {
+        throw new Error(
+          `参数 "${n.name}" 对应节点 ${prompt[n.id]!.class_type}（图片/音视频加载），` +
+            `期望素材文件名或 data:/http(s) URL，却收到提示词文本：${v.slice(0, 60)}${
+              v.length > 60 ? '…' : ''
+            }。请改用文生图模板，或把素材先上传。`
+        )
+      }
       prompt[n.id]!.inputs[widget] = v
     }
   }

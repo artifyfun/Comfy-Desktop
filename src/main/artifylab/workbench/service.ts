@@ -585,6 +585,9 @@ class WorkbenchService {
             name: p.name,
             type: p.selectedWidget?.type ?? p.type,
             widget: p.selectedWidget?.name,
+            // renderComponent 决定参数真实语义：*-uploader 是「素材文件」槽
+            // （只能传已上传素材文件名或 data:/http URL），绝不是提示词文本。
+            rc: p.renderComponent ?? null,
             options: p.selectedWidget?.options ?? undefined
           }))
       })),
@@ -680,6 +683,8 @@ API 格式：{"节点id": {"class_type": "节点类名", "inputs": {"参数名":
 3. intent=chat 用于追问澄清或闲聊，回复放 reply。
 4. 模板库为空或不匹配时选 chat 并说明。3.5 可跨会话保留的偏好/事实用 intent=memory（见「长期记忆」段）。
 5. 用户上传了素材时，倾向选择带媒体输入参数的模板（图生图/视频驱动），参数值填素材文件名（已上传）。
+5.1 **参数类型铁律**：模板参数里的 rc（renderComponent）为 *-uploader 的是**素材文件槽**——只能传已上传素材的文件名或 data:/http(s): URL，**绝不能传提示词文本**。只有 rc=textarea/select/slider/number（或无 rc 的文本型）参数才收提示词/数值。把中文描述塞进 image-uploader 参数 = ComfyUI 报 No such file or directory。
+5.2 **模板不合适就变通，不要盲目重试**：如果用户要文生图、但候选模板的关键参数全是素材槽（图生图/槽位替换类），不要硬传文本：先用 wb_list_nodes 查看模板节点图确认各节点类型 → 用 PLAN 的 node_overrides 修改节点参数（如把 LoadImageFromPath 换成 EmptyLatentImage 或直接改下游节点输入）→ 或 wb_run_workflow 提交自组 API 工作流 → 或 wb_clone_template 派生可编辑变体。重试同参数只会重复同样的失败。
 6. 存在「会话预设约束」段落时，其 intent 限制是**硬性规则**，违反的输出会被系统直接拒绝——你必须输出该 intent。7. 有「多步编排」段时优先按它执行；单步需求仍直接出 PLAN JSON。${chainHint}${constraint}${attachmentHint}${docHint}${batchRule}${shortcutHint}${titleRule}${memoryRule}${orchestrationRule}
 
 ## 模板库

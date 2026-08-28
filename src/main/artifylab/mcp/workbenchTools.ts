@@ -132,6 +132,9 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
               name: p.name,
               type: p.selectedWidget?.type ?? p.type,
               widget: p.selectedWidget?.name,
+              // rc=*-uploader → 素材文件槽（只能传文件名或 data:/http URL，
+              // 不能传提示词文本）；textarea/select/slider/number → 文本/枚举/数值
+              rc: p.renderComponent ?? null,
               options: p.selectedWidget?.options
             }))
         }))
