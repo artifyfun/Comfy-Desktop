@@ -407,7 +407,10 @@
     <!-- 工作台能力/环境说明（自我认知可视化） -->
     <a-modal v-model:open="envOpen" :title="t('workbenchEnvInfo')" :footer="null" width="560px">
       <div v-if="envLoading" class="py-8 text-center"><a-spin /></div>
-      <div v-else-if="envSnapshot" class="space-y-3 py-2">
+      <div
+        v-else-if="envSnapshot && envSnapshot.appNames && envSnapshot.modelsByType"
+        class="space-y-3 py-2"
+      >
         <div>
           <div class="text-xs text-[var(--wb-text-2)] mb-1">{{ t('workbenchEnvSkills') }}</div>
           <div class="flex flex-wrap gap-1.5">
@@ -461,6 +464,9 @@
         >
           {{ t('workbenchEnvHint') }}
         </p>
+      </div>
+      <div v-else-if="!envLoading" class="py-8 text-center text-xs text-[var(--wb-text-3)]">
+        —（环境快照不可用）
       </div>
     </a-modal>
 
@@ -1316,10 +1322,16 @@ const envSnapshot = ref(null)
 async function showEnvDialog() {
   envOpen.value = true
   envLoading.value = true
+  envSnapshot.value = null
   try {
-    const res = await fetch(`${origin.value}/api/workbench/runtime`)
+    // 能力/环境快照走 /env（appNames/modelsByType/vramGb/customNodes）。
+    // 勿改回 /runtime：那上面只有 outputDir（另存为白名单用），拿到后
+    // 模板访问缺失字段会渲染崩，弹窗卡在 loading。
+    const res = await fetch(`${origin.value}/api/workbench/env`)
     const json = await res.json()
     envSnapshot.value = json?.data ?? null
+  } catch {
+    envSnapshot.value = null
   } finally {
     envLoading.value = false
   }
