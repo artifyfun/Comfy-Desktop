@@ -24,21 +24,24 @@
         <nav class="flex space-x-4" v-if="isElectron">
           <router-link
             :to="firstNavTo"
-            class="px-3 py-1.5 text-sm font-medium rounded-md transition duration-150 text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]"
+            class="nav-tab"
+            :class="{ 'nav-tab-on': $route.path === firstNavTo }"
           >
             <i :class="firstNavIcon"></i>
             {{ firstNavLabel || t('appCenter') }}
           </router-link>
           <router-link
             to="/gallery"
-            class="px-3 py-1.5 text-sm font-medium rounded-md transition duration-150 text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]"
+            class="nav-tab"
+            :class="{ 'nav-tab-on': $route.path === '/gallery' }"
           >
             <i class="mr-2 fas fa-images"></i>
             {{ t('gallery') }}
           </router-link>
           <router-link
             to="/workbench"
-            class="px-3 py-1.5 text-sm font-medium rounded-md transition duration-150 text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]"
+            class="nav-tab"
+            :class="{ 'nav-tab-on': $route.path === '/workbench' }"
           >
             <i class="mr-2 fas fa-wand-magic-sparkles"></i>
             {{ t('workbench') }}
@@ -130,6 +133,35 @@ const handleUpdateConfig = async (config) => {
 </script>
 
 <style scoped>
+/* Comfy 顶部 tab:激活 = 白字 + 2px azure 底条 */
+.nav-tab {
+  position: relative;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--wb-text-2);
+  border-radius: var(--wb-r-ctrl);
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+.nav-tab:hover {
+  color: #fff;
+  background: var(--wb-surface-hover);
+}
+.nav-tab-on {
+  color: #fff;
+}
+.nav-tab-on::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -6px;
+  height: 2px;
+  background: var(--wb-accent);
+  border-radius: 1px;
+}
 .brand-mark {
   background: var(--wb-ink);
   color: var(--wb-brand);

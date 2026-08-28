@@ -74,7 +74,9 @@
             v-for="s in g.sessions"
             :key="s.id"
             class="group relative rounded-lg px-2 py-1.5 cursor-pointer transition"
-            :class="s.id === currentId ? 'bg-slate-700/70' : 'hover:bg-[var(--wb-surface)]'"
+            :class="
+              s.id === currentId ? 'bg-[var(--wb-surface)] sess-on' : 'hover:bg-[var(--wb-surface)]'
+            "
             @click="$emit('select', s)"
           >
             <!-- 状态点 -->

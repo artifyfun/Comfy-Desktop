@@ -30,7 +30,10 @@
         />
 
         <!-- 中：会话区 -->
-        <section class="flex-1 min-w-0 flex flex-col border h-[calc(100vh-160px)]">
+        <section
+          class="flex-1 min-w-0 flex flex-col h-[calc(100vh-160px)]"
+          style="border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-card)"
+        >
           <!-- 会话头 -->
           <div
             class="flex items-center gap-2 px-4 h-12 border-b border-[var(--wb-stroke)] shrink-0"
@@ -47,11 +50,12 @@
             <!-- 预设 chip：点击切换（dsh preset 模式） -->
             <a-dropdown :trigger="['click']">
               <button
-                class="flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs transition"
+                class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs transition"
+                style="border: 1px solid var(--wb-stroke-strong)"
                 :class="
                   sessionPreset
-                    ? 'border-[var(--wb-accent)]/60 bg-[var(--wb-accent)]/10 text-[var(--wb-accent)]'
-                    : 'border-[var(--wb-stroke-strong)] text-[var(--wb-text-2)] hover:border-slate-400'
+                    ? 'preset-chip-on text-[var(--wb-accent)]'
+                    : 'text-[var(--wb-text-2)]'
                 "
                 :title="t('workbenchPresetSwitch')"
               >
@@ -266,7 +270,11 @@
         </section>
 
         <!-- 右：产物面板（可折叠） -->
-        <section v-if="panelOpen" class="w-72 shrink-0 flex flex-col border h-[calc(100vh-160px)]">
+        <section
+          v-if="panelOpen"
+          class="w-72 shrink-0 flex flex-col h-[calc(100vh-160px)]"
+          style="border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-card)"
+        >
           <div
             class="p-3 border-b border-[var(--wb-stroke)] text-white font-semibold flex items-center justify-between"
           >

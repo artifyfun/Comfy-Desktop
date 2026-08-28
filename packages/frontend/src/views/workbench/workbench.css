@@ -109,3 +109,9 @@ input[type='radio'].wb-tech-check {
 .wb-tech-input input::placeholder {
   color: #64748b;
 }
+
+/* 预设 chip 选中态:azure 描边 + 淡 azure 底 */
+.preset-chip-on {
+  border-color: var(--wb-accent) !important;
+  background: rgba(11, 140, 233, 0.12);
+}

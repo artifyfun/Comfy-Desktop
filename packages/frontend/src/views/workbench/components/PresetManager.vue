@@ -16,10 +16,9 @@
         <div
           v-for="p in sortedPresets"
           :key="p.id"
-          class="rounded-lg border p-3 relative"
-          :class="
-            p.id === defaultId ? 'border-[var(--wb-accent)]' : 'border-[var(--wb-stroke-strong)]'
-          "
+          class="rounded-lg p-3 relative"
+          style="border: 1px solid var(--wb-stroke-strong)"
+          :class="p.id === defaultId ? 'pm-sel' : ''"
         >
           <div class="flex items-start justify-between">
             <div class="min-w-0">
@@ -289,3 +288,9 @@ async function remove(id) {
   }
 }
 </script>
+
+<style scoped>
+.pm-sel {
+  border-color: var(--wb-accent) !important;
+}
+</style>

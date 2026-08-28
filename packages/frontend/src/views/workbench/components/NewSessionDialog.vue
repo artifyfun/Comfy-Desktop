@@ -16,18 +16,19 @@
           <button
             v-for="p in sortedPresets"
             :key="p.id"
-            class="relative w-full text-left rounded-xl border p-3 transition flex items-start gap-3"
+            class="relative w-full text-left p-3 transition flex items-start gap-3"
+            style="border: 1px solid var(--wb-stroke-strong); border-radius: var(--wb-r-card)"
             :class="
               selectedId === p.id
-                ? 'border-[var(--wb-accent)] bg-[var(--wb-accent)]/10 ring-1 ring-[var(--wb-accent)]'
-                : 'border-[var(--wb-stroke-strong)] hover:border-[var(--wb-stroke-strong)] bg-[var(--wb-surface-deep)]'
+                ? 'bg-[var(--wb-surface)]'
+                : 'hover:bg-[var(--wb-surface)] bg-[var(--wb-surface-deep)]'
             "
             @click="selectedId = p.id"
           >
             <span
               class="mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
               :class="
-                selectedId === p.id ? 'bg-[var(--wb-accent)]/30' : 'bg-[var(--wb-surface-hover)]'
+                selectedId === p.id ? 'bg-[rgba(11,140,233,0.35)]' : 'bg-[var(--wb-surface-hover)]'
               "
             >
               <i
@@ -126,3 +127,10 @@ function create() {
   emit('update:open', false)
 }
 </script>
+
+<style scoped>
+/* Comfy 选中语义:白描边（--node-stroke-selected） */
+.sel-white {
+  border: 1px solid var(--wb-selected) !important;
+}
+</style>

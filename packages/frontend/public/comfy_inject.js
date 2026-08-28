@@ -1060,6 +1060,8 @@
     // 幂等：脚本加载即建一次 + ComfyUI 就绪回调再调一次，防重复
     if (document.getElementById('floating-btn')) return
     const style = document.createElement('style')
+    // Comfy 风格浮标：ink 圆角方 + 电光黄 A 字（与 app icon 同语言），
+    // hover 提亮描边，无渐变/无发光/无旋转
     style.innerHTML = `
       #floating-btn {
           position: fixed;
@@ -1067,32 +1069,28 @@
           right: 10px;
           width: 40px;
           height: 40px;
-          border-radius: 50%;
-          background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
-          color: white;
-          border: none;
-          box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+          border-radius: 8px;
+          background: #211927;
+          color: #f0ff41;
+          border: 1px solid #494a50;
           cursor: pointer;
-          font-size: 18px;
+          font-size: 20px;
+          font-weight: 800;
+          font-family: 'Inter', -apple-system, sans-serif;
+          line-height: 1;
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: all 0.3s ease;
+          transition: border-color 0.15s ease, background 0.15s ease;
           z-index: 10000;
       }
 
       #floating-btn:hover {
-          transform: scale(1.1) rotate(15deg);
-          box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+          border-color: #f0ff41;
       }
 
       #floating-btn:active {
-          transform: scale(0.95);
-      }
-
-      #floating-btn::after {
-          content: "🎨";
-          font-size: 18px;
+          background: #171718;
       }
   `
     document.head.appendChild(style)
@@ -1100,6 +1098,7 @@
     floatingBtn.id = 'floating-btn'
     floatingBtn.title = 'ArtifyLab'
     floatingBtn.ariaLabel = 'ArtifyLab'
+    floatingBtn.textContent = 'A'
     document.body.appendChild(floatingBtn)
 
     floatingBtn.addEventListener('click', () => {
