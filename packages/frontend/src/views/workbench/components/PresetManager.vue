@@ -8,7 +8,7 @@
   >
     <div class="space-y-3">
       <!-- 默认预设提示 -->
-      <div class="text-xs text-slate-400">
+      <div class="text-xs text-[var(--wb-text-2)]">
         {{ t('workbenchPresetDefaultHint') }}：<span class="text-tech-cyan">{{ defaultId }}</span>
       </div>
 
@@ -17,7 +17,9 @@
           v-for="p in sortedPresets"
           :key="p.id"
           class="rounded-lg border p-3 relative"
-          :class="p.id === defaultId ? 'border-tech-blue' : 'border-slate-600'"
+          :class="
+            p.id === defaultId ? 'border-[var(--wb-accent)]' : 'border-[var(--wb-stroke-strong)]'
+          "
         >
           <div class="flex items-start justify-between">
             <div class="min-w-0">
@@ -26,23 +28,27 @@
                 <a-tag v-if="p.builtin" color="blue" class="ml-1">builtin</a-tag>
                 <a-tag v-if="p.id === defaultId" color="cyan" class="ml-1">default</a-tag>
               </div>
-              <div class="text-xs text-slate-400 mt-1 line-clamp-2">
+              <div class="text-xs text-[var(--wb-text-2)] mt-1 line-clamp-2">
                 {{ p.description?.[lang] || '' }}
               </div>
-              <div class="text-[11px] text-slate-500 mt-1 font-mono">
+              <div class="text-[11px] text-[var(--wb-text-3)] mt-1 font-mono">
                 intent: {{ p.intentHint || 'free'
                 }}<template v-if="p.order != null"> · order: {{ p.order }}</template>
               </div>
               <!-- 捆绑技能（dsh preset skills/ 语义） -->
               <div v-if="!p.builtin" class="mt-2">
                 <div class="flex items-center gap-1 flex-wrap">
-                  <span class="text-[11px] text-slate-500">{{ t('workbenchPresetSkills') }}:</span>
+                  <span class="text-[11px] text-[var(--wb-text-3)]"
+                    >{{ t('workbenchPresetSkills') }}:</span
+                  >
                   <a-tag v-for="s in p.skillIds ?? []" :key="s" class="!m-0 !text-[11px]">
                     {{ skillName(s) }}
                   </a-tag>
-                  <span v-if="!p.skillIds?.length" class="text-[11px] text-slate-600">—</span>
+                  <span v-if="!p.skillIds?.length" class="text-[11px] text-[var(--wb-text-3)]"
+                    >—</span
+                  >
                   <button
-                    class="text-[11px] text-tech-blue hover:underline ml-1"
+                    class="text-[11px] text-[var(--wb-accent)] hover:underline ml-1"
                     @click="openSkills(p)"
                   >
                     {{ t('workbenchPresetEditSkills') }}
@@ -79,19 +85,24 @@
         @ok="saveSkills"
         @cancel="skillsOpen = false"
       >
-        <div v-if="skillsList.length === 0" class="text-sm text-slate-400 py-4 text-center">
+        <div
+          v-if="skillsList.length === 0"
+          class="text-sm text-[var(--wb-text-2)] py-4 text-center"
+        >
           {{ t('workbenchSkillsEmptyLib') }}
         </div>
         <div v-else class="space-y-1 max-h-80 overflow-y-auto">
           <label
             v-for="s in skillsList"
             :key="s.id"
-            class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-700/40 cursor-pointer"
+            class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--wb-surface-hover)] cursor-pointer"
           >
             <input type="checkbox" :value="s.id" v-model="checkedSkills" class="wb-tech-check" />
             <span class="text-sm text-white">{{ s.name }}</span>
-            <span class="text-[11px] text-slate-500 font-mono">/{{ s.id }}</span>
-            <span class="text-[11px] text-slate-400 truncate ml-auto">{{ s.description }}</span>
+            <span class="text-[11px] text-[var(--wb-text-3)] font-mono">/{{ s.id }}</span>
+            <span class="text-[11px] text-[var(--wb-text-2)] truncate ml-auto">{{
+              s.description
+            }}</span>
           </label>
         </div>
       </a-modal>
@@ -115,21 +126,23 @@
           </a-form-item>
           <a-form-item :label="t('workbenchPresetSkills')">
             <div
-              class="max-h-40 overflow-y-auto space-y-1.5 p-2 rounded-lg border border-slate-700/60"
+              class="max-h-40 overflow-y-auto space-y-1.5 p-2 rounded-lg border border-[var(--wb-stroke)]"
             >
               <label
                 v-for="sk in skillsList"
                 :key="sk.id"
-                class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer"
+                class="flex items-center gap-2 text-sm text-[var(--wb-text-2)] cursor-pointer"
               >
                 <input v-model="copySkills" type="checkbox" :value="sk.id" class="wb-tech-check" />
                 <span class="truncate">{{ sk.name }}</span>
               </label>
-              <div v-if="!skillsList.length" class="text-xs text-slate-500">
+              <div v-if="!skillsList.length" class="text-xs text-[var(--wb-text-3)]">
                 {{ t('workbenchNoSkillsYet') }}
               </div>
             </div>
-            <div class="text-[11px] text-slate-500 mt-1">{{ t('workbenchCopySkillsHint') }}</div>
+            <div class="text-[11px] text-[var(--wb-text-3)] mt-1">
+              {{ t('workbenchCopySkillsHint') }}
+            </div>
           </a-form-item>
         </a-form>
       </a-modal>

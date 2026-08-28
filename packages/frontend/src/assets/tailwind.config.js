@@ -3,13 +3,15 @@ export default {
   theme: {
     extend: {
       colors: {
-        'tech-dark': '#0f172a',
-        'tech-darker': '#0a0f1f',
-        'tech-blue': '#40e0d0',
-        'tech-purple': '#6a11cb',
-        'tech-pink': '#ec4899',
-        'tech-cyan': '#06b6d4',
-        'tech-green': '#10b981',
+        // Comfy 令牌映射（退役过渡：旧类名 bg-tech-dark/text-tech-blue 等继续可用，
+        // 值已切到 charcoal/azure 体系；二期统一改类名后删除此映射）
+        'tech-dark': '#171718',
+        'tech-darker': '#0d0d0e',
+        'tech-blue': '#0b8ce9',
+        'tech-purple': '#0b8ce9',
+        'tech-pink': '#f56c6c',
+        'tech-cyan': '#31b9f4',
+        'tech-green': '#4ade80',
       },
       animation: {
         'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
@@ -22,8 +24,9 @@ export default {
           '50%': { transform: 'translateY(-10px)' },
         },
         glow: {
-          '0%': { 'box-shadow': '0 0 5px #40e0d0, 0 0 10px #40e0d0' },
-          '100%': { 'box-shadow': '0 0 15px #40e0d0, 0 0 30px #40e0d0' },
+          // 发光退役（Comfy 无发光语义）：降级为淡入
+          '0%': { opacity: '0.85' },
+          '100%': { opacity: '1' },
         },
       },
     },

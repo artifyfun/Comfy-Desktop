@@ -45,7 +45,7 @@ import { showError, showSuccess } from '@/utils'
 const props = defineProps({
   html: {
     type: String,
-    required: true
+    required: true,
   },
 })
 
@@ -139,7 +139,8 @@ const handleSave = async () => {
   :deep(p) {
     margin-bottom: 1em;
   }
-  :deep(ul), :deep(ol) {
+  :deep(ul),
+  :deep(ol) {
     padding-left: 1em;
     margin-bottom: 1em;
   }

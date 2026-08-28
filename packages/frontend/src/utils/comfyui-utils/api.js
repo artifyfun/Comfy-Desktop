@@ -60,7 +60,7 @@ class ComfyApi extends EventTarget {
       existingSession = '?clientId=' + existingSession
     }
     this.socket = new WebSocket(
-      `ws${window.location.protocol === 'https:' ? 's' : ''}://${this.api_host}${this.api_base}/ws${existingSession}`
+      `ws${window.location.protocol === 'https:' ? 's' : ''}://${this.api_host}${this.api_base}/ws${existingSession}`,
     )
     this.socket.binaryType = 'arraybuffer'
 
@@ -200,7 +200,7 @@ class ComfyApi extends EventTarget {
     const body = {
       client_id: this.clientId,
       prompt: output,
-      extra_data: { extra_pnginfo: { workflow } }
+      extra_data: { extra_pnginfo: { workflow } },
     }
 
     if (number === -1) {
@@ -212,14 +212,14 @@ class ComfyApi extends EventTarget {
     const res = await this.fetchApi('/prompt', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
     })
 
     if (res.status !== 200) {
       throw {
-        response: await res.json()
+        response: await res.json(),
       }
     }
 
@@ -250,9 +250,9 @@ class ComfyApi extends EventTarget {
         // Running action uses a different endpoint for cancelling
         Running: data.queue_running.map((prompt) => ({
           prompt,
-          remove: { name: 'Cancel', cb: () => api.interrupt() }
+          remove: { name: 'Cancel', cb: () => api.interrupt() },
         })),
-        Pending: data.queue_pending.map((prompt) => ({ prompt }))
+        Pending: data.queue_pending.map((prompt) => ({ prompt })),
       }
     } catch (error) {
       console.error(error)
@@ -293,9 +293,9 @@ class ComfyApi extends EventTarget {
       await this.fetchApi('/' + type, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
-        body: body ? JSON.stringify(body) : undefined
+        body: body ? JSON.stringify(body) : undefined,
       })
     } catch (error) {
       console.error(error)
@@ -343,9 +343,9 @@ class ComfyApi extends EventTarget {
     return this.fetchApi('/users', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ username })
+      body: JSON.stringify({ username }),
     })
   }
 
@@ -374,7 +374,7 @@ class ComfyApi extends EventTarget {
   async storeSettings(settings) {
     return this.fetchApi(`/settings`, {
       method: 'POST',
-      body: JSON.stringify(settings)
+      body: JSON.stringify(settings),
     })
   }
 
@@ -387,7 +387,7 @@ class ComfyApi extends EventTarget {
   async storeSetting(id, value) {
     return this.fetchApi(`/settings/${encodeURIComponent(id)}`, {
       method: 'POST',
-      body: JSON.stringify(value)
+      body: JSON.stringify(value),
     })
   }
 
@@ -412,10 +412,12 @@ class ComfyApi extends EventTarget {
     const resp = await this.fetchApi(`/userdata/${encodeURIComponent(file)}`, {
       method: 'POST',
       body: options?.stringify ? JSON.stringify(data) : data,
-      ...options
+      ...options,
     })
     if (resp.status !== 200) {
-      throw new Error(`Error storing user data file '${file}': ${resp.status} ${(await resp).statusText}`)
+      throw new Error(
+        `Error storing user data file '${file}': ${resp.status} ${(await resp).statusText}`,
+      )
     }
   }
 }

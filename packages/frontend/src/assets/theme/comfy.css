@@ -1,0 +1,53 @@
+/*
+ * Comfy 风格设计令牌 — 全应用唯一 CSS 事实源。
+ * 与 src/utils/antd-theme.js 的 comfyTokens 同值（antd 组件走那边，手写样式走这里）。
+ * 事实源出处：ComfyUI 前端 main-*.css 的 charcoal/smoke/azure 色阶
+ * （--color-charcoal-800/600/400/300、--interface-stroke、--color-azure-600 等）。
+ * 规范见 docs/ui-redesign/PROPOSAL.md §2.1。
+ */
+:root {
+  /* surfaces — Comfy charcoal 阶梯 */
+  --wb-bg-base: #171718;
+  --wb-surface-deep: #202121;
+  --wb-surface: #262729;
+  --wb-surface-hover: #313235;
+  --wb-surface-active: #3c3d42;
+  /* strokes */
+  --wb-stroke: #313235;
+  --wb-stroke-strong: #494a50;
+  --wb-selected: #ffffff;
+  /* text */
+  --wb-text: #ffffff;
+  --wb-text-2: #a0a0a0;
+  --wb-text-3: #8a8a8a;
+  /* accent */
+  --wb-accent: #0b8ce9;
+  --wb-accent-hover: #31b9f4;
+  --wb-danger: #f56c6c;
+  --wb-success: #4ade80;
+  /* brand（仅 logo，不做界面功能色） */
+  --wb-brand: #f0ff41;
+  --wb-ink: #211927;
+  /* shape */
+  --wb-r-ctrl: 6px;
+  --wb-r-card: 10px;
+  --wb-r-modal: 14px;
+  --wb-topbar-h: 40px;
+  --wb-font: 'Inter', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+/* 旧 tech-* 令牌退役过渡：映射到新令牌，存量类名不炸，二期清理 */
+:root {
+  --tech-blue: var(--wb-accent);
+  --tech-dark: var(--wb-bg-base);
+  --tech-darker: #0d0d0e;
+}
+
+/* 渐变按钮退役后的 azure 实色主按钮（存量模板直接换类名用） */
+.btn-comfy-primary {
+  background: var(--wb-accent);
+  color: #fff;
+}
+.btn-comfy-primary:hover {
+  background: var(--wb-accent-hover);
+}

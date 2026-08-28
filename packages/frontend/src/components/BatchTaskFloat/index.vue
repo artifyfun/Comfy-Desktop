@@ -4,7 +4,9 @@
     <div v-if="!expanded" class="batch-float-pill" @click="expanded = true">
       <span class="dot" :class="statusClass"></span>
       <span class="pill-text">{{ pillText }}</span>
-      <div class="pill-bar"><div class="pill-bar-fill" :style="{ transform: `scaleX(${percent / 100})` }"></div></div>
+      <div class="pill-bar">
+        <div class="pill-bar-fill" :style="{ transform: `scaleX(${percent / 100})` }"></div>
+      </div>
     </div>
 
     <div v-else class="batch-float-panel">
@@ -16,7 +18,11 @@
 
       <div class="panel-progress" v-if="store.status && store.status.total > 0">
         <div class="progress-track">
-          <div class="progress-fill" :class="statusClass" :style="{ transform: `scaleX(${percent / 100})` }"></div>
+          <div
+            class="progress-fill"
+            :class="statusClass"
+            :style="{ transform: `scaleX(${percent / 100})` }"
+          ></div>
         </div>
         <span class="progress-text">{{ s.processed }}/{{ s.total }}（{{ percent }}%）</span>
       </div>
@@ -37,21 +43,13 @@
         </div>
         <div v-if="showConfig" class="config-body">
           <div class="config-row">
-            <button
-              class="mini-switch"
-              :class="{ on: cfg.autoShutdown }"
-              @click="toggleShutdown"
-            >
+            <button class="mini-switch" :class="{ on: cfg.autoShutdown }" @click="toggleShutdown">
               <span class="mini-knob"></span>
             </button>
             <span class="config-label">运行完成后关机</span>
           </div>
           <div class="config-row">
-            <button
-              class="mini-switch"
-              :class="{ on: cfg.notifyEnabled }"
-              @click="toggleNotify"
-            >
+            <button class="mini-switch" :class="{ on: cfg.notifyEnabled }" @click="toggleNotify">
               <span class="mini-knob"></span>
             </button>
             <span class="config-label">完成后通知手机</span>
@@ -84,15 +82,23 @@
           <!-- 暂停任务（保留进度，可继续/删除） -->
           <div v-if="pausedJob" class="queue-mini-item paused">
             <span class="queue-mini-name">{{ pausedJob.appName || '批量任务' }}</span>
-            <span class="queue-mini-meta">{{ pausedJob.processed }}/{{ pausedJob.total }} 已暂停</span>
-            <button class="mini-act ok" title="继续执行" @click="handleResumeJob(pausedJob.id)">▶</button>
-            <button class="mini-act danger" title="删除出队" @click="handleDequeue(pausedJob.id)">✕</button>
+            <span class="queue-mini-meta"
+              >{{ pausedJob.processed }}/{{ pausedJob.total }} 已暂停</span
+            >
+            <button class="mini-act ok" title="继续执行" @click="handleResumeJob(pausedJob.id)">
+              ▶
+            </button>
+            <button class="mini-act danger" title="删除出队" @click="handleDequeue(pausedJob.id)">
+              ✕
+            </button>
           </div>
           <div v-for="qj in queuedJobs.slice(0, 4)" :key="qj.id" class="queue-mini-item">
             <span class="queue-mini-name">{{ qj.appName || '批量任务' }}</span>
             <span class="queue-mini-meta">{{ qj.processed }}/{{ qj.total }}</span>
             <button class="mini-act" title="置顶" @click="handleMoveTop(qj.id)">↑</button>
-            <button class="mini-act danger" title="删除出队" @click="handleDequeue(qj.id)">✕</button>
+            <button class="mini-act danger" title="删除出队" @click="handleDequeue(qj.id)">
+              ✕
+            </button>
           </div>
           <div class="queue-mini-more" v-if="queuedJobs.length > 4">
             还有 {{ queuedJobs.length - 4 }} 个…
@@ -108,9 +114,7 @@
       </div>
 
       <div class="panel-actions">
-        <button v-if="store.isRunning" class="btn" @click="handlePause">
-          ⏸ {{ t('pause') }}
-        </button>
+        <button v-if="store.isRunning" class="btn" @click="handlePause">⏸ {{ t('pause') }}</button>
         <button v-if="store.isRunning" class="btn btn-danger" @click="handleStop">
           ⏹ {{ t('stopExecution') }}
         </button>
@@ -145,7 +149,7 @@ const visible = computed(
     store.isRunning ||
     store.queuedCount > 0 ||
     !!store.pausedJob ||
-    (expanded.value && store.queue.length > 0)
+    (expanded.value && store.queue.length > 0),
 )
 const statusClass = computed(() => {
   if (store.isRunning) return 'running'
@@ -157,17 +161,17 @@ const statusClass = computed(() => {
 const doneText = computed(() => {
   const total = store.queue.length
   if (total === 0) return t('batchTaskDone')
-  const failed = store.queue.filter(
-    (j) => j.status === 'failed' || j.status === 'stopped'
-  ).length
+  const failed = store.queue.filter((j) => j.status === 'failed' || j.status === 'stopped').length
   const done = store.queue.filter((j) => j.status === 'completed').length
   if (failed === 0) return t('batchTaskDone')
   return `${done} 成功 · ${failed} 失败/停止`
 })
 const pillText = computed(() => {
   if (store.isRunning) {
-    return `${s.value.processed}/${s.value.total} · ${percent.value}%` +
+    return (
+      `${s.value.processed}/${s.value.total} · ${percent.value}%` +
       (store.queuedCount > 0 ? ` · 队列中 ${store.queuedCount}` : '')
+    )
   }
   if (store.pausedJob) {
     return `已暂停 ${s.value.processed}/${s.value.total} · 队列中 ${store.queuedCount}`
@@ -178,8 +182,10 @@ const pillText = computed(() => {
 })
 const headerText = computed(() => {
   if (store.isRunning) {
-    return `${s.value.appName || t('batchExecution')} · ${percent.value}%` +
+    return (
+      `${s.value.appName || t('batchExecution')} · ${percent.value}%` +
       (store.queuedCount > 0 ? `（队列 ${store.queuedCount}）` : '')
+    )
   }
   if (store.pausedJob) {
     return `已暂停：${s.value.appName || t('batchExecution')} · ${percent.value}%`
@@ -204,7 +210,7 @@ watch(
   () => store.queueConfig.notifyUrl,
   (v) => {
     notifyUrlDraft.value = v || ''
-  }
+  },
 )
 
 async function handleStop() {
@@ -233,7 +239,7 @@ function handleDequeue(id) {
     onOk: async () => {
       await store.cancel(id)
       showInfo('batchDequeued')
-    }
+    },
   })
 }
 
@@ -455,7 +461,9 @@ function goDetail() {
     height: 12px;
     border-radius: 50%;
     background: #94a3b8;
-    transition: left 0.2s, background 0.2s;
+    transition:
+      left 0.2s,
+      background 0.2s;
   }
   &.on {
     background: #059669;

@@ -33,24 +33,24 @@ import MarketCompactListView from './MarketCompactListView.vue'
 defineProps({
   apps: {
     type: Array,
-    default: () => []
+    default: () => [],
   },
   searchQuery: {
     type: String,
-    default: ''
+    default: '',
   },
   selectedCategory: {
     type: String,
-    default: ''
+    default: '',
   },
   viewMode: {
     type: String,
-    default: 'grid'
+    default: 'grid',
   },
   loading: {
     type: Boolean,
-    default: false
-  }
+    default: false,
+  },
 })
 
 defineEmits(['view-detail', 'install', 'clear-search', 'clear-filter'])
@@ -58,7 +58,9 @@ defineEmits(['view-detail', 'install', 'clear-search', 'clear-filter'])
 
 <style scoped>
 .card-enter-active {
-  transition: opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition:
+    opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .card-enter-from {

@@ -19,26 +19,32 @@
           :auto-size="{ minRows: 2, maxRows: 4 }"
           class="ai-edit-textarea"
         />
-        <a-button type="primary" :loading="aiLoading" @click="handleAiEdit" style="margin-left: 8px;">{{ t('aiEdit') }}</a-button>
-        <a-button type="default" :disabled="!aiLoading" @click="handleAiEditStop" style="margin-left: 8px;">{{ t('aiEditStop') }}</a-button>
-        <span v-if="aiLoading" style="margin-left: 12px; color: #888;">{{ t('aiEditRunning') }}</span>
+        <a-button
+          type="primary"
+          :loading="aiLoading"
+          @click="handleAiEdit"
+          style="margin-left: 8px"
+          >{{ t('aiEdit') }}</a-button
+        >
+        <a-button
+          type="default"
+          :disabled="!aiLoading"
+          @click="handleAiEditStop"
+          style="margin-left: 8px"
+          >{{ t('aiEditStop') }}</a-button
+        >
+        <span v-if="aiLoading" style="margin-left: 12px; color: #888">{{
+          t('aiEditRunning')
+        }}</span>
       </div>
       <splitpanes class="default-theme">
         <pane>
           <a-spin :tip="t('waitingAIResponse')" :spinning="aiLoading">
-            <CodeEditor
-              ref="codeEditorRef"
-              :value="realtimeCode"
-              @change="handleCodeChange"
-            />
+            <CodeEditor ref="codeEditorRef" :value="realtimeCode" @change="handleCodeChange" />
           </a-spin>
         </pane>
         <pane>
-          <Preview
-            class="preview-iframe"
-            :html="previewHtml"
-            :isAiWorking="false"
-          />
+          <Preview class="preview-iframe" :html="previewHtml" :isAiWorking="false" />
         </pane>
       </splitpanes>
     </div>
@@ -61,11 +67,11 @@ const appStore = useAppStore()
 const props = defineProps({
   show: {
     type: Boolean,
-    default: false
+    default: false,
   },
   app: {
     type: Object,
-    default: () => ({})
+    default: () => ({}),
   },
 })
 
@@ -81,15 +87,18 @@ const previewHtml = computed(() => {
 })
 
 // 监听模态框显示状态，初始化代码内容
-watch(() => props.show, (newShow) => {
-  if (newShow) {
-    // 模态框打开时，初始化实时代码内容
-    realtimeCode.value = props.app.code || ''
-  } else {
-    // 模态框关闭时，清空实时代码内容
-    realtimeCode.value = ''
-  }
-})
+watch(
+  () => props.show,
+  (newShow) => {
+    if (newShow) {
+      // 模态框打开时，初始化实时代码内容
+      realtimeCode.value = props.app.code || ''
+    } else {
+      // 模态框关闭时，清空实时代码内容
+      realtimeCode.value = ''
+    }
+  },
+)
 
 const handleModalUpdate = (value) => {
   emit('update:show', value)
@@ -130,9 +139,9 @@ const handleAiEdit = async () => {
         api_key: appStore.config.api_key,
         base_url: appStore.config.base_url,
         model: appStore.config.model,
-        prompt: `请你协助我修改我的页面代码，${aiPrompt.value}，返回结果不要带有任何解释，不要有多余内容，只需要返回修改后的代码，确保代码可以直接运行，我的页面代码为：${realtimeCode.value}`
+        prompt: `请你协助我修改我的页面代码，${aiPrompt.value}，返回结果不要带有任何解释，不要有多余内容，只需要返回修改后的代码，确保代码可以直接运行，我的页面代码为：${realtimeCode.value}`,
       }),
-      signal: aiController.signal
+      signal: aiController.signal,
     })
     if (!res.ok) throw new Error('network')
     const data = await res.json()
@@ -202,7 +211,7 @@ const handleCancel = () => {
   }
   .ant-modal-title {
     color: #e2e8f0;
-    font-family: 'Orbitron', sans-serif;
+    font-family: var(--wb-font);
     font-weight: 600;
   }
   .ant-modal-body {

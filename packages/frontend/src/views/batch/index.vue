@@ -8,11 +8,8 @@
 
     <!-- 主要内容区域 -->
     <div class="main-content">
-      <div class="flex justify-end mb-2" style="padding: 24px 0;">
-        <a-button
-          @click="openHistoryDialog"
-          class="nav-btn"
-        >
+      <div class="flex justify-end mb-2" style="padding: 24px 0">
+        <a-button @click="openHistoryDialog" class="nav-btn">
           📝 {{ t('viewExecutionHistory') }}
         </a-button>
       </div>
@@ -67,7 +64,9 @@
                   <h4>{{ t('foundFiles') }} ({{ filteredDirectoryFiles.length }})</h4>
                   <div class="file-filter">
                     <a-radio-group v-model:value="fileFilter" size="small">
-                      <a-radio-button value="all">{{ t('all') }} ({{ directoryFiles.length }})</a-radio-button>
+                      <a-radio-button value="all"
+                        >{{ t('all') }} ({{ directoryFiles.length }})</a-radio-button
+                      >
                       <a-radio-button
                         v-for="(count, type) in fileCounts"
                         :key="type"
@@ -80,7 +79,11 @@
                   </div>
                 </div>
                 <div class="file-list">
-                  <div v-for="file in filteredDirectoryFiles.slice(0, 10)" :key="file.path" class="file-item">
+                  <div
+                    v-for="file in filteredDirectoryFiles.slice(0, 10)"
+                    :key="file.path"
+                    class="file-item"
+                  >
                     <FileOutlined v-if="!file.isDirectory && !getFileTypeIcon(file.name)" />
                     <FolderOutlined v-else-if="file.isDirectory" />
                     <component :is="getFileTypeIcon(file.name)" v-else />
@@ -167,7 +170,7 @@
       <div v-if="currentStep === 1" class="step-content">
         <div class="mapping-container">
           <div class="mapping-header">
-            <h3 class="step-title" style="margin-bottom: 0;">{{ t('mapDataFields') }}</h3>
+            <h3 class="step-title" style="margin-bottom: 0">{{ t('mapDataFields') }}</h3>
             <div class="drag-tip-inline">
               <InfoCircleOutlined class="drag-tip-icon" />
               <span class="drag-tip-text">{{ t('dragTip') }}</span>
@@ -239,9 +242,7 @@
                       <span class="type-match" v-if="isTypeCompatible(input.valueMap, input)">
                         ✅ {{ t('typeMatch') }}
                       </span>
-                      <span class="type-mismatch" v-else>
-                        ⚠️ {{ t('typeMismatch') }}
-                      </span>
+                      <span class="type-mismatch" v-else> ⚠️ {{ t('typeMismatch') }} </span>
                       <a-button
                         type="text"
                         size="small"
@@ -341,10 +342,7 @@
           <!-- 自动关闭计算机配置 -->
           <div class="auto-shutdown-config">
             <div class="shutdown-toggle">
-              <a-switch
-                v-model:checked="autoShutdownEnabled"
-                class="shutdown-switch"
-              />
+              <a-switch v-model:checked="autoShutdownEnabled" class="shutdown-switch" />
               <div class="shutdown-info">
                 <div class="shutdown-label">{{ t('autoShutdown') }}</div>
                 <div class="shutdown-description">{{ t('autoShutdownDescription') }}</div>
@@ -377,13 +375,25 @@
             </div>
           </div>
 
-
           <!-- 进度条 -->
           <div class="custom-progress-bar">
-            <div class="custom-progress-inner" :style="{ transform: `scaleX(${executionProgress.percent / 100})`, background: executionProgress.strokeColor }"></div>
+            <div
+              class="custom-progress-inner"
+              :style="{
+                transform: `scaleX(${executionProgress.percent / 100})`,
+                background: executionProgress.strokeColor,
+              }"
+            ></div>
             <span class="custom-progress-text">{{ executionProgress.percent }}%</span>
           </div>
-          <div class="mb-2 eta-row" v-if="isExecuting && executionProgress.processed > 0 && executionProgress.processed < executionProgress.total">
+          <div
+            class="mb-2 eta-row"
+            v-if="
+              isExecuting &&
+              executionProgress.processed > 0 &&
+              executionProgress.processed < executionProgress.total
+            "
+          >
             ⏳ {{ t('estimatedRemaining') }}: {{ estimatedRemainingText }}
           </div>
 
@@ -435,7 +445,12 @@
             <h4 class="queue-title">📋 任务队列</h4>
             <div class="queue-header-actions">
               <a-button size="small" @click="goQueueDetail">📋 队列详情</a-button>
-              <a-button size="small" danger v-if="batchTaskStore.isRunning" @click="stopAllExecution">
+              <a-button
+                size="small"
+                danger
+                v-if="batchTaskStore.isRunning"
+                @click="stopAllExecution"
+              >
                 ⏹️ 停止全部
               </a-button>
               <a-button size="small" v-if="finishedCount > 0" @click="handleClearFinished">
@@ -447,29 +462,68 @@
             暂无任务，提交后自动排队依次执行
           </div>
           <div class="queue-list" v-else>
-            <div class="queue-item" v-for="job in batchTaskStore.queue" :key="job.id" :class="job.status">
+            <div
+              class="queue-item"
+              v-for="job in batchTaskStore.queue"
+              :key="job.id"
+              :class="job.status"
+            >
               <div class="queue-item-head">
                 <span class="queue-badge" :class="job.status">{{ statusText(job.status) }}</span>
                 <span class="queue-app">{{ job.appName || '批量任务' }}</span>
                 <span class="queue-meta">{{ job.processed }}/{{ job.total }}</span>
                 <span class="queue-spacer"></span>
-                <a-button size="small" v-if="job.status === 'queued'" @click="handleMoveTop(job.id)">置顶</a-button>
-                <a-button size="small" danger v-if="job.status === 'queued'" @click="handleCancelJob(job.id)">删除出队</a-button>
-                <a-button size="small" v-if="job.status === 'running'" @click="handlePauseJob(job.id)">⏸ 暂停</a-button>
-                <a-button size="small" danger v-if="job.status === 'running'" @click="handleStopJob">⏹ 停止</a-button>
-                <a-button size="small" type="primary" v-if="job.status === 'paused'" @click="handleResumeJob(job.id)">▶ 继续</a-button>
-                <a-button size="small" danger v-if="job.status === 'paused'" @click="handleCancelJob(job.id)">删除</a-button>
+                <a-button size="small" v-if="job.status === 'queued'" @click="handleMoveTop(job.id)"
+                  >置顶</a-button
+                >
+                <a-button
+                  size="small"
+                  danger
+                  v-if="job.status === 'queued'"
+                  @click="handleCancelJob(job.id)"
+                  >删除出队</a-button
+                >
+                <a-button
+                  size="small"
+                  v-if="job.status === 'running'"
+                  @click="handlePauseJob(job.id)"
+                  >⏸ 暂停</a-button
+                >
+                <a-button size="small" danger v-if="job.status === 'running'" @click="handleStopJob"
+                  >⏹ 停止</a-button
+                >
+                <a-button
+                  size="small"
+                  type="primary"
+                  v-if="job.status === 'paused'"
+                  @click="handleResumeJob(job.id)"
+                  >▶ 继续</a-button
+                >
+                <a-button
+                  size="small"
+                  danger
+                  v-if="job.status === 'paused'"
+                  @click="handleCancelJob(job.id)"
+                  >删除</a-button
+                >
                 <a-button
                   size="small"
                   v-if="['completed', 'stopped', 'failed'].includes(job.status)"
                   @click="handleRerun(job)"
-                >🔁 重跑</a-button>
+                  >🔁 重跑</a-button
+                >
               </div>
               <div class="queue-progress">
-                <div class="queue-progress-fill" :class="job.status" :style="{ width: (job.percent || 0) + '%' }"></div>
+                <div
+                  class="queue-progress-fill"
+                  :class="job.status"
+                  :style="{ width: (job.percent || 0) + '%' }"
+                ></div>
               </div>
               <div class="queue-item-foot">
-                <span class="queue-preview" v-if="job.currentPreview" :title="job.currentPreview">{{ job.currentPreview }}</span>
+                <span class="queue-preview" v-if="job.currentPreview" :title="job.currentPreview">{{
+                  job.currentPreview
+                }}</span>
                 <span class="queue-stats">✓ {{ job.success }} · ✗ {{ job.failed }}</span>
               </div>
             </div>
@@ -479,11 +533,7 @@
 
       <!-- 步骤导航 -->
       <div class="step-navigation">
-        <a-button
-          v-if="currentStep > 0"
-          @click="previousStep"
-          class="nav-btn"
-        >
+        <a-button v-if="currentStep > 0" @click="previousStep" class="nav-btn">
           <template #icon><LeftOutlined /></template>
           {{ t('previous') }}
         </a-button>
@@ -510,7 +560,9 @@
     :footer="null"
   >
     <div class="history-dialog">
-      <div v-if="historyRecords.length === 0" class="history-empty">{{ t('noExecutionRecords') }}</div>
+      <div v-if="historyRecords.length === 0" class="history-empty">
+        {{ t('noExecutionRecords') }}
+      </div>
       <div v-else class="history-list">
         <div class="history-item" v-for="rec in historyRecords" :key="rec.id">
           <div class="history-head">
@@ -544,8 +596,12 @@
             </div>
           </div>
           <div class="history-actions">
-            <a-button size="small" type="primary" @click="restoreFromRecord(rec)">{{ t('continueFromLast') }}</a-button>
-            <a-button size="small" danger @click="deleteHistoryRecord(rec.id)">{{ t('deleteRecord') }}</a-button>
+            <a-button size="small" type="primary" @click="restoreFromRecord(rec)">{{
+              t('continueFromLast')
+            }}</a-button>
+            <a-button size="small" danger @click="deleteHistoryRecord(rec.id)">{{
+              t('deleteRecord')
+            }}</a-button>
           </div>
         </div>
       </div>
@@ -588,7 +644,7 @@ import {
   FilePptOutlined,
   VideoCameraOutlined,
   SoundOutlined,
-  InfoCircleOutlined
+  InfoCircleOutlined,
 } from '@ant-design/icons-vue'
 
 const state = reactive({
@@ -619,7 +675,7 @@ const client = ref(null)
 const getClient = () => {
   if (!client.value) {
     client.value = new ComfyUIClient(appStore.config.comfyHost, state.clientId, {
-      logger: { info: () => {}, warn: () => {}, error: console.error, debug: () => {} }
+      logger: { info: () => {}, warn: () => {}, error: console.error, debug: () => {} },
     })
   }
   return client.value
@@ -641,9 +697,7 @@ const notifyWebhookUrl = ref('') // 新增：Bark/Telegram/server酱 webhook URL
 
 // 队列相关：本页提交的任务 id（可能排队等待，也可能在跑）
 const currentJobId = ref(null)
-const myJob = computed(() =>
-  batchTaskStore.queue.find((j) => j.id === currentJobId.value) ?? null
-)
+const myJob = computed(() => batchTaskStore.queue.find((j) => j.id === currentJobId.value) ?? null)
 // 排在我前面的排队任务数
 const queueWaitCount = computed(() => {
   const idx = batchTaskStore.queue.findIndex((j) => j.id === currentJobId.value)
@@ -651,7 +705,8 @@ const queueWaitCount = computed(() => {
   return batchTaskStore.queue.slice(0, idx).filter((j) => j.status === 'queued').length
 })
 const finishedCount = computed(
-  () => batchTaskStore.queue.filter((j) => !['queued', 'running', 'paused'].includes(j.status)).length
+  () =>
+    batchTaskStore.queue.filter((j) => !['queued', 'running', 'paused'].includes(j.status)).length,
 )
 function statusText(status) {
   const map = {
@@ -660,7 +715,7 @@ function statusText(status) {
     paused: '已暂停',
     completed: '已完成',
     stopped: '已停止',
-    failed: '失败'
+    failed: '失败',
   }
   return map[status] || status
 }
@@ -673,7 +728,7 @@ const executionProgress = reactive({
   percent: 0,
   status: 'normal',
   strokeColor: '#10b981',
-  currentItem: ''
+  currentItem: '',
 })
 const executionLogs = ref([]) // 新增：执行日志
 // 日志上限：长任务下 unshift 无限增长会拖垮内存与渲染，超限丢弃最旧（尾部）
@@ -687,7 +742,7 @@ watch(executionLogs, (logs) => {
 // 预计剩余时间统计
 const executionTimeStats = reactive({
   totalMs: 0,
-  count: 0
+  count: 0,
 })
 
 const averageItemMs = computed(() => {
@@ -730,7 +785,9 @@ const showHistoryDialog = ref(false)
 const historyRecords = ref([])
 const currentHistoryRecordId = ref(null)
 const historyLoadedKey = ref('')
-const historyKey = computed(() => (currentApp.value && currentApp.value.id) ? `batch/history/${currentApp.value.id}` : '')
+const historyKey = computed(() =>
+  currentApp.value && currentApp.value.id ? `batch/history/${currentApp.value.id}` : '',
+)
 
 async function ensureHistoryLoaded() {
   if (!historyKey.value) {
@@ -741,7 +798,9 @@ async function ensureHistoryLoaded() {
     const list = (await localforage.getItem(historyKey.value)) || []
     historyRecords.value = Array.isArray(list) ? list : []
     // 按更新时间倒序
-    historyRecords.value.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))
+    historyRecords.value.sort(
+      (a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt),
+    )
     historyLoadedKey.value = historyKey.value
   } catch (error) {
     // 读取失败时不清空已有列表（避免把「读不到」伪装成「无记录」），仅记录并提示。
@@ -770,7 +829,7 @@ function syncQueueConfig() {
   batchTaskStore.setQueueConfig({
     autoShutdown: autoShutdownEnabled.value,
     notifyEnabled: notifyEnabled.value,
-    notifyUrl: notifyWebhookUrl.value
+    notifyUrl: notifyWebhookUrl.value,
   })
 }
 // URL 输入防抖应用（避免每敲一个字符就打一次后端）
@@ -822,7 +881,8 @@ async function createNewHistoryRecord() {
       type: selectedSourceType.value,
       directoryPath: directoryPath.value,
       fileFilter: fileFilter.value,
-      uploadedFiles: deepClone(uploadedFiles.value?.map(f => ({ name: f.name, size: f.size }))) || [],
+      uploadedFiles:
+        deepClone(uploadedFiles.value?.map((f) => ({ name: f.name, size: f.size }))) || [],
       jsonInput: jsonInput.value,
     },
     batchData: deepClone(batchData.value),
@@ -836,7 +896,7 @@ async function createNewHistoryRecord() {
 
 async function upsertHistoryRecord(update) {
   if (!update?.id) return
-  const idx = historyRecords.value.findIndex(r => r.id === update.id)
+  const idx = historyRecords.value.findIndex((r) => r.id === update.id)
   if (idx === -1) return
   const rec = historyRecords.value[idx]
   const merged = { ...rec, ...update }
@@ -864,7 +924,7 @@ async function openHistoryDialog() {
 }
 
 async function deleteHistoryRecord(id) {
-  const idx = historyRecords.value.findIndex(r => r.id === id)
+  const idx = historyRecords.value.findIndex((r) => r.id === id)
   if (idx > -1) {
     historyRecords.value.splice(idx, 1)
     await saveHistory()
@@ -895,7 +955,7 @@ const canProceed = computed(() => {
     case 0:
       return batchData.value.length > 0
     case 1:
-      return state.inputs.some(input => input.valueMap || input.manualValue !== undefined)
+      return state.inputs.some((input) => input.valueMap || input.manualValue !== undefined)
     default:
       return true
   }
@@ -910,25 +970,25 @@ const fileCounts = computed(() => {
     videos: 0,
     audios: 0,
     texts: 0,
-    documents: 0
+    documents: 0,
   }
 
-  directoryFiles.value.forEach(file => {
+  directoryFiles.value.forEach((file) => {
     if (file.isDirectory) {
       counts.directories++
     } else {
       counts.files++
 
       const fileName = file.name.toLowerCase()
-      if (fileTypes.images.some(ext => fileName.endsWith(ext))) {
+      if (fileTypes.images.some((ext) => fileName.endsWith(ext))) {
         counts.images++
-      } else if (fileTypes.videos.some(ext => fileName.endsWith(ext))) {
+      } else if (fileTypes.videos.some((ext) => fileName.endsWith(ext))) {
         counts.videos++
-      } else if (fileTypes.audios.some(ext => fileName.endsWith(ext))) {
+      } else if (fileTypes.audios.some((ext) => fileName.endsWith(ext))) {
         counts.audios++
-      } else if (fileTypes.texts.some(ext => fileName.endsWith(ext))) {
+      } else if (fileTypes.texts.some((ext) => fileName.endsWith(ext))) {
         counts.texts++
-      } else if (fileTypes.documents.some(ext => fileName.endsWith(ext))) {
+      } else if (fileTypes.documents.some((ext) => fileName.endsWith(ext))) {
         counts.documents++
       }
     }
@@ -939,11 +999,110 @@ const fileCounts = computed(() => {
 
 // 文件类型定义
 const fileTypes = {
-  images: ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.ico', '.tiff', '.tif', '.jfif'],
-  videos: ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.mkv', '.m4v', '.3gp', '.ogv', '.ts', '.mts', '.m2ts', '.vob', '.asf', '.rm', '.rmvb', '.divx', '.xvid'],
-  audios: ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma', '.m4a', '.opus', '.aiff', '.au', '.ra', '.mid', '.midi', '.amr', '.ape', '.alac', '.wv'],
-  texts: ['.txt', '.md', '.json', '.xml', '.html', '.htm', '.css', '.js', '.ts', '.jsx', '.tsx', '.vue', '.py', '.java', '.cpp', '.c', '.h', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala', '.sql', '.sh', '.bat', '.ps1', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf', '.log'],
-  documents: ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp', '.rtf', '.csv']
+  images: [
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.gif',
+    '.bmp',
+    '.webp',
+    '.svg',
+    '.ico',
+    '.tiff',
+    '.tif',
+    '.jfif',
+  ],
+  videos: [
+    '.mp4',
+    '.avi',
+    '.mov',
+    '.wmv',
+    '.flv',
+    '.webm',
+    '.mkv',
+    '.m4v',
+    '.3gp',
+    '.ogv',
+    '.ts',
+    '.mts',
+    '.m2ts',
+    '.vob',
+    '.asf',
+    '.rm',
+    '.rmvb',
+    '.divx',
+    '.xvid',
+  ],
+  audios: [
+    '.mp3',
+    '.wav',
+    '.flac',
+    '.aac',
+    '.ogg',
+    '.wma',
+    '.m4a',
+    '.opus',
+    '.aiff',
+    '.au',
+    '.ra',
+    '.mid',
+    '.midi',
+    '.amr',
+    '.ape',
+    '.alac',
+    '.wv',
+  ],
+  texts: [
+    '.txt',
+    '.md',
+    '.json',
+    '.xml',
+    '.html',
+    '.htm',
+    '.css',
+    '.js',
+    '.ts',
+    '.jsx',
+    '.tsx',
+    '.vue',
+    '.py',
+    '.java',
+    '.cpp',
+    '.c',
+    '.h',
+    '.php',
+    '.rb',
+    '.go',
+    '.rs',
+    '.swift',
+    '.kt',
+    '.scala',
+    '.sql',
+    '.sh',
+    '.bat',
+    '.ps1',
+    '.yaml',
+    '.yml',
+    '.toml',
+    '.ini',
+    '.cfg',
+    '.conf',
+    '.log',
+  ],
+  documents: [
+    '.pdf',
+    '.doc',
+    '.docx',
+    '.xls',
+    '.xlsx',
+    '.ppt',
+    '.pptx',
+    '.odt',
+    '.ods',
+    '.odp',
+    '.rtf',
+    '.csv',
+  ],
 }
 
 // 过滤后的文件列表
@@ -955,29 +1114,32 @@ const filteredDirectoryFiles = computed(() => {
   const filterMap = {
     files: (file) => !file.isDirectory,
     directories: (file) => file.isDirectory,
-    images: (file) => !file.isDirectory && fileTypes.images.some(ext => file.name.toLowerCase().endsWith(ext)),
-    videos: (file) => !file.isDirectory && fileTypes.videos.some(ext => file.name.toLowerCase().endsWith(ext)),
-    audios: (file) => !file.isDirectory && fileTypes.audios.some(ext => file.name.toLowerCase().endsWith(ext)),
-    texts: (file) => !file.isDirectory && fileTypes.texts.some(ext => file.name.toLowerCase().endsWith(ext)),
-    documents: (file) => !file.isDirectory && fileTypes.documents.some(ext => file.name.toLowerCase().endsWith(ext))
+    images: (file) =>
+      !file.isDirectory && fileTypes.images.some((ext) => file.name.toLowerCase().endsWith(ext)),
+    videos: (file) =>
+      !file.isDirectory && fileTypes.videos.some((ext) => file.name.toLowerCase().endsWith(ext)),
+    audios: (file) =>
+      !file.isDirectory && fileTypes.audios.some((ext) => file.name.toLowerCase().endsWith(ext)),
+    texts: (file) =>
+      !file.isDirectory && fileTypes.texts.some((ext) => file.name.toLowerCase().endsWith(ext)),
+    documents: (file) =>
+      !file.isDirectory && fileTypes.documents.some((ext) => file.name.toLowerCase().endsWith(ext)),
   }
 
   const filterFn = filterMap[fileFilter.value]
   return filterFn ? directoryFiles.value.filter(filterFn) : directoryFiles.value
 })
 
-
-
 const previewColumns = computed(() => {
   if (batchData.value.length === 0) return []
 
   const firstItem = batchData.value[0]
-  return Object.keys(firstItem).map(key => {
+  return Object.keys(firstItem).map((key) => {
     const column = {
       title: key,
       dataIndex: key,
       key: key,
-      ellipsis: true
+      ellipsis: true,
     }
 
     // 根据字段类型设置不同的宽度和格式化
@@ -1001,7 +1163,7 @@ const previewColumns = computed(() => {
         break
       case 'isDirectory':
         column.width = 80
-        column.customRender = ({ text }) => text ? 'true' : 'false'
+        column.customRender = ({ text }) => (text ? 'true' : 'false')
         break
       case 'fileExtension':
         column.width = 80
@@ -1028,17 +1190,19 @@ async function init() {
     showError('currentAppNotFound')
     return
   }
-  const inputs = genMeta(currentApp.value).components.children.filter(node => ['form-item'].includes(node.componentName)).map(node => {
-    return {
-      id: node.id,
-      key: node.props.key,
-      label: node.props.label,
-      valueType: node.props.valueType || 'undefined',
-      valueMap: null,
-      manualValue: undefined,
-      manualInputValue: ''
-    }
-  })
+  const inputs = genMeta(currentApp.value)
+    .components.children.filter((node) => ['form-item'].includes(node.componentName))
+    .map((node) => {
+      return {
+        id: node.id,
+        key: node.props.key,
+        label: node.props.label,
+        valueType: node.props.valueType || 'undefined',
+        valueMap: null,
+        manualValue: undefined,
+        manualInputValue: '',
+      }
+    })
 
   state.inputs = inputs
   // 加载当前应用的执行记录
@@ -1068,7 +1232,7 @@ async function scanDirectory(path) {
   try {
     if (window.electronAPI) {
       const files = await window.electronAPI.ArtifyLab.scanFolder(path)
-      directoryFiles.value = files.map(file => ({
+      directoryFiles.value = files.map((file) => ({
         name: file.fileName,
         path: file.fullPath,
         size: file.size,
@@ -1076,7 +1240,7 @@ async function scanDirectory(path) {
         extension: file.extension,
         isDirectory: file.isDirectory,
         lastModified: file.lastModified,
-        relativePath: file.relativePath
+        relativePath: file.relativePath,
       }))
 
       // 生成批量数据
@@ -1090,7 +1254,7 @@ async function scanDirectory(path) {
 
 // 从文件生成批量数据
 function generateBatchDataFromFiles() {
-  batchData.value = filteredDirectoryFiles.value.map(file => ({
+  batchData.value = filteredDirectoryFiles.value.map((file) => ({
     fileName: file.name,
     filePath: file.path,
     fileSize: file.size,
@@ -1101,7 +1265,7 @@ function generateBatchDataFromFiles() {
     fileNameWithoutExt: file.extension ? file.name.slice(0, -file.extension.length) : file.name,
     isDirectory: file.isDirectory,
     lastModified: file.lastModified,
-    relativePath: file.relativePath
+    relativePath: file.relativePath,
   }))
 
   updateAvailableFields()
@@ -1193,7 +1357,7 @@ async function parseExcelFile(file) {
       maxRows: 10000, // 最大读取10000行
       includeEmptyRows: false, // 不包含空行
       dateFormat: 'YYYY-MM-DD', // 日期格式
-      numberFormat: 'string' // 数字转换为字符串
+      numberFormat: 'string', // 数字转换为字符串
     })
 
     batchData.value = result.data
@@ -1204,7 +1368,7 @@ async function parseExcelFile(file) {
     console.log('Excel文件解析成功:', {
       sheetName: result.sheetName,
       totalRows: result.totalRows,
-      headers: result.headers
+      headers: result.headers,
     })
 
     return result.data
@@ -1218,12 +1382,12 @@ async function parseExcelFile(file) {
 // 解析CSV
 function parseCSV(content) {
   const lines = content.split('\n')
-  const headers = lines[0].split(',').map(h => h.trim())
+  const headers = lines[0].split(',').map((h) => h.trim())
   const data = []
 
   for (let i = 1; i < lines.length; i++) {
     if (lines[i].trim()) {
-      const values = lines[i].split(',').map(v => v.trim())
+      const values = lines[i].split(',').map((v) => v.trim())
       const item = {}
       headers.forEach((header, index) => {
         item[header] = values[index] || ''
@@ -1237,7 +1401,7 @@ function parseCSV(content) {
 
 // 移除文件
 function removeFile(file) {
-  const index = uploadedFiles.value.findIndex(f => f.uid === file.uid)
+  const index = uploadedFiles.value.findIndex((f) => f.uid === file.uid)
   if (index > -1) {
     uploadedFiles.value.splice(index, 1)
   }
@@ -1265,10 +1429,11 @@ function updateAvailableFields() {
   }
 
   const firstItem = batchData.value[0]
-  availableFields.value = Object.keys(firstItem).map(key => ({
+  availableFields.value = Object.keys(firstItem).map((key) => ({
     key: key,
     name: key,
-    preview: String(firstItem[key]).substring(0, 128) + (String(firstItem[key]).length > 128 ? '...' : '')
+    preview:
+      String(firstItem[key]).substring(0, 128) + (String(firstItem[key]).length > 128 ? '...' : ''),
   }))
 }
 
@@ -1301,7 +1466,7 @@ function handleDrop(event, input) {
       showError('typeMismatchError', {
         fieldName: draggedField.value.name,
         fieldType: getFieldType(draggedField.value),
-        inputType: input.valueType
+        inputType: input.valueType,
       })
     }
   }
@@ -1323,7 +1488,7 @@ function setManualValue(input) {
       showError('valueConversionError', {
         value: input.manualInputValue,
         targetType: input.valueType,
-        error: error.message
+        error: error.message,
       })
     }
   }
@@ -1351,16 +1516,20 @@ function isTypeCompatible(field, input) {
 
   // 类型兼容性映射
   const typeCompatibility = {
-    'string': ['string'], // string只能映射到string
-    'number': ['number', 'string'], // number可以映射到number或string
-    'boolean': ['boolean', 'string'], // boolean可以映射到boolean或string
-    'object': ['object', 'string'], // object可以映射到object或string
-    'array': ['array', 'string'], // array可以映射到array或string
-    'null': ['string', 'number', 'boolean', 'object', 'array'], // null可以映射到任何类型
-    'undefined': ['string', 'number', 'boolean', 'object', 'array'] // undefined可以映射到任何类型
+    string: ['string'], // string只能映射到string
+    number: ['number', 'string'], // number可以映射到number或string
+    boolean: ['boolean', 'string'], // boolean可以映射到boolean或string
+    object: ['object', 'string'], // object可以映射到object或string
+    array: ['array', 'string'], // array可以映射到array或string
+    null: ['string', 'number', 'boolean', 'object', 'array'], // null可以映射到任何类型
+    undefined: ['string', 'number', 'boolean', 'object', 'array'], // undefined可以映射到任何类型
   }
 
-  return typeCompatibility[fieldType]?.includes(targetType) || fieldType === targetType || targetType === 'undefined'
+  return (
+    typeCompatibility[fieldType]?.includes(targetType) ||
+    fieldType === targetType ||
+    targetType === 'undefined'
+  )
 }
 
 // 根据目标类型转换值
@@ -1425,7 +1594,7 @@ function getPrompt(data) {
       item.inputs.seed = getSeed(15)
     }
   })
-  state.inputs.forEach(node => {
+  state.inputs.forEach((node) => {
     let value = prompt[node.id].inputs[node.key] // 默认值
 
     if (node.valueMap) {
@@ -1507,7 +1676,7 @@ async function executeBatch() {
       notifyUrl: notifyEnabled.value ? notifyWebhookUrl.value.trim() : '',
       autoShutdown: autoShutdownEnabled.value,
       appId: currentApp.value.id,
-      appName: currentApp.value.name
+      appName: currentApp.value.name,
     })
     currentJobId.value = data.jobId
     isExecuting.value = true
@@ -1550,7 +1719,7 @@ function watchBatchTask() {
           executionLogs.value.unshift({
             time: new Date().toLocaleTimeString(),
             message: `已加入队列，等待执行（前方 ${queueWaitCount.value} 个任务）`,
-            type: 'info'
+            type: 'info',
           })
         }
         isExecuting.value = true
@@ -1568,7 +1737,7 @@ function watchBatchTask() {
         executionLogs.value.unshift({
           time: new Date().toLocaleTimeString(),
           message: job.currentPreview,
-          type: 'info'
+          type: 'info',
         })
       }
 
@@ -1583,8 +1752,8 @@ function watchBatchTask() {
               index: r.index,
               success: r.success,
               error: r.error,
-              durationMs: r.durationMs
-            }
+              durationMs: r.durationMs,
+            },
           })
         }
         await upsertHistoryRecord({
@@ -1595,7 +1764,7 @@ function watchBatchTask() {
           percent: job.percent,
           logs: job.currentPreview
             ? [{ time: new Date().toLocaleTimeString(), message: job.currentPreview, type: 'info' }]
-            : undefined
+            : undefined,
         })
       }
 
@@ -1613,23 +1782,30 @@ function watchBatchTask() {
         executionProgress.currentItem = ''
         if (job.status === 'completed') {
           showSuccess('batchExecutionCompleted', {
-            total: job.total, success: job.success, failed: job.failed
+            total: job.total,
+            success: job.success,
+            failed: job.failed,
           })
         }
         if (currentHistoryRecordId.value) {
           await upsertHistoryRecord({
             id: currentHistoryRecordId.value,
-            status: job.status === 'completed' ? 'completed' : job.status === 'stopped' ? 'stopped' : 'failed',
+            status:
+              job.status === 'completed'
+                ? 'completed'
+                : job.status === 'stopped'
+                  ? 'stopped'
+                  : 'failed',
             processed: job.processed,
             success: job.success,
             failed: job.failed,
-            percent: job.percent
+            percent: job.percent,
           })
         }
         if (batchWatchStop) batchWatchStop()
       }
     },
-    { deep: false }
+    { deep: false },
   )
   batchWatchStop = unwatch
 }
@@ -1692,11 +1868,15 @@ async function stopExecution() {
   executionLogs.value.unshift({
     time: new Date().toLocaleTimeString(),
     message: t('executionStoppedByUser') + '（队列中后续任务继续执行）',
-    type: 'info'
+    type: 'info',
   })
 
   // 标记记录已停止
-  await upsertHistoryRecord({ id: currentHistoryRecordId.value, status: 'stopped', currentItem: '' })
+  await upsertHistoryRecord({
+    id: currentHistoryRecordId.value,
+    status: 'stopped',
+    currentItem: '',
+  })
 }
 
 // 停止全部：中断当前任务 + 取消所有排队任务
@@ -1711,9 +1891,13 @@ async function stopAllExecution() {
   executionLogs.value.unshift({
     time: new Date().toLocaleTimeString(),
     message: '已停止全部任务（含排队中的任务）',
-    type: 'info'
+    type: 'info',
   })
-  await upsertHistoryRecord({ id: currentHistoryRecordId.value, status: 'stopped', currentItem: '' })
+  await upsertHistoryRecord({
+    id: currentHistoryRecordId.value,
+    status: 'stopped',
+    currentItem: '',
+  })
 }
 
 // 队列操作
@@ -1773,7 +1957,7 @@ function handleRerun(job) {
       } catch (e) {
         showInfo(e?.message || '重新运行失败')
       }
-    }
+    },
   })
 }
 
@@ -1785,11 +1969,11 @@ function clearLogs() {
 // 获取文件类型图标
 function getFileTypeIcon(fileName) {
   const ext = fileName.toLowerCase()
-  if (fileTypes.images.some(type => ext.endsWith(type))) {
+  if (fileTypes.images.some((type) => ext.endsWith(type))) {
     return PictureOutlined
-  } else if (fileTypes.videos.some(type => ext.endsWith(type))) {
+  } else if (fileTypes.videos.some((type) => ext.endsWith(type))) {
     return VideoCameraOutlined
-  } else if (fileTypes.audios.some(type => ext.endsWith(type))) {
+  } else if (fileTypes.audios.some((type) => ext.endsWith(type))) {
     return SoundOutlined
   } else if (ext.endsWith('.pdf')) {
     return FilePdfOutlined
@@ -1799,7 +1983,7 @@ function getFileTypeIcon(fileName) {
     return FileExcelOutlined
   } else if (ext.endsWith('.ppt') || ext.endsWith('.pptx')) {
     return FilePptOutlined
-  } else if (fileTypes.texts.some(type => ext.endsWith(type))) {
+  } else if (fileTypes.texts.some((type) => ext.endsWith(type))) {
     return FileTextOutlined
   }
   return null
@@ -1817,10 +2001,10 @@ function formatFileSize(bytes) {
 // 获取状态文本
 function getStatusText(status) {
   const statusMap = {
-    'running': t('statusRunning'),
-    'completed': t('statusCompleted'),
-    'failed': t('statusFailed'),
-    'stopped': t('statusStopped')
+    running: t('statusRunning'),
+    completed: t('statusCompleted'),
+    failed: t('statusFailed'),
+    stopped: t('statusStopped'),
   }
   return statusMap[status] || status
 }
@@ -1849,8 +2033,8 @@ async function handleNotify({ title, body }) {
       body: JSON.stringify({
         url: notifyWebhookUrl.value.trim(),
         title,
-        body
-      })
+        body,
+      }),
     })
     const json = await response.json().catch(() => ({}))
     if (!response.ok || !json?.success) {
@@ -1859,14 +2043,14 @@ async function handleNotify({ title, body }) {
     executionLogs.value.unshift({
       time: new Date().toLocaleTimeString(),
       message: t('notifySent'),
-      type: 'success'
+      type: 'success',
     })
   } catch (error) {
     console.error('完成通知失败:', error)
     executionLogs.value.unshift({
       time: new Date().toLocaleTimeString(),
       message: t('notifyFailed'),
-      type: 'error'
+      type: 'error',
     })
   }
 }
@@ -1877,7 +2061,7 @@ async function handleAutoShutdown() {
     executionLogs.value.unshift({
       time: new Date().toLocaleTimeString(),
       message: t('shutdownInProgress'),
-      type: 'info'
+      type: 'info',
     })
 
     // 调用关闭API
@@ -1890,7 +2074,7 @@ async function handleAutoShutdown() {
     executionLogs.value.unshift({
       time: new Date().toLocaleTimeString(),
       message: t('shutdownSuccess'),
-      type: 'success'
+      type: 'success',
     })
   } catch (error) {
     console.error('自动关闭计算机失败:', error)
@@ -1898,7 +2082,7 @@ async function handleAutoShutdown() {
     executionLogs.value.unshift({
       time: new Date().toLocaleTimeString(),
       message: t('shutdownFailed'),
-      type: 'error'
+      type: 'error',
     })
   }
 }
@@ -1911,7 +2095,7 @@ async function shutdown() {
     },
     body: JSON.stringify({
       delay: 30,
-      force: true
+      force: true,
     }),
   })
 
@@ -1929,9 +2113,9 @@ async function unloadModel() {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      "unload_models": true,
-      "free_memory": true
-    })
+      unload_models: true,
+      free_memory: true,
+    }),
   })
 
   if (!response.ok) {

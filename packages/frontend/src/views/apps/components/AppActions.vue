@@ -1,11 +1,13 @@
 <template>
   <div class="flex flex-col mb-8 space-y-4">
-    <div class="flex flex-col space-y-4 lg:flex-row lg:justify-between lg:items-center lg:space-y-0">
+    <div
+      class="flex flex-col space-y-4 lg:flex-row lg:justify-between lg:items-center lg:space-y-0"
+    >
       <!-- 左侧：新增应用按钮 -->
       <div class="flex items-center space-x-4" v-if="isElectron && props.showCreate">
         <a-dropdown :trigger="['click']">
           <button
-            class="flex items-center px-5 py-3 space-x-2 font-semibold text-white bg-gradient-to-r rounded-lg transition cursor-pointer floating-btn from-tech-blue to-tech-cyan hover:opacity-90"
+            class="flex items-center px-5 py-3 space-x-2 font-semibold text-white rounded-md transition cursor-pointer floating-btn btn-comfy-primary"
           >
             <i class="fas fa-plus"></i>
             <span>{{ t('addNewApp') }}</span>
@@ -50,14 +52,14 @@
 
       <!-- 右侧：视图切换按钮 -->
       <div class="flex items-center justify-end lg:justify-end">
-        <div class="flex items-center p-1 space-x-1 bg-tech-darker rounded-lg">
+        <div class="flex items-center p-1 space-x-1 rounded-md">
           <button
             @click="$emit('update:viewMode', 'grid')"
             :class="[
               'flex items-center justify-center w-10 h-10 text-sm font-medium rounded-md transition',
               viewMode === 'grid'
-                ? 'text-white bg-tech-blue shadow-lg'
-                : 'text-slate-400 hover:text-white hover:bg-tech-darker'
+                ? 'text-white bg-[var(--wb-accent)]'
+                : 'text-slate-400 hover:text-white hover:bg-[var(--wb-surface-hover)]',
             ]"
             :title="t('gridView')"
           >
@@ -68,8 +70,8 @@
             :class="[
               'flex items-center justify-center w-10 h-10 text-sm font-medium rounded-md transition',
               viewMode === 'compact'
-                ? 'text-white bg-tech-blue shadow-lg'
-                : 'text-slate-400 hover:text-white hover:bg-tech-darker'
+                ? 'text-white bg-[var(--wb-accent)]'
+                : 'text-slate-400 hover:text-white hover:bg-[var(--wb-surface-hover)]',
             ]"
             :title="t('compactView')"
           >
@@ -81,14 +83,15 @@
 
     <div class="flex items-center space-x-2">
       <div class="pulse-dot"></div>
-      <span class="font-medium text-tech-blue">
-        {{ (searchQuery.trim() || selectedCategory) && filteredApps.length !== totalApps
-          ? `${filteredApps.length}/${totalApps}`
-          : filteredApps.length
-        }} {{ t('appsOnline') }}
+      <span class="font-medium text-[var(--wb-accent)]">
+        {{
+          (searchQuery.trim() || selectedCategory) && filteredApps.length !== totalApps
+            ? `${filteredApps.length}/${totalApps}`
+            : filteredApps.length
+        }}
+        {{ t('appsOnline') }}
       </span>
     </div>
-
   </div>
 </template>
 
@@ -101,27 +104,27 @@ import { isElectron } from '@/utils'
 const props = defineProps({
   apps: {
     type: Array,
-    default: () => []
+    default: () => [],
   },
   showCreate: {
     type: Boolean,
-    default: true
+    default: true,
   },
   searchQuery: {
     type: String,
-    default: ''
+    default: '',
   },
   selectedCategory: {
     type: String,
-    default: ''
+    default: '',
   },
   searchHistory: {
     type: Array,
-    default: () => []
+    default: () => [],
   },
   viewMode: {
     type: String,
-    default: 'grid'
+    default: 'grid',
   },
 })
 
@@ -135,7 +138,7 @@ const emit = defineEmits([
   'clear-history',
   'delete-history-item',
   'create-new',
-  'import-app'
+  'import-app',
 ])
 
 const fileList = ref([])
@@ -149,7 +152,7 @@ const filteredApps = computed(() => {
   const query = props.searchQuery.toLowerCase().trim()
   const categoryFilter = props.selectedCategory
 
-  return props.apps.filter(app => {
+  return props.apps.filter((app) => {
     const nameMatch = app.name.toLowerCase().includes(query)
     const categoryMatch = app.category.toLowerCase().includes(query)
     const descriptionMatch = app.description.toLowerCase().includes(query)
@@ -180,15 +183,16 @@ const handleAppUploadChange = ({ file }) => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #0ea5e9;
+  background: var(--wb-success);
 }
 
 .floating-btn {
-  box-shadow: 0 0 20px rgba(14, 165, 233, 0.5);
+  /* 发光退役（Comfy 无发光语义） */
 }
 
 @keyframes pulse-slow {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
   }
   50% {
@@ -197,7 +201,8 @@ const handleAppUploadChange = ({ file }) => {
 }
 
 @keyframes float {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0px);
   }
   50% {

@@ -33,19 +33,19 @@ import CompactListView from './CompactListView.vue'
 const props = defineProps({
   apps: {
     type: Array,
-    default: () => []
+    default: () => [],
   },
   searchQuery: {
     type: String,
-    default: ''
+    default: '',
   },
   selectedCategory: {
     type: String,
-    default: ''
+    default: '',
   },
   viewMode: {
     type: String,
-    default: 'grid'
+    default: 'grid',
   },
 })
 
@@ -54,7 +54,9 @@ defineEmits(['view-detail', 'edit', 'delete', 'clear-search', 'clear-filter'])
 
 <style scoped>
 .card-enter-active {
-  transition: opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition:
+    opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .card-enter-from {

@@ -2,7 +2,16 @@ import { reactive, ref, onMounted, onUnmounted } from 'vue'
 import dayjs from 'dayjs'
 import localforage from 'localforage'
 import { ComfyUIClient } from '@artifyfun/comfy-ui-client'
-import { getQueryParam, downloadJSON, previewImageFullscreen, uuidv4, getSeed, postFile, createGlassAlert, getFile } from '@/utils'
+import {
+  getQueryParam,
+  downloadJSON,
+  previewImageFullscreen,
+  uuidv4,
+  getSeed,
+  postFile,
+  createGlassAlert,
+  getFile,
+} from '@/utils'
 
 export default function useWorkflow() {
   const app = window.appTemplate
@@ -37,7 +46,12 @@ export default function useWorkflow() {
     createGlassAlert(message, state.config.lang === 'zh' ? '错误' : 'Error')
   }
 
-  const totalSteps = ref(Object.keys(app.template.prompt).reduce((acc, key) => acc + (app.template.prompt[key].inputs?.steps || 1), 0))
+  const totalSteps = ref(
+    Object.keys(app.template.prompt).reduce(
+      (acc, key) => acc + (app.template.prompt[key].inputs?.steps || 1),
+      0,
+    ),
+  )
   const finishedSteps = ref(0)
   const cachedIds = ref([])
   const addIds = ref([])
@@ -49,7 +63,7 @@ export default function useWorkflow() {
       // comfy-ui-client >= 0.4: 构造第三参为 options，事件经 client.on(event, data)
       // 订阅（event 即旧 eventEmitter 里 message.type 的值）
       client.value = new ComfyUIClient(state.config.comfyHost, state.clientId, {
-        logger: { info: () => {}, warn: () => {}, error: console.error, debug: () => {} }
+        logger: { info: () => {}, warn: () => {}, error: console.error, debug: () => {} },
       })
       client.value.on('status', () => {
         // 兼容旧 eventEmitter('message') 分支里的通用状态
@@ -62,7 +76,7 @@ export default function useWorkflow() {
         'progress',
         'execution_success',
         'execution_error',
-        'execution_interrupted'
+        'execution_interrupted',
       ]) {
         client.value.on(evt, (data) => handleWsEvent(evt, data))
       }
@@ -78,12 +92,12 @@ export default function useWorkflow() {
       state.promptId = data.prompt_id
     }
     if (type === 'execution_cached') {
-      data.nodes.forEach(id => {
+      data.nodes.forEach((id) => {
         if (!cachedIds.value.includes(id)) {
           cachedIds.value.push(id)
         }
       })
-      cachedIds.value.forEach(id => {
+      cachedIds.value.forEach((id) => {
         if (Object.keys(app.template.prompt).includes(id)) {
           if (app.template.prompt[id]?.inputs?.steps) {
             if (!addIds.value.includes(id)) {
@@ -104,7 +118,11 @@ export default function useWorkflow() {
     if (type === 'progress') {
       if (['SamplerCustomAdvanced'].includes(app.template.prompt[data.node]?.class_type)) {
         finishedSteps.value += 1
-      } else if (Object.keys(app.template.prompt).includes(data.node) && app.template.prompt[data.node]?.inputs?.steps && finishedSteps.value < totalSteps.value) {
+      } else if (
+        Object.keys(app.template.prompt).includes(data.node) &&
+        app.template.prompt[data.node]?.inputs?.steps &&
+        finishedSteps.value < totalSteps.value
+      ) {
         finishedSteps.value += 1
       } else if (!addIds.value.includes(data.node)) {
         finishedSteps.value += 1
@@ -149,7 +167,9 @@ export default function useWorkflow() {
   function getImageUrl(data, type) {
     if (type === 'output') {
       const { filename, subfolder } = data || {}
-      return filename ? `${state.config.serverHost}/view?type=${type}&filename=${filename}&subfolder=${subfolder || ''}` : null
+      return filename
+        ? `${state.config.serverHost}/view?type=${type}&filename=${filename}&subfolder=${subfolder || ''}`
+        : null
     }
     return data ? `${state.config.serverHost}/view?type=${type}&filename=${data}` : null
   }
@@ -157,7 +177,9 @@ export default function useWorkflow() {
   function getFileUrl(data, type) {
     if (type === 'output') {
       const { filename, subfolder } = data || {}
-      return filename ? `${state.config.comfyHost}/view?type=${type}&filename=${filename}&subfolder=${subfolder || ''}` : null
+      return filename
+        ? `${state.config.comfyHost}/view?type=${type}&filename=${filename}&subfolder=${subfolder || ''}`
+        : null
     }
     return data ? `${state.config.comfyHost}/view?type=${type}&filename=${data}` : null
   }
@@ -195,15 +217,21 @@ export default function useWorkflow() {
     const response = {}
     Object.keys(outputs).forEach((key) => {
       if (outputKeys.includes(key)) {
-        Object.values(outputs[key]).forEach(item => {
+        Object.values(outputs[key]).forEach((item) => {
           if (Array.isArray(item)) {
-            const outputItem = item.find((item) => typeof item === 'object' && item.type === 'output')
+            const outputItem = item.find(
+              (item) => typeof item === 'object' && item.type === 'output',
+            )
             if (outputItem) {
               response[key] = outputItem
             }
           }
         })
-        response[key] = response[key] || Object.values(outputs[key]).find((item) => Array.isArray(item))?.join('\n')
+        response[key] =
+          response[key] ||
+          Object.values(outputs[key])
+            .find((item) => Array.isArray(item))
+            ?.join('\n')
       }
     })
     return response
@@ -215,14 +243,17 @@ export default function useWorkflow() {
     try {
       Object.keys(app.template.prompt).forEach((key) => {
         const item = app.template.prompt[key]
-        Object.keys(item.inputs).forEach(inputKey => {
+        Object.keys(item.inputs).forEach((inputKey) => {
           if (inputKey.includes('seed') && typeof item.inputs[inputKey] === 'number') {
             item.inputs[inputKey] = getSeed(15)
           }
         })
       })
       Object.keys(state.inputs).forEach((key) => {
-        if (app.template.prompt[key]?.inputs && typeof app.template.prompt[key].inputs === 'object') {
+        if (
+          app.template.prompt[key]?.inputs &&
+          typeof app.template.prompt[key].inputs === 'object'
+        ) {
           Object.assign(app.template.prompt[key].inputs, state.inputs[key])
         }
       })
@@ -237,7 +268,10 @@ export default function useWorkflow() {
     }
 
     if (!response) {
-      const message = state.config.lang === 'zh' ? `工作流执行失败: 未获取到输出数据` : `Workflow execution failed: No output data`
+      const message =
+        state.config.lang === 'zh'
+          ? `工作流执行失败: 未获取到输出数据`
+          : `Workflow execution failed: No output data`
       emitError(message)
       throw new Error(message)
     }
@@ -254,8 +288,12 @@ export default function useWorkflow() {
     // 上报 Gallery 资产库：参数/工作流快照 + 输出文件（失败静默，不影响主流程）
     try {
       const outputsFlat = Object.values(response)
-        .filter(item => item && typeof item === 'object' && item.filename)
-        .map(item => ({ filename: item.filename, subfolder: item.subfolder || '', type: item.type || 'output' }))
+        .filter((item) => item && typeof item === 'object' && item.filename)
+        .map((item) => ({
+          filename: item.filename,
+          subfolder: item.subfolder || '',
+          type: item.type || 'output',
+        }))
       if (outputsFlat.length && state.config.serverHost) {
         fetch(`${state.config.serverHost}/api/gallery/record`, {
           method: 'POST',
@@ -265,11 +303,13 @@ export default function useWorkflow() {
             inputs: state.inputs,
             prompt: app.template.prompt,
             workflow: app.template.workflow,
-            outputs: outputsFlat
-          })
+            outputs: outputsFlat,
+          }),
         }).catch(() => {})
       }
-    } catch (e) { console.warn('gallery record failed', e) }
+    } catch (e) {
+      console.warn('gallery record failed', e)
+    }
 
     if (Object.keys(response).length) {
       Object.assign(state.outputs, response)
@@ -302,10 +342,10 @@ export default function useWorkflow() {
   }
 
   const getLastState = async () => {
-    const lastState = (await localforage.getItem(LAST_STATE_KEY))
+    const lastState = await localforage.getItem(LAST_STATE_KEY)
     if (lastState) {
       const needAssignKeys = ['promptId', 'clientId', 'inputs', 'outputs', 'history']
-      needAssignKeys.forEach(key => {
+      needAssignKeys.forEach((key) => {
         if (state[key] && typeof state[key] === 'object') {
           Object.assign(state[key], lastState[key])
         } else {

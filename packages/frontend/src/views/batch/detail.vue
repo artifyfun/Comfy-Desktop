@@ -23,7 +23,11 @@
         <div class="card-title">⚙️ {{ t('queueSettings') }}</div>
         <div class="config-note-text">{{ t('queueSettingsDesc') }}</div>
         <div class="config-row">
-          <a-switch v-model:checked="cfgShutdown" class="shutdown-switch" @change="onShutdownChange" />
+          <a-switch
+            v-model:checked="cfgShutdown"
+            class="shutdown-switch"
+            @change="onShutdownChange"
+          />
           <div class="config-info">
             <div class="config-label">{{ t('shutdownAfterRun') }}</div>
             <div class="config-desc">{{ t('shutdownAfterRunDesc') }}</div>
@@ -84,58 +88,66 @@
             <span class="job-badge" :class="job.status">{{ statusText(job.status) }}</span>
             <span class="job-app">{{ job.appName || '批量任务' }}</span>
             <span class="job-config-tags">
-              <span v-if="job.autoShutdown" class="cfg-tag shutdown" title="该任务完成后参与关机">⚡关机</span>
-              <span v-if="job.notifyUrl" class="cfg-tag notify" title="该任务完成时通知">🔔通知</span>
+              <span v-if="job.autoShutdown" class="cfg-tag shutdown" title="该任务完成后参与关机"
+                >⚡关机</span
+              >
+              <span v-if="job.notifyUrl" class="cfg-tag notify" title="该任务完成时通知"
+                >🔔通知</span
+              >
             </span>
             <span class="job-time">{{ timeText(job) }}</span>
             <span class="job-spacer"></span>
-            <a-button
-              size="small"
-              v-if="job.status === 'queued'"
-              @click="handleMoveTop(job.id)"
-            >置顶</a-button>
+            <a-button size="small" v-if="job.status === 'queued'" @click="handleMoveTop(job.id)"
+              >置顶</a-button
+            >
             <a-button
               size="small"
               type="primary"
               ghost
               v-if="job.status === 'running'"
               @click="handlePauseJob(job.id)"
-            >⏸ 暂停</a-button>
-            <a-button
-              size="small"
-              danger
-              v-if="job.status === 'running'"
-              @click="handleStopJob"
-            >⏹ 停止</a-button>
+              >⏸ 暂停</a-button
+            >
+            <a-button size="small" danger v-if="job.status === 'running'" @click="handleStopJob"
+              >⏹ 停止</a-button
+            >
             <a-button
               size="small"
               type="primary"
               v-if="job.status === 'paused'"
               @click="handleResumeJob(job.id)"
-            >▶ 继续</a-button>
+              >▶ 继续</a-button
+            >
             <a-button
               size="small"
               danger
               v-if="job.status === 'queued' || job.status === 'paused'"
               @click="handleDequeue(job)"
-            >删除出队</a-button>
+              >删除出队</a-button
+            >
             <a-button
               size="small"
               type="primary"
               ghost
               v-if="['completed', 'stopped', 'failed'].includes(job.status)"
               @click="handleRerun(job)"
-            >🔁 重新运行</a-button>
+              >🔁 重新运行</a-button
+            >
             <a-button
               size="small"
               danger
               v-if="['completed', 'stopped', 'failed'].includes(job.status)"
               @click="handleDequeue(job)"
-            >删除</a-button>
+              >删除</a-button
+            >
           </div>
 
           <div class="job-progress">
-            <div class="job-progress-fill" :class="job.status" :style="{ width: (job.percent || 0) + '%' }"></div>
+            <div
+              class="job-progress-fill"
+              :class="job.status"
+              :style="{ width: (job.percent || 0) + '%' }"
+            ></div>
             <span class="job-progress-text">{{ job.percent || 0 }}%</span>
           </div>
 
@@ -143,18 +155,26 @@
             <span class="job-preview" v-if="job.currentPreview" :title="job.currentPreview">
               {{ job.currentPreview }}
             </span>
-            <span class="job-stats">✓ {{ job.success }} · ✗ {{ job.failed }} · {{ job.processed }}/{{ job.total }}</span>
+            <span class="job-stats"
+              >✓ {{ job.success }} · ✗ {{ job.failed }} · {{ job.processed }}/{{ job.total }}</span
+            >
           </div>
 
           <div class="job-expand">
             <a-button type="text" size="small" class="expand-btn" @click="toggleExpand(job.id)">
-              {{ expandedJobId === job.id ? '收起' : '展开' }}（日志 {{ (job.logs || []).length }} · 结果 {{ (job.results || []).length }}）
+              {{ expandedJobId === job.id ? '收起' : '展开' }}（日志 {{ (job.logs || []).length }} ·
+              结果 {{ (job.results || []).length }}）
             </a-button>
             <div v-if="expandedJobId === job.id" class="job-detail">
               <div class="detail-section" v-if="(job.logs || []).length">
                 <div class="detail-title">{{ t('jobLogs') }}</div>
                 <div class="log-list">
-                  <div v-for="(lg, i) in job.logs.slice(0, 60)" :key="i" class="log-line" :class="lg.type">
+                  <div
+                    v-for="(lg, i) in job.logs.slice(0, 60)"
+                    :key="i"
+                    class="log-line"
+                    :class="lg.type"
+                  >
                     <span class="log-time">{{ lg.time }}</span>
                     <span class="log-msg">{{ lg.message }}</span>
                   </div>
@@ -164,7 +184,12 @@
               <div class="detail-section" v-if="(job.results || []).length">
                 <div class="detail-title">{{ t('jobResults') }}</div>
                 <div class="result-list">
-                  <div v-for="(r, i) in job.results.slice(0, 20)" :key="i" class="result-line" :class="r.success ? 'ok' : 'fail'">
+                  <div
+                    v-for="(r, i) in job.results.slice(0, 20)"
+                    :key="i"
+                    class="result-line"
+                    :class="r.success ? 'ok' : 'fail'"
+                  >
                     <span class="result-index">#{{ r.index }}</span>
                     <span class="result-status">{{ r.success ? '✓' : '✗' }}</span>
                     <span class="result-msg" v-if="!r.success && r.error">{{ r.error }}</span>
@@ -173,7 +198,10 @@
                   <div v-if="job.results.length > 20" class="log-more">…仅显示前 20 条</div>
                 </div>
               </div>
-              <div class="detail-section" v-if="!(job.logs || []).length && !(job.results || []).length">
+              <div
+                class="detail-section"
+                v-if="!(job.logs || []).length && !(job.results || []).length"
+              >
                 <div class="log-more">暂无日志</div>
               </div>
             </div>
@@ -207,7 +235,7 @@ const queuedCount = computed(() => store.queue.filter((j) => j.status === 'queue
 const runningCount = computed(() => store.queue.filter((j) => j.status === 'running').length)
 const pausedCount = computed(() => store.queue.filter((j) => j.status === 'paused').length)
 const doneCount = computed(
-  () => store.queue.filter((j) => !['queued', 'running', 'paused'].includes(j.status)).length
+  () => store.queue.filter((j) => !['queued', 'running', 'paused'].includes(j.status)).length,
 )
 
 function statusText(status) {
@@ -217,7 +245,7 @@ function statusText(status) {
     paused: '已暂停',
     completed: '已完成',
     stopped: '已停止',
-    failed: '失败'
+    failed: '失败',
   }
   return map[status] || status
 }
@@ -309,7 +337,7 @@ function handleRerun(job) {
       } catch (e) {
         showInfo(e?.message || '重新运行失败')
       }
-    }
+    },
   })
 }
 
@@ -350,7 +378,7 @@ function handleDequeue(job) {
         await store.deleteJob(job.id)
       }
       showInfo('batchDequeued')
-    }
+    },
   })
 }
 
@@ -393,7 +421,7 @@ onBeforeUnmount(() => {
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
-      font-family: 'Orbitron', sans-serif;
+      font-family: var(--wb-font);
     }
     .header-spacer {
       flex: 1;
@@ -506,10 +534,18 @@ onBeforeUnmount(() => {
       border: 1px solid rgba(56, 70, 102, 0.5);
       font-size: 12px;
       color: #cbd5e1;
-      &.queued { color: #fbbf24; }
-      &.running { color: #7dd3fc; }
-      &.paused { color: #fbbf24; }
-      &.done { color: #94a3b8; }
+      &.queued {
+        color: #fbbf24;
+      }
+      &.running {
+        color: #7dd3fc;
+      }
+      &.paused {
+        color: #fbbf24;
+      }
+      &.done {
+        color: #94a3b8;
+      }
     }
   }
   .ops-buttons {
@@ -541,10 +577,19 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   background: rgba(30, 41, 59, 0.6);
   border: 1px solid rgba(56, 70, 102, 0.5);
-  &.running { border-color: rgba(14, 165, 233, 0.55); }
-  &.paused { border-color: rgba(251, 191, 36, 0.55); }
-  &.completed { border-color: rgba(16, 185, 129, 0.4); }
-  &.stopped, &.failed { border-color: rgba(239, 68, 68, 0.35); }
+  &.running {
+    border-color: rgba(14, 165, 233, 0.55);
+  }
+  &.paused {
+    border-color: rgba(251, 191, 36, 0.55);
+  }
+  &.completed {
+    border-color: rgba(16, 185, 129, 0.4);
+  }
+  &.stopped,
+  &.failed {
+    border-color: rgba(239, 68, 68, 0.35);
+  }
 
   .job-head {
     display: flex;
@@ -559,11 +604,27 @@ onBeforeUnmount(() => {
       line-height: 18px;
       color: #94a3b8;
       background: rgba(100, 116, 139, 0.2);
-      &.queued { color: #fbbf24; background: rgba(251, 191, 36, 0.15); }
-      &.running { color: #7dd3fc; background: rgba(14, 165, 233, 0.15); }
-      &.paused { color: #fbbf24; background: rgba(251, 191, 36, 0.15); }
-      &.completed { color: #6ee7b7; background: rgba(16, 185, 129, 0.15); }
-      &.stopped, &.failed { color: #fca5a5; background: rgba(239, 68, 68, 0.15); }
+      &.queued {
+        color: #fbbf24;
+        background: rgba(251, 191, 36, 0.15);
+      }
+      &.running {
+        color: #7dd3fc;
+        background: rgba(14, 165, 233, 0.15);
+      }
+      &.paused {
+        color: #fbbf24;
+        background: rgba(251, 191, 36, 0.15);
+      }
+      &.completed {
+        color: #6ee7b7;
+        background: rgba(16, 185, 129, 0.15);
+      }
+      &.stopped,
+      &.failed {
+        color: #fca5a5;
+        background: rgba(239, 68, 68, 0.15);
+      }
     }
     .job-app {
       color: #e2e8f0;
@@ -597,7 +658,9 @@ onBeforeUnmount(() => {
       color: #64748b;
       font-size: 11px;
     }
-    .job-spacer { flex: 1; }
+    .job-spacer {
+      flex: 1;
+    }
   }
 
   .job-progress {
@@ -612,9 +675,16 @@ onBeforeUnmount(() => {
       border-radius: 3px;
       background: #0ea5e9;
       transition: width 0.35s ease;
-      &.paused { background: #fbbf24; }
-      &.completed { background: #10b981; }
-      &.stopped, &.failed { background: #ef4444; }
+      &.paused {
+        background: #fbbf24;
+      }
+      &.completed {
+        background: #10b981;
+      }
+      &.stopped,
+      &.failed {
+        background: #ef4444;
+      }
     }
     .job-progress-text {
       position: absolute;
@@ -676,11 +746,23 @@ onBeforeUnmount(() => {
           gap: 8px;
           font-size: 11px;
           line-height: 1.7;
-          .log-time { color: #64748b; flex-shrink: 0; }
-          .log-msg { color: #94a3b8; word-break: break-all; }
-          &.success .log-msg { color: #10b981; }
-          &.error .log-msg { color: #ef4444; }
-          &.info .log-msg { color: #38bdf8; }
+          .log-time {
+            color: #64748b;
+            flex-shrink: 0;
+          }
+          .log-msg {
+            color: #94a3b8;
+            word-break: break-all;
+          }
+          &.success .log-msg {
+            color: #10b981;
+          }
+          &.error .log-msg {
+            color: #ef4444;
+          }
+          &.info .log-msg {
+            color: #38bdf8;
+          }
         }
       }
       .result-list {
@@ -694,12 +776,30 @@ onBeforeUnmount(() => {
           gap: 8px;
           font-size: 11px;
           line-height: 1.7;
-          .result-index { color: #64748b; flex-shrink: 0; font-family: monospace; }
-          .result-status { flex-shrink: 0; }
-          .result-msg { color: #fca5a5; word-break: break-all; flex: 1; }
-          .result-ms { color: #64748b; flex-shrink: 0; font-family: monospace; }
-          &.ok .result-status { color: #10b981; }
-          &.fail .result-status { color: #ef4444; }
+          .result-index {
+            color: #64748b;
+            flex-shrink: 0;
+            font-family: monospace;
+          }
+          .result-status {
+            flex-shrink: 0;
+          }
+          .result-msg {
+            color: #fca5a5;
+            word-break: break-all;
+            flex: 1;
+          }
+          .result-ms {
+            color: #64748b;
+            flex-shrink: 0;
+            font-family: monospace;
+          }
+          &.ok .result-status {
+            color: #10b981;
+          }
+          &.fail .result-status {
+            color: #ef4444;
+          }
         }
       }
       .log-more {

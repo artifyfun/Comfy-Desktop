@@ -10,7 +10,7 @@
 
     <div class="update-modal glass-card" @click.stop>
       <div class="modal-header">
-        <h3 class="modal-title tech-font">
+        <h3 class="modal-title">
           <i class="fas fa-sync-alt title-icon"></i>
           {{ t('autoUpdate') }}
         </h3>
@@ -63,13 +63,18 @@
         </div>
 
         <!-- 发现新版本 -->
-        <div v-if="updateStatus.available && !updateStatus.downloading && !updateStatus.downloaded" class="status-item available">
+        <div
+          v-if="updateStatus.available && !updateStatus.downloading && !updateStatus.downloaded"
+          class="status-item available"
+        >
           <div class="status-icon">
             <i class="fas fa-star"></i>
           </div>
           <div class="status-content">
             <div class="status-title">{{ t('updateAvailable') }}</div>
-            <div class="status-desc">{{ t('versionAvailable', { version: updateStatus.version }) }}</div>
+            <div class="status-desc">
+              {{ t('versionAvailable', { version: updateStatus.version }) }}
+            </div>
             <div class="version-info">
               <span class="current-version">{{ t('currentVersion') }}: {{ appInfo.version }}</span>
               <span class="new-version">{{ t('newVersion') }}: {{ updateStatus.version }}</span>
@@ -113,13 +118,24 @@
         </div>
 
         <!-- 无更新可用 -->
-        <div v-if="!updateStatus.checking && !updateStatus.available && !updateStatus.downloading && !updateStatus.downloaded && !updateStatus.error" class="status-item no-update">
+        <div
+          v-if="
+            !updateStatus.checking &&
+            !updateStatus.available &&
+            !updateStatus.downloading &&
+            !updateStatus.downloaded &&
+            !updateStatus.error
+          "
+          class="status-item no-update"
+        >
           <div class="status-icon">
             <i class="fas fa-thumbs-up"></i>
           </div>
           <div class="status-content">
             <div class="status-title">{{ t('alreadyLatestVersion') }}</div>
-            <div class="status-desc">{{ t('currentVersionIsLatest', { version: appInfo.version }) }}</div>
+            <div class="status-desc">
+              {{ t('currentVersionIsLatest', { version: appInfo.version }) }}
+            </div>
             <div class="manual-update-section">
               <div class="manual-update-tip">
                 <i class="fas fa-info-circle"></i>
@@ -136,7 +152,10 @@
 
       <div class="modal-footer">
         <!-- 发现新版本时的按钮 -->
-        <div v-if="updateStatus.available && !updateStatus.downloading && !updateStatus.downloaded" class="btn-group">
+        <div
+          v-if="updateStatus.available && !updateStatus.downloading && !updateStatus.downloaded"
+          class="btn-group"
+        >
           <button @click="downloadUpdate" class="btn btn-primary">
             <i class="fas fa-download btn-icon"></i>
             {{ t('downloadUpdate') }}
@@ -169,7 +188,11 @@
 
         <!-- 其他状态时的按钮 -->
         <div v-if="!updateStatus.available && !updateStatus.downloaded" class="btn-group">
-          <button @click="checkForUpdates" class="btn btn-primary" :disabled="updateStatus.checking">
+          <button
+            @click="checkForUpdates"
+            class="btn btn-primary"
+            :disabled="updateStatus.checking"
+          >
             <i class="fas fa-sync-alt btn-icon" :class="{ 'fa-spin': updateStatus.checking }"></i>
             {{ updateStatus.checking ? t('checking') : t('checkForUpdates') }}
           </button>
@@ -191,12 +214,12 @@ import { t } from '@/utils/i18n'
 const props = defineProps({
   show: {
     type: Boolean,
-    default: false
+    default: false,
   },
   appInfo: {
     type: Object,
-    default: () => ({})
-  }
+    default: () => ({}),
+  },
 })
 
 // Emits
@@ -210,14 +233,14 @@ const updateStatus = ref({
   version: '',
   error: '',
   downloading: false,
-  downloaded: false
+  downloaded: false,
 })
 
 // 提示消息状态
 const message = ref({
   show: false,
   text: '',
-  type: 'info' // 'info', 'success', 'warning', 'error'
+  type: 'info', // 'info', 'success', 'warning', 'error'
 })
 
 // 监听props变化
@@ -232,7 +255,7 @@ const getMessageIcon = (type) => {
     info: 'fas fa-info-circle',
     success: 'fas fa-check-circle',
     warning: 'fas fa-exclamation-triangle',
-    error: 'fas fa-times-circle'
+    error: 'fas fa-times-circle',
   }
   return icons[type] || icons.info
 }
@@ -242,7 +265,7 @@ const showMessage = (text, type = 'info', duration = 3000) => {
   message.value = {
     show: true,
     text,
-    type
+    type,
   }
 
   // 自动隐藏消息
@@ -262,7 +285,7 @@ const checkForUpdates = async () => {
     updateStatus.value = {
       ...updateStatus.value,
       checking: true,
-      error: ''
+      error: '',
     }
 
     // 调用electron API检查更新
@@ -272,7 +295,7 @@ const checkForUpdates = async () => {
       ...updateStatus.value,
       checking: false,
       available: result?.isUpdateAvailable || false,
-      version: result?.version || ''
+      version: result?.version || '',
     }
 
     if (result?.isUpdateAvailable) {
@@ -285,7 +308,7 @@ const checkForUpdates = async () => {
     updateStatus.value = {
       ...updateStatus.value,
       checking: false,
-      error: error instanceof Error ? error.message : t('updateCheckError')
+      error: error instanceof Error ? error.message : t('updateCheckError'),
     }
     showMessage(t('updateCheckFailedMessage'), 'error')
   }
@@ -296,7 +319,7 @@ const downloadUpdate = async () => {
   try {
     updateStatus.value = {
       ...updateStatus.value,
-      downloading: true
+      downloading: true,
     }
 
     // 调用electron API下载更新
@@ -305,7 +328,7 @@ const downloadUpdate = async () => {
     updateStatus.value = {
       ...updateStatus.value,
       downloading: false,
-      downloaded: true
+      downloaded: true,
     }
 
     showMessage(t('updateDownloadedMessage'), 'success')
@@ -314,7 +337,7 @@ const downloadUpdate = async () => {
     updateStatus.value = {
       ...updateStatus.value,
       downloading: false,
-      error: error instanceof Error ? error.message : t('updateDownloadError')
+      error: error instanceof Error ? error.message : t('updateDownloadError'),
     }
     showMessage(t('updateDownloadFailedMessage'), 'error')
   }
@@ -329,7 +352,7 @@ const installUpdate = async () => {
     console.error('Failed to install update:', error)
     updateStatus.value = {
       ...updateStatus.value,
-      error: error instanceof Error ? error.message : t('updateInstallError')
+      error: error instanceof Error ? error.message : t('updateInstallError'),
     }
     showMessage(t('updateInstallFailedMessage'), 'error')
   }
@@ -372,15 +395,18 @@ const watchShow = () => {
 }
 
 // Watch props.show changes
-watch(() => props.show, (newVal) => {
-  showModal.value = newVal
-  if (newVal && !updateStatus.value.checking && !updateStatus.value.available) {
-    // 打开modal时自动检查更新
-    setTimeout(() => {
-      checkForUpdates()
-    }, 500)
-  }
-})
+watch(
+  () => props.show,
+  (newVal) => {
+    showModal.value = newVal
+    if (newVal && !updateStatus.value.checking && !updateStatus.value.available) {
+      // 打开modal时自动检查更新
+      setTimeout(() => {
+        checkForUpdates()
+      }, 500)
+    }
+  },
+)
 
 onMounted(() => {
   watchShow()
@@ -558,7 +584,11 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    transform 0.2s ease;
 }
 
 .close-btn:hover {
@@ -726,7 +756,8 @@ onMounted(() => {
 }
 
 @keyframes progressAnimation {
-  0%, 100% {
+  0%,
+  100% {
     width: 0%;
     opacity: 0.7;
   }
@@ -838,7 +869,8 @@ onMounted(() => {
 }
 
 @keyframes pulse {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
     opacity: 1;
   }

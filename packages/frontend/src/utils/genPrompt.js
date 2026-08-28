@@ -1,19 +1,18 @@
-const ARTIFY_LIB_NAME = "@artifyfun/artify-lib"
+const ARTIFY_LIB_NAME = '@artifyfun/artify-lib'
 
 export const CDN_URLS = {
-  VUE: "https://unpkg.com/vue@3/dist/vue.global.js",
-  TAILWIND: "https://cdn.tailwindcss.com",
+  VUE: 'https://unpkg.com/vue@3/dist/vue.global.js',
+  TAILWIND: 'https://cdn.tailwindcss.com',
   ARTIFY_LIB: `https://unpkg.com/${ARTIFY_LIB_NAME}/index.global.js`,
   ARTIFY_LIB_DEV: `http://localhost:3001/index.global.js`,
   ARTIFY_LIB_CSS: `https://unpkg.com/${ARTIFY_LIB_NAME}/index.css`,
   ARTIFY_LIB_CSS_DEV: `http://localhost:3001/index.css`,
-  FONT_AWESOME: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css",
-};
+  FONT_AWESOME: 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
+}
 
 function getInputType(value) {
   return Object.prototype.toString.call(value).slice(8, -1).toLowerCase()
 }
-
 
 const genMeta = (app) => {
   const { template } = app
@@ -44,7 +43,7 @@ const genMeta = (app) => {
                 label,
                 key,
                 title,
-                valueType: 'string'
+                valueType: 'string',
               },
               children: [
                 {
@@ -66,7 +65,7 @@ const genMeta = (app) => {
                 label,
                 key,
                 title,
-                valueType: 'boolean'
+                valueType: 'boolean',
               },
               children: [
                 {
@@ -87,7 +86,7 @@ const genMeta = (app) => {
                 label,
                 key,
                 title,
-                valueType: 'number'
+                valueType: 'number',
               },
               children: [
                 {
@@ -108,7 +107,7 @@ const genMeta = (app) => {
                 label,
                 key,
                 title,
-                valueType: 'number'
+                valueType: 'number',
               },
               children: [
                 {
@@ -135,7 +134,7 @@ const genMeta = (app) => {
                   label,
                   key,
                   title,
-                  valueType: 'string'
+                  valueType: 'string',
                 },
                 children: [
                   {
@@ -155,7 +154,7 @@ const genMeta = (app) => {
                   label,
                   key,
                   title,
-                  valueType: 'string'
+                  valueType: 'string',
                 },
                 children: [
                   {
@@ -175,7 +174,7 @@ const genMeta = (app) => {
                   label,
                   key,
                   title,
-                  valueType: 'string'
+                  valueType: 'string',
                 },
                 children: [
                   {
@@ -195,7 +194,7 @@ const genMeta = (app) => {
                   label,
                   key,
                   title,
-                  valueType: getInputType(selectedWidget.options.values[0])
+                  valueType: getInputType(selectedWidget.options.values[0]),
                 },
                 children: [
                   {
@@ -225,7 +224,7 @@ const genMeta = (app) => {
                 label,
                 key,
                 title,
-                valueType: 'undefined'
+                valueType: 'undefined',
               },
               children: [
                 {
@@ -252,7 +251,7 @@ const genMeta = (app) => {
               props: {
                 label,
                 key,
-                title
+                title,
               },
               children: [
                 {
@@ -272,7 +271,7 @@ const genMeta = (app) => {
               props: {
                 label,
                 key,
-                title
+                title,
               },
               children: [
                 {
@@ -293,7 +292,7 @@ const genMeta = (app) => {
               props: {
                 label,
                 key,
-                title
+                title,
               },
               children: [
                 {
@@ -314,7 +313,7 @@ const genMeta = (app) => {
               props: {
                 label,
                 key,
-                title
+                title,
               },
               children: [
                 {
@@ -394,7 +393,8 @@ const genPrompt = (app, buildStyle, config) => {
     meta,
     promptType: 'html',
     systemPrompt: genSystemPrompt(meta, buildStyle),
-    userPrompt: config.lang === 'zh' ? genUserPrompt(meta, buildStyle) : genUserPromptEn(meta, buildStyle),
+    userPrompt:
+      config.lang === 'zh' ? genUserPrompt(meta, buildStyle) : genUserPromptEn(meta, buildStyle),
     assistantPrompt: genAssistantPrompt(meta, buildStyle),
   }
 }
@@ -471,34 +471,36 @@ workflow由ArtifyLib.useWorkflow提供，不需要实现任何workflow的状态�
 ${JSON.stringify(meta.state, null, 2)}
 
 以下是需要你实现的页面元素：
-  ${meta.components.children.filter(item => !['button'].includes(item.componentName)).map((item) => {
-    if (item.componentName === 'form-item') {
-      let prompt = ''
-      if (item.children[0].componentName === 'image-uploader') {
-        prompt = `图片上传：标签为"${item.props.label}"，原生组件为input type="file"，样式一定要display: none，@change绑定e => workflow.onUploadImageChange(e, '${item.id}')，展示的图片使用vue组件<post-image src="${item.children[0].props.value}"></post-image>，删除图片调用workflow.removeImage('${item.id}')`
-      } else if (item.children[0].componentName === 'audio-uploader') {
-        prompt = `音频上传：标签为"${item.props.label}"，原生组件为input type="file"，样式一定要display: none，@change绑定e => workflow.onUploadAudioChange(e, '${item.id}')，展示的音频使用原生组件<audio src="${item.children[0].props.value}" style="height: 40px;" controls="controls" loop="loop"></audio>，删除音频调用workflow.removeAudio('${item.id}')`
-      } else if (item.children[0].componentName === 'video-uploader') {
-        prompt = `视频上传：标签为"${item.props.label}"，原生组件为input type="file"，样式一定要display: none，@change绑定e => workflow.onUploadVideoChange(e, '${item.id}')，展示的视频使用原生组件<video src="${item.children[0].props.value}" controls="controls" loop="loop"></video>，删除视频调用workflow.removeVideo('${item.id}')`
-      } else {
-        prompt = `输入项：标签为"${item.props.label}"，原生组件为${item.children[0].componentName},属性为${JSON.stringify(item.children[0].props)}${item.children[0].props.value ? `，值绑定到${item.children[0].props.value}` : ''}`
-      }
+  ${meta.components.children
+    .filter((item) => !['button'].includes(item.componentName))
+    .map((item) => {
+      if (item.componentName === 'form-item') {
+        let prompt = ''
+        if (item.children[0].componentName === 'image-uploader') {
+          prompt = `图片上传：标签为"${item.props.label}"，原生组件为input type="file"，样式一定要display: none，@change绑定e => workflow.onUploadImageChange(e, '${item.id}')，展示的图片使用vue组件<post-image src="${item.children[0].props.value}"></post-image>，删除图片调用workflow.removeImage('${item.id}')`
+        } else if (item.children[0].componentName === 'audio-uploader') {
+          prompt = `音频上传：标签为"${item.props.label}"，原生组件为input type="file"，样式一定要display: none，@change绑定e => workflow.onUploadAudioChange(e, '${item.id}')，展示的音频使用原生组件<audio src="${item.children[0].props.value}" style="height: 40px;" controls="controls" loop="loop"></audio>，删除音频调用workflow.removeAudio('${item.id}')`
+        } else if (item.children[0].componentName === 'video-uploader') {
+          prompt = `视频上传：标签为"${item.props.label}"，原生组件为input type="file"，样式一定要display: none，@change绑定e => workflow.onUploadVideoChange(e, '${item.id}')，展示的视频使用原生组件<video src="${item.children[0].props.value}" controls="controls" loop="loop"></video>，删除视频调用workflow.removeVideo('${item.id}')`
+        } else {
+          prompt = `输入项：标签为"${item.props.label}"，原生组件为${item.children[0].componentName},属性为${JSON.stringify(item.children[0].props)}${item.children[0].props.value ? `，值绑定到${item.children[0].props.value}` : ''}`
+        }
 
-      return prompt
-    }
-    if (item.componentName === 'image-preview') {
-      return `图片预览：标签为"${item.props.label}"，vue组件为${item.children[0].componentName}(和原生img用法一样，标签需要使用小写才能识别),属性为${JSON.stringify(item.children[0].props)},图片绑定到${item.children[0].props.src}，可全屏查看(直接调用workflow.previewImage('${item.id}'))，可下载(直接调用workflow.downloadImage('${item.id}'))`
-    }
-    if (item.componentName === 'audio-preview') {
-      return `音频预览：标签为"${item.props.label}"，展示的音频使用原生组件<audio src="${item.children[0].props.src}" style="height: 40px;" controls="controls" loop="loop"></audio>，可下载(直接调用workflow.downloadFile('${item.id}'))`
-    }
-    if (item.componentName === 'video-preview') {
-      return `视频预览：标签为"${item.props.label}"，展示的视频使用原生组件<video src="${item.children[0].props.src}" controls="controls" loop="loop"></video>，可下载(直接调用workflow.downloadFile('${item.id}'))`
-    }
-    if (item.componentName === 'div') {
-      return `结果预览：标签为"${item.props.label}"，原生组件为${item.children[0].componentName},属性为${JSON.stringify(item.children[0].props)}${item.children[0].props.value ? `，值绑定到${item.children[0].props.value}` : ''}`
-    }
-  })}
+        return prompt
+      }
+      if (item.componentName === 'image-preview') {
+        return `图片预览：标签为"${item.props.label}"，vue组件为${item.children[0].componentName}(和原生img用法一样，标签需要使用小写才能识别),属性为${JSON.stringify(item.children[0].props)},图片绑定到${item.children[0].props.src}，可全屏查看(直接调用workflow.previewImage('${item.id}'))，可下载(直接调用workflow.downloadImage('${item.id}'))`
+      }
+      if (item.componentName === 'audio-preview') {
+        return `音频预览：标签为"${item.props.label}"，展示的音频使用原生组件<audio src="${item.children[0].props.src}" style="height: 40px;" controls="controls" loop="loop"></audio>，可下载(直接调用workflow.downloadFile('${item.id}'))`
+      }
+      if (item.componentName === 'video-preview') {
+        return `视频预览：标签为"${item.props.label}"，展示的视频使用原生组件<video src="${item.children[0].props.src}" controls="controls" loop="loop"></video>，可下载(直接调用workflow.downloadFile('${item.id}'))`
+      }
+      if (item.componentName === 'div') {
+        return `结果预览：标签为"${item.props.label}"，原生组件为${item.children[0].componentName},属性为${JSON.stringify(item.children[0].props)}${item.children[0].props.value ? `，值绑定到${item.children[0].props.value}` : ''}`
+      }
+    })}
   按钮：点击触发workflow.start，加载状态绑定到workflow.state.loading
   按钮：点击触发workflow.stop，禁用状态绑定到!workflow.state.loading
   按钮：点击触发workflow.toggleHistoryModal，用于打开历史弹窗
@@ -576,34 +578,36 @@ Known workflow.state object:
 ${JSON.stringify(meta.state, null, 2)}
 
 The following page elements need to be implemented:
-  ${meta.components.children.filter(item => !['button'].includes(item.componentName)).map((item) => {
-    if (item.componentName === 'form-item') {
-      let prompt = ''
-      if (item.children[0].componentName === 'image-uploader') {
-        prompt = `Image upload: label is "${item.props.label}", native component is input type="file", style must be display: none, @change binding e => workflow.onUploadImageChange(e, '${item.id}'), display image using vue component <post-image src="${item.children[0].props.value}"></post-image>, delete image by calling workflow.removeImage('${item.id}')`
-      } else if (item.children[0].componentName === 'audio-uploader') {
-        prompt = `Audio upload: label is "${item.props.label}", native component is input type="file", style must be display: none, @change binding e => workflow.onUploadAudioChange(e, '${item.id}'), display audio using native component <audio src="${item.children[0].props.value}" style="height: 40px;" controls="controls" loop="loop"></audio>, delete audio by calling workflow.removeAudio('${item.id}')`
-      } else if (item.children[0].componentName === 'video-uploader') {
-        prompt = `Video upload: label is "${item.props.label}", native component is input type="file", style must be display: none, @change binding e => workflow.onUploadVideoChange(e, '${item.id}'), display video using native component <video src="${item.children[0].props.value}" controls="controls" loop="loop"></video>, delete video by calling workflow.removeVideo('${item.id}')`
-      } else {
-        prompt = `Input field: label is "${item.props.label}", native component is ${item.children[0].componentName}, properties are ${JSON.stringify(item.children[0].props)}${item.children[0].props.value ? `, value bound to ${item.children[0].props.value}` : ''}`
-      }
+  ${meta.components.children
+    .filter((item) => !['button'].includes(item.componentName))
+    .map((item) => {
+      if (item.componentName === 'form-item') {
+        let prompt = ''
+        if (item.children[0].componentName === 'image-uploader') {
+          prompt = `Image upload: label is "${item.props.label}", native component is input type="file", style must be display: none, @change binding e => workflow.onUploadImageChange(e, '${item.id}'), display image using vue component <post-image src="${item.children[0].props.value}"></post-image>, delete image by calling workflow.removeImage('${item.id}')`
+        } else if (item.children[0].componentName === 'audio-uploader') {
+          prompt = `Audio upload: label is "${item.props.label}", native component is input type="file", style must be display: none, @change binding e => workflow.onUploadAudioChange(e, '${item.id}'), display audio using native component <audio src="${item.children[0].props.value}" style="height: 40px;" controls="controls" loop="loop"></audio>, delete audio by calling workflow.removeAudio('${item.id}')`
+        } else if (item.children[0].componentName === 'video-uploader') {
+          prompt = `Video upload: label is "${item.props.label}", native component is input type="file", style must be display: none, @change binding e => workflow.onUploadVideoChange(e, '${item.id}'), display video using native component <video src="${item.children[0].props.value}" controls="controls" loop="loop"></video>, delete video by calling workflow.removeVideo('${item.id}')`
+        } else {
+          prompt = `Input field: label is "${item.props.label}", native component is ${item.children[0].componentName}, properties are ${JSON.stringify(item.children[0].props)}${item.children[0].props.value ? `, value bound to ${item.children[0].props.value}` : ''}`
+        }
 
-      return prompt
-    }
-    if (item.componentName === 'image-preview') {
-      return `Image preview: label is "${item.props.label}", vue component is ${item.children[0].componentName} (same usage as native img, tag must be lowercase to be recognized), properties are ${JSON.stringify(item.children[0].props)}, image bound to ${item.children[0].props.src}, can view fullscreen (directly call workflow.previewImage('${item.id}')), can download (directly call workflow.downloadImage('${item.id}'))`
-    }
-    if (item.componentName === 'audio-preview') {
-      return `Audio preview: label is "${item.props.label}", display audio using native component <audio src="${item.children[0].props.src}" style="height: 40px;" controls="controls" loop="loop"></audio>, can download (directly call workflow.downloadFile('${item.id}'))`
-    }
-    if (item.componentName === 'video-preview') {
-      return `Video preview: label is "${item.props.label}", display video using native component <video src="${item.children[0].props.src}" controls="controls" loop="loop"></video>, can download (directly call workflow.downloadFile('${item.id}'))`
-    }
-    if (item.componentName === 'div') {
-      return `Result preview: label is "${item.props.label}", native component is ${item.children[0].componentName}, properties are ${JSON.stringify(item.children[0].props)}${item.children[0].props.value ? `, value bound to ${item.children[0].props.value}` : ''}`
-    }
-  })}
+        return prompt
+      }
+      if (item.componentName === 'image-preview') {
+        return `Image preview: label is "${item.props.label}", vue component is ${item.children[0].componentName} (same usage as native img, tag must be lowercase to be recognized), properties are ${JSON.stringify(item.children[0].props)}, image bound to ${item.children[0].props.src}, can view fullscreen (directly call workflow.previewImage('${item.id}')), can download (directly call workflow.downloadImage('${item.id}'))`
+      }
+      if (item.componentName === 'audio-preview') {
+        return `Audio preview: label is "${item.props.label}", display audio using native component <audio src="${item.children[0].props.src}" style="height: 40px;" controls="controls" loop="loop"></audio>, can download (directly call workflow.downloadFile('${item.id}'))`
+      }
+      if (item.componentName === 'video-preview') {
+        return `Video preview: label is "${item.props.label}", display video using native component <video src="${item.children[0].props.src}" controls="controls" loop="loop"></video>, can download (directly call workflow.downloadFile('${item.id}'))`
+      }
+      if (item.componentName === 'div') {
+        return `Result preview: label is "${item.props.label}", native component is ${item.children[0].componentName}, properties are ${JSON.stringify(item.children[0].props)}${item.children[0].props.value ? `, value bound to ${item.children[0].props.value}` : ''}`
+      }
+    })}
   Button: click triggers workflow.start, loading state bound to workflow.state.loading
   Button: click triggers workflow.stop, disabled state bound to !workflow.state.loading
   Button: click triggers workflow.toggleHistoryModal, used to open history modal
@@ -638,11 +642,14 @@ function genHtml(app, code, config) {
     components: undefined,
   }
 
-  const fullCode = code.replace('<head>', `<head>
+  const fullCode = code.replace(
+    '<head>',
+    `<head>
   <script>
     window.appTemplate = ${JSON.stringify(appTemplate)}
   </script>
-`)
+`,
+  )
   return fullCode
 }
 
@@ -670,7 +677,9 @@ function renderComponent(item) {
         `
       case 'select':
         // 选项
-        const options = (child.props.options || []).map(opt => `<option value="${opt.value}">${opt.label}</option>`).join('')
+        const options = (child.props.options || [])
+          .map((opt) => `<option value="${opt.value}">${opt.label}</option>`)
+          .join('')
         return `
           <div class="mb-6">
             <label class="block mb-2 font-medium text-textSecondary">${label}</label>
@@ -866,13 +875,15 @@ function genLocalHtml(app) {
   const TAILWIND_CDN = CDN_URLS.TAILWIND
   // 输入区
   const inputHtml = meta.components.children
-    .filter(item => item.componentName === 'form-item')
-    .map(item => renderComponent(item, meta))
+    .filter((item) => item.componentName === 'form-item')
+    .map((item) => renderComponent(item, meta))
     .join('\n')
   // 输出区
   const outputHtml = meta.components.children
-    .filter(item => ['image-preview', 'audio-preview', 'video-preview', 'div'].includes(item.componentName))
-    .map(item => renderComponent(item, meta))
+    .filter((item) =>
+      ['image-preview', 'audio-preview', 'video-preview', 'div'].includes(item.componentName),
+    )
+    .map((item) => renderComponent(item, meta))
     .join('\n')
   // 按钮区
   const buttonHtml = `
@@ -1114,10 +1125,4 @@ function genLocalHtml(app) {
 `
 }
 
-export {
-  genMeta,
-  genPrompt,
-  genUserPromptEn,
-  genHtml,
-  genLocalHtml
-}
+export { genMeta, genPrompt, genUserPromptEn, genHtml, genLocalHtml }

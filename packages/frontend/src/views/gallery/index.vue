@@ -10,7 +10,7 @@
             <div class="w-8 h-8 text-2xl text-tech-blue">
               <i class="fas fa-images"></i>
             </div>
-            <h1 class="text-2xl font-bold text-white tech-font">
+            <h1 class="text-2xl font-bold text-white">
               {{ t('gallery') }}
             </h1>
             <span class="text-sm text-slate-400">

@@ -1,20 +1,18 @@
 <template>
   <div
-    class="overflow-hidden relative p-5 rounded-xl cursor-pointer glass-card"
+    class="overflow-hidden relative p-5 cursor-pointer glass-card"
+    style="border-radius: var(--wb-r-card)"
     @click="$emit('view-detail', app)"
   >
     <!-- 卡片光效 -->
-    <div class="card-glow"></div>
 
     <!-- 封面图片 -->
     <div class="overflow-hidden relative mb-4 h-48 rounded-lg app-imageUrl">
-      <div
-        class="absolute inset-0 z-10 bg-gradient-to-t to-transparent from-tech-darker"
-      ></div>
+      <div class="absolute inset-0 z-10 bg-gradient-to-t to-transparent from-[#171718]"></div>
 
       <!-- 市场安装标记 -->
       <div v-if="app.isFromMarket" class="absolute top-3 left-3 z-20">
-        <div class="flex items-center px-2 py-1 text-xs font-medium text-white bg-gradient-to-r rounded from-tech-green to-tech-cyan">
+        <div class="flex items-center px-2 py-1 text-xs font-medium text-white rounded">
           <i class="fas fa-store"></i>
         </div>
       </div>
@@ -60,7 +58,7 @@ import { t } from '@/utils/i18n'
 const props = defineProps({
   app: {
     type: Object,
-    required: true
+    required: true,
   },
 })
 
@@ -78,32 +76,16 @@ function formatDate(date) {
 
 <style scoped>
 .glass-card {
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(56, 70, 102, 0.4);
-  box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
-  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  background: var(--wb-surface-deep);
+  border: 1px solid var(--wb-stroke);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .glass-card:hover {
-  border-color: rgba(14, 165, 233, 0.5);
-  box-shadow: 0 12px 40px rgba(14, 165, 233, 0.2);
-}
-
-.card-glow {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 100%;
-  border-radius: 1rem;
-  z-index: -1;
-  background: radial-gradient(circle at center, rgba(14, 165, 233, 0.2) 0%, transparent 70%);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.glass-card:hover .card-glow {
-  opacity: 1;
+  background: var(--wb-surface);
+  border-color: var(--wb-selected);
 }
 
 .app-imageUrl {

@@ -1,33 +1,37 @@
 <template>
   <div
     v-if="open"
-    class="absolute bottom-full left-0 mb-2 w-80 max-h-80 overflow-y-auto rounded-lg border border-slate-600 bg-slate-800 shadow-2xl z-50"
+    class="absolute bottom-full left-0 mb-2 w-80 max-h-80 overflow-y-auto rounded-lg border border-[var(--wb-stroke-strong)] bg-[var(--wb-surface-deep)] shadow-2xl z-50"
   >
-    <div class="p-2 text-xs text-slate-400 border-b border-slate-700 sticky top-0 bg-slate-800">
+    <div
+      class="p-2 text-xs text-[var(--wb-text-2)] border-b border-[var(--wb-stroke)] sticky top-0 bg-[var(--wb-surface-deep)]"
+    >
       {{ t('workbenchSkillHint') }}
     </div>
     <div class="py-1">
-      <div v-if="items.length === 0" class="px-3 py-2 text-sm text-slate-400">
+      <div v-if="items.length === 0" class="px-3 py-2 text-sm text-[var(--wb-text-2)]">
         {{ t('workbenchSkillEmpty') }}
       </div>
       <button
         v-for="(s, i) in items"
         :key="s.kind + s.id"
         class="w-full text-left px-3 py-2 flex items-start gap-2"
-        :class="i === activeIndex ? 'bg-slate-700/80' : 'hover:bg-slate-700/50'"
+        :class="
+          i === activeIndex ? 'bg-[var(--wb-surface-active)]' : 'hover:bg-[var(--wb-surface-hover)]'
+        "
         @click="$emit('pick', s)"
         @mousemove="$emit('active', i)"
       >
         <i
           :class="s.kind === 'preset' ? 'fas fa-bolt' : 'fas fa-diagram-project'"
-          class="mt-0.5 text-tech-blue"
+          class="mt-0.5 text-[var(--wb-accent)]"
         ></i>
         <div class="min-w-0">
           <div class="text-sm text-white truncate">
             {{ s.name }}
-            <span class="text-[10px] text-slate-400 font-mono">/{{ s.id }}</span>
+            <span class="text-[10px] text-[var(--wb-text-2)] font-mono">/{{ s.id }}</span>
           </div>
-          <div class="text-xs text-slate-400 truncate">{{ s.description }}</div>
+          <div class="text-xs text-[var(--wb-text-2)] truncate">{{ s.description }}</div>
         </div>
       </button>
     </div>

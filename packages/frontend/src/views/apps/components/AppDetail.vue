@@ -1,6 +1,6 @@
 <template>
   <div class="flex overflow-auto fixed inset-0 z-50 justify-center items-center p-4 bg-black/80">
-    <div class="relative p-6 w-full max-w-3xl rounded-xl glass-card">
+    <div class="relative p-6 w-full max-w-3xl glass-card" style="border-radius: var(--wb-r-modal)">
       <button
         @click="handleClose"
         class="absolute top-6 right-6 text-xl text-slate-400 hover:text-white"
@@ -11,7 +11,11 @@
       <div class="grid grid-cols-1 gap-8 md:grid-cols-2">
         <div>
           <div class="overflow-hidden h-72 rounded-lg">
-            <img :src="currentApp.imageUrl" :alt="currentApp.name" class="object-cover w-full h-full" />
+            <img
+              :src="currentApp.imageUrl"
+              :alt="currentApp.name"
+              class="object-cover w-full h-full"
+            />
           </div>
 
           <div class="flex flex-wrap gap-2 mt-4">
@@ -50,7 +54,10 @@
                 </a-tooltip>
                 <a-tooltip>
                   <template #title>{{ t('versionHistory') }}</template>
-                  <span class="ml-2 text-xs cursor-pointer text-tech-blue" @click="showVersions = true">
+                  <span
+                    class="ml-2 text-xs cursor-pointer text-tech-blue"
+                    @click="showVersions = true"
+                  >
                     <i class="fas fa-solid fa-clock-rotate-left"></i>
                   </span>
                 </a-tooltip>
@@ -75,21 +82,21 @@
           </div>
           <div class="flex gap-2 justify-end">
             <button
-              class="py-3 w-full font-medium text-white bg-gradient-to-r rounded-lg cursor-pointer from-tech-blue to-tech-cyan"
+              class="btn-comfy-primary py-3 w-full font-medium text-white rounded-md cursor-pointer"
               @click="handleLaunch"
             >
               {{ t('launchApp') }}
             </button>
             <button
               v-if="isElectron"
-              class="px-1 py-3 font-medium text-white bg-gradient-to-r rounded-lg cursor-pointer text-nowrap from-tech-purple to-tech-blue"
+              class="btn-comfy-primary px-1 py-3 font-medium text-white rounded-md cursor-pointer text-nowrap"
               @click="handleRunWorkflow"
             >
               {{ t('runWorkflow') }}
             </button>
             <button
               v-if="isElectron"
-              class="relative px-1 py-3 font-medium text-white bg-gradient-to-r rounded-lg cursor-pointer text-nowrap from-tech-purple to-tech-blue"
+              class="btn-comfy-primary relative px-1 py-3 font-medium text-white rounded-md cursor-pointer text-nowrap"
               @click="handleRunBatch"
             >
               {{ t('batchMode') }}
@@ -197,7 +204,7 @@ const handleCheckDeps = async () => {
     const res = await fetch(`${appStore.config.serverHost}/api/apps/check-deps`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ app: currentApp.value })
+      body: JSON.stringify({ app: currentApp.value }),
     })
     const json = await res.json()
     if (!res.ok || !json?.success) {
@@ -225,7 +232,7 @@ watch(
   (newApp) => {
     currentApp.value = JSON.parse(JSON.stringify(newApp))
   },
-  { deep: true, immediate: true }
+  { deep: true, immediate: true },
 )
 
 // 版本恢复后刷新详情
@@ -247,7 +254,10 @@ const handleEdit = () => {
 
 // 处理导出
 const handleExport = () => {
-  downloadJSON(currentApp.value, `artifylab-app-${currentApp.value.name}-${new Date().toLocaleDateString()}.json`)
+  downloadJSON(
+    currentApp.value,
+    `artifylab-app-${currentApp.value.name}-${new Date().toLocaleDateString()}.json`,
+  )
 }
 
 // 处理删除
@@ -327,10 +337,11 @@ const handleGenSave = async (genApp) => {
 
 <style scoped>
 .glass-card {
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(56, 70, 102, 0.4);
-  box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
-  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  background: var(--wb-surface-deep);
+  border: 1px solid var(--wb-stroke);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .fade-enter-active,

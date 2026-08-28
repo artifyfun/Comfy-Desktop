@@ -1,6 +1,12 @@
 <template>
   <div class="comfyui-playground">
-    <iframe v-if="state.url" ref="iframe" style="width: 100%; height: 100%" :src="state.url" frameborder="0"></iframe>
+    <iframe
+      v-if="state.url"
+      ref="iframe"
+      style="width: 100%; height: 100%"
+      :src="state.url"
+      frameborder="0"
+    ></iframe>
   </div>
 </template>
 
@@ -14,7 +20,7 @@ const emit = defineEmits(['onload', 'updateParamsNodes'])
 const appStore = useAppStore()
 
 const state = reactive({
-  url: null
+  url: null,
 })
 
 const iframe = ref(null)
@@ -37,7 +43,7 @@ const loadGraphData = (graphData, name) => {
   const message = JSON.stringify({
     eventType: 'loadGraphData',
     data: graphData,
-    name: name
+    name: name,
   })
   postMessage(message)
   return new Promise((resolve) => {
@@ -62,7 +68,7 @@ const loadGraphData = (graphData, name) => {
 
 const updatePrompt = () => {
   const message = JSON.stringify({
-    eventType: 'updatePrompt'
+    eventType: 'updatePrompt',
   })
   postMessage(message)
   return new Promise((resolve) => {
@@ -88,7 +94,7 @@ const updatePrompt = () => {
 const updateParamsNodes = (paramsNodes) => {
   const message = JSON.stringify({
     eventType: 'updateParamsNodes',
-    data: paramsNodes
+    data: paramsNodes,
   })
   postMessage(message)
 }
@@ -109,7 +115,7 @@ const handleMessage = (event) => {
         ...node,
         description: node.description || '',
         renderComponent: node.renderComponent || getRenderComponent(node),
-        key: node.key || uuidv4()
+        key: node.key || uuidv4(),
       }
     })
     emit('updateParamsNodes', paramsNodes)
@@ -134,7 +140,7 @@ defineExpose({
   postMessage,
   loadGraphData,
   updatePrompt,
-  updateParamsNodes
+  updateParamsNodes,
 })
 </script>
 

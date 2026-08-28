@@ -1,10 +1,10 @@
 <template>
   <aside
-    class="session-sidebar flex flex-col bg-slate-900/80 border-r border-slate-700 transition-all duration-300 shrink-0"
+    class="session-sidebar flex flex-col bg-[var(--wb-bg-base)] border-r border-[var(--wb-stroke)] transition-all duration-300 shrink-0"
     :class="collapsed ? 'w-0 overflow-hidden border-r-0' : 'w-60 h-[calc(100vh-160px)]'"
   >
     <!-- 品牌行 + 折叠 -->
-    <div class="flex items-center justify-between px-2 h-12 border-b border-slate-700">
+    <div class="flex items-center justify-between px-2 h-12 border-b border-[var(--wb-stroke)]">
       <template v-if="!collapsed">
         <span class="text-sm font-semibold text-white">Artify</span>
         <button class="text-slate-400 hover:text-white px-1" @click="$emit('collapse')">
@@ -20,7 +20,7 @@
       <!-- 新建会话 -->
       <div class="p-2">
         <button
-          class="w-full px-3 py-2 rounded-lg bg-tech-blue/80 hover:bg-tech-blue text-white text-sm font-medium transition flex items-center justify-center gap-2"
+          class="w-full px-3 py-2 rounded-md bg-[var(--wb-accent)] hover:bg-[var(--wb-accent-hover)] text-white text-sm font-medium transition flex items-center justify-center gap-2"
           @click="$emit('new-session')"
         >
           <i class="fas fa-plus"></i>{{ t('workbenchNewSession') }}
@@ -49,14 +49,14 @@
             <i class="fas fa-box-archive"></i>{{ t('workbenchArchivedView') }}
             <span
               v-if="archivedCount > 0"
-              class="text-[10px] leading-none px-1.5 py-0.5 rounded-full bg-slate-700 text-slate-300"
+              class="text-[10px] leading-none px-1.5 py-0.5 rounded-full bg-[var(--wb-surface-hover)] text-[var(--wb-text-2)]"
               >{{ archivedCount }}</span
             >
           </button>
         </template>
         <button
           v-else
-          class="flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded text-tech-cyan hover:bg-slate-800 transition"
+          class="flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded text-[var(--wb-accent)] hover:bg-[var(--wb-surface-hover)] transition"
           @click="$emit('update:showArchived', false)"
         >
           <i class="fas fa-arrow-left text-[10px]"></i>{{ t('workbenchBackToSessions') }}
@@ -74,7 +74,7 @@
             v-for="s in g.sessions"
             :key="s.id"
             class="group relative rounded-lg px-2 py-1.5 cursor-pointer transition"
-            :class="s.id === currentId ? 'bg-slate-700/70' : 'hover:bg-slate-800/70'"
+            :class="s.id === currentId ? 'bg-slate-700/70' : 'hover:bg-[var(--wb-surface)]'"
             @click="$emit('select', s)"
           >
             <!-- 状态点 -->
@@ -131,15 +131,15 @@
       </div>
 
       <!-- 底部：设置 + 技能管理 -->
-      <div class="p-2 border-t border-slate-700 space-y-0.5">
+      <div class="p-2 border-t border-[var(--wb-stroke)] space-y-0.5">
         <button
-          class="w-full text-left px-2 py-1.5 rounded text-sm text-slate-400 hover:text-white hover:bg-slate-800 flex items-center gap-2"
+          class="w-full text-left px-2 py-1.5 rounded text-sm text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)] flex items-center gap-2"
           @click="$emit('manage-presets')"
         >
           <i class="fas fa-bolt w-4"></i>{{ t('workbenchManagePresets') }}
         </button>
         <button
-          class="w-full text-left px-2 py-1.5 rounded text-sm text-slate-400 hover:text-white hover:bg-slate-800 flex items-center gap-2"
+          class="w-full text-left px-2 py-1.5 rounded text-sm text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)] flex items-center gap-2"
           @click="$emit('show-env')"
         >
           <i class="fas fa-microchip w-4"></i>{{ t('workbenchEnvInfo') }}
@@ -235,3 +235,20 @@ function confirmRename() {
   renameOpen.value = false
 }
 </script>
+
+<style scoped>
+/* Comfy 选中语义:左侧 3px azure 条（对齐 .side-bar-button-selected） */
+.sess-on {
+  position: relative;
+}
+.sess-on::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: var(--wb-accent);
+  border-radius: 2px;
+}
+</style>

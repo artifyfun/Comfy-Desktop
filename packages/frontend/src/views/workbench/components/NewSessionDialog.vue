@@ -10,7 +10,7 @@
   >
     <div class="space-y-4 py-2">
       <div>
-        <div class="text-sm text-slate-300 mb-2">{{ t('workbenchPresetPick') }}</div>
+        <div class="text-sm text-[var(--wb-text-2)] mb-2">{{ t('workbenchPresetPick') }}</div>
         <!-- dsh preset 卡片列表：name + description + 意图标签，点选整卡 -->
         <div class="space-y-2 max-h-72 overflow-y-auto pr-1">
           <button
@@ -19,17 +19,22 @@
             class="relative w-full text-left rounded-xl border p-3 transition flex items-start gap-3"
             :class="
               selectedId === p.id
-                ? 'border-tech-blue bg-tech-blue/10 ring-1 ring-tech-blue'
-                : 'border-slate-600 hover:border-slate-400 bg-slate-800/40'
+                ? 'border-[var(--wb-accent)] bg-[var(--wb-accent)]/10 ring-1 ring-[var(--wb-accent)]'
+                : 'border-[var(--wb-stroke-strong)] hover:border-[var(--wb-stroke-strong)] bg-[var(--wb-surface-deep)]'
             "
             @click="selectedId = p.id"
           >
             <span
               class="mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-              :class="selectedId === p.id ? 'bg-tech-blue/30' : 'bg-slate-700'"
+              :class="
+                selectedId === p.id ? 'bg-[var(--wb-accent)]/30' : 'bg-[var(--wb-surface-hover)]'
+              "
             >
               <i
-                :class="[presetIcon(p), selectedId === p.id ? 'text-tech-blue' : 'text-slate-300']"
+                :class="[
+                  presetIcon(p),
+                  selectedId === p.id ? 'text-[var(--wb-accent)]' : 'text-[var(--wb-text-2)]',
+                ]"
                 class="text-sm"
               ></i>
             </span>
@@ -41,27 +46,27 @@
                   class="text-[10px] text-tech-cyan border border-tech-cyan/40 rounded px-1"
                   >default</span
                 >
-                <span v-if="p.builtin" class="text-[10px] text-slate-500">builtin</span>
+                <span v-if="p.builtin" class="text-[10px] text-[var(--wb-text-3)]">builtin</span>
               </span>
-              <span class="block text-xs text-slate-400 mt-0.5 leading-relaxed">
+              <span class="block text-xs text-[var(--wb-text-2)] mt-0.5 leading-relaxed">
                 {{ presetDesc(p) }}
               </span>
               <span
                 v-if="p.intentHint"
-                class="inline-block mt-1 text-[10px] font-mono text-slate-500 border border-slate-700 rounded px-1.5 py-0.5"
+                class="inline-block mt-1 text-[10px] font-mono text-[var(--wb-text-3)] border border-[var(--wb-stroke)] rounded px-1.5 py-0.5"
               >
                 /{{ p.id }} · intent: {{ p.intentHint }}
               </span>
             </span>
             <i
               class="fas fa-circle-check mt-1 shrink-0"
-              :class="selectedId === p.id ? 'text-tech-blue' : 'text-slate-600'"
+              :class="selectedId === p.id ? 'text-[var(--wb-accent)]' : 'text-[var(--wb-text-3)]'"
             ></i>
           </button>
         </div>
       </div>
       <div>
-        <div class="text-sm text-slate-300 mb-1">{{ t('workbenchSessionTitle') }}</div>
+        <div class="text-sm text-[var(--wb-text-2)] mb-1">{{ t('workbenchSessionTitle') }}</div>
         <a-input
           v-model:value="title"
           :placeholder="t('workbenchTitleAuto')"

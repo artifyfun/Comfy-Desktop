@@ -7,15 +7,18 @@
   >
     <div
       v-if="dragOver"
-      class="absolute inset-0 z-40 flex flex-col items-center justify-center bg-slate-900/90 border-2 border-dashed border-tech-blue rounded-xl"
+      class="absolute inset-0 z-40 flex flex-col items-center justify-center bg-[var(--wb-bg-base)]/95 border-2 border-dashed border-[var(--wb-accent)]"
     >
-      <i class="fas fa-cloud-arrow-up text-3xl text-tech-blue mb-2"></i>
+      <i class="fas fa-cloud-arrow-up text-3xl text-[var(--wb-accent)] mb-2"></i>
       <div class="text-sm text-slate-200">{{ t('workbenchDropHint') }}</div>
     </div>
 
     <!-- dsh composer 布局：圆角卡片，textarea 全宽在上，工具条在底 -->
     <!-- 圆角与中间面板 rounded-xl 一致，内层按 3px 内收对齐 border 重叠 -->
-    <div class="rounded-xl border border-slate-600 bg-slate-800 px-4 pt-3 pb-2 shadow-lg">
+    <div
+      class="border border-[var(--wb-stroke)] bg-[var(--wb-surface-deep)] px-4 pt-3 pb-2"
+      style="border-radius: var(--wb-r-card)"
+    >
       <!-- 附件行（缩略图在上） -->
       <AttachmentRail
         v-if="attachments.length"
@@ -49,7 +52,7 @@
         <!-- 附件单入口:下拉选「上传实体 / 引用本地路径」,不再并排两个按钮 -->
         <a-dropdown :trigger="['click']">
           <button
-            class="w-8 h-8 rounded-full text-slate-400 hover:text-white hover:bg-slate-700 flex items-center justify-center transition"
+            class="w-8 h-8 rounded-full text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)] flex items-center justify-center transition"
             :title="t('workbenchAttach')"
             :disabled="uploading"
             @click.prevent
@@ -63,7 +66,9 @@
                   <span class="flex items-center gap-2">
                     <i class="fas fa-cloud-arrow-up w-4"></i>{{ t('workbenchUpload') }}
                   </span>
-                  <span class="text-[11px] text-slate-500">{{ t('workbenchUploadHint') }}</span>
+                  <span class="text-[11px] text-[var(--wb-text-3)]">{{
+                    t('workbenchUploadHint')
+                  }}</span>
                 </span>
               </a-menu-item>
               <a-menu-item v-if="isElectron" key="reference">
@@ -71,7 +76,9 @@
                   <span class="flex items-center gap-2">
                     <i class="fas fa-link w-4"></i>{{ t('workbenchReferenceLocal') }}
                   </span>
-                  <span class="text-[11px] text-slate-500">{{ t('workbenchReferenceHint') }}</span>
+                  <span class="text-[11px] text-[var(--wb-text-3)]">{{
+                    t('workbenchReferenceHint')
+                  }}</span>
                 </span>
               </a-menu-item>
             </a-menu>
@@ -82,13 +89,15 @@
           @update:override="(v) => $emit('update:modelOverride', v)"
         />
         <div class="flex-1"></div>
-        <span v-if="slashOpen" class="text-[11px] text-slate-500 mr-2 hidden sm:inline">
+        <span v-if="slashOpen" class="text-[11px] text-[var(--wb-text-3)] mr-2 hidden sm:inline">
           ↑↓ {{ t('workbenchNavigate') }} · Tab/{{ t('confirm') }} · Esc
         </span>
         <button
           class="w-8 h-8 rounded-full flex items-center justify-center transition disabled:opacity-40"
           :class="
-            canSend ? 'bg-tech-blue text-white hover:brightness-110' : 'bg-slate-700 text-slate-400'
+            canSend
+              ? 'bg-[var(--wb-accent)] text-white hover:brightness-110'
+              : 'bg-[var(--wb-surface-hover)] text-[var(--wb-text-2)]'
           "
           :disabled="!canSend"
           :title="t('workbenchSend')"

@@ -33,7 +33,7 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
     () =>
       queue.value.find((j) => j.status === 'running') ??
       queue.value.find((j) => j.status === 'paused') ??
-      null
+      null,
   )
   const isRunning = computed(() => !!queue.value.find((j) => j.status === 'running'))
   /** 当前被暂停的任务 */
@@ -44,7 +44,7 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
   const hasActive = computed(
     () =>
       queuedCount.value > 0 ||
-      !!queue.value.find((j) => j.status === 'running' || j.status === 'paused')
+      !!queue.value.find((j) => j.status === 'running' || j.status === 'paused'),
   )
   const percent = computed(() => status.value?.percent ?? 0)
 
@@ -87,9 +87,7 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
     polling.value = true
     timer = setInterval(async () => {
       await fetchQueue()
-      const alive = queue.value.some((j) =>
-        ['queued', 'running', 'paused'].includes(j.status)
-      )
+      const alive = queue.value.some((j) => ['queued', 'running', 'paused'].includes(j.status))
       if (!alive) stopPolling()
     }, 2000)
   }
@@ -105,7 +103,7 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
     const res = await fetch(api('/api/batch/start'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     })
     const json = await res.json()
     if (!res.ok || !json?.success) {
@@ -143,7 +141,7 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
     const res = await fetch(api('/api/batch/stop'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stopAll: true })
+      body: JSON.stringify({ stopAll: true }),
     })
     await res.json().catch(() => ({}))
     await fetchQueue()
@@ -154,7 +152,7 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
     const res = await fetch(api('/api/batch/cancel'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id })
+      body: JSON.stringify({ id }),
     })
     await res.json().catch(() => ({}))
     await fetchQueue()
@@ -172,7 +170,7 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
     const res = await fetch(api('/api/batch/delete'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id })
+      body: JSON.stringify({ id }),
     })
     await res.json().catch(() => ({}))
     await fetchQueue()
@@ -183,7 +181,7 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
     const res = await fetch(api('/api/batch/rerun'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id })
+      body: JSON.stringify({ id }),
     })
     const json = await res.json().catch(() => ({}))
     if (!res.ok || !json?.success) {
@@ -199,7 +197,7 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
     const res = await fetch(api('/api/batch/move'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, toTop: true })
+      body: JSON.stringify({ id, toTop: true }),
     })
     await res.json().catch(() => ({}))
     await fetchQueue()
@@ -210,7 +208,7 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
     const res = await fetch(api('/api/batch/pause'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(id ? { id } : {})
+      body: JSON.stringify(id ? { id } : {}),
     })
     await res.json().catch(() => ({}))
     await fetchQueue()
@@ -221,7 +219,7 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
     const res = await fetch(api('/api/batch/job-resume'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id })
+      body: JSON.stringify({ id }),
     })
     await res.json().catch(() => ({}))
     await fetchQueue()
@@ -236,7 +234,7 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
       queueConfig.value = {
         autoShutdown: !!cfg.autoShutdown,
         notifyEnabled: !!cfg.notifyEnabled,
-        notifyUrl: String(cfg.notifyUrl || '')
+        notifyUrl: String(cfg.notifyUrl || ''),
       }
     } catch {
       /* ignore */
@@ -249,7 +247,7 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
       await localforage.setItem(QUEUE_CONFIG_KEY, {
         autoShutdown: queueConfig.value.autoShutdown,
         notifyEnabled: queueConfig.value.notifyEnabled,
-        notifyUrl: queueConfig.value.notifyUrl
+        notifyUrl: queueConfig.value.notifyUrl,
       })
     } catch {
       /* ignore */
@@ -273,13 +271,13 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
   async function applyQueueConfig() {
     const payload = {
       autoShutdown: queueConfig.value.autoShutdown,
-      notifyUrl: queueConfig.value.notifyEnabled ? queueConfig.value.notifyUrl.trim() : ''
+      notifyUrl: queueConfig.value.notifyEnabled ? queueConfig.value.notifyUrl.trim() : '',
     }
     try {
       const res = await fetch(api('/api/batch/config'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       })
       await res.json().catch(() => ({}))
     } catch {
@@ -318,6 +316,6 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
     loadQueueConfig,
     saveQueueConfig,
     setQueueConfig,
-    applyQueueConfig
+    applyQueueConfig,
   }
 })

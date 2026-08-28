@@ -11,7 +11,7 @@
             <div class="w-8 h-8 text-2xl text-tech-blue">
               <i class="fas fa-store"></i>
             </div>
-            <h1 class="text-2xl font-bold text-white tech-font">
+            <h1 class="text-2xl font-bold text-white">
               {{ t('market') }}
             </h1>
           </div>
@@ -190,15 +190,11 @@ onMounted(() => {
 .page-container {
   height: 100%;
   width: 100%;
-  font-family: 'Exo 2', sans-serif;
-  background: linear-gradient(135deg, #0a0f1f 0%, #0f172a 100%);
+  font-family: var(--wb-font);
+  background: var(--wb-bg-base);
   min-height: 100vh;
   color: #e2e8f0;
   overflow-x: hidden;
-
-  .tech-font {
-    font-family: 'Orbitron', sans-serif;
-  }
 
   .grid-lines {
     position: absolute;
@@ -206,11 +202,7 @@ onMounted(() => {
     left: 0;
     width: 100%;
     height: 100%;
-    background-image:
-      linear-gradient(rgba(56, 70, 102, 0.2) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(56, 70, 102, 0.2) 1px, transparent 1px);
-    background-size: 30px 30px;
-    z-index: -2;
+    display: none;
   }
 }
 </style>

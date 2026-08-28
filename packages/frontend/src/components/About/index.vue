@@ -77,7 +77,11 @@
             <div class="qrcode-box">
               <div class="qrcode-inner">
                 <div class="qrcode-placeholder">
-                  <img src="./ArtifyLab.jpg" style="width: 140px; height: 140px" :alt="t('artifyWorkshop')" />
+                  <img
+                    src="./ArtifyLab.jpg"
+                    style="width: 140px; height: 140px"
+                    :alt="t('artifyWorkshop')"
+                  />
                 </div>
                 <div class="qrcode-label">{{ t('scanToFollow') }}</div>
                 <div class="qrcode-subtitle">{{ t('getAIWorkflowResources') }}</div>
@@ -85,22 +89,33 @@
             </div>
           </div>
           <div v-if="appInfo && appInfo.version" class="version-update-row">
-            <div class="app-version">
-              Version: {{ appInfo.version }}
-            </div>
+            <div class="app-version">Version: {{ appInfo.version }}</div>
             <button @click="showUpdateModal = true" class="check-update-btn">
               <i class="fas fa-sync-alt"></i>
               <span>{{ t('checkForUpdates') }}</span>
             </button>
           </div>
-          <div class="license-info" style="width: 100%; color: #aaaaff; font-size: 0.95rem; text-align: right; margin-top: 10px;">
+          <div
+            class="license-info"
+            style="
+              width: 100%;
+              color: #aaaaff;
+              font-size: 0.95rem;
+              text-align: right;
+              margin-top: 10px;
+            "
+          >
             <span v-html="copyrightText"></span>
           </div>
         </div>
       </div>
     </div>
     <!-- 更新Modal组件 -->
-    <UpdateModal v-if="appInfo && appInfo.version" v-model:show="showUpdateModal" :appInfo="appInfo" />
+    <UpdateModal
+      v-if="appInfo && appInfo.version"
+      v-model:show="showUpdateModal"
+      :appInfo="appInfo"
+    />
   </div>
 </template>
 
@@ -126,21 +141,21 @@ onMounted(async () => {
 
 const copyrightText = computed(() =>
   t('copyright', {
-    license: `<a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" style="color: #40e0d0; text-decoration: underline;">${t('gplv3')}</a>`
-  })
+    license: `<a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" style="color: var(--wb-accent-hover); text-decoration: underline;">${t('gplv3')}</a>`,
+  }),
 )
 </script>
 
 <script>
 export default {
-  name: 'AboutModal'
+  name: 'AboutModal',
 }
 </script>
 
 <style lang="less" scoped>
 .about-modal {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+  background: rgba(0, 0, 0, 0.72);
   min-height: 100vh;
   display: flex;
   justify-content: center;
@@ -166,12 +181,9 @@ export default {
   .modal-container {
     width: 90%;
     max-width: 800px;
-    background: linear-gradient(145deg, #0d0b1f, #171236);
-    border-radius: 20px;
-    border: 1px solid rgba(64, 224, 208, 0.3);
-    box-shadow:
-      0 0 40px rgba(100, 100, 255, 0.2),
-      inset 0 0 20px rgba(0, 255, 255, 0.1);
+    background: var(--wb-surface-deep);
+    border-radius: var(--wb-r-modal);
+    border: 1px solid var(--wb-stroke);
     position: relative;
     overflow: auto;
     padding: 40px;
@@ -185,8 +197,7 @@ export default {
     left: 0;
     width: 100%;
     height: 4px;
-    background: linear-gradient(90deg, #00dbde, #fc00ff);
-    box-shadow: 0 0 15px rgba(128, 0, 255, 0.7);
+    background: var(--wb-accent);
   }
 
   .close-btn {
@@ -202,9 +213,12 @@ export default {
     display: flex;
     justify-content: center;
     align-items: center;
-    color: #40e0d0;
+    color: var(--wb-accent-hover);
     font-size: 1.2rem;
-    transition: background 0.3s ease, color 0.3s ease, transform 0.3s ease;
+    transition:
+      background 0.3s ease,
+      color 0.3s ease,
+      transform 0.3s ease;
   }
 
   .close-btn:hover {
@@ -237,17 +251,13 @@ export default {
   h2 {
     font-size: 2.2rem;
     margin-bottom: 20px;
-    background: linear-gradient(90deg, #00dbde, #fc00ff);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-    text-shadow: 0 0 10px rgba(128, 0, 255, 0.3);
+    color: var(--wb-text);
   }
 
   .intro-text {
     line-height: 1.8;
     font-size: 1.1rem;
-    color: #d0d0ff;
+    color: var(--wb-text-2);
     margin-bottom: 30px;
     position: relative;
     padding-left: 20px;
@@ -260,60 +270,41 @@ export default {
     top: 0;
     height: 100%;
     width: 4px;
-    background: linear-gradient(180deg, #00dbde, #fc00ff);
+    background: var(--wb-accent);
     border-radius: 2px;
   }
 
   .highlight {
-    color: #40e0d0;
+    color: var(--wb-accent-hover);
     font-weight: 600;
   }
 
   .wechat-name {
     font-size: 1.8rem;
     font-weight: 700;
-    color: #40e0d0;
+    color: var(--wb-brand);
     margin: 20px 0;
     text-align: center;
-    text-shadow: 0 0 10px rgba(64, 224, 208, 0.7);
     letter-spacing: 1px;
   }
 
   .qrcode-box {
     width: 280px;
     height: 280px;
-    background: linear-gradient(135deg, #0f0c29, #302b63);
-    border: 1px solid rgba(64, 224, 208, 0.5);
-    border-radius: 15px;
+    background: var(--wb-surface);
+    border: 1px solid var(--wb-stroke);
+    border-radius: var(--wb-r-card);
     display: flex;
     justify-content: center;
     align-items: center;
     position: relative;
     overflow: hidden;
-    box-shadow: 0 0 30px rgba(64, 224, 208, 0.3);
-  }
-
-  .qrcode-box::before {
-    content: '';
-    position: absolute;
-    top: -50%;
-    left: -50%;
-    width: 200%;
-    height: 200%;
-    background: conic-gradient(transparent, #00dbde, transparent 30%);
-    animation: rotate 4s linear infinite;
-  }
-
-  @keyframes rotate {
-    100% {
-      transform: rotate(360deg);
-    }
   }
 
   .qrcode-inner {
     position: relative;
     z-index: 2;
-    background: #0d0b1f;
+    background: var(--wb-bg-base);
     width: 260px;
     height: 260px;
     border-radius: 12px;
@@ -337,7 +328,7 @@ export default {
     display: flex;
     justify-content: center;
     align-items: center;
-    color: #40e0d0;
+    color: var(--wb-accent-hover);
     font-size: 1.5rem;
   }
 
@@ -349,7 +340,7 @@ export default {
   }
 
   .qrcode-subtitle {
-    color: #a0a0ff;
+    color: var(--wb-text-2);
     font-size: 1rem;
   }
 
@@ -367,7 +358,7 @@ export default {
   }
 
   .feature i {
-    color: #00dbde;
+    color: var(--wb-accent-hover);
     font-size: 1.2rem;
     margin-top: 3px;
   }
@@ -378,13 +369,13 @@ export default {
 
   @keyframes pulse {
     0% {
-      box-shadow: 0 0 0 0 rgba(64, 224, 208, 0.7);
+      opacity: 1;
     }
-    70% {
-      box-shadow: 0 0 0 15px rgba(64, 224, 208, 0);
+    50% {
+      opacity: 0.55;
     }
     100% {
-      box-shadow: 0 0 0 0 rgba(64, 224, 208, 0);
+      opacity: 1;
     }
   }
 
@@ -395,14 +386,13 @@ export default {
     justify-content: flex-start;
 
     .social-icon {
-      color: #40e0d0;
+      color: var(--wb-text-2);
       font-size: 2rem;
-      transition: color 0.2s, transform 0.2s;
+      transition: color 0.15s;
       text-decoration: none;
 
       &:hover {
-        color: #fc00ff;
-        transform: scale(1.15) rotate(-8deg);
+        color: var(--wb-text);
       }
     }
   }
@@ -412,10 +402,10 @@ export default {
     align-items: center;
     gap: 6px;
     padding: 8px 15px;
-    background: linear-gradient(135deg, rgba(64, 224, 208, 0.2), rgba(252, 0, 255, 0.2));
-    border: 1px solid rgba(64, 224, 208, 0.5);
-    border-radius: 20px;
-    color: #40e0d0;
+    background: var(--wb-surface);
+    border: 1px solid var(--wb-stroke);
+    border-radius: var(--wb-r-ctrl);
+    color: var(--wb-text);
     font-size: 0.85rem;
     font-weight: 500;
     cursor: pointer;
@@ -424,26 +414,9 @@ export default {
     overflow: hidden;
   }
 
-  .check-update-btn::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-    transform: translateX(-100%);
-    transition: transform 0.3s ease-out;
-  }
-
   .check-update-btn:hover {
-    background: linear-gradient(135deg, rgba(64, 224, 208, 0.3), rgba(252, 0, 255, 0.3));
-    border-color: rgba(64, 224, 208, 0.8);
-    box-shadow: 0 8px 25px rgba(64, 224, 208, 0.3);
-  }
-
-  .check-update-btn:hover::before {
-    transform: translateX(200%);
+    background: var(--wb-surface-hover);
+    border-color: var(--wb-stroke-strong);
   }
 
   .check-update-btn i {
@@ -470,7 +443,7 @@ export default {
   }
 
   .app-version {
-    color: #40e0d0;
+    color: var(--wb-accent-hover);
     font-size: 1rem;
     font-weight: 500;
   }

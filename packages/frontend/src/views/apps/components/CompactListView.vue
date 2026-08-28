@@ -8,16 +8,10 @@
       @scroll="handleScroll"
     >
       <!-- 总高度占位 -->
-      <div
-        :style="{ height: totalHeight + 'px' }"
-        class="virtual-scroll-spacer"
-      ></div>
+      <div :style="{ height: totalHeight + 'px' }" class="virtual-scroll-spacer"></div>
 
       <!-- 可见项目容器 -->
-      <div
-        :style="{ transform: `translateY(${offsetY}px)` }"
-        class="virtual-items-container"
-      >
+      <div :style="{ transform: `translateY(${offsetY}px)` }" class="virtual-items-container">
         <transition-group name="card" tag="div" class="space-y-2">
           <div
             v-for="app in visibleApps"
@@ -33,10 +27,7 @@
                 :alt="app.name"
                 class="object-cover w-full h-full"
               />
-              <div
-                v-else
-                class="flex justify-center items-center w-full h-full text-tech-blue"
-              >
+              <div v-else class="flex justify-center items-center w-full h-full text-tech-blue">
                 <i class="text-xl fas fa-robot"></i>
               </div>
             </div>
@@ -49,7 +40,9 @@
                 </h3>
                 <div class="flex items-center space-x-2">
                   <!-- 分类标签 -->
-                  <span class="px-2 py-1 text-xs font-medium rounded-full text-tech-blue bg-tech-blue/10">
+                  <span
+                    class="px-2 py-1 text-xs font-medium rounded-full text-tech-blue bg-tech-blue/10"
+                  >
                     {{ t(app.category) }}
                   </span>
                   <!-- 状态指示器 -->
@@ -116,25 +109,26 @@
         {{ searchQuery.trim() || selectedCategory ? t('noAppsFound') : t('noAppsAvailable') }}
       </h3>
       <p class="mx-auto mb-6 max-w-md text-slate-400">
-        {{ searchQuery.trim()
-          ? t('noAppsFoundWithQuery', { query: searchQuery })
-          : selectedCategory
-          ? t('noAppsInCategory', { category: selectedCategory })
-          : t('addFirstAppTip')
+        {{
+          searchQuery.trim()
+            ? t('noAppsFoundWithQuery', { query: searchQuery })
+            : selectedCategory
+              ? t('noAppsInCategory', { category: selectedCategory })
+              : t('addFirstAppTip')
         }}
       </p>
       <div class="flex justify-center space-x-2">
         <button
           v-if="searchQuery.trim()"
           @click="$emit('clear-search')"
-          class="px-6 py-2 font-medium text-white bg-gradient-to-r rounded-lg transition cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90"
+          class="btn-comfy-primary px-6 py-2 font-medium text-white rounded-md transition cursor-pointer"
         >
           {{ t('clearSearch') }}
         </button>
         <button
           v-if="selectedCategory"
           @click="$emit('clear-filter')"
-          class="px-6 py-2 font-medium text-white bg-gradient-to-r rounded-lg transition cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90"
+          class="btn-comfy-primary px-6 py-2 font-medium text-white rounded-md transition cursor-pointer"
         >
           {{ t('clearFilter') }}
         </button>
@@ -153,15 +147,15 @@ const { modal } = App.useApp()
 const props = defineProps({
   apps: {
     type: Array,
-    default: () => []
+    default: () => [],
   },
   searchQuery: {
     type: String,
-    default: ''
+    default: '',
   },
   selectedCategory: {
     type: String,
-    default: ''
+    default: '',
   },
 })
 
@@ -208,7 +202,7 @@ const filteredApps = computed(() => {
   const query = props.searchQuery.toLowerCase().trim()
   const categoryFilter = props.selectedCategory
 
-  return props.apps.filter(app => {
+  return props.apps.filter((app) => {
     const nameMatch = app.name.toLowerCase().includes(query)
     const categoryMatch = app.category.toLowerCase().includes(query)
     const descriptionMatch = app.description.toLowerCase().includes(query)
@@ -233,7 +227,7 @@ const visibleRange = computed(() => {
 
   return {
     start: Math.max(0, start - bufferSize.value),
-    end: Math.min(filteredApps.value.length, end + bufferSize.value)
+    end: Math.min(filteredApps.value.length, end + bufferSize.value),
   }
 })
 
@@ -375,7 +369,9 @@ onUnmounted(() => {
 }
 
 .card-enter-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
 }
 
 .card-enter-from {

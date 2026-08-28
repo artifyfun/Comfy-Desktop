@@ -8,17 +8,15 @@
       @scroll="handleScroll"
     >
       <!-- 总高度占位 -->
-      <div
-        :style="{ height: totalHeight + 'px' }"
-        class="virtual-scroll-spacer"
-      ></div>
+      <div :style="{ height: totalHeight + 'px' }" class="virtual-scroll-spacer"></div>
 
       <!-- 可见项目容器 -->
-      <div
-        :style="{ transform: `translateY(${offsetY}px)` }"
-        class="virtual-items-container"
-      >
-        <transition-group name="card" tag="div" class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <div :style="{ transform: `translateY(${offsetY}px)` }" class="virtual-items-container">
+        <transition-group
+          name="card"
+          tag="div"
+          class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+        >
           <MarketAppCard
             v-for="app in visibleApps"
             :key="app.id"
@@ -39,25 +37,26 @@
         {{ searchQuery.trim() || selectedCategory ? t('noAppsFound') : t('noAppsAvailable') }}
       </h3>
       <p class="mx-auto mb-6 max-w-md text-slate-400">
-        {{ searchQuery.trim()
-          ? t('noAppsFoundWithQuery', { query: searchQuery })
-          : selectedCategory
-          ? t('noAppsInCategory', { category: selectedCategory })
-          : t('marketEmptyDescription')
+        {{
+          searchQuery.trim()
+            ? t('noAppsFoundWithQuery', { query: searchQuery })
+            : selectedCategory
+              ? t('noAppsInCategory', { category: selectedCategory })
+              : t('marketEmptyDescription')
         }}
       </p>
       <div class="flex justify-center space-x-2">
         <button
           v-if="searchQuery.trim()"
           @click="$emit('clear-search')"
-          class="px-6 py-2 font-medium text-white bg-gradient-to-r rounded-lg transition cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90"
+          class="px-6 py-2 font-medium text-white rounded-md transition cursor-pointer btn-comfy-primary"
         >
           {{ t('clearSearch') }}
         </button>
         <button
           v-if="selectedCategory"
           @click="$emit('clear-filter')"
-          class="px-6 py-2 font-medium text-white bg-gradient-to-r rounded-lg transition cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90"
+          class="px-6 py-2 font-medium text-white rounded-md transition cursor-pointer btn-comfy-primary"
         >
           {{ t('clearFilter') }}
         </button>
@@ -74,15 +73,15 @@ import MarketAppCard from './MarketAppCard.vue'
 const props = defineProps({
   apps: {
     type: Array,
-    default: () => []
+    default: () => [],
   },
   searchQuery: {
     type: String,
-    default: ''
+    default: '',
   },
   selectedCategory: {
     type: String,
-    default: ''
+    default: '',
   },
 })
 
@@ -114,7 +113,7 @@ const filteredApps = computed(() => {
   }
   const query = props.searchQuery.toLowerCase().trim()
   const categoryFilter = props.selectedCategory
-  return props.apps.filter(app => {
+  return props.apps.filter((app) => {
     const nameMatch = app.name.toLowerCase().includes(query)
     const categoryMatch = app.category.toLowerCase().includes(query)
     const descriptionMatch = app.description.toLowerCase().includes(query)
@@ -257,7 +256,9 @@ onUnmounted(() => {
 }
 
 .card-enter-active {
-  transition: opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition:
+    opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .card-enter-from {

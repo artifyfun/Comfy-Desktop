@@ -25,7 +25,7 @@ export const useViewStore = defineStore('view', () => {
   const saveViewState = () => {
     try {
       const state = {
-        viewMode: viewMode.value
+        viewMode: viewMode.value,
       }
       localStorage.setItem(VIEW_STORE_KEY, JSON.stringify(state))
     } catch (error) {
@@ -46,9 +46,13 @@ export const useViewStore = defineStore('view', () => {
   }
 
   // 监听视图模式变化，自动保存到本地存储
-  watch(viewMode, () => {
-    saveViewState()
-  }, { immediate: false })
+  watch(
+    viewMode,
+    () => {
+      saveViewState()
+    },
+    { immediate: false },
+  )
 
   // 初始化时加载状态
   loadViewState()
@@ -58,6 +62,6 @@ export const useViewStore = defineStore('view', () => {
     updateViewMode,
     toggleViewMode,
     loadViewState,
-    saveViewState
+    saveViewState,
   }
 })

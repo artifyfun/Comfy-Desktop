@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ArtifyLab × Comfy 风格 Demo</title>
+<style>
+/* ============ 设计令牌（ComfyUI charcoal 体系直移） ============ */
+:root {
+  --wb-bg-base: #171718;
+  --wb-surface-deep: #202121;
+  --wb-surface: #262729;
+  --wb-surface-hover: #313235;
+  --wb-surface-active: #3c3d42;
+  --wb-stroke: #313235;
+  --wb-stroke-strong: #494a50;
+  --wb-selected: #ffffff;
+  --wb-text: #ffffff;
+  --wb-text-2: #a0a0a0;
+  --wb-text-3: #8a8a8a;
+  --wb-accent: #0b8ce9;
+  --wb-accent-hover: #31b9f4;
+  --wb-danger: #f56c6c;
+  --wb-success: #4ade80;
+  --wb-brand: #f0ff41;
+  --wb-ink: #211927;
+  --wb-r-ctrl: 6px;
+  --wb-r-card: 10px;
+  --wb-r-modal: 14px;
+  --wb-topbar-h: 40px;
+  --wb-font: 'Inter', -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { height:100%; }
+body {
+  background: var(--wb-bg-base);
+  color: var(--wb-text);
+  font-family: var(--wb-font);
+  font-size: 14px;
+  overflow: hidden;
+}
+
+/* ============ 顶栏（40px，tab 式导航） ============ */
+.topbar {
+  height: var(--wb-topbar-h);
+  background: var(--wb-bg-base);
+  border-bottom: 1px solid var(--wb-stroke);
+  display: flex; align-items: center;
+  padding: 0 16px; gap: 20px;
+}
+.brand { display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; }
+.brand-mark {
+  width: 22px; height: 22px; border-radius: 5px;
+  background: var(--wb-ink);
+  display:flex; align-items:center; justify-content:center;
+  font-weight: 800; font-size: 14px; color: var(--wb-brand);
+  font-family: var(--wb-font);
+}
+.brand-name { font-weight: 600; font-size: 14px; color: var(--wb-text); }
+.brand-name span { color: var(--wb-text-2); font-weight: 500; }
+.topnav { display:flex; gap: 2px; height: 100%; margin-left: 12px; }
+.topnav a {
+  display:flex; align-items:center; padding: 0 14px;
+  color: var(--wb-text-2); text-decoration:none; font-size:13px;
+  position: relative; transition: color .15s;
+}
+.topnav a:hover { color: var(--wb-text); }
+.topnav a.active { color: var(--wb-text); }
+.topnav a.active::after {
+  content:''; position:absolute; left:10px; right:10px; bottom:0;
+  height:2px; background: var(--wb-accent); border-radius: 2px 2px 0 0;
+}
+.topbar-right { margin-left:auto; display:flex; gap:8px; align-items:center; }
+
+/* ============ 通用控件 ============ */
+.btn {
+  display:inline-flex; align-items:center; gap:6px;
+  height: 28px; padding: 0 12px;
+  background: var(--wb-surface); color: var(--wb-text);
+  border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-ctrl);
+  font-size: 13px; cursor:pointer; transition: all .15s;
+  font-family: var(--wb-font);
+}
+.btn:hover { background: var(--wb-surface-hover); }
+.btn.primary { background: var(--wb-accent); border-color: var(--wb-accent); }
+.btn.primary:hover { background: var(--wb-accent-hover); border-color: var(--wb-accent-hover); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--wb-text-2); }
+.btn.ghost:hover { background: var(--wb-surface-hover); color: var(--wb-text); }
+.input {
+  height: 28px; padding: 0 10px;
+  background: var(--wb-surface); border:1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-ctrl); color: var(--wb-text);
+  font-size: 13px; outline:none; font-family:var(--wb-font);
+  transition: border-color .15s;
+}
+.input::placeholder { color: var(--wb-text-3); }
+.input:focus { border-color: var(--wb-accent); }
+
+/* ============ 页面切换 ============ */
+.page { display:none; height: calc(100vh - var(--wb-topbar-h)); }
+.page.on { display:flex; }
+
+/* ============ 应用中心 ============ */
+.apps-wrap { flex:1; overflow-y:auto; padding: 20px 28px; }
+.apps-head { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+.apps-head h1 { font-size:18px; font-weight:600; }
+.chip {
+  height:24px; padding:0 10px; display:inline-flex; align-items:center;
+  border:1px solid var(--wb-stroke); border-radius: 12px;
+  color:var(--wb-text-2); font-size:12px; cursor:pointer; transition:all .15s;
+}
+.chip.on { border-color: var(--wb-selected); color: var(--wb-text); }
+.chip:hover { background: var(--wb-surface-hover); }
+.apps-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(230px,1fr)); gap:14px; }
+.app-card {
+  background: var(--wb-surface-deep); border:1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-card); padding:16px; cursor:pointer;
+  transition: all .15s; position:relative;
+}
+.app-card:hover { background: var(--wb-surface); border-color: var(--wb-selected); }
+.app-card .icon {
+  width:40px; height:40px; border-radius: var(--wb-r-ctrl);
+  background: var(--wb-ink); color: var(--wb-brand);
+  display:flex; align-items:center; justify-content:center;
+  font-weight:800; font-size:18px; margin-bottom:12px;
+}
+.app-card h3 { font-size:14px; font-weight:600; margin-bottom:6px; }
+.app-card p { font-size:12px; color:var(--wb-text-2); line-height:1.5;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.app-card .meta { margin-top:12px; display:flex; align-items:center; gap:6px; font-size:11px; color:var(--wb-text-3); }
+.dot { width:6px; height:6px; border-radius:50%; }
+.dot.on { background: var(--wb-success); }
+.dot.off { background: var(--wb-text-3); }
+.app-card .tags { position:absolute; top:14px; right:14px; display:flex; gap:4px; }
+.tag { font-size:10px; padding:2px 6px; background:var(--wb-surface-hover); border-radius:4px; color:var(--wb-text-2); }
+
+/* ============ 工作台 ============ */
+.wb { display:flex; height:100%; }
+/* 会话侧栏 */
+.sessions {
+  width: 232px; background: var(--wb-bg-base);
+  border-right:1px solid var(--wb-stroke);
+  display:flex; flex-direction:column; flex-shrink:0;
+}
+.sessions-head { padding:12px 12px 8px; }
+.sessions-head .btn { width:100%; justify-content:center; height:30px; }
+.sessions-search { padding: 0 12px 10px; }
+.sessions-search .input { width:100%; }
+.sessions-list { flex:1; overflow-y:auto; padding: 4px 8px; }
+.sess-group { font-size:11px; color:var(--wb-text-3); padding:10px 6px 4px; }
+.sess-item {
+  padding: 7px 10px; border-radius: var(--wb-r-ctrl);
+  color: var(--wb-text-2); font-size:13px; cursor:pointer;
+  position:relative; transition: all .12s; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.sess-item:hover { background: var(--wb-surface); color: var(--wb-text); }
+.sess-item.on { background: var(--wb-surface); color: var(--wb-text); }
+.sess-item.on::before {
+  content:''; position:absolute; left:0; top:8px; bottom:8px; width:3px;
+  background: var(--wb-accent); border-radius:2px;
+}
+/* 对话主区 */
+.chat { flex:1; display:flex; flex-direction:column; min-width:0; }
+.chat-head {
+  height:44px; display:flex; align-items:center; gap:10px;
+  padding: 0 16px; border-bottom:1px solid var(--wb-stroke); flex-shrink:0;
+}
+.chat-head .title { font-size:14px; font-weight:600; }
+.intent-pill {
+  height:22px; padding:0 10px; display:inline-flex; align-items:center; gap:4px;
+  border:1px solid var(--wb-stroke); border-radius:11px;
+  font-size:11px; color:var(--wb-text-2);
+}
+.intent-pill.on { border-color: var(--wb-selected); color: var(--wb-text); }
+.chat-body { flex:1; overflow-y:auto; padding: 20px 24px; display:flex; flex-direction:column; gap:14px; }
+.msg {
+  max-width: 76%; padding: 12px 14px;
+  background: var(--wb-surface-deep); border:1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-card); position:relative; line-height:1.65; font-size:13px;
+}
+.msg.user { align-self:flex-end; border-left:3px solid var(--wb-accent); }
+.msg.ai { align-self:flex-start; border-left:3px solid var(--wb-stroke-strong); }
+.msg .who { font-size:11px; color:var(--wb-text-3); margin-bottom:6px; display:flex; gap:6px; align-items:center; }
+.msg .who .tk { background:var(--wb-surface-hover); border-radius:4px; padding:1px 5px; font-size:10px; }
+.msg.tool {
+  align-self:flex-start; font-size:12px; color:var(--wb-text-2);
+  background: transparent; border:1px dashed var(--wb-stroke-strong); padding:8px 12px;
+}
+.msg.tool b { color: var(--wb-accent); font-weight:600; }
+/* composer */
+.composer { padding: 14px 24px 18px; flex-shrink:0; }
+.composer-card {
+  background: var(--wb-surface-deep); border:1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-card); transition: border-color .15s;
+}
+.composer-card:focus-within { border-color: var(--wb-accent); }
+.composer-card textarea {
+  width:100%; background:transparent; border:none; outline:none; resize:none;
+  color:var(--wb-text); font-size:13px; font-family:var(--wb-font);
+  padding: 12px 14px 4px; min-height:44px;
+}
+.composer-card textarea::placeholder { color: var(--wb-text-3); }
+.composer-bar { display:flex; align-items:center; gap:8px; padding: 6px 10px 10px; }
+.composer-bar .model {
+  font-size:12px; color:var(--wb-text-2); display:flex; align-items:center; gap:6px;
+  padding:3px 8px; border-radius: var(--wb-r-ctrl); cursor:pointer;
+}
+.composer-bar .model:hover { background: var(--wb-surface-hover); }
+.send {
+  margin-left:auto; width:30px; height:30px; border-radius: var(--wb-r-ctrl);
+  background: var(--wb-accent); border:none; color:#fff; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; transition: background .15s;
+}
+.send:hover { background: var(--wb-accent-hover); }
+/* 产物栏 */
+.artifacts {
+  width: 260px; border-left:1px solid var(--wb-stroke);
+  display:flex; flex-direction:column; flex-shrink:0; background: var(--wb-bg-base);
+}
+.artifacts-head {
+  height:44px; display:flex; align-items:center; padding:0 14px; gap:8px;
+  border-bottom:1px solid var(--wb-stroke); font-size:13px; font-weight:600;
+}
+.artifacts-body { flex:1; overflow-y:auto; padding:14px; }
+.art-thumb {
+  width:100%; aspect-ratio:1; border-radius:8px; background: var(--wb-surface-deep);
+  border:1px solid var(--wb-stroke); margin-bottom:10px;
+  display:flex; align-items:center; justify-content:center; color:var(--wb-text-3); font-size:12px;
+  position:relative; overflow:hidden; cursor:pointer; transition: border-color .15s;
+}
+.art-thumb:hover { border-color: var(--wb-selected); }
+.art-thumb .bar {
+  position:absolute; left:0; right:0; bottom:0; padding:5px 8px;
+  background: rgba(23,23,24,.88); font-size:11px; color:var(--wb-text-2);
+}
+.art-empty { text-align:center; color:var(--wb-text-3); font-size:12px; padding:40px 20px; line-height:1.8; }
+</style>
+</head>
+<body>
+
+<!-- 顶栏 -->
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark">A</div>
+    <div class="brand-name">Artify<span>工坊</span></div>
+  </div>
+  <nav class="topnav">
+    <a class="nav-apps active" href="#" onclick="go('apps')">应用中心</a>
+    <a class="nav-wb" href="#" onclick="go('wb')">工作台</a>
+    <a href="#">画廊</a>
+    <a href="#">市场</a>
+  </nav>
+  <div class="topbar-right">
+    <button class="btn ghost">⌘K</button>
+    <button class="btn ghost">设置</button>
+  </div>
+</div>
+
+<!-- ============ 页面 1：应用中心 ============ -->
+<div class="page on" id="page-apps">
+  <div class="apps-wrap">
+    <div class="apps-head">
+      <h1>应用中心</h1>
+      <span style="font-size:12px;color:var(--wb-text-3);display:flex;align-items:center;gap:5px;">
+        <span class="dot on"></span>2 个应用在线
+      </span>
+      <span class="chip on">全部</span><span class="chip">文生图</span><span class="chip">图生视频</span><span class="chip">文案</span>
+      <span style="flex:1"></span>
+      <input class="input" style="width:220px" placeholder="搜索应用名称或类型...">
+      <button class="btn primary">+ 新增应用</button>
+    </div>
+    <div class="apps-grid">
+      <div class="app-card">
+        <div class="tags"><span class="tag">图生视频</span></div>
+        <div class="icon">A</div>
+        <h3>文生图·测试</h3>
+        <p>输入提示词生成单张图片，KSampler 快速出图，适合验证链路与灵感捕捉。</p>
+        <div class="meta"><span class="dot on"></span>在线 · SD1.5 · 上次运行 2 分钟前</div>
+      </div>
+      <div class="app-card">
+        <div class="tags"><span class="tag">文生图</span></div>
+        <div class="icon" style="color:var(--wb-accent)">V</div>
+        <h3>产品图精修</h3>
+        <p>电商产品图一键精修：去背、补光、场景重绘，支持批量参数模板。</p>
+        <div class="meta"><span class="dot on"></span>在线 · SDXL · 上次运行 1 小时前</div>
+      </div>
+      <div class="app-card">
+        <div class="icon" style="color:var(--wb-text-2)">T</div>
+        <h3>小红书文案</h3>
+        <p>基于生成图片产出配套种草文案，支持指定语气与字数约束。</p>
+        <div class="meta"><span class="dot off"></span>离线 · 文本模型</div>
+      </div>
+      <div class="app-card" style="border-style:dashed;display:flex;align-items:center;justify-content:center;color:var(--wb-text-3);min-height:150px;">
+        + 从应用市场安装
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 页面 2：工作台 ============ -->
+<div class="page" id="page-wb">
+  <div class="wb">
+    <!-- 会话侧栏 -->
+    <aside class="sessions">
+      <div class="sessions-head"><button class="btn primary">+ 新建会话</button></div>
+      <div class="sessions-search"><input class="input" placeholder="搜索会话..."></div>
+      <div class="sessions-list">
+        <div class="sess-group">今天</div>
+        <div class="sess-item on">编排全绿-e2e</div>
+        <div class="sess-item">编排验证-final</div>
+        <div class="sess-item">文生图测试</div>
+        <div class="sess-group">昨天</div>
+        <div class="sess-item">小红书图文批产</div>
+        <div class="sess-item">产品图精修调参</div>
+        <div class="sess-group">本周</div>
+        <div class="sess-item">视频链式验证</div>
+        <div class="sess-item">记忆功能测试</div>
+      </div>
+    </aside>
+    <!-- 对话区 -->
+    <main class="chat">
+      <div class="chat-head">
+        <span class="title">编排全绿-e2e</span>
+        <span class="intent-pill on">⚡ 标准</span>
+        <span class="intent-pill">文生图</span>
+        <span class="intent-pill">图生视频</span>
+        <span style="flex:1"></span>
+        <button class="btn ghost">分支 ⌄</button>
+        <button class="btn ghost">⌗</button>
+      </div>
+      <div class="chat-body">
+        <div class="msg user">
+          <div class="who">你</div>
+          先出一套橘猫的图，再挑一张配一句小红书文案
+        </div>
+        <div class="msg tool">
+          调用 <b>wb_list_templates</b> → 找到「文生图·测试」&nbsp;·&nbsp;320ms
+        </div>
+        <div class="msg tool">
+          调用 <b>wb_execute_template</b>(prompt="a cute orange cat", wait=true) → 完成&nbsp;·&nbsp;84s
+        </div>
+        <div class="msg ai">
+          <div class="who">Artify <span class="tk">↑ 1.2k</span><span class="tk">↓ 0.4k</span></div>
+          已生成 1 张图片（wb-orchestration_00001_.png），256×256。<br>
+          配套文案：<b>橘猫可爱到犯规！</b>需要再出几版或改成视频吗？
+        </div>
+        <div class="msg user">
+          <div class="who">你</div>
+          出个竖版 3:4 的，氛围感强一点
+        </div>
+      </div>
+      <div class="composer">
+        <div class="composer-card">
+          <textarea rows="1" placeholder="描述你想生成的内容（图片/视频/文案），AI 自动选择应用与参数执行"></textarea>
+          <div class="composer-bar">
+            <span class="model">✳ deepseek-v4-flash ⌄</span>
+            <span class="model">📎</span>
+            <button class="send">↑</button>
+          </div>
+        </div>
+      </div>
+    </main>
+    <!-- 产物栏 -->
+    <aside class="artifacts">
+      <div class="artifacts-head">▦ 产物</div>
+      <div class="artifacts-body">
+        <div class="art-thumb">
+          [橘猫 · 256×256]
+          <div class="bar">wb-orchestration_00001_.png</div>
+        </div>
+        <div class="art-thumb">
+          [橘猫 · 竖版]
+          <div class="bar">wb-orchestration_00002_.png · 生成中</div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+function go(p) {
+  document.querySelectorAll('.page').forEach(e => e.classList.remove('on'));
+  document.getElementById('page-' + p).classList.add('on');
+  document.querySelectorAll('.topnav a').forEach(a => a.classList.remove('active'));
+  document.querySelector('.nav-' + (p === 'apps' ? 'apps' : 'wb')).classList.add('active');
+}
+if (location.hash === '#wb') go('wb');
+</script>
+</body>
+</html>

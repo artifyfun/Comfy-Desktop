@@ -610,7 +610,7 @@ const handleOptimizePrompt = () => {
   }
   .ant-modal-title {
     color: #e2e8f0;
-    font-family: 'Orbitron', sans-serif;
+    font-family: var(--wb-font);
     font-weight: 600;
   }
   .ant-modal-body {

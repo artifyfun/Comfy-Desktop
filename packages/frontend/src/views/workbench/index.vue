@@ -1,5 +1,5 @@
 <template>
-  <div class="page-container bg-tech-dark">
+  <div class="page-container" style="background: var(--wb-bg-base)">
     <div id="app" class="pb-20 min-h-screen flex flex-col">
       <AppHeader
         :first-nav-to="'/'"
@@ -30,15 +30,15 @@
         />
 
         <!-- 中：会话区 -->
-        <section
-          class="flex-1 min-w-0 flex flex-col rounded-xl bg-slate-900/60 border border-slate-700 h-[calc(100vh-160px)]"
-        >
+        <section class="flex-1 min-w-0 flex flex-col border h-[calc(100vh-160px)]">
           <!-- 会话头 -->
-          <div class="flex items-center gap-2 px-4 h-12 border-b border-slate-700 shrink-0">
+          <div
+            class="flex items-center gap-2 px-4 h-12 border-b border-[var(--wb-stroke)] shrink-0"
+          >
             <!-- 侧栏折叠时:展开入口收进本面板左上角（侧栏 0 宽,不再占位） -->
             <button
               v-if="sidebarCollapsed"
-              class="w-7 h-7 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center transition shrink-0"
+              class="w-7 h-7 rounded-lg text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-deep)] flex items-center justify-center transition shrink-0"
               :title="t('workbenchExpandSidebar')"
               @click="sidebarCollapsed = false"
             >
@@ -50,8 +50,8 @@
                 class="flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs transition"
                 :class="
                   sessionPreset
-                    ? 'border-tech-blue/60 bg-tech-blue/10 text-tech-blue'
-                    : 'border-slate-600 text-slate-300 hover:border-slate-400'
+                    ? 'border-[var(--wb-accent)]/60 bg-[var(--wb-accent)]/10 text-[var(--wb-accent)]'
+                    : 'border-[var(--wb-stroke-strong)] text-[var(--wb-text-2)] hover:border-slate-400'
                 "
                 :title="t('workbenchPresetSwitch')"
               >
@@ -63,14 +63,16 @@
                 <a-menu @click="onPresetMenu">
                   <a-menu-item v-for="p in sortedPresets" :key="p.id">
                     <span class="flex items-center gap-2">
-                      <i :class="presetIcon(p)" class="w-4 text-tech-blue"></i>
+                      <i :class="presetIcon(p)" class="w-4 text-[var(--wb-accent)]"></i>
                       <span>{{ presetName(p) }}</span>
                       <i
                         v-if="currentSession?.presetId === p.id"
-                        class="fas fa-check text-tech-blue ml-auto"
+                        class="fas fa-check text-[var(--wb-accent)] ml-auto"
                       ></i>
                     </span>
-                    <div class="text-[11px] text-slate-400 whitespace-normal leading-snug mt-0.5">
+                    <div
+                      class="text-[11px] text-[var(--wb-text-2)] whitespace-normal leading-snug mt-0.5"
+                    >
                       {{ p.description?.[lang] || p.description?.zh }}
                     </div>
                   </a-menu-item>
@@ -87,13 +89,15 @@
 
           <!-- 对话流（含执行卡内联） -->
           <div ref="messagesEl" class="flex-1 overflow-y-auto p-4 space-y-6">
-            <div v-if="messages.length === 0" class="text-center text-slate-400 mt-10">
+            <div v-if="messages.length === 0" class="text-center text-[var(--wb-text-2)] mt-10">
               <i class="fas fa-wand-magic-sparkles text-4xl mb-3 opacity-40"></i>
               <p>{{ t('workbenchIntro') }}</p>
             </div>
             <template v-for="(m, i) in messages" :key="i">
               <div v-if="showDateDivider(i)" class="w-full pt-1 pb-2 text-center shrink-0">
-                <span class="text-[11px] text-slate-500 bg-slate-900/80 rounded-full px-3 py-1">
+                <span
+                  class="text-[11px] text-[var(--wb-text-3)] bg-[var(--wb-bg-base)] rounded-full px-3 py-1"
+                >
                   {{ dateDividerLabel(m.createdAt) }}
                 </span>
               </div>
@@ -104,14 +108,14 @@
                     <div
                       v-for="(a, j) in m.attachments"
                       :key="j"
-                      class="w-12 h-12 rounded bg-slate-800 border border-slate-600 flex items-center justify-center overflow-hidden"
+                      class="w-12 h-12 rounded bg-[var(--wb-surface-deep)] border border-[var(--wb-stroke-strong)] flex items-center justify-center overflow-hidden"
                     >
                       <img
                         v-if="a.kind === 'image' && a._preview"
                         :src="a._preview"
                         class="w-full h-full object-cover"
                       />
-                      <i v-else :class="kindIcon(a.kind)" class="text-slate-400"></i>
+                      <i v-else :class="kindIcon(a.kind)" class="text-[var(--wb-text-2)]"></i>
                     </div>
                   </div>
                   <!-- 产物缩略图（artifact 消息内联，点击 lightbox） -->
@@ -122,7 +126,7 @@
                     <div
                       v-for="(f, j) in m.outputFiles"
                       :key="j"
-                      class="w-24 h-24 rounded-lg overflow-hidden bg-slate-800 border border-slate-600 cursor-zoom-in hover:border-tech-blue transition flex items-center justify-center"
+                      class="w-24 h-24 rounded-lg overflow-hidden bg-[var(--wb-surface-deep)] border border-[var(--wb-stroke-strong)] cursor-zoom-in hover:border-[var(--wb-accent)] transition flex items-center justify-center"
                       @click="lightboxFile = f"
                     >
                       <img :src="viewUrl(f)" class="w-full h-full object-cover" loading="lazy" />
@@ -164,7 +168,7 @@
                       </div>
                       <pre
                         v-if="expandedToolIds.has(m.toolItem.id) && toolItemDetail(m.toolItem)"
-                        class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-black/40 border border-slate-700 p-2 whitespace-pre-wrap break-all text-slate-300 font-mono"
+                        class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-black/40 border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
                         >{{ toolItemDetail(m.toolItem) }}</pre
                       >
                     </template>
@@ -177,7 +181,7 @@
                   </div>
                   <!-- dsh 式操作行:hover 浮出,贴气泡下方 -->
                   <div
-                    class="flex items-center gap-3 text-[11px] text-slate-500 h-5 opacity-0 group-hover/msg:opacity-100 transition"
+                    class="flex items-center gap-3 text-[11px] text-[var(--wb-text-3)] h-5 opacity-0 group-hover/msg:opacity-100 transition"
                     :class="m.role === 'user' ? 'justify-end pr-1' : 'pl-1'"
                   >
                     <button
@@ -262,26 +266,26 @@
         </section>
 
         <!-- 右：产物面板（可折叠） -->
-        <section
-          v-if="panelOpen"
-          class="w-72 shrink-0 flex flex-col rounded-xl bg-slate-900/60 border border-slate-700 h-[calc(100vh-160px)]"
-        >
+        <section v-if="panelOpen" class="w-72 shrink-0 flex flex-col border h-[calc(100vh-160px)]">
           <div
-            class="p-3 border-b border-slate-700 text-white font-semibold flex items-center justify-between"
+            class="p-3 border-b border-[var(--wb-stroke)] text-white font-semibold flex items-center justify-between"
           >
             <span
-              ><i class="fas fa-photo-film mr-2 text-tech-blue"></i
+              ><i class="fas fa-photo-film mr-2 text-[var(--wb-accent)]"></i
               >{{ t('workbenchArtifacts') }}</span
             >
           </div>
           <div class="flex-1 overflow-y-auto p-3 space-y-3">
-            <div v-if="artifacts.length === 0" class="text-center text-slate-400 mt-8 text-sm">
+            <div
+              v-if="artifacts.length === 0"
+              class="text-center text-[var(--wb-text-2)] mt-8 text-sm"
+            >
               {{ t('workbenchNoArtifacts') }}
             </div>
             <div
               v-for="(a, i) in artifacts"
               :key="i"
-              class="rounded-lg border border-slate-700 bg-slate-800/50 p-2"
+              class="rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface-deep)] p-2"
             >
               <div class="flex items-center justify-between mb-1">
                 <a-tag
@@ -291,22 +295,22 @@
                 >
                   {{ a.status }}
                 </a-tag>
-                <span class="text-xs text-slate-400 truncate max-w-[140px]">{{
+                <span class="text-xs text-[var(--wb-text-2)] truncate max-w-[140px]">{{
                   a.templateName
                 }}</span>
               </div>
               <!-- 批量任务进度条 -->
               <div v-if="a.batchStatus && a.batchStatus !== 'completed'" class="mb-2">
-                <div class="flex justify-between text-xs text-slate-400 mb-1">
+                <div class="flex justify-between text-xs text-[var(--wb-text-2)] mb-1">
                   <span>{{ t('workbenchBatchProgress') }}</span>
                   <span
                     >{{ a.batchSuccess ?? 0 }}/{{ a.batchTotal ?? '?' }}（失败
                     {{ a.batchFailed ?? 0 }}）</span
                   >
                 </div>
-                <div class="h-1.5 rounded bg-slate-700 overflow-hidden">
+                <div class="h-1.5 rounded bg-[var(--wb-surface-hover)] overflow-hidden">
                   <div
-                    class="h-full bg-tech-blue transition-all"
+                    class="h-full bg-[var(--wb-accent)] transition-all"
                     :style="{ width: (a.batchPercent ?? 0) + '%' }"
                   ></div>
                 </div>
@@ -316,7 +320,7 @@
                 <div
                   v-for="(f, j) in a.files"
                   :key="j"
-                  class="group/file relative aspect-square rounded overflow-hidden bg-slate-900 border border-slate-600 cursor-zoom-in hover:border-tech-blue transition"
+                  class="group/file relative aspect-square rounded overflow-hidden bg-slate-900 border border-[var(--wb-stroke-strong)] cursor-zoom-in hover:border-[var(--wb-accent)] transition"
                   @click="lightboxFile = f"
                 >
                   <img :src="viewUrl(f)" class="w-full h-full object-cover" loading="lazy" />
@@ -360,13 +364,13 @@
                   </a-dropdown>
                 </div>
               </div>
-              <div v-else-if="a.outputs.length" class="text-xs text-slate-300 break-all">
+              <div v-else-if="a.outputs.length" class="text-xs text-[var(--wb-text-2)] break-all">
                 {{ a.outputs.join(' · ') }}
               </div>
               <!-- 卡级操作收敛到每文件 dropdown;此处仅保留批量终态徽标 -->
               <div
                 v-if="a.batchStatus && ['completed', 'stopped', 'failed'].includes(a.batchStatus)"
-                class="mt-2 text-xs text-slate-400"
+                class="mt-2 text-xs text-[var(--wb-text-2)]"
               >
                 {{ a.batchStatus }} · {{ a.batchSuccess ?? 0 }}/{{ a.batchTotal ?? '?' }}
               </div>
@@ -397,34 +401,39 @@
       <div v-if="envLoading" class="py-8 text-center"><a-spin /></div>
       <div v-else-if="envSnapshot" class="space-y-3 py-2">
         <div>
-          <div class="text-xs text-slate-400 mb-1">{{ t('workbenchEnvSkills') }}</div>
+          <div class="text-xs text-[var(--wb-text-2)] mb-1">{{ t('workbenchEnvSkills') }}</div>
           <div class="flex flex-wrap gap-1.5">
             <a-tag v-for="n in envSnapshot.appNames" :key="n" color="blue">{{ n }}</a-tag>
-            <span v-if="!envSnapshot.appNames.length" class="text-xs text-slate-500">—</span>
+            <span v-if="!envSnapshot.appNames.length" class="text-xs text-[var(--wb-text-3)]"
+              >—</span
+            >
           </div>
         </div>
         <div>
-          <div class="text-xs text-slate-400 mb-1">{{ t('workbenchEnvModels') }}</div>
+          <div class="text-xs text-[var(--wb-text-2)] mb-1">{{ t('workbenchEnvModels') }}</div>
           <div v-for="(names, type) in envSnapshot.modelsByType" :key="type" class="text-xs mb-1">
             <span class="text-tech-cyan font-mono">{{ type }}</span
             >：
-            <span class="text-slate-300"
+            <span class="text-[var(--wb-text-2)]"
               >{{ names.slice(0, 12).join('、')
               }}{{ names.length > 12 ? ` 等 ${names.length} 个` : '' }}</span
             >
           </div>
-          <div v-if="!Object.keys(envSnapshot.modelsByType).length" class="text-xs text-slate-500">
+          <div
+            v-if="!Object.keys(envSnapshot.modelsByType).length"
+            class="text-xs text-[var(--wb-text-3)]"
+          >
             —（未配置 modelsDirs 或目录为空）
           </div>
         </div>
         <div class="flex gap-4 text-xs">
-          <span class="text-slate-400"
+          <span class="text-[var(--wb-text-2)]"
             >{{ t('workbenchEnvVram') }}:
             <b class="text-white">{{
               envSnapshot.vramGb ? `约 ${Math.round(envSnapshot.vramGb)}GB` : '—'
             }}</b></span
           >
-          <span class="text-slate-400"
+          <span class="text-[var(--wb-text-2)]"
             >{{ t('workbenchEnvNodes') }}:
             <b class="text-white">{{ envSnapshot.customNodes.length }}</b></span
           >
@@ -434,12 +443,14 @@
             key="nodes"
             :header="`${t('workbenchEnvNodes')} (${envSnapshot.customNodes.length})`"
           >
-            <div class="text-xs text-slate-300 break-all leading-relaxed">
+            <div class="text-xs text-[var(--wb-text-2)] break-all leading-relaxed">
               {{ envSnapshot.customNodes.join('、') || '—' }}
             </div>
           </a-collapse-panel>
         </a-collapse>
-        <p class="text-xs text-slate-500 leading-relaxed border-t border-slate-700 pt-2">
+        <p
+          class="text-xs text-[var(--wb-text-3)] leading-relaxed border-t border-[var(--wb-stroke)] pt-2"
+        >
           {{ t('workbenchEnvHint') }}
         </p>
       </div>
@@ -486,7 +497,7 @@
       @ok="onConfirmOk"
       @cancel="confirmState = null"
     >
-      <p class="text-sm text-slate-300">
+      <p class="text-sm text-[var(--wb-text-2)]">
         {{
           confirmState?.kind === 'delete'
             ? t('workbenchDeleteConfirmBody', { title: confirmState?.session?.title || '' })
@@ -514,7 +525,9 @@
         </a-form-item>
         <a-form-item :label="t('workbenchPublishUi')">
           <a-switch v-model:checked="publishBuildUi" />
-          <span class="ml-2 text-xs text-slate-400">{{ t('workbenchPublishUiHint') }}</span>
+          <span class="ml-2 text-xs text-[var(--wb-text-2)]">{{
+            t('workbenchPublishUiHint')
+          }}</span>
         </a-form-item>
       </a-form>
     </a-modal>
@@ -1330,10 +1343,12 @@ async function onPresetMenu({ key }) {
 }
 
 function messageClass(m) {
-  if (m.role === 'user') return 'bg-tech-blue/90 text-white'
+  if (m.role === 'user')
+    return 'bg-[var(--wb-surface-deep)] text-white border-l-[3px] border-l-[var(--wb-accent)]'
   if (m.kind === 'error') return 'bg-red-900/60 text-red-200'
-  if (m.kind === 'card') return 'bg-slate-800 text-slate-200 border border-slate-600'
-  return 'bg-slate-800/70 text-slate-200'
+  if (m.kind === 'card')
+    return 'bg-[var(--wb-surface-deep)] text-slate-200 border border-[var(--wb-stroke-strong)]'
+  return 'bg-[var(--wb-surface-deep)] text-slate-200 border-l-[3px] border-l-[var(--wb-stroke-strong)]'
 }
 
 // ---------- token 用量展示 ----------
@@ -1472,12 +1487,6 @@ onMounted(() => {
   loadOutputDir()
 })
 </script>
-
-<style scoped>
-.bg-tech-blue\/90 {
-  background-color: rgba(59, 130, 246, 0.9);
-}
-</style>
 
 <style>
 /* 工作台全局小样式（modal 传送 body，需非 scoped） */

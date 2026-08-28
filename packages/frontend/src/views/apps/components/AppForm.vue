@@ -1,6 +1,6 @@
 <template>
   <div class="flex overflow-auto fixed inset-0 justify-center items-start p-4 z-500 bg-black/70">
-    <div class="p-6 w-full max-w-md rounded-xl glass-card">
+    <div class="p-6 w-full max-w-md glass-card" style="border-radius: var(--wb-r-card)">
       <div class="flex justify-between items-center mb-6">
         <div>
           <h3 class="text-xl font-bold text-white">
@@ -106,7 +106,7 @@
         <div class="pt-4">
           <button
             @click="handleSave"
-            class="py-3 w-full font-medium text-white bg-gradient-to-r rounded-lg transition-opacity cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90"
+            class="py-3 w-full font-medium text-white rounded-md transition cursor-pointer btn-comfy-primary"
           >
             {{ currentApp.id ? t('saveApp') : t('createApp') }}
           </button>
@@ -259,7 +259,7 @@ const handleChange = async ({ file }) => {
     // Clone existing template but inject new workflow
     activeTemplate.value = {
       ...JSON.parse(JSON.stringify(currentApp.value.template)),
-      workflow: workflow
+      workflow: workflow,
     }
     showWorkflowModal.value = true
   }
@@ -322,9 +322,10 @@ function compressImageToBase64(file, quality = 0.7, maxSize = 512) {
 
 <style scoped>
 .glass-card {
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(56, 70, 102, 0.4);
-  box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
-  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  background: var(--wb-surface-deep);
+  border: 1px solid var(--wb-stroke);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 </style>

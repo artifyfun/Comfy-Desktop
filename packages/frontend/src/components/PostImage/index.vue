@@ -1,10 +1,5 @@
 <template>
-  <img
-    v-bind="$attrs"
-    :src="imageUrl"
-    @load="handleLoad"
-    @error="handleError"
-  />
+  <img v-bind="$attrs" :src="imageUrl" @load="handleLoad" @error="handleError" />
 </template>
 
 <script setup>
@@ -13,14 +8,14 @@ import { ref, watch, onUnmounted, defineEmits, defineProps } from 'vue'
 const props = defineProps({
   src: {
     type: String,
-    required: true
+    required: true,
   },
   alt: String,
   // 用于 POST 请求的数据
   postData: {
     type: [Object, null],
-    default: () => ({})
-  }
+    default: () => ({}),
+  },
 })
 
 const emit = defineEmits(['load', 'error'])
@@ -40,9 +35,9 @@ const createImageUrl = async () => {
     const response = await fetch(props.src, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       },
-      body: JSON.stringify(props.postData)
+      body: JSON.stringify(props.postData),
     })
 
     if (!response.ok) {
@@ -64,7 +59,7 @@ watch(
   () => {
     createImageUrl()
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 // 处理加载事件

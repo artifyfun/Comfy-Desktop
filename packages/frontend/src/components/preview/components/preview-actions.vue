@@ -25,11 +25,7 @@
       </a-button>
 
       <!-- 更多按钮 -->
-      <a-dropdown
-        :trigger="['click']"
-        v-model:open="isMenuExpanded"
-        :disabled="isDisabled"
-      >
+      <a-dropdown :trigger="['click']" v-model:open="isMenuExpanded" :disabled="isDisabled">
         <a-button :type="isMenuExpanded ? 'primary' : 'default'">
           <template #icon><more-outlined /></template>
           <span class="more-text">{{ t('moreActions') }}</span>
@@ -58,18 +54,13 @@
               <download-outlined class="icon-download" />
               <span class="menu-text">{{ t('download') }}</span>
             </a-menu-item>
-
           </a-menu>
         </template>
       </a-dropdown>
     </div>
 
     <!-- 对话框组件 -->
-    <save-template-dialog
-      ref="saveTemplateDialogRef"
-      :html="html"
-    />
-
+    <save-template-dialog ref="saveTemplateDialogRef" :html="html" />
   </div>
 </template>
 
@@ -90,27 +81,27 @@ import { showError, showSuccess } from '@/utils'
 const props = defineProps({
   html: {
     type: String,
-    required: true
+    required: true,
   },
   isDisabled: {
     type: Boolean,
-    default: false
+    default: false,
   },
   onLoadTemplate: {
     type: Function,
-    required: true
+    required: true,
   },
   isGenerating: {
     type: Boolean,
-    default: false
+    default: false,
   },
   autoRefresh: {
     type: Boolean,
-    default: true
+    default: true,
   },
   onToggleAutoRefresh: {
     type: Function,
-    required: true
+    required: true,
   },
 })
 
@@ -133,7 +124,8 @@ const handleCopyHtml = async () => {
 }
 
 // 下载 HTML 文件
-const handleDownloadHtml = async () => { try {
+const handleDownloadHtml = async () => {
+  try {
     const blob = new Blob([props.html], { type: 'text/html' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

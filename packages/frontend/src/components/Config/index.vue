@@ -104,7 +104,7 @@
                     :disabled="isTesting"
                     class="flex justify-center items-center px-4 py-2.5 mt-3 w-full text-white rounded-lg transition duration-300"
                     :class="{
-                      'bg-gradient-to-r from-tech-blue to-tech-cyan hover:opacity-90': !isTesting,
+                      'btn-comfy-primary': !isTesting,
                       'bg-slate-600 cursor-not-allowed': isTesting,
                     }"
                   >
@@ -273,7 +273,7 @@
                       >
                       <button
                         @click="copyText(mcp.url)"
-                        class="px-3 py-2 text-xs text-white rounded-lg transition duration-200 bg-gradient-to-r from-tech-blue to-tech-cyan hover:opacity-90"
+                        class="px-3 py-2 text-xs text-white rounded-lg transition duration-200 btn-comfy-primary"
                       >
                         <i class="fas fa-copy"></i>
                       </button>
@@ -296,7 +296,7 @@
                       </button>
                       <button
                         @click="copyText(mcp.token)"
-                        class="px-3 py-2 text-xs text-white rounded-lg transition duration-200 bg-gradient-to-r from-tech-blue to-tech-cyan hover:opacity-90"
+                        class="px-3 py-2 text-xs text-white rounded-lg transition duration-200 btn-comfy-primary"
                       >
                         <i class="fas fa-copy"></i>
                       </button>
@@ -326,7 +326,7 @@
                           >
                           <button
                             @click="copyText(snippet.cmd)"
-                            class="absolute top-1.5 right-1.5 px-2 py-1 text-[11px] text-white rounded transition duration-200 bg-gradient-to-r from-tech-blue to-tech-cyan hover:opacity-90"
+                            class="absolute top-1.5 right-1.5 px-2 py-1 text-[11px] text-white rounded transition duration-200 btn-comfy-primary"
                           >
                             <i class="fas fa-copy"></i>
                           </button>
@@ -368,9 +368,7 @@
                     :disabled="ngrokTestLoading"
                     class="flex items-center px-4 py-2.5 mt-3 mb-2 w-full text-white rounded-lg transition duration-300"
                     :class="
-                      ngrokTestLoading
-                        ? 'bg-slate-600 cursor-not-allowed'
-                        : 'bg-gradient-to-r from-tech-blue to-tech-cyan hover:opacity-90'
+                      ngrokTestLoading ? 'bg-slate-600 cursor-not-allowed' : 'btn-comfy-primary'
                     "
                   >
                     <i v-if="ngrokTestLoading" class="mr-2 fas fa-spinner fa-spin"></i>
@@ -454,12 +452,12 @@
                 <div class="flex gap-2 mt-6">
                   <button
                     @click="exportApps"
-                    class="flex relative flex-1 justify-center items-center px-4 py-2.5 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-blue to-tech-cyan hover:opacity-90"
+                    class="flex relative flex-1 justify-center items-center px-4 py-2.5 text-white btn-comfy-primary rounded-md transition"
                   >
                     <i class="mr-2 fas fa-download"></i>{{ t('exportApps') }}
                   </button>
                   <label
-                    class="flex relative flex-1 justify-center items-center px-4 py-2.5 text-white bg-gradient-to-r rounded-lg transition duration-300 cursor-pointer from-tech-cyan to-tech-blue hover:opacity-90"
+                    class="flex relative flex-1 justify-center items-center px-4 py-2.5 text-white btn-comfy-primary rounded-md transition cursor-pointer"
                   >
                     <i class="mr-2 fas fa-upload"></i>{{ t('importApps') }}
                     <input type="file" accept=".json" class="hidden" @change="importApps" />
@@ -473,7 +471,7 @@
                   <div class="grid grid-cols-1 gap-3">
                     <button
                       @click="openRootFolder('')"
-                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
+                      class="flex items-center px-4 py-3 text-white btn-comfy-primary rounded-md transition"
                     >
                       <i class="mr-3 text-xl fas fa-folder-open"></i>
                       <span>{{ t('openRootFolder') }}</span>
@@ -481,7 +479,7 @@
 
                     <button
                       @click="openRootFolder('input')"
-                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-cyan to-tech-blue hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
+                      class="flex items-center px-4 py-3 text-white btn-comfy-primary rounded-md transition"
                     >
                       <i class="mr-3 text-xl fas fa-upload"></i>
                       <span>{{ t('openInputFolder') }}</span>
@@ -489,7 +487,7 @@
 
                     <button
                       @click="openRootFolder('output')"
-                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
+                      class="flex items-center px-4 py-3 text-white btn-comfy-primary rounded-md transition"
                     >
                       <i class="mr-3 text-xl fas fa-download"></i>
                       <span>{{ t('openOutputFolder') }}</span>
@@ -497,7 +495,7 @@
 
                     <button
                       @click="openRootFolder('custom_nodes')"
-                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-cyan to-tech-blue hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
+                      class="flex items-center px-4 py-3 text-white btn-comfy-primary rounded-md transition"
                     >
                       <i class="mr-3 text-xl fas fa-puzzle-piece"></i>
                       <span>{{ t('openPluginsFolder') }}</span>
@@ -505,14 +503,14 @@
 
                     <button
                       @click="openRootFolder('models')"
-                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
+                      class="flex items-center px-4 py-3 text-white btn-comfy-primary rounded-md transition"
                     >
                       <i class="mr-3 text-xl fas fa-cube"></i>
                       <span>{{ t('openModelsFolder') }}</span>
                     </button>
                     <button
                       @click="openCMD('python')"
-                      class="flex items-center px-4 py-3 text-white bg-gradient-to-r rounded-lg transition duration-300 from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
+                      class="flex items-center px-4 py-3 text-white btn-comfy-primary rounded-md transition"
                     >
                       <i class="mr-3 text-xl fa-brands fa-python"></i>
                       <span>{{ t('openPythonVenv') }}</span>
@@ -540,7 +538,7 @@
                       <div class="flex gap-2 mt-2">
                         <button
                           @click="copyCmd"
-                          class="px-3 py-1 text-[11px] text-white bg-gradient-to-r from-tech-blue to-tech-cyan rounded hover:opacity-90 hover:shadow hover:shadow-tech-cyan/20"
+                          class="px-3 py-1 text-[11px] text-white btn-comfy-primary rounded"
                         >
                           {{ t('copyCommand') }}
                         </button>
@@ -556,7 +554,7 @@
               <div class="pt-4" v-if="!['quick', 'mcp'].includes(activeTab)">
                 <button
                   @click="handleClickConfirm"
-                  class="py-3 w-full font-medium text-white bg-gradient-to-r rounded-lg transition cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90 hover:shadow-lg hover:shadow-tech-cyan/20"
+                  class="py-3 w-full font-medium text-white btn-comfy-primary rounded-md transition cursor-pointer"
                 >
                   {{ t('saveSettings') }}
                 </button>
@@ -1044,10 +1042,10 @@ onMounted(async () => {
 .config-modal {
   height: 100%;
   width: 100%;
-  font-family: 'Exo 2', sans-serif;
-  // background: linear-gradient(135deg, #0a0f1f 0%, #0f172a 100%);
+  font-family: var(--wb-font);
+  // background: var(--wb-bg-base);
   min-height: 100vh;
-  color: #e2e8f0;
+  color: var(--wb-text);
   overflow-x: hidden;
   position: fixed;
   left: 0;
@@ -1055,10 +1053,6 @@ onMounted(async () => {
   bottom: 0;
   right: 0;
   z-index: 1000;
-
-  .tech-font {
-    font-family: 'Orbitron', sans-serif;
-  }
 
   .glass-card {
     background: rgba(15, 23, 42, 0.6);
@@ -1106,10 +1100,7 @@ onMounted(async () => {
     left: 0;
     width: 100%;
     height: 100%;
-    background-image:
-      linear-gradient(rgba(56, 70, 102, 0.2) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(56, 70, 102, 0.2) 1px, transparent 1px);
-    background-size: 30px 30px;
+    display: none;
     z-index: -2;
   }
 
@@ -1182,18 +1173,12 @@ onMounted(async () => {
 </style>
 
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700&family=Exo+2:wght@300;400;500;600;700&display=swap');
-
 body {
-  font-family: 'Exo 2', sans-serif;
-  background: linear-gradient(135deg, #0a0f1f 0%, #0f172a 100%);
+  font-family: var(--wb-font);
+  background: var(--wb-bg-base);
   min-height: 100vh;
-  color: #e2e8f0;
+  color: var(--wb-text);
   overflow-x: hidden;
-}
-
-.tech-font {
-  font-family: 'Orbitron', sans-serif;
 }
 
 .glass-card {

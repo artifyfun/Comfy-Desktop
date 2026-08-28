@@ -156,7 +156,9 @@ export function getLatentMetadata(file) {
       const dataView = new DataView(safetensorsData.buffer)
       let header_size = dataView.getUint32(0, true)
       let offset = 8
-      let header = JSON.parse(new TextDecoder().decode(safetensorsData.slice(offset, offset + header_size)))
+      let header = JSON.parse(
+        new TextDecoder().decode(safetensorsData.slice(offset, offset + header_size)),
+      )
       r(header.__metadata__)
     }
 
@@ -253,10 +255,12 @@ export async function importA1111(graph, parameters) {
         if (!embeddings.length) return text
         return text.replaceAll(
           new RegExp(
-            '\\b(' + embeddings.map((e) => e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\b|\\b') + ')\\b',
-            'ig'
+            '\\b(' +
+              embeddings.map((e) => e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\b|\\b') +
+              ')\\b',
+            'ig',
           ),
-          'embedding:$1'
+          'embedding:$1',
         )
       }
 
@@ -390,7 +394,7 @@ export async function importA1111(graph, parameters) {
         },
         seed(v) {
           setWidgetValue(samplerNode, 'seed', +v)
-        }
+        },
       }
 
       for (const opt in opts) {
@@ -407,7 +411,12 @@ export async function importA1111(graph, parameters) {
         setWidgetValue(hrSamplerNode, 'denoise', +(popOpt('denoising strength') || '1'))
       }
 
-      let n = createLoraNodes(positiveNode, positive, { node: clipSkipNode, index: 0 }, { node: ckptNode, index: 0 })
+      let n = createLoraNodes(
+        positiveNode,
+        positive,
+        { node: clipSkipNode, index: 0 },
+        { node: ckptNode, index: 0 },
+      )
       positive = n.text
       n = createLoraNodes(negativeNode, negative, n.prevClip, n.prevModel)
       negative = n.text

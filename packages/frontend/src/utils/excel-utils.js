@@ -26,7 +26,7 @@ export class ExcelProcessor {
       maxRows = 10000, // 最大行数限制
       includeEmptyRows = false, // 是否包含空行
       dateFormat = 'YYYY-MM-DD', // 日期格式
-      numberFormat = 'string' // 数字格式: 'string' | 'number'
+      numberFormat = 'string', // 数字格式: 'string' | 'number'
     } = options
 
     return new Promise((resolve, reject) => {
@@ -39,7 +39,7 @@ export class ExcelProcessor {
             type: 'array',
             cellDates: true, // 自动识别日期
             cellNF: false, // 不包含数字格式
-            cellStyles: false // 不包含样式
+            cellStyles: false, // 不包含样式
           })
 
           // 检查工作表是否存在
@@ -102,9 +102,8 @@ export class ExcelProcessor {
             headers: headers,
             sheetName: sheetName,
             totalRows: processedData.length,
-            originalRange: range
+            originalRange: range,
           })
-
         } catch (error) {
           console.error('Excel文件解析失败:', error)
           reject(error)
@@ -160,10 +159,7 @@ export class ExcelProcessor {
     const month = String(date.getMonth() + 1).padStart(2, '0')
     const day = String(date.getDate()).padStart(2, '0')
 
-    return format
-      .replace('YYYY', year)
-      .replace('MM', month)
-      .replace('DD', day)
+    return format.replace('YYYY', year).replace('MM', month).replace('DD', day)
   }
 
   /**
@@ -186,7 +182,7 @@ export class ExcelProcessor {
             sheetCount: workbook.SheetNames.length,
             fileSize: file.size,
             fileName: file.name,
-            sheets: []
+            sheets: [],
           }
 
           // 获取每个工作表的信息
@@ -199,7 +195,7 @@ export class ExcelProcessor {
               index: index,
               rows: range.e.r + 1,
               columns: range.e.c + 1,
-              range: worksheet['!ref']
+              range: worksheet['!ref'],
             })
           })
 
@@ -230,7 +226,7 @@ export class ExcelProcessor {
     const validTypes = [
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
       'application/vnd.ms-excel', // .xls
-      'application/octet-stream' // 某些系统可能返回这个类型
+      'application/octet-stream', // 某些系统可能返回这个类型
     ]
 
     if (!validTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls)$/i)) {
@@ -251,7 +247,7 @@ export class ExcelProcessor {
     return {
       isValid: errors.length === 0,
       errors,
-      warnings
+      warnings,
     }
   }
 
@@ -263,11 +259,7 @@ export class ExcelProcessor {
    */
   static async exportToExcel(data, fileName = 'export.xlsx', options = {}) {
     const XLSX = await loadXLSX()
-    const {
-      sheetName = 'Sheet1',
-      headers = null,
-      autoWidth = true
-    } = options
+    const { sheetName = 'Sheet1', headers = null, autoWidth = true } = options
 
     try {
       // 创建工作簿
@@ -286,15 +278,15 @@ export class ExcelProcessor {
       // 自动调整列宽
       if (autoWidth) {
         const columnWidths = []
-        sheetData.forEach(row => {
+        sheetData.forEach((row) => {
           row.forEach((cell, index) => {
             const cellLength = String(cell).length
             columnWidths[index] = Math.max(columnWidths[index] || 0, cellLength)
           })
         })
 
-        worksheet['!cols'] = columnWidths.map(width => ({
-          width: Math.min(Math.max(width + 2, 8), 50)
+        worksheet['!cols'] = columnWidths.map((width) => ({
+          width: Math.min(Math.max(width + 2, 8), 50),
         }))
       }
 

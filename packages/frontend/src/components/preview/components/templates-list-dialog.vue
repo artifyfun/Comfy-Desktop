@@ -13,21 +13,14 @@
   >
     <div class="dialog-content">
       <!-- 空状态 -->
-      <div
-        v-if="!templates.length"
-        class="empty-state"
-      >
+      <div v-if="!templates.length" class="empty-state">
         <empty-outlined class="empty-icon" />
         <div class="empty-text">{{ t('noSavedTemplates') }}</div>
       </div>
 
       <!-- 模板列表 -->
       <div v-else class="templates-list">
-        <div
-          v-for="template in templates"
-          :key="template.id"
-          class="template-item"
-        >
+        <div v-for="template in templates" :key="template.id" class="template-item">
           <div class="template-header">
             <div class="template-name">{{ template.name }}</div>
             <div class="template-actions">
@@ -54,10 +47,7 @@
                       <download-outlined class="icon-download" />
                       <span class="menu-text">{{ t('download') }}</span>
                     </a-menu-item>
-                    <a-menu-item
-                      @click="() => handleDeleteTemplate(template)"
-                      danger
-                    >
+                    <a-menu-item @click="() => handleDeleteTemplate(template)" danger>
                       <delete-outlined />
                       <span class="menu-text">{{ t('delete') }}</span>
                     </a-menu-item>
@@ -94,7 +84,7 @@ import {
   FolderOpenOutlined,
   CopyOutlined,
   DownloadOutlined,
-  DeleteOutlined
+  DeleteOutlined,
 } from '@ant-design/icons-vue'
 import { indexedDBService } from '@/services/indexeddb'
 import { t } from '@/utils/i18n'
@@ -103,11 +93,11 @@ import { showError, showSuccess } from '@/utils'
 const props = defineProps({
   open: {
     type: Boolean,
-    default: false
+    default: false,
   },
   onSelect: {
     type: Function,
-    required: true
+    required: true,
   },
 })
 

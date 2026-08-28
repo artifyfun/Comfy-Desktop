@@ -6,9 +6,9 @@
  */
 /* 单元素形态(原生 input / 无缀件 a-input):样式直接命中 */
 .wb-tech-input {
-  background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(56, 70, 102, 0.6);
-  border-radius: 0.5rem;
+  background: var(--wb-surface);
+  border: 1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-ctrl);
   color: #fff;
   transition:
     background 0.3s ease,
@@ -19,9 +19,9 @@
 /* affix-wrapper 形态(allow-clear / 前后缀):外层 wrapper 承载全部视觉,
    内层 input 必须透明无边框,否则双重边框+antd 白底漏出,和搜索框不一致 */
 .wb-tech-input.ant-input-affix-wrapper {
-  background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(56, 70, 102, 0.6);
-  border-radius: 0.5rem;
+  background: var(--wb-surface);
+  border: 1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-ctrl);
   transition:
     background 0.3s ease,
     border-color 0.3s ease,
@@ -38,7 +38,7 @@
 
 .wb-tech-input.ant-input-affix-wrapper .ant-input-prefix,
 .wb-tech-input.ant-input-affix-wrapper .ant-input-suffix {
-  color: #64748b;
+  color: var(--wb-text-3);
 }
 
 /* 与搜索框一致的内边距/字号(antd 默认 padding 偏大,视觉发飘) */

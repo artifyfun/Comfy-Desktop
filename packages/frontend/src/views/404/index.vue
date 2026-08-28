@@ -58,12 +58,12 @@ const goBack = () => {
 <style scoped>
 .error-page {
   min-height: 100vh;
-  background: linear-gradient(135deg, #0a0f1f 0%, #0f172a 100%);
+  background: var(--wb-bg-base);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
-  font-family: 'Exo 2', sans-serif;
+  font-family: var(--wb-font);
 }
 
 .error-container {
@@ -76,13 +76,13 @@ const goBack = () => {
 }
 
 .error-content {
-  color: #e2e8f0;
+  color: var(--wb-text);
 }
 
 .error-number {
   font-size: 120px;
   font-weight: 900;
-  background: linear-gradient(135deg, #06b6d4, #3b82f6);
+  background: var(--wb-accent);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -99,7 +99,7 @@ const goBack = () => {
 
 .error-description {
   font-size: 18px;
-  color: #94a3b8;
+  color: var(--wb-text-2);
   line-height: 1.6;
   margin-bottom: 32px;
 }
@@ -112,13 +112,16 @@ const goBack = () => {
 
 .btn-primary {
   padding: 12px 24px;
-  background: linear-gradient(135deg, #06b6d4, #3b82f6);
+  background: var(--wb-accent);
   color: white;
   border: none;
   border-radius: 8px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.3s ease, box-shadow 0.3s ease, color 0.3s ease;
+  transition:
+    background 0.3s ease,
+    box-shadow 0.3s ease,
+    color 0.3s ease;
 }
 
 .btn-primary:hover {
@@ -128,12 +131,14 @@ const goBack = () => {
 .btn-secondary {
   padding: 12px 24px;
   background: rgba(148, 163, 184, 0.1);
-  color: #e2e8f0;
+  color: var(--wb-text);
   border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 8px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.3s ease, color 0.3s ease;
+  transition:
+    background 0.3s ease,
+    color 0.3s ease;
 }
 
 .btn-secondary:hover {
@@ -154,7 +159,7 @@ const goBack = () => {
 
 .error-suggestions li {
   padding: 8px 0;
-  color: #94a3b8;
+  color: var(--wb-text-2);
   position: relative;
   padding-left: 20px;
 }
@@ -191,7 +196,7 @@ const goBack = () => {
 
 .brush-stroke {
   position: absolute;
-  background: linear-gradient(135deg, #06b6d4, #3b82f6);
+  background: var(--wb-accent);
   border-radius: 50px;
   opacity: 0.6;
   animation: float 6s ease-in-out infinite;
@@ -222,7 +227,8 @@ const goBack = () => {
 }
 
 @keyframes float {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0px) rotate(0deg);
   }
   33% {

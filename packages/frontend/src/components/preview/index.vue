@@ -1,27 +1,15 @@
 <template>
-  <div
-    ref="previewRef"
-    class="preview-container"
-    @click="handleClick"
-  >
+  <div ref="previewRef" class="preview-container" @click="handleClick">
     <iframe
       ref="iframeRef"
       title="output"
-      :class="[
-        'preview-iframe',
-        { 'pointer-events-none': isAiWorking }
-      ]"
+      :class="['preview-iframe', { 'pointer-events-none': isAiWorking }]"
       :srcDoc="formattedHtml"
     />
     <template v-if="showActions && !isAiWorking">
       <div class="preview-actions">
         <div class="button-group">
-          <a-button
-            class="back-button"
-            type="primary"
-            ghost
-            @click="() => setView('editor')"
-          >
+          <a-button class="back-button" type="primary" ghost @click="() => setView('editor')">
             <template #icon><laptop-outlined /></template>
             {{ t('backToEditor') }}
           </a-button>
@@ -58,24 +46,24 @@ import { CDN_URLS } from '@/utils/genPrompt'
 const props = defineProps({
   html: {
     type: String,
-    required: true
+    required: true,
   },
   isAiWorking: {
     type: Boolean,
-    required: false
+    required: false,
   },
   setView: {
     type: Function,
-    required: false
+    required: false,
   },
   setHtml: {
     type: Function,
-    required: false
+    required: false,
   },
   showActions: {
     type: Boolean,
     required: false,
-    default: false
+    default: false,
   },
 })
 
@@ -94,42 +82,56 @@ const timerId = ref(0)
 
 const formattedHtml = computed(() => {
   if (isDevMode) {
-    return throttledHtml.value.replace(CDN_URLS.ARTIFY_LIB, CDN_URLS.ARTIFY_LIB_DEV).replace(CDN_URLS.ARTIFY_LIB_CSS, CDN_URLS.ARTIFY_LIB_CSS_DEV)
+    return throttledHtml.value
+      .replace(CDN_URLS.ARTIFY_LIB, CDN_URLS.ARTIFY_LIB_DEV)
+      .replace(CDN_URLS.ARTIFY_LIB_CSS, CDN_URLS.ARTIFY_LIB_CSS_DEV)
   }
   return throttledHtml.value
 })
 
 // 当HTML内容改变时保存到ref中
-watch(() => props.html, (newHtml) => {
-  htmlRef.value = newHtml
-})
+watch(
+  () => props.html,
+  (newHtml) => {
+    htmlRef.value = newHtml
+  },
+)
 
 // 监测AI生成过程的结束
-watch(() => props.isAiWorking, (newIsAiWorking) => {
-  if (previousIsAiWorkingRef.value && !newIsAiWorking) {
-    throttledHtml.value = htmlRef.value
-    console.log('AI工作结束')
-  }
-  previousIsAiWorkingRef.value = newIsAiWorking
-})
+watch(
+  () => props.isAiWorking,
+  (newIsAiWorking) => {
+    if (previousIsAiWorkingRef.value && !newIsAiWorking) {
+      throttledHtml.value = htmlRef.value
+      console.log('AI工作结束')
+    }
+    previousIsAiWorkingRef.value = newIsAiWorking
+  },
+)
 
 // 防止过于频繁刷新iframe
-watch([() => props.html, () => props.isAiWorking, () => autoRefresh.value], ([newHtml, newIsAiWorking, newAutoRefresh]) => {
-  if (!newAutoRefresh) return
+watch(
+  [() => props.html, () => props.isAiWorking, () => autoRefresh.value],
+  ([newHtml, newIsAiWorking, newAutoRefresh]) => {
+    if (!newAutoRefresh) return
 
-  const throttleTime = newIsAiWorking ? 2000 : 1000
-  const now = Date.now()
+    const throttleTime = newIsAiWorking ? 2000 : 1000
+    const now = Date.now()
 
-  if (now - lastUpdateTimeRef.value >= throttleTime) {
-    throttledHtml.value = newHtml
-    lastUpdateTimeRef.value = now
-  } else {
-    timerId.value = setTimeout(() => {
+    if (now - lastUpdateTimeRef.value >= throttleTime) {
       throttledHtml.value = newHtml
-      lastUpdateTimeRef.value = Date.now()
-    }, throttleTime - (now - lastUpdateTimeRef.value))
-  }
-})
+      lastUpdateTimeRef.value = now
+    } else {
+      timerId.value = setTimeout(
+        () => {
+          throttledHtml.value = newHtml
+          lastUpdateTimeRef.value = Date.now()
+        },
+        throttleTime - (now - lastUpdateTimeRef.value),
+      )
+    }
+  },
+)
 
 // 处理点击事件
 const handleClick = (e) => {
@@ -166,7 +168,7 @@ const handleRefreshIframe = () => {
     }
   }
 
-      console.log('手动刷新预览')
+  console.log('手动刷新预览')
   showInfo(t('refreshPreviewMessage'))
 }
 
@@ -192,7 +194,6 @@ const handleLoadTemplate = (templateHtml) => {
 }
 
 onUnmounted(() => clearTimeout(timerId.value))
-
 </script>
 
 <style lang="less" scoped>

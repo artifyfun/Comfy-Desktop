@@ -8,16 +8,10 @@
       @scroll="handleScroll"
     >
       <!-- 总高度占位 -->
-      <div
-        :style="{ height: totalHeight + 'px' }"
-        class="virtual-scroll-spacer"
-      ></div>
+      <div :style="{ height: totalHeight + 'px' }" class="virtual-scroll-spacer"></div>
 
       <!-- 可见项目容器 -->
-      <div
-        :style="{ transform: `translateY(${offsetY}px)` }"
-        class="virtual-items-container"
-      >
+      <div :style="{ transform: `translateY(${offsetY}px)` }" class="virtual-items-container">
         <transition-group name="card" tag="div" class="space-y-2">
           <div
             v-for="app in visibleApps"
@@ -33,10 +27,7 @@
                 :alt="app.name"
                 class="object-cover w-full h-full"
               />
-              <div
-                v-else
-                class="flex justify-center items-center w-full h-full text-tech-blue"
-              >
+              <div v-else class="flex justify-center items-center w-full h-full text-tech-blue">
                 <i class="text-xl fas fa-robot"></i>
               </div>
             </div>
@@ -49,7 +40,9 @@
                 </h3>
                 <div class="flex items-center space-x-2">
                   <!-- 分类标签 -->
-                  <span class="px-2 py-1 text-xs font-medium rounded-full text-tech-blue bg-tech-blue/10">
+                  <span
+                    class="px-2 py-1 text-xs font-medium rounded-full text-tech-blue bg-tech-blue/10"
+                  >
                     {{ t(app.category) }}
                   </span>
                   <!-- 评分 -->
@@ -96,7 +89,7 @@
               </button>
               <button
                 @click.stop="$emit('install', app)"
-                class="px-3 py-1 text-xs font-medium text-white bg-gradient-to-r rounded-lg transition cursor-pointer from-tech-blue to-tech-cyan hover:opacity-90"
+                class="px-3 py-1 text-xs font-medium text-white rounded-md transition cursor-pointer btn-comfy-primary"
                 :title="t('install')"
               >
                 <i class="mr-1 fas fa-download"></i>
@@ -148,15 +141,15 @@ import { t } from '@/utils/i18n'
 const props = defineProps({
   apps: {
     type: Array,
-    default: () => []
+    default: () => [],
   },
   searchQuery: {
     type: String,
-    default: ''
+    default: '',
   },
   selectedCategory: {
     type: String,
-    default: ''
+    default: '',
   },
 })
 
@@ -188,16 +181,17 @@ const filteredApps = computed(() => {
   // 按搜索关键词过滤
   if (props.searchQuery) {
     const query = props.searchQuery.toLowerCase()
-    filtered = filtered.filter(app =>
-      app.name.toLowerCase().includes(query) ||
-      app.description.toLowerCase().includes(query) ||
-      app.category.toLowerCase().includes(query)
+    filtered = filtered.filter(
+      (app) =>
+        app.name.toLowerCase().includes(query) ||
+        app.description.toLowerCase().includes(query) ||
+        app.category.toLowerCase().includes(query),
     )
   }
 
   // 按分类过滤
   if (props.selectedCategory) {
-    filtered = filtered.filter(app => app.category === props.selectedCategory)
+    filtered = filtered.filter((app) => app.category === props.selectedCategory)
   }
 
   return filtered
@@ -216,7 +210,7 @@ const visibleRange = computed(() => {
 
   return {
     start: Math.max(0, start - bufferSize.value),
-    end: Math.min(filteredApps.value.length, end + bufferSize.value)
+    end: Math.min(filteredApps.value.length, end + bufferSize.value),
   }
 })
 
@@ -377,7 +371,9 @@ onUnmounted(() => {
 }
 
 .card-enter-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
 }
 
 .card-enter-from {

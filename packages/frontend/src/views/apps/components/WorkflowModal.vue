@@ -29,19 +29,18 @@ import { t } from '@/utils/i18n'
 import { showError } from '@/utils'
 import ComfyuiWorkflowEditor from '@/components/ComfyuiWorkflowEditor/index.vue'
 
-
 const props = defineProps({
   show: {
     type: Boolean,
-    default: false
+    default: false,
   },
   template: {
     type: Object,
-    default: () => ({})
+    default: () => ({}),
   },
   name: {
     type: String,
-    default: 'ArtifyLab Workflow'
+    default: 'ArtifyLab Workflow',
   },
 })
 
@@ -109,7 +108,7 @@ const handleSave = async () => {
   }
   .ant-modal-title {
     color: #e2e8f0;
-    font-family: 'Orbitron', sans-serif;
+    font-family: var(--wb-font);
     font-weight: 600;
   }
   .ant-modal-body {

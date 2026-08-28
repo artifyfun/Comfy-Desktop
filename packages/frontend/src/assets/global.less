@@ -34,7 +34,7 @@
   }
   .ant-modal-title {
     color: #e2e8f0;
-    font-family: 'Orbitron', sans-serif;
+    font-family: var(--wb-font);
     font-weight: 600;
   }
   .ant-modal-body {
@@ -74,7 +74,7 @@
   border: 1px solid rgba(56, 70, 102, 0.4);
   border-radius: 12px;
   color: #e2e8f0;
-  font-family: 'Exo 2', sans-serif;
+  font-family: var(--wb-font);
   box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
 }
 
@@ -83,18 +83,18 @@
   border: 1px solid rgba(56, 70, 102, 0.4);
   border-radius: 12px;
   color: #e2e8f0;
-  font-family: 'Exo 2', sans-serif;
+  font-family: var(--wb-font);
   box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
 }
 
 .ant-notification-notice-message {
   color: #e2e8f0;
-  font-family: 'Exo 2', sans-serif;
+  font-family: var(--wb-font);
 }
 
 .ant-notification-notice-description {
   color: #94a3b8;
-  font-family: 'Exo 2', sans-serif;
+  font-family: var(--wb-font);
 }
 
 /* 确保所有 Ant Design Vue 组件都使用统一的字体 */
@@ -117,7 +117,9 @@
   border: 1px solid rgba(56, 70, 102, 0.6) !important;
   color: #e2e8f0 !important;
   border-radius: 8px !important;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease !important;
 }
 
 /* 大号搜索框 wrapper 与右侧按钮严格等高（antd large 默认有 1-2px 偏差） */

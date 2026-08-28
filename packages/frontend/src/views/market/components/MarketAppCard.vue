@@ -8,9 +8,7 @@
 
     <!-- 封面图片 -->
     <div class="overflow-hidden relative mb-4 h-48 rounded-lg app-imageUrl">
-      <div
-        class="absolute inset-0 z-10 bg-gradient-to-t to-transparent from-tech-darker"
-      ></div>
+      <div class="absolute inset-0 z-10 bg-gradient-to-t to-transparent from-[#171718]"></div>
       <div
         class="absolute top-3 right-3 px-2 py-1 text-sm font-medium text-white rounded bg-tech-blue/80"
       >
@@ -47,7 +45,7 @@
       <!-- 安装按钮 -->
       <!-- <div class="pt-3 mt-3 border-t border-slate-700">
         <button
-          class="px-4 py-2 w-full text-sm font-medium text-white bg-gradient-to-r rounded-lg transition duration-300 cursor-pointer from-tech-green to-tech-cyan hover:from-tech-green/80 hover:to-tech-cyan/80"
+          class="px-4 py-2 w-full text-sm font-medium text-white rounded-md transition cursor-pointer btn-comfy-primary"
           @click.stop="$emit('install', app)"
         >
           <i class="mr-2 fas fa-download"></i>
@@ -64,7 +62,7 @@ import { t } from '@/utils/i18n'
 defineProps({
   app: {
     type: Object,
-    required: true
+    required: true,
   },
 })
 
@@ -85,7 +83,10 @@ function formatDate(date) {
   background: rgba(15, 23, 42, 0.6);
   border: 1px solid rgba(56, 70, 102, 0.4);
   box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
-  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .glass-card:hover {

@@ -38,11 +38,13 @@
               </template>
             </a-float-button>
           </a-tooltip> -->
-          <a-tooltip v-if="isElectron && appStore.config.comfyHost && router.currentRoute.value.path === '/'">
+          <a-tooltip
+            v-if="isElectron && appStore.config.comfyHost && router.currentRoute.value.path === '/'"
+          >
             <template #title>{{ t('comfyui') }}</template>
             <a-float-button @click="toComfyuiPage">
               <template #icon>
-                <img src="/comfyui.png" alt="ComfyUI">
+                <img src="/comfyui.png" alt="ComfyUI" />
               </template>
             </a-float-button>
           </a-tooltip>
@@ -103,12 +105,15 @@ const initConfig = async () => {
 }
 
 // 监听语言变化
-watch(() => appStore.config?.lang, (newLang) => {
-  if (newLang) {
-    dayjs.locale(appStore.config.lang === 'zh' ? 'zh-cn' : 'en')
-    setLanguage(newLang)
-  }
-})
+watch(
+  () => appStore.config?.lang,
+  (newLang) => {
+    if (newLang) {
+      dayjs.locale(appStore.config.lang === 'zh' ? 'zh-cn' : 'en')
+      setLanguage(newLang)
+    }
+  },
+)
 
 initConfig()
 
@@ -158,7 +163,6 @@ const toComfyuiPage = () => {
   window.electronAPI.ArtifyLab.loadComfyUI()
   // window.open(appStore.config.comfyHost)
 }
-
 </script>
 
 <style>

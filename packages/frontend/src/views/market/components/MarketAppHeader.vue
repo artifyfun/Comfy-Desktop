@@ -1,13 +1,26 @@
 <template>
   <header class="relative px-4 py-6 mx-auto max-w-7xl sm:px-6 lg:px-8">
-    <div class="flex flex-col space-y-4 md:flex-row md:items-center md:justify-between md:space-y-0">
+    <div
+      class="flex flex-col space-y-4 md:flex-row md:items-center md:justify-between md:space-y-0"
+    >
       <!-- 左侧标题 -->
       <div class="flex items-center space-x-4">
         <div class="flex items-center space-x-3 cursor-pointer" @click="toggleAboutModal">
           <div class="flex justify-center items-center w-10 h-10 rounded-lg">
-            <img src="/favicon_rmbg.png" alt="" />
+            <div
+              class="flex justify-center items-center w-7 h-7 rounded-md"
+              style="
+                background: var(--wb-ink);
+                color: var(--wb-brand);
+                font-weight: 800;
+                font-size: 14px;
+                line-height: 1;
+              "
+            >
+              A
+            </div>
           </div>
-          <h1 class="text-2xl font-bold text-white tech-font">
+          <h1 class="text-2xl font-bold text-white">
             Artify<span class="text-tech-blue">{{ currentLang === 'zh' ? '工坊' : 'Lab' }}</span>
           </h1>
         </div>
@@ -58,11 +71,7 @@
     <!-- About 组件 -->
     <About v-if="showAboutModal" @clickClose="toggleAboutModal" />
     <!-- 配置组件 -->
-    <Config
-      v-if="showConfigModal"
-      @cancel="toggleConfigModal"
-      @confirm="handleUpdateConfig"
-    />
+    <Config v-if="showConfigModal" @cancel="toggleConfigModal" @confirm="handleUpdateConfig" />
   </header>
 </template>
 
@@ -103,8 +112,4 @@ const handleUpdateConfig = async (config) => {
 }
 </script>
 
-<style scoped>
-.tech-font {
-  font-family: 'Orbitron', sans-serif;
-}
-</style>
+<style scoped></style>

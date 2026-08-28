@@ -23,7 +23,7 @@ const editorState = reactive({
   loading: false,
   paramsNodes: props.template.paramsNodes,
   prompt: {},
-  workflow: null
+  workflow: null,
 })
 const playground = ref(null)
 
@@ -53,7 +53,7 @@ const getData = async () => {
   return {
     prompt: editorState.prompt,
     paramsNodes: editorState.paramsNodes,
-    workflow: editorState.workflow || props.template.workflow
+    workflow: editorState.workflow || props.template.workflow,
   }
 }
 
@@ -63,7 +63,7 @@ watch(
   (newTemplate) => {
     editorState.paramsNodes = newTemplate.paramsNodes
   },
-  { deep: true }
+  { deep: true },
 )
 
 onMounted(() => {

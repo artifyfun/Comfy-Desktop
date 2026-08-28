@@ -34,10 +34,7 @@
                         @click="handleClickItem(item)"
                       />
                       <div class="history-item-actions">
-                        <button
-                          @click="handleRemoveItem(item)"
-                          class="delete-button"
-                        >
+                        <button @click="handleRemoveItem(item)" class="delete-button">
                           <i class="fas fa-trash"></i>
                         </button>
                       </div>
@@ -64,19 +61,19 @@ import PostImage from '@/components/PostImage/index.vue'
 
 const props = defineProps({
   workflow: {
-    type: Object
-  }
+    type: Object,
+  },
 })
 
 const t = (key) => {
   return {
     zh: {
       history: '历史记录',
-      noHistoryRecords: '暂无数据'
+      noHistoryRecords: '暂无数据',
     },
     en: {
       history: 'history',
-      noHistoryRecords: 'empty'
+      noHistoryRecords: 'empty',
     },
   }[props.workflow.state.config.lang][key]
 }
@@ -94,23 +91,27 @@ const handleRemoveItem = (item) => {
 }
 
 const getHistoryUrl = (item) => {
-  const imageKey = Object.keys(item.outputs).find(key => {
-    if (['.png', '.jpg', '.jpeg', '.gif', '.webp'].some(subfix => item.outputs[key]?.endsWith?.(subfix))) {
-      return true
-    }
-    return false
-  }) || Object.keys(item.outputs)[0]
+  const imageKey =
+    Object.keys(item.outputs).find((key) => {
+      if (
+        ['.png', '.jpg', '.jpeg', '.gif', '.webp'].some((subfix) =>
+          item.outputs[key]?.endsWith?.(subfix),
+        )
+      ) {
+        return true
+      }
+      return false
+    }) || Object.keys(item.outputs)[0]
   return props.workflow.getImageUrl(item.outputs[imageKey], 'output')
 }
-
 </script>
 
 <style lang="less">
 .history-modal {
   height: 100%;
   width: 100%;
-  font-family: 'Exo 2', sans-serif;
-  background: linear-gradient(135deg, #0a0f1f 0%, #0f172a 100%);
+  font-family: var(--wb-font);
+  background: var(--wb-bg-base);
   min-height: 100vh;
   color: #e2e8f0;
   overflow-x: hidden;
@@ -137,7 +138,9 @@ const getHistoryUrl = (item) => {
     background: rgba(15, 23, 42, 0.6);
     border: 1px solid rgba(56, 70, 102, 0.4);
     box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
-    transition: transform 0.15s ease, border-color 0.15s ease;
+    transition:
+      transform 0.15s ease,
+      border-color 0.15s ease;
     max-width: 90vw;
   }
 
@@ -285,7 +288,9 @@ const getHistoryUrl = (item) => {
   }
 
   .slide-leave-active {
-    transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+    transition:
+      opacity 0.25s ease-out,
+      transform 0.25s ease-out;
   }
 
   .slide-enter-from,

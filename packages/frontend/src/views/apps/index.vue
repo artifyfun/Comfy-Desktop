@@ -12,8 +12,8 @@
       <main class="relative px-4 mx-auto mt-4 max-w-7xl sm:px-6 lg:px-8">
         <!-- 标题区域 -->
         <!-- <div class="mb-10 text-center">
-          <h2 class="mb-4 text-4xl font-bold text-white tech-font md:text-5xl">
-            <span class="text-tech-blue">{{ t('app') }}</span> {{ t('center') }}
+          <h2 class="mb-4 text-4xl font-bold text-white md:text-5xl">
+            <span class="text-[var(--wb-accent)]">{{ t('app') }}</span> {{ t('center') }}
           </h2>
           <p class="mx-auto max-w-2xl text-xl text-slate-300">
             {{ t('exploreFrontierAI') }}
@@ -21,10 +21,10 @@
         </div> -->
         <div class="flex items-center mb-2 space-x-4">
           <div class="flex items-center space-x-2">
-            <div class="w-8 h-8 text-2xl text-tech-blue">
+            <div class="w-8 h-8 text-2xl text-[var(--wb-accent)]">
               <i class="fas fa-home"></i>
             </div>
-            <h1 class="text-2xl font-bold text-white tech-font">{{ t('app') }}{{ t('center') }}</h1>
+            <h1 class="text-2xl font-bold text-white">{{ t('app') }}{{ t('center') }}</h1>
           </div>
         </div>
 
@@ -288,27 +288,14 @@ function deleteHistoryItem(index) {
 .page-container {
   height: 100%;
   width: 100%;
-  font-family: 'Exo 2', sans-serif;
-  background: linear-gradient(135deg, #0a0f1f 0%, #0f172a 100%);
+  font-family: var(--wb-font);
+  background: var(--wb-bg-base);
   min-height: 100vh;
-  color: #e2e8f0;
+  color: var(--wb-text);
   overflow-x: hidden;
 
-  .tech-font {
-    font-family: 'Orbitron', sans-serif;
-  }
-
   .grid-lines {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-image:
-      linear-gradient(rgba(56, 70, 102, 0.2) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(56, 70, 102, 0.2) 1px, transparent 1px);
-    background-size: 30px 30px;
-    z-index: -2;
+    display: none;
   }
 }
 </style>

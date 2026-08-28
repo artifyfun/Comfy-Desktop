@@ -1,14 +1,15 @@
 // 主题色常量
 export const THEME_COLORS = {
-  primary: '#40e0d0',      // tech-blue
-  primaryHover: '#06b6d4', // tech-cyan
-  primaryActive: '#6a11cb', // tech-purple
-  success: '#40e0d0',       // tech-blue
-  warning: '#ec4899',       // tech-pink
-  error: '#ef4444',         // 红色
-  info: '#06b6d4',          // tech-cyan
-  dark: '#0f172a',          // tech-dark
-  darker: '#0a0f1f',        // tech-darker
+  // Comfy 令牌映射(与 theme/comfy.css、utils/antd-theme.js 同值)
+  primary: '#0b8ce9',
+  primaryHover: '#31b9f4',
+  primaryActive: '#31b9f4',
+  success: '#4ade80',
+  warning: '#f0ff41',
+  error: '#f56c6c',
+  info: '#0b8ce9',
+  dark: '#171718',
+  darker: '#0d0d0e',
 }
 
 // 获取主题色
@@ -17,10 +18,15 @@ export const getThemeColor = (colorName) => {
 }
 
 // 获取渐变背景
-export const getGradientBackground = (direction = '135deg', startColor = 'primary', endColor = 'primaryHover') => {
+export const getGradientBackground = (
+  direction = '135deg',
+  startColor = 'primary',
+  endColor = 'primaryHover',
+) => {
   const start = getThemeColor(startColor)
   const end = getThemeColor(endColor)
-  return `linear-gradient(${direction}, ${start} 0%, ${end} 100%)`
+  // 渐变退役(Comfy 无渐变语义):返回实色
+  return start
 }
 
 // 获取阴影样式
@@ -32,9 +38,9 @@ export const getShadowStyle = (color = 'primary', intensity = 0.3) => {
 // 十六进制颜色转RGB
 export const hexToRgb = (hex) => {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
-  return result ?
-    `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}` :
-    '64, 224, 208'
+  return result
+    ? `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}`
+    : '11, 140, 233'
 }
 
 // 获取CSS变量
@@ -99,4 +105,4 @@ export class ThemeUtils {
   static getContrastText(backgroundColor) {
     return getContrastColor(backgroundColor)
   }
-} 
+}

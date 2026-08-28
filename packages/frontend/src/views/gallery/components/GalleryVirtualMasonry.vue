@@ -43,7 +43,9 @@
         >
           <div class="truncate">{{ layout.item.filename }}</div>
           <div class="flex justify-between text-slate-300">
-            <span class="truncate">{{ layout.item.app_name || formatTime(layout.item.created_at) }}</span>
+            <span class="truncate">{{
+              layout.item.app_name || formatTime(layout.item.created_at)
+            }}</span>
             <span class="flex items-center gap-1">
               <i
                 class="cursor-pointer"
@@ -244,7 +246,7 @@ watch(
   () => {
     scheduleLayout()
   },
-  { deep: false }
+  { deep: false },
 )
 
 watch(colWidth, () => layoutAll())

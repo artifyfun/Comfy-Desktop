@@ -20,24 +20,23 @@ import About from '@/components/About/index.vue'
 import { t } from '@/utils/i18n'
 
 const state = reactive({
-  showAboutModal: false
+  showAboutModal: false,
 })
 
 const handleToggleAboutModal = () => {
   state.showAboutModal = !state.showAboutModal
 }
-
 </script>
 
 <style lang="less" scoped>
 .page-container {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+  font-family: var(--wb-font);
+  background: var(--wb-bg-base);
   min-height: 100vh;
   display: flex;
   justify-content: center;
   align-items: center;
-  color: #e0e0ff;
+  color: var(--wb-text);
   padding: 20px;
 
   * {
@@ -57,34 +56,29 @@ const handleToggleAboutModal = () => {
 
   h1 {
     font-size: 3.5rem;
-    background: linear-gradient(90deg, #00dbde, #fc00ff);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-    text-shadow: 0 0 15px rgba(128, 0, 255, 0.3);
+    color: var(--wb-text);
     margin-bottom: 20px;
     letter-spacing: 2px;
   }
 
   .subtitle {
     font-size: 1.2rem;
-    color: #a0a0ff;
+    color: var(--wb-text-2);
     max-width: 600px;
     margin: 0 auto;
     line-height: 1.6;
   }
 
   .btn {
-    background: linear-gradient(45deg, #6a11cb, #2575fc);
+    background: var(--wb-accent);
     color: white;
     border: none;
     padding: 15px 40px;
     font-size: 1.2rem;
-    border-radius: 30px;
+    border-radius: var(--wb-r-ctrl);
     cursor: pointer;
     margin-top: 30px;
-    transition: box-shadow 0.3s ease;
-    box-shadow: 0 5px 15px rgba(37, 117, 252, 0.4);
+    transition: background 0.15s ease;
     position: relative;
     overflow: hidden;
     letter-spacing: 1px;
@@ -92,23 +86,7 @@ const handleToggleAboutModal = () => {
   }
 
   .btn:hover {
-    box-shadow: 0 8px 20px rgba(37, 117, 252, 0.6);
-  }
-
-  .btn::after {
-    content: '';
-    position: absolute;
-    top: -50%;
-    left: 0;
-    width: 20px;
-    height: 200%;
-    background: rgba(255, 255, 255, 0.3);
-    transform: translateX(-300%) rotate(25deg);
-    transition: transform 0.3s ease-out;
-  }
-
-  .btn:hover::after {
-    transform: translateX(1200%) rotate(25deg);
+    background: var(--wb-accent-hover);
   }
 }
 </style>

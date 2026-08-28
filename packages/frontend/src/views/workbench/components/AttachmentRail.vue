@@ -7,7 +7,7 @@
       :class="a.uploading ? 'opacity-60' : ''"
     >
       <div
-        class="w-16 h-16 rounded-lg overflow-hidden bg-slate-800 border border-slate-600 flex items-center justify-center"
+        class="w-16 h-16 rounded-lg overflow-hidden bg-[var(--wb-surface-deep)] border border-[var(--wb-stroke-strong)] flex items-center justify-center"
       >
         <img
           v-if="a.kind === 'image' && a.previewUrl"
@@ -16,8 +16,10 @@
           :alt="a.filename"
         />
         <div v-else class="text-center">
-          <i :class="kindIcon(a.kind)" class="text-xl text-tech-blue"></i>
-          <div class="text-[10px] text-slate-400 mt-0.5 truncate w-14">{{ a.filename }}</div>
+          <i :class="kindIcon(a.kind)" class="text-xl text-[var(--wb-accent)]"></i>
+          <div class="text-[10px] text-[var(--wb-text-2)] mt-0.5 truncate w-14">
+            {{ a.filename }}
+          </div>
         </div>
       </div>
       <span
@@ -27,7 +29,7 @@
         <a-spin size="small" />
       </span>
       <button
-        class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-slate-700 text-white text-xs hidden group-hover:flex items-center justify-center hover:bg-red-500"
+        class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[var(--wb-surface-hover)] text-white text-xs hidden group-hover:flex items-center justify-center hover:bg-red-500"
         @click="$emit('remove', i)"
       >
         <i class="fas fa-times"></i>

@@ -1,16 +1,19 @@
 <template>
-  <header class="relative px-4 py-6 mx-auto max-w-7xl sm:px-6 lg:px-8">
+  <header
+    class="relative px-4 py-3 mx-auto max-w-7xl sm:px-6 lg:px-8"
+    style="min-height: var(--wb-topbar-h)"
+  >
     <div
       class="flex flex-col space-y-4 md:flex-row md:items-center md:justify-between md:space-y-0"
     >
       <!-- 左侧标题 -->
       <div class="flex items-center space-x-4">
         <div class="flex items-center space-x-3 cursor-pointer" @click="toggleAboutModal">
-          <div class="flex justify-center items-center w-10 h-10 rounded-lg">
-            <img src="/favicon_rmbg.png" alt="" />
-          </div>
-          <h1 class="text-2xl font-bold text-white tech-font">
-            Artify<span class="text-tech-blue">{{ currentLang === 'zh' ? '工坊' : 'Lab' }}</span>
+          <div class="flex justify-center items-center w-7 h-7 rounded-md brand-mark">A</div>
+          <h1 class="text-lg font-semibold text-white">
+            Artify<span class="text-slate-400 font-medium">{{
+              currentLang === 'zh' ? '工坊' : 'Lab'
+            }}</span>
           </h1>
         </div>
       </div>
@@ -21,21 +24,21 @@
         <nav class="flex space-x-4" v-if="isElectron">
           <router-link
             :to="firstNavTo"
-            class="px-3 py-2 text-sm font-medium rounded-lg transition duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
+            class="px-3 py-1.5 text-sm font-medium rounded-md transition duration-150 text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]"
           >
             <i :class="firstNavIcon"></i>
             {{ firstNavLabel || t('appCenter') }}
           </router-link>
           <router-link
             to="/gallery"
-            class="px-3 py-2 text-sm font-medium rounded-lg transition duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
+            class="px-3 py-1.5 text-sm font-medium rounded-md transition duration-150 text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]"
           >
             <i class="mr-2 fas fa-images"></i>
             {{ t('gallery') }}
           </router-link>
           <router-link
             to="/workbench"
-            class="px-3 py-2 text-sm font-medium rounded-lg transition duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
+            class="px-3 py-1.5 text-sm font-medium rounded-md transition duration-150 text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]"
           >
             <i class="mr-2 fas fa-wand-magic-sparkles"></i>
             {{ t('workbench') }}
@@ -45,7 +48,7 @@
         <button
           v-if="isElectron"
           @click="toggleLanguage"
-          class="px-3 py-2 text-sm font-medium rounded-lg transition duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
+          class="px-3 py-1.5 text-sm font-medium rounded-md transition duration-150 text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]"
         >
           <i class="mr-2 fas fa-globe"></i>
           {{ currentLang === 'zh' ? 'EN' : '中文' }}
@@ -54,7 +57,7 @@
         <!-- 关于按钮 -->
         <button
           @click="toggleAboutModal"
-          class="px-3 py-2 text-sm font-medium rounded-lg transition duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
+          class="px-3 py-1.5 text-sm font-medium rounded-md transition duration-150 text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]"
         >
           <i class="mr-2 fas fa-info-circle"></i>
           {{ t('about') }}
@@ -64,7 +67,7 @@
         <button
           v-if="isElectron"
           @click="toggleConfigModal"
-          class="px-3 py-2 text-sm font-medium rounded-lg transition duration-300 text-slate-300 hover:text-white hover:bg-slate-800/50"
+          class="px-3 py-1.5 text-sm font-medium rounded-md transition duration-150 text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]"
         >
           <i class="mr-2 fas fa-cog"></i>
           {{ t('settings') }}
@@ -127,7 +130,11 @@ const handleUpdateConfig = async (config) => {
 </script>
 
 <style scoped>
-.tech-font {
-  font-family: 'Orbitron', sans-serif;
+.brand-mark {
+  background: var(--wb-ink);
+  color: var(--wb-brand);
+  font-weight: 800;
+  font-size: 14px;
+  line-height: 1;
 }
 </style>

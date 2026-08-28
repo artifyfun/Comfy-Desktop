@@ -311,9 +311,9 @@ const createImageUrl = async (url) => {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       },
-      body: JSON.stringify({})
+      body: JSON.stringify({}),
     })
 
     if (!response.ok) {
@@ -331,13 +331,13 @@ export async function previewImageFullscreen(url) {
   const imageUrl = await createImageUrl(url)
   // 检查是否已存在预览层
   if (document.getElementById('fullscreen-preview')) {
-    return;
+    return
   }
 
   // 创建样式（如果尚未添加）
   if (!document.getElementById('fullscreen-preview-styles')) {
-    const style = document.createElement('style');
-    style.id = 'fullscreen-preview-styles';
+    const style = document.createElement('style')
+    style.id = 'fullscreen-preview-styles'
     style.textContent = `
           .fullscreen-overlay {
               position: fixed;
@@ -433,99 +433,107 @@ export async function previewImageFullscreen(url) {
                   width: 20px;
               }
           }
-      `;
-    document.head.appendChild(style);
+      `
+    document.head.appendChild(style)
   }
 
   // 创建遮罩层
-  const overlay = document.createElement('div');
-  overlay.id = 'fullscreen-preview';
-  overlay.className = 'fullscreen-overlay';
+  const overlay = document.createElement('div')
+  overlay.id = 'fullscreen-preview'
+  overlay.className = 'fullscreen-overlay'
 
   // 创建图片容器
-  const imageContainer = document.createElement('div');
-  imageContainer.className = 'fullscreen-image-container';
+  const imageContainer = document.createElement('div')
+  imageContainer.className = 'fullscreen-image-container'
 
   // 创建图片元素
-  const image = new Image();
-  image.src = imageUrl;
-  image.className = 'fullscreen-image';
-  image.alt = 'preview';
+  const image = new Image()
+  image.src = imageUrl
+  image.className = 'fullscreen-image'
+  image.alt = 'preview'
 
   // 创建关闭按钮
-  const closeButton = document.createElement('div');
-  closeButton.className = 'close-button';
-  closeButton.title = 'close';
+  const closeButton = document.createElement('div')
+  closeButton.className = 'close-button'
+  closeButton.title = 'close'
 
   // 组装元素
-  imageContainer.appendChild(image);
-  overlay.appendChild(imageContainer);
-  overlay.appendChild(closeButton);
-  document.body.appendChild(overlay);
+  imageContainer.appendChild(image)
+  overlay.appendChild(imageContainer)
+  overlay.appendChild(closeButton)
+  document.body.appendChild(overlay)
 
   // 添加滚动锁定
-  document.body.style.overflow = 'hidden';
+  document.body.style.overflow = 'hidden'
 
   // 关闭函数
   const closePreview = () => {
-    overlay.style.animation = 'none';
-    overlay.style.opacity = '1';
-    overlay.style.animation = 'fadeOut 0.3s forwards';
+    overlay.style.animation = 'none'
+    overlay.style.opacity = '1'
+    overlay.style.animation = 'fadeOut 0.3s forwards'
 
     // 添加淡出动画
-    const fadeOutStyle = document.createElement('style');
+    const fadeOutStyle = document.createElement('style')
     fadeOutStyle.textContent = `
           @keyframes fadeOut {
               to { opacity: 0; }
           }
-      `;
-    document.head.appendChild(fadeOutStyle);
+      `
+    document.head.appendChild(fadeOutStyle)
 
     setTimeout(() => {
-      document.body.removeChild(overlay);
-      document.body.style.overflow = '';
-      document.head.removeChild(fadeOutStyle);
+      document.body.removeChild(overlay)
+      document.body.style.overflow = ''
+      document.head.removeChild(fadeOutStyle)
 
       // 移除事件监听器
-      closeButton.removeEventListener('click', closePreview);
-      overlay.removeEventListener('click', handleOverlayClick);
-      window.removeEventListener('keydown', handleKeyDown);
-    }, 300);
-  };
+      closeButton.removeEventListener('click', closePreview)
+      overlay.removeEventListener('click', handleOverlayClick)
+      window.removeEventListener('keydown', handleKeyDown)
+    }, 300)
+  }
 
   // 点击遮罩层关闭（排除图片和按钮）
   const handleOverlayClick = (e) => {
     if (e.target === overlay) {
-      closePreview();
+      closePreview()
     }
-  };
+  }
 
   // 键盘支持（ESC键关闭）
   const handleKeyDown = (e) => {
     if (e.key === 'Escape' || e.keyCode === 27) {
-      closePreview();
+      closePreview()
     }
-  };
+  }
 
   // 添加事件监听
-  closeButton.addEventListener('click', closePreview);
-  overlay.addEventListener('click', handleOverlayClick);
-  window.addEventListener('keydown', handleKeyDown);
+  closeButton.addEventListener('click', closePreview)
+  overlay.addEventListener('click', handleOverlayClick)
+  window.addEventListener('keydown', handleKeyDown)
 
   // 移动端滑动关闭支持
-  let startY = 0;
-  overlay.addEventListener('touchstart', (e) => {
-    startY = e.touches[0].clientY;
-  }, { passive: true });
+  let startY = 0
+  overlay.addEventListener(
+    'touchstart',
+    (e) => {
+      startY = e.touches[0].clientY
+    },
+    { passive: true },
+  )
 
-  overlay.addEventListener('touchend', (e) => {
-    const endY = e.changedTouches[0].clientY;
-    const diffY = endY - startY;
-    // 快速向下滑动关闭（超过50px）
-    if (diffY > 50) {
-      closePreview();
-    }
-  }, { passive: true });
+  overlay.addEventListener(
+    'touchend',
+    (e) => {
+      const endY = e.changedTouches[0].clientY
+      const diffY = endY - startY
+      // 快速向下滑动关闭（超过50px）
+      if (diffY > 50) {
+        closePreview()
+      }
+    },
+    { passive: true },
+  )
 }
 
 export function getSeed(n) {
@@ -554,48 +562,48 @@ export async function fetchFile({ url, filename, method }) {
     const options = {
       method,
       headers: {
-        'Content-Type': 'application/json' // 根据实际API调整
-      }
+        'Content-Type': 'application/json', // 根据实际API调整
+      },
     }
     if (method === 'POST') {
       // 如果API需要参数，在此处添加
       options.body = JSON.stringify({})
     }
-    const response = await fetch(url, options);
+    const response = await fetch(url, options)
 
     // 2. 检查请求是否成功
     if (!response.ok) {
-      throw new Error(`下载失败: ${response.status} ${response.statusText}`);
+      throw new Error(`下载失败: ${response.status} ${response.statusText}`)
     }
 
     // 3. 获取Blob数据
-    const blob = await response.blob();
+    const blob = await response.blob()
 
     // 4. 创建临时下载链接
-    const blobUrl = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = blobUrl;
-    link.download = filename || 'download.jpg'; // 默认文件名
+    const blobUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = blobUrl
+    link.download = filename || 'download.jpg' // 默认文件名
 
     // 5. 触发下载
-    document.body.appendChild(link);
-    link.click();
+    document.body.appendChild(link)
+    link.click()
 
     // 6. 清理资源
     setTimeout(() => {
-      document.body.removeChild(link);
-      URL.revokeObjectURL(blobUrl);
-    }, 100);
+      document.body.removeChild(link)
+      URL.revokeObjectURL(blobUrl)
+    }, 100)
   } catch (error) {
-    console.error('图片下载失败:', error);
-    throw error; // 可根据需求改为友好提示
+    console.error('图片下载失败:', error)
+    throw error // 可根据需求改为友好提示
   }
 }
 
 // 提示框生成函数
 export function createGlassAlert(message, title = '提示') {
   // 创建遮罩层
-  const overlay = document.createElement('div');
+  const overlay = document.createElement('div')
   overlay.style.cssText = `
       position: fixed;
       top: 0;
@@ -610,10 +618,10 @@ export function createGlassAlert(message, title = '提示') {
       opacity: 0;
       animation: fadeIn 0.4s forwards;
       backdrop-filter: blur(4px);
-  `;
+  `
 
   // 创建玻璃拟态弹窗
-  const alertBox = document.createElement('div');
+  const alertBox = document.createElement('div')
   alertBox.style.cssText = `
       background: rgba(15, 23, 42, 0.65);
       backdrop-filter: blur(12px);
@@ -626,29 +634,29 @@ export function createGlassAlert(message, title = '提示') {
       transform: translateY(20px);
       opacity: 0;
       animation: slideIn 0.4s 0.1s forwards;
-  `;
+  `
 
   // 创建标题栏
-  const header = document.createElement('div');
+  const header = document.createElement('div')
   header.style.cssText = `
       padding: 20px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       border-bottom: 1px solid rgba(56, 70, 102, 0.4);
-  `;
+  `
 
-  const titleEl = document.createElement('h3');
+  const titleEl = document.createElement('h3')
   titleEl.style.cssText = `
       font-size: 1.4rem;
       color: #f8fafc;
       font-weight: 600;
       margin: 0;
-  `;
-  titleEl.textContent = title;
+  `
+  titleEl.textContent = title
 
-  const closeBtn = document.createElement('button');
-  closeBtn.innerHTML = ``;
+  const closeBtn = document.createElement('button')
+  closeBtn.innerHTML = ``
   closeBtn.style.cssText = `
       background: rgba(56, 70, 102, 0.5);
       border: none;
@@ -662,38 +670,38 @@ export function createGlassAlert(message, title = '提示') {
       align-items: center;
       justify-content: center;
       transition: all 0.2s;
-  `;
+  `
   closeBtn.onmouseenter = () => {
-    closeBtn.style.background = 'rgba(239, 68, 68, 0.8)';
-    closeBtn.style.color = 'white';
-  };
+    closeBtn.style.background = 'rgba(239, 68, 68, 0.8)'
+    closeBtn.style.color = 'white'
+  }
   closeBtn.onmouseleave = () => {
-    closeBtn.style.background = 'rgba(56, 70, 102, 0.5)';
-    closeBtn.style.color = '#94a3b8';
-  };
+    closeBtn.style.background = 'rgba(56, 70, 102, 0.5)'
+    closeBtn.style.color = '#94a3b8'
+  }
 
   // 创建内容区域
-  const content = document.createElement('div');
+  const content = document.createElement('div')
   content.style.cssText = `
       padding: 30px 20px;
       font-size: 1.1rem;
       line-height: 1.6;
       color: #e2e8f0;
       text-align: center;
-  `;
-  content.textContent = message;
+  `
+  content.textContent = message
 
   // 创建操作按钮
-  const actions = document.createElement('div');
+  const actions = document.createElement('div')
   actions.style.cssText = `
       padding: 20px;
       display: flex;
       justify-content: center;
       border-top: 1px solid rgba(56, 70, 102, 0.4);
-  `;
+  `
 
-  const confirmBtn = document.createElement('button');
-  confirmBtn.textContent = 'Ok';
+  const confirmBtn = document.createElement('button')
+  confirmBtn.textContent = 'Ok'
   confirmBtn.style.cssText = `
       background: linear-gradient(to right, #0ea5e9, #6366f1);
       color: white;
@@ -705,44 +713,44 @@ export function createGlassAlert(message, title = '提示') {
       transition: all 0.3s ease;
       box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
       font-weight: 500;
-  `;
+  `
   confirmBtn.onmouseenter = () => {
-    confirmBtn.style.transform = 'translateY(-2px)';
-    confirmBtn.style.boxShadow = '0 6px 20px rgba(37, 99, 235, 0.6)';
-  };
+    confirmBtn.style.transform = 'translateY(-2px)'
+    confirmBtn.style.boxShadow = '0 6px 20px rgba(37, 99, 235, 0.6)'
+  }
   confirmBtn.onmouseleave = () => {
-    confirmBtn.style.transform = 'translateY(0)';
-    confirmBtn.style.boxShadow = '0 4px 15px rgba(37, 99, 235, 0.4)';
-  };
+    confirmBtn.style.transform = 'translateY(0)'
+    confirmBtn.style.boxShadow = '0 4px 15px rgba(37, 99, 235, 0.4)'
+  }
 
   // 添加关闭功能
   const closeAlert = () => {
-    alertBox.style.animation = 'slideOut 0.3s forwards';
-    overlay.style.animation = 'fadeOut 0.3s forwards';
+    alertBox.style.animation = 'slideOut 0.3s forwards'
+    overlay.style.animation = 'fadeOut 0.3s forwards'
 
     setTimeout(() => {
-      document.body.removeChild(overlay);
-      document.body.style.overflow = '';
-    }, 300);
-  };
+      document.body.removeChild(overlay)
+      document.body.style.overflow = ''
+    }, 300)
+  }
 
-  closeBtn.onclick = closeAlert;
-  confirmBtn.onclick = closeAlert;
+  closeBtn.onclick = closeAlert
+  confirmBtn.onclick = closeAlert
 
   // 组装元素
-  header.appendChild(titleEl);
-  header.appendChild(closeBtn);
-  actions.appendChild(confirmBtn);
+  header.appendChild(titleEl)
+  header.appendChild(closeBtn)
+  actions.appendChild(confirmBtn)
 
-  alertBox.appendChild(header);
-  alertBox.appendChild(content);
-  alertBox.appendChild(actions);
-  overlay.appendChild(alertBox);
+  alertBox.appendChild(header)
+  alertBox.appendChild(content)
+  alertBox.appendChild(actions)
+  overlay.appendChild(alertBox)
 
   // 添加全局样式
   if (!document.getElementById('glass-alert-styles')) {
-    const style = document.createElement('style');
-    style.id = 'glass-alert-styles';
+    const style = document.createElement('style')
+    style.id = 'glass-alert-styles'
     style.textContent = `
           @keyframes fadeIn {
               from { opacity: 0; }
@@ -760,11 +768,11 @@ export function createGlassAlert(message, title = '提示') {
               from { transform: translateY(0); opacity: 1; }
               to { transform: translateY(20px); opacity: 0; }
           }
-      `;
-    document.head.appendChild(style);
+      `
+    document.head.appendChild(style)
   }
 
   // 添加到文档并阻止背景滚动
-  document.body.appendChild(overlay);
-  document.body.style.overflow = 'hidden';
+  document.body.appendChild(overlay)
+  document.body.style.overflow = 'hidden'
 }

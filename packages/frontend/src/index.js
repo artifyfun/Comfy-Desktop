@@ -16,18 +16,14 @@ const ArtifyLib = {
   install(app) {
     app.component('HistoryModal', HistoryModal)
     app.component('PostImage', PostImage)
-  }
+  },
 }
 
 // 导出插件作为默认导出
 export default ArtifyLib
 
 // 导出单个组件和composables
-export {
-  HistoryModal,
-  PostImage,
-  useWorkflow
-}
+export { HistoryModal, PostImage, useWorkflow }
 
 // 导出插件安装方法
 export { ArtifyLib }

@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <a-spin :spinning="appStore.isLoading">
-      <Preview style="margin: 0;" v-bind="previewProps" />
+      <Preview style="margin: 0" v-bind="previewProps" />
     </a-spin>
   </div>
 </template>
@@ -27,9 +27,9 @@ async function unloadModel() {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      "unload_models": true,
-      "free_memory": true
-    })
+      unload_models: true,
+      free_memory: true,
+    }),
   })
 
   if (!response.ok) {
