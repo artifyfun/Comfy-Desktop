@@ -191,6 +191,17 @@
                       ></i>
                     </button>
                     <span class="text-slate-600">{{ timeLabel(m.createdAt) }}</span>
+                    <!-- token 用量:仅该会话最后一轮 AI 回复显示(↑输入 ↓输出) -->
+                    <span
+                      v-if="usageFor(m)"
+                      class="text-slate-600 tabular-nums"
+                      :title="usageTitle(usageFor(m))"
+                    >
+                      <i class="fas fa-arrow-up text-[9px]"></i
+                      >{{ fmtTokens(usageFor(m).inputTokens) }}
+                      <i class="fas fa-arrow-down text-[9px] ml-1"></i
+                      >{{ fmtTokens(usageFor(m).outputTokens) }}
+                    </span>
                     <!-- 分支导航:该消息存在兄弟变体时显示 ‹ v/N › -->
                     <span v-if="m._variants > 1" class="flex items-center gap-1">
                       <button
@@ -624,6 +635,7 @@ async function selectSession(s) {
   const json = await res.json()
   if (!res.ok || !json?.success) return
   const session = json.data
+  curSession.value = session
   messages.value = session.messages ?? []
   artifacts.value = [...(session.executions ?? [])].reverse().map((e) => ({
     promptId: e.promptId,
@@ -1322,6 +1334,25 @@ function messageClass(m) {
   if (m.kind === 'error') return 'bg-red-900/60 text-red-200'
   if (m.kind === 'card') return 'bg-slate-800 text-slate-200 border border-slate-600'
   return 'bg-slate-800/70 text-slate-200'
+}
+
+// ---------- token 用量展示 ----------
+const curSession = ref(null)
+
+function usageFor(m) {
+  if (m.kind !== 'chat' || m.role !== 'agent') return null
+  const u = curSession.value?.turnUsages ?? []
+  return u.length ? u[u.length - 1] : null
+}
+
+function usageTitle(u) {
+  return `输入 ${u.inputTokens}（缓存 ${u.cachedInputTokens}）· 输出 ${u.outputTokens}（思考 ${u.reasoningOutputTokens}）`
+}
+
+function fmtTokens(n) {
+  if (n >= 10000) return (n / 1000).toFixed(0) + 'k'
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k'
+  return String(n)
 }
 
 // ---------- 日期分隔与时间标签（dsh 同款） ----------

@@ -73,6 +73,8 @@ export type WorkbenchMessageKind =
   | 'error'
   | 'invalid'
   | 'title'
+  /** decide 过程条目(reasoning/命令/文件/搜索/todo/mcp),完整 ThreadItem 快照 */
+  | 'tool_item'
 
 export interface WorkbenchMessage {
   role: 'user' | 'agent' | 'system'
@@ -90,7 +92,18 @@ export interface WorkbenchMessage {
   /** v2：完整产物引用（/view 直出缩略图） */
   outputFiles?: WorkbenchOutputFile[]
   attachments?: AttachmentMeta[]
+  /** kind='tool_item' 时的 codex ThreadItem 完整快照 */
+  toolItem?: unknown
   createdAt: number
+}
+
+/** 单轮 token 用量（turn.completed.usage 快照） */
+export interface TurnUsage {
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  reasoningOutputTokens: number
+  at: number
 }
 
 /** 产物文件引用（gallery /view 直出缩略图所需的完整定位） */
@@ -139,6 +152,8 @@ export interface WorkbenchSession {
   activeLeaf?: number
   /** 上次分支操作时间(侧栏「已编辑」徽标用,可选) */
   lastBranchAt?: number
+  /** 每轮 token 用量(轮次序 append;与激活分支无关,会话级累计) */
+  turnUsages?: TurnUsage[]
   executions: WorkbenchExecution[]
   /** 创建时选定，会话期锁定（dsh agent-preset 语义） */
   presetId?: string
@@ -320,6 +335,15 @@ class WorkbenchService {
     this.flush()
   }
 
+  /** 会话级 token 用量追加(turn.completed) */
+  appendTurnUsage(sessionId: string, usage: TurnUsage): void {
+    const session = this.getSession(sessionId)
+    if (!session) return
+    if (!session.turnUsages) session.turnUsages = []
+    session.turnUsages.push(usage)
+    this.flush()
+  }
+
   /** 当前激活分支路径(根→叶下标序列);旧线性数据直接全量返回 */
   activePath(sessionId: string): number[] {
     const session = this.getSession(sessionId)
@@ -467,10 +491,12 @@ class WorkbenchService {
       null,
       1
     )
-    // 分支树(dsh 同款):decide 历史只走当前激活分支
+    // 分支树(dsh 同款):decide 历史只走当前激活分支;
+    // 过程条目(tool_item/card/progress)不回灌,只取对话语义消息,防上下文爆炸
     const recent = this.activePath(session.id)
-      .slice(-8)
       .map((i) => session.messages[i]!)
+      .filter((m) => m.kind === 'chat' || m.kind === 'error')
+      .slice(-8)
       .map((m) => `${m.role}: ${m.text.slice(0, 200)}`)
       .join('\n')
     const lastExec = this.lastExecution(session.id)

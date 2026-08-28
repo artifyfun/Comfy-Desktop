@@ -423,8 +423,51 @@ export function createWorkbenchRouter(): express.Router {
         (p) => {
           // codex 结构化条目流透传（工具调用/文件改动/搜索/reasoning 实时可见，
           // 抄 codex app-server 条目驱动模型）；普通 log 不再逐次刷「deciding」
-          if (p.type === 'thread_event') {
-            send('item', { event: p.event })
+          if (p.type !== 'thread_event') return
+          send('item', { event: p.event })
+          const evt = p.event as {
+            type?: string
+            item?: Record<string, unknown>
+            error?: { message?: string }
+            usage?: Record<string, number>
+          }
+          // 过程持久化:item.completed 才落盘(in_progress 的中间抖动不存)
+          if (evt.type === 'item.completed' && evt.item) {
+            const item = evt.item
+            // agent_message 是 PLAN 原文,不作为过程条目重复落盘
+            if (item.type === 'agent_message') return
+            workbenchService.appendMessage(sessionId, {
+              role: 'agent',
+              kind: 'tool_item',
+              text: '',
+              toolItem: item
+            })
+          }
+          // 条目级错误(item.completed error 之外的显式 error item)
+          if (evt.type === 'item.started' && evt.item?.type === 'error') {
+            workbenchService.appendMessage(sessionId, {
+              role: 'agent',
+              kind: 'error',
+              text: String((evt.item as { message?: string }).message ?? 'item error')
+            })
+          }
+          // 轮级失败:必留痕(否则用户只看到自己气泡,无任何反馈)
+          if (evt.type === 'turn.failed') {
+            workbenchService.appendMessage(sessionId, {
+              role: 'agent',
+              kind: 'error',
+              text: `turn failed: ${evt.error?.message ?? 'unknown'}`
+            })
+          }
+          // token 用量:轮完成时入会话
+          if (evt.type === 'turn.completed' && evt.usage) {
+            workbenchService.appendTurnUsage(sessionId, {
+              inputTokens: Number(evt.usage.input_tokens ?? 0),
+              cachedInputTokens: Number(evt.usage.cached_input_tokens ?? 0),
+              outputTokens: Number(evt.usage.output_tokens ?? 0),
+              reasoningOutputTokens: Number(evt.usage.reasoning_output_tokens ?? 0),
+              at: Date.now()
+            })
           }
         },
         attachments ?? []
