@@ -169,6 +169,8 @@ interface SessionStore {
   presets?: WorkbenchPreset[]
   presetDefault?: string
   favorites?: WorkbenchFavorite[]
+  /** 跨会话长期记忆(dsh memory 语义):key 幂等,工作台可自我更新 */
+  memories?: Record<string, { value: string; updatedAt: number }>
 }
 
 const MAX_SESSIONS = 50
@@ -333,6 +335,43 @@ class WorkbenchService {
     session.activeLeaf = msgs.length - 1
     session.updatedAt = Date.now()
     this.flush()
+  }
+
+  // ---------------- 跨会话长期记忆（dsh memory 语义） ----------------
+
+  listMemories(): Record<string, { value: string; updatedAt: number }> {
+    return { ...(this.store.memories ?? {}) }
+  }
+
+  /** 写入/更新(幂等,同 key 覆盖);工作台自我更新与用户指令共用此口 */
+  rememberMemory(key: string, value: string): void {
+    const k = key.trim().slice(0, 64)
+    if (!k) throw new Error('memory key 不能为空')
+    this.store.memories = {
+      ...(this.store.memories ?? {}),
+      [k]: { value: value.trim().slice(0, 500), updatedAt: Date.now() }
+    }
+    this.flush()
+  }
+
+  forgetMemory(key: string): boolean {
+    if (!this.store.memories || !(key in this.store.memories)) return false
+    const next = { ...this.store.memories }
+    delete next[key]
+    this.store.memories = next
+    this.flush()
+    return true
+  }
+
+  /** decide spec 的「用户长期记忆」注入段(空记忆返回空串) */
+  renderMemoryContext(): string {
+    const entries = Object.entries(this.store.memories ?? {})
+    if (entries.length === 0) return ''
+    const lines = entries
+      .sort((a, b) => b[1].updatedAt - a[1].updatedAt)
+      .slice(0, 20)
+      .map(([k, v]) => `- ${k}: ${v.value}`)
+    return `\n## 用户长期记忆（跨会话持久,可直接引用;需更新时用 intent=memory）\n${lines.join('\n')}`
   }
 
   /** 会话级 token 用量追加(turn.completed) */
@@ -527,6 +566,14 @@ class WorkbenchService {
     const titleRule = `
 ## 标题（可选）
 若为首条消息，可在 JSON 中加 "title":"≤15字会话标题"。`
+    // 跨会话记忆注入(dsh memory 语义):读取段 + 自我更新授权
+    const memorySection = this.renderMemoryContext()
+    const memoryRule = `
+## 长期记忆（intent=memory）
+用户表达可跨会话保留的偏好/事实（「以后都用...」「记住我喜欢...」「我的显卡是...」）时：
+{"intent":"memory","memory":{"action":"remember","key":"短标签(英文-kebab,如 preferred-style)","value":"一句话内容"},"reply":"向用户确认记住了什么"}
+用户要求忘掉某事（「别再用...」「忘掉...」）时 action=forget（只需 key；不匹配任何键时用最接近的键并在 reply 说明）。
+环境快照/会话近史与你已知记忆冲突时，以用户新表述为准主动 remember 更新同 key。`
     // 自我认知 + 环境快照（AGENTS.md 语义：常驻能力说明与本地环境感知）
     let envSection = ''
     try {
@@ -537,21 +584,21 @@ class WorkbenchService {
     }
     return `${SELF_KNOWLEDGE_TEXT}${envSection}
 根据用户需求从模板库选择模板并填参数，输出**只含一个 JSON 对象**（无 markdown 代码块、无解释文字）：
-{"intent":"image|video|audio|text|chat","templateId":"...","params":{...},"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text 时直接给用户的回复","title":"仅首条消息时提供"}
+{"intent":"image|video|audio|text|chat|memory","templateId":"...","params":{...},"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text/memory 时直接给用户的回复","memory":{"action":"remember|forget","key":"...","value":"remember 时必填"},"title":"仅首条消息时提供"}
 
 规则：
 1. intent=image/video/audio 必须从下列模板中选 templateId，params 只用模板声明的参数，数值遵守 min/max，枚举必须完全匹配可选值。
 2. intent=text 走纯文本生成（文案/起名/总结等），把生成结果放 reply。
 3. intent=chat 用于追问澄清或闲聊，回复放 reply。
-4. 模板库为空或不匹配时选 chat 并说明。
+4. 模板库为空或不匹配时选 chat 并说明。3.5 可跨会话保留的偏好/事实用 intent=memory（见「长期记忆」段）。
 5. 用户上传了素材时，倾向选择带媒体输入参数的模板（图生图/视频驱动），参数值填素材文件名（已上传）。
-6. 存在「会话预设约束」段落时，其 intent 限制是**硬性规则**，违反的输出会被系统直接拒绝——你必须输出该 intent。${chainHint}${constraint}${attachmentHint}${docHint}${batchRule}${shortcutHint}${titleRule}
+6. 存在「会话预设约束」段落时，其 intent 限制是**硬性规则**，违反的输出会被系统直接拒绝——你必须输出该 intent。${chainHint}${constraint}${attachmentHint}${docHint}${batchRule}${shortcutHint}${titleRule}${memoryRule}
 
 ## 模板库
 ${catalog}
 
 ## 会话近史
-${recent || '（空）'}
+${recent || '（空）'}${memorySection}
 
 ## 用户需求
 ${userInput}`
@@ -703,7 +750,13 @@ ${userInput}`
     // 会话预设意图约束：codex 违反时本地校验会拦（下面 validatePlanLocal 前
     // 先人工补一条 issue，给出明确错误指向预设）
     const presetIssues: PlanValidationIssue[] = []
-    if (preset?.intentHint && plan.intent !== preset.intentHint) {
+    if (
+      preset?.intentHint &&
+      plan.intent !== preset.intentHint &&
+      plan.intent !== 'memory' &&
+      plan.intent !== 'chat' &&
+      plan.intent !== 'text'
+    ) {
       presetIssues.push({
         field: 'intent',
         message: `预设 ${preset.id} 锁定 intent=${preset.intentHint}，但决策为 ${plan.intent}`

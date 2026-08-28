@@ -11,9 +11,20 @@ import { logger } from '../utils/logger'
 
 /** codex 决策输出的结构化执行计划 */
 export interface WorkbenchPlan {
-  intent: 'image' | 'video' | 'audio' | 'text' | 'chat'
-  /** intent=chat 时直接回复用户；其余意图必须带模板与参数 */
+  intent: 'image' | 'video' | 'audio' | 'text' | 'chat' | 'memory'
+  /** intent=chat/text/memory 时直接回复用户；执行意图必须带模板与参数 */
   reply?: string
+  /**
+   * intent=memory 时的记忆操作:dsh 长期记忆语义。
+   * remember=写入/更新(按 key 幂等),forget=按 key 删除
+   */
+  memory?: {
+    action: 'remember' | 'forget'
+    /** 记忆键(短标签,如 preferred-style / negative-prompt / hardware) */
+    key: string
+    /** action=remember 时的内容(一句话,≤500 字) */
+    value?: string
+  }
   templateId?: string
   params?: Record<string, unknown>
   /** 会话内链式：引用上一次执行的产物（图→视频） */
@@ -195,6 +206,21 @@ export function validatePlanLocal(
   if (plan.intent === 'chat') {
     if (!plan.reply || !plan.reply.trim()) {
       issues.push({ field: 'reply', message: 'chat 意图必须带 reply' })
+    }
+    return { ok: issues.length === 0, issues }
+  }
+  if (plan.intent === 'memory') {
+    if (!plan.memory) {
+      issues.push({ field: 'memory', message: 'memory 意图必须带 memory 操作' })
+    } else {
+      if (plan.memory.action !== 'remember' && plan.memory.action !== 'forget')
+        issues.push({ field: 'memory.action', message: 'action 只能是 remember 或 forget' })
+      if (!plan.memory.key || !plan.memory.key.trim())
+        issues.push({ field: 'memory.key', message: '必须带记忆 key（短标签）' })
+      if (plan.memory.action === 'remember' && !plan.memory.value?.trim())
+        issues.push({ field: 'memory.value', message: 'remember 必须带 value' })
+      if ((plan.memory.value ?? '').length > 500)
+        issues.push({ field: 'memory.value', message: 'value 超 500 字' })
     }
     return { ok: issues.length === 0, issues }
   }

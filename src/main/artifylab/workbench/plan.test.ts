@@ -217,3 +217,32 @@ describe('parsePlanFromCodexText（真实 decide 输出形态回归）', () => {
     expect(parsePlanFromCodexText(JSON.stringify({ type: 'turn.failed', error: 'x' }))).toBeNull()
   })
 })
+
+describe('memory intent 校验', () => {
+  it('remember 合法通过', () => {
+    const r = validatePlanLocal(
+      {
+        intent: 'memory',
+        memory: { action: 'remember', key: 'preferred-style', value: '赛博朋克风' }
+      },
+      []
+    )
+    expect(r.ok).toBe(true)
+  })
+  it('remember 缺 value 拒绝', () => {
+    const r = validatePlanLocal({ intent: 'memory', memory: { action: 'remember', key: 'x' } }, [])
+    expect(r.ok).toBe(false)
+    expect(r.issues.some((i) => i.field === 'memory.value')).toBe(true)
+  })
+  it('forget 缺 key 拒绝', () => {
+    const r = validatePlanLocal({ intent: 'memory', memory: { action: 'forget', key: '' } }, [])
+    expect(r.ok).toBe(false)
+  })
+  it('value 超 500 字拒绝', () => {
+    const r = validatePlanLocal(
+      { intent: 'memory', memory: { action: 'remember', key: 'x', value: '长'.repeat(501) } },
+      []
+    )
+    expect(r.ok).toBe(false)
+  })
+})

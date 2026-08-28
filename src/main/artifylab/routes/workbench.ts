@@ -251,6 +251,11 @@ export function createWorkbenchRouter(): express.Router {
     )
   })
 
+  // 跨会话长期记忆:读取(前端可展示/管理);写入走 decide 的 memory intent
+  router.get('/api/workbench/memories', (_req, res) => {
+    res.json(createSuccessResponse(workbenchService.listMemories()))
+  })
+
   router.post('/api/workbench/favorites', async (req: Request, res) => {
     try {
       const { sessionId, promptId, file, note } = req.body as {
@@ -494,6 +499,31 @@ export function createWorkbenchRouter(): express.Router {
         const errText = `PLAN 无效：${local.issues.map((i) => i.message).join('；')}`
         workbenchService.appendMessage(sessionId, { role: 'agent', kind: 'error', text: errText })
         send('invalid', { issues: local.issues })
+        finish()
+        return
+      }
+      // 长期记忆(dsh memory 语义):执行 remember/forget,确认消息落盘
+      if (plan.intent === 'memory' && plan.memory) {
+        const { action, key, value } = plan.memory
+        let ok = false
+        if (action === 'remember') {
+          workbenchService.rememberMemory(key, value ?? '')
+          ok = true
+        } else {
+          ok = workbenchService.forgetMemory(key)
+        }
+        const confirmText =
+          action === 'remember'
+            ? `已记住【${key}】：${value}`
+            : ok
+              ? `已忘掉【${key}】`
+              : `没有找到记忆【${key}】，未删除任何内容`
+        workbenchService.appendMessage(sessionId, {
+          role: 'agent',
+          kind: 'chat',
+          text: confirmText
+        })
+        send('reply', { intent: 'memory', reply: confirmText, memory: { action, key, ok } })
         finish()
         return
       }
