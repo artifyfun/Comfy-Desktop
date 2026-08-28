@@ -490,7 +490,8 @@ export function createWorkbenchRouter(): express.Router {
             })
           }
         },
-        attachments ?? []
+        attachments ?? [],
+        { signal: ac.signal }
       )
       if (!plan) {
         send('error', { message: 'codex 未输出可解析的 PLAN', raw: raw.slice(0, 2000) })
@@ -631,6 +632,11 @@ export function createWorkbenchRouter(): express.Router {
       })
       finish()
     } catch (error) {
+      // 用户主动取消（SSE close / 超时 abort）：静默收尾，不落错误气泡
+      if (ac.signal.aborted) {
+        finish()
+        return
+      }
       const message = error instanceof Error ? error.message : String(error)
       logger.error('workbench chat failed', error)
       // 错误落盘:重进会话仍可见（此前仅前端内存,刷新/切会话即丢）

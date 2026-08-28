@@ -55,6 +55,7 @@ import {
   type ExecutionResult
 } from '../mcp/executor'
 import { Codex, resolveCodexBaseUrl, resolveCodexBinary } from '../agentDriver'
+import type { Thread } from '../vendor/codex-sdk'
 import { startBatch } from '../services/batchRunner'
 import { deriveAttachmentKind } from './presetCore'
 
@@ -251,19 +252,233 @@ function sessionsPath(): string {
   return join(app.getPath('userData'), 'workbench-sessions.json')
 }
 
+/** 会话级 agent 运行时状态（harness P1）：codex+thread 跨消息复用 */
+interface AgentSession {
+  codex: Codex
+  thread: Thread
+  tempHome: string
+  /** 非 deepseek 官方端点时挂的 responses→chat 转换代理（随 session 回收） */
+  proxy?: { server: HttpServer; baseUrl: string }
+  lastActiveAt: number
+  /** 本会话累计 agent 轮次（decide/恢复轮各 +1） */
+  turns: number
+  totalTokens: number
+}
+
+/** agent session 空闲回收：超过该时长无活动即销毁（线程/代理/tempHome） */
+const AGENT_IDLE_MS = 10 * 60 * 1000
+/** 单会话 agent 轮次上限（防 harness 无限循环烧 token） */
+const MAX_AGENT_TURNS = 24
+
 class WorkbenchService {
   private store: SessionStore = { sessions: [] }
   private flushTimer: NodeJS.Timeout | null = null
-  /** decide 期间按需起的内嵌 responses→chat 转换代理（用完即关） */
-  private proxyServer?: HttpServer
-  /** /mcp 端点可用性（decide 前探测，决定 spec 是否注入 wb_* 编排段） */
+  /** /mcp 端点可用性（agent session 创建时探测，决定 spec 是否注入 wb_* 编排段） */
   private mcpAvailable = false
   /** 编排去重标记：decide 轮内 wb_execute_template 真实执行过 → 最终 PLAN 不再重复执行 */
   private orchestratedSessions = new Set<string>()
+  /** 会话级 agent 运行时（harness）：codex+thread+tempHome+proxy 跨消息复用，模型上下文连续 */
+  private agentSessions = new Map<string, AgentSession>()
+  private agentIdleTimer: NodeJS.Timeout | null = null
 
   constructor() {
     this.load()
     templateLibrary.on('change', () => this.pokeTemplates())
+  }
+
+  // ---------- agent 运行时（harness P1）：会话级 codex+thread 复用 ----------
+
+  /**
+   * 取（或建）会话级 agent 运行时。首次创建：起内嵌代理（非 deepseek 官方端点）、
+   * 临时 CODEX_HOME（注册 workbench MCP，wb_* 工具回环）、spawn codex、startThread。
+   * 后续复用同一 thread → 模型在多次用户消息/恢复轮之间上下文连续，能看到自己
+   * 此前的工具调用与执行结果（这是「harness」的核心增益：不再是每轮重新失忆）。
+   * 应用重启后 Map 为空 → 自动重建，spec 注入近史兜底（降级不阻断）。
+   */
+  private async getOrCreateAgentSession(
+    sessionId: string,
+    onProgress: DecideProgressCallback
+  ): Promise<AgentSession> {
+    const cached = this.agentSessions.get(sessionId)
+    if (cached) {
+      this.touchAgentSession(sessionId)
+      return cached
+    }
+    const binary = resolveCodexBinary()
+    if (!binary) throw new Error('codex binary not found (run scripts/copy-codex-bin.mjs)')
+    const cfg = appStoreManager.getConfig()
+    const upstreamBaseUrl = cfg.base_url || 'https://api.deepseek.com/v1'
+    let codexBaseUrl = upstreamBaseUrl
+    let proxy: AgentSession['proxy']
+    // 内嵌 responses→chat 转换代理：上游无 /v1/responses（new-api 默认）时由
+    // 应用自身兜底翻译。会话级常驻（复用），随 agent session 一起回收。
+    if (!/^https:\/\/api\.deepseek\.com/.test(upstreamBaseUrl)) {
+      const p = await startWorkbenchProxy({
+        upstreamBaseUrl,
+        upstreamApiKey: cfg.api_key || '',
+        model: cfg.buildModel || 'glm-5.3-flash'
+      })
+      proxy = { server: p.server, baseUrl: p.baseUrl }
+      codexBaseUrl = p.baseUrl
+    }
+    const tempHome = mkdtempSync(join(app.getPath('temp'), 'wb-codex-'))
+    const { getServerPort } = await import('../server')
+    const serverPort = getServerPort()
+    this.mcpAvailable = serverPort != null
+    if (serverPort) {
+      const mcpUrl = `http://127.0.0.1:${serverPort}/mcp`
+      writeFileSync(
+        join(tempHome, 'config.toml'),
+        [
+          `[mcp_servers.workbench]`,
+          `url = "${mcpUrl}"`,
+          `bearer_token_env_var = "WORKBENCH_MCP_TOKEN"`,
+          // approve：exec 单轮 approval_policy=never、workspace-write 沙箱下唯一
+          // 无条件放行值（codex mcp_tool_call.rs：只有 AppToolApproval::Approve
+          // 不看注解直接豁免；auto/writes 对非 read-only 工具仍要弹窗→被拒）。
+          // wb_* 全部经 validatePlanLocal 白名单校验、上下文绑会话，安全面可控。
+          `default_tools_approval_mode = "approve"`,
+          ``,
+          // workspace-write 沙箱默认禁网 —— MCP(streamable HTTP) 属 executor 侧
+          // 网络，不放行则每次工具调用被 sandbox network proxy 拦截（探针实测
+          // "MCP tool call failed"，模型只能放弃编排）。仅放行回环 MCP 端点。
+          `[sandbox_workspace_write]`,
+          `network_access = true`,
+          ``
+        ].join('\n')
+      )
+    }
+    beginWorkbenchToolContext(sessionId)
+    const codex = new Codex({
+      codexPathOverride: binary,
+      baseUrl: resolveCodexBaseUrl({
+        baseUrl: codexBaseUrl
+      }),
+      apiKey: cfg.api_key || process.env.CODEX_API_KEY || '',
+      env: {
+        ...process.env,
+        CODEX_HOME: tempHome,
+        // provider 用 env_key 字段读 API key（codex 0.149.x 的 provider 段
+        // 没有 api_key 字段；环境变量注入是官方自定义 provider 的标准做法）
+        WORKBENCH_CODEX_API_KEY: cfg.api_key || process.env.CODEX_API_KEY || '',
+        ...(serverPort ? { WORKBENCH_MCP_TOKEN: getOrCreateMcpToken() } : {})
+      },
+      // 双保险：即使泄露进 provider 配置，也强制回内置 openai 让 baseUrl 生效。
+      // code_mode/tool_search 关闭：0.149.x 新路由默认把 MCP 工具交给 JS
+      // code-mode runtime / 延迟注册（deferred），exec --experimental-json 单轮
+      // 下两者都不可用 → 模型调用报 "unsupported call: wb_*"（stderr 实测）。
+      // 关掉走经典工具路由，MCP 工具直接注册进 router。
+      config: {
+        // 自定义 provider 强制 HTTPS Streaming：codex 默认先试 WebSocket
+        // /v1/responses，而本机代理（mimo2codex）只实现了 POST 端点 → 每次
+        // 决策都要「404 → 重连 5 次 → 回退 HTTPS」浪费十几秒。保留
+        // wire_api="responses"（能力不变），supports_websockets=false 让引擎
+        // 直接走 HTTPS。
+        //
+        // 字段名必须是 base_url + env_key（0.149.x 引擎实测：api_base_url /
+        // api_key 不被识别，base_url 静默回落到 api.openai.com → 401 →
+        // "Codex Exec exited with code 1"，且 401 前没有任何 WS 尝试，说明
+        // supports_websockets 已生效）。
+        model_provider: 'openai_http',
+        'model_providers.openai_http': {
+          name: 'Artify Workbench HTTP',
+          base_url: resolveCodexBaseUrl({
+            baseUrl: codexBaseUrl
+          }),
+          env_key: 'WORKBENCH_CODEX_API_KEY',
+          wire_api: 'responses',
+          requires_openai_auth: false,
+          supports_websockets: false
+        },
+        features: { code_mode: false, tool_search: false }
+      }
+    })
+    // 沙箱档位:'standard'(默认)仅工作目录可写;'full' 完全放开(C 权限,
+    // 用户显式开启)。档位读取失败一律回退 standard,宁可少权不可多权。
+    let agentAccess: 'standard' | 'full' = 'standard'
+    try {
+      const fromSettings = getSetting('workbenchAgentAccess')
+      const fromConfig = appStoreManager.getConfig().workbenchAgentAccess
+      agentAccess = (fromSettings ?? fromConfig) === 'full' ? 'full' : 'standard'
+    } catch {
+      try {
+        agentAccess =
+          appStoreManager.getConfig().workbenchAgentAccess === 'full' ? 'full' : 'standard'
+      } catch {}
+    }
+    const thread = codex.startThread({
+      model: cfg.buildModel || 'glm-5.3-flash',
+      sandboxMode: agentAccess === 'full' ? 'danger-full-access' : 'workspace-write',
+      workingDirectory: process.cwd(),
+      skipGitRepoCheck: true
+    })
+    const agent: AgentSession = {
+      codex,
+      thread,
+      tempHome,
+      proxy,
+      lastActiveAt: Date.now(),
+      turns: 0,
+      totalTokens: 0
+    }
+    this.agentSessions.set(sessionId, agent)
+    this.scheduleAgentIdleReap()
+    if (proxy) {
+      onProgress({
+        type: 'log',
+        text: `responses→chat 代理已就绪 ${proxy.baseUrl} → ${upstreamBaseUrl}`
+      })
+    }
+    return agent
+  }
+
+  private touchAgentSession(sessionId: string): void {
+    const agent = this.agentSessions.get(sessionId)
+    if (agent) agent.lastActiveAt = Date.now()
+  }
+
+  /** 销毁会话级 agent 运行时：关代理、删临时 CODEX_HOME、失效 wb_* 工具上下文 */
+  private disposeAgentSession(sessionId: string): void {
+    const agent = this.agentSessions.get(sessionId)
+    if (!agent) return
+    this.agentSessions.delete(sessionId)
+    try {
+      agent.proxy?.server.close()
+    } catch {
+      /* 代理关闭失败不影响 */
+    }
+    try {
+      rmSync(agent.tempHome, { recursive: true, force: true })
+    } catch {
+      /* 清理失败不影响 */
+    }
+    endWorkbenchToolContext(sessionId)
+  }
+
+  /** 空闲回收：超时无活动的 agent session 销毁（线程/代理/tempHome 不常驻） */
+  private scheduleAgentIdleReap(): void {
+    if (this.agentIdleTimer) return
+    this.agentIdleTimer = setInterval(() => {
+      const now = Date.now()
+      for (const [id, agent] of this.agentSessions) {
+        if (now - agent.lastActiveAt > AGENT_IDLE_MS) this.disposeAgentSession(id)
+      }
+      if (this.agentSessions.size === 0 && this.agentIdleTimer) {
+        clearInterval(this.agentIdleTimer)
+        this.agentIdleTimer = null
+      }
+    }, 60_000)
+    // 不 hold 事件循环退出
+    this.agentIdleTimer.unref?.()
+  }
+
+  /** 应用退出时清理全部 agent 运行时 */
+  disposeAllAgentSessions(): void {
+    for (const id of Array.from(this.agentSessions.keys())) this.disposeAgentSession(id)
+    if (this.agentIdleTimer) {
+      clearInterval(this.agentIdleTimer)
+      this.agentIdleTimer = null
+    }
   }
 
   private pokeTemplates(): void {
@@ -358,7 +573,11 @@ class WorkbenchService {
     const before = this.store.sessions.length
     this.store.sessions = this.store.sessions.filter((s) => s.id !== id)
     const ok = this.store.sessions.length < before
-    if (ok) this.flush()
+    if (ok) {
+      // 会话删除时一并销毁其 agent 运行时（线程/代理/tempHome）
+      this.disposeAgentSession(id)
+      this.flush()
+    }
     return ok
   }
 
@@ -674,6 +893,8 @@ API 格式：{"节点id": {"class_type": "节点类名", "inputs": {"参数名":
       logger.debug('workbench env snapshot render failed', e)
     }
     return `${SELF_KNOWLEDGE_TEXT}${envSection}
+## 会话延续（agent 上下文）
+你在本会话**此前的工具调用、推理与执行结果仍在上下文中**——复盘失败时优先参考它们（例如上次把提示词文本传进了图片加载槽导致 No such file、或某个模板实际不吃文本），基于事实修正而非凭空重试。首次进入本会话则忽略此段。
 根据用户需求从模板库选择模板并填参数，输出**只含一个 JSON 对象**（无 markdown 代码块、无解释文字）：
 {"intent":"image|video|audio|text|chat|memory","templateId":"...","params":{...},"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text/memory 时直接给用户的回复","memory":{"action":"remember|forget","key":"...","value":"remember 时必填"},"title":"仅首条消息时提供"}
 
@@ -713,7 +934,8 @@ ${userInput}`
     sessionId: string,
     rawInput: string,
     onProgress: DecideProgressCallback,
-    attachments: AttachmentMeta[] = []
+    attachments: AttachmentMeta[] = [],
+    opts: { signal?: AbortSignal } = {}
   ): Promise<{
     plan: WorkbenchPlan | null
     issues: PlanValidationIssue[]
@@ -744,129 +966,20 @@ ${userInput}`
       attachments: attachments.length ? attachments : undefined
     })
 
-    // codex 决策（复用 agentDriver 的 Codex SDK 直连；单轮，产出 JSON）
-    const binary = resolveCodexBinary()
-    if (!binary) throw new Error('codex binary not found (run scripts/copy-codex-bin.mjs)')
+    // 会话级 agent 运行时（harness P1）：codex+thread 跨消息复用，模型在多次
+    // 用户消息/恢复轮之间上下文连续（能看到自己此前的工具调用与执行结果）。
+    // 首次创建含代理+临时 CODEX_HOME；之后直接复用。应用重启后 Map 为空 →
+    // 自动重建，spec 注入近史兜底。
+    const agent = await this.getOrCreateAgentSession(sessionId, onProgress)
+    if (agent.turns >= MAX_AGENT_TURNS) {
+      throw new Error(`本会话 agent 轮次已达上限（${MAX_AGENT_TURNS} 轮），请新建会话继续`)
+    }
     const spec = await this.buildDecisionSpec(effectiveInput, session, {
       preset,
       attachments,
       templateShortcut
     })
-    // 内嵌 responses→chat 转换代理：上游无 /v1/responses（new-api 默认）时由
-    // 应用自身兜底翻译，用户无需安装任何外部代理。
-    const cfg = appStoreManager.getConfig()
-    const upstreamBaseUrl = cfg.base_url || 'https://api.deepseek.com/v1'
-    let codexBaseUrl = upstreamBaseUrl
-    if (!/^https:\/\/api\.deepseek\.com/.test(upstreamBaseUrl)) {
-      const proxy = await startWorkbenchProxy({
-        upstreamBaseUrl,
-        upstreamApiKey: cfg.api_key || '',
-        model: cfg.buildModel || 'glm-5.3-flash'
-      })
-      this.proxyServer = proxy.server
-      codexBaseUrl = proxy.baseUrl
-      onProgress({
-        type: 'log',
-        text: `responses→chat 代理已就绪 ${proxy.baseUrl} → ${upstreamBaseUrl}`
-      })
-    }
-    // 临时 CODEX_HOME：每次 decide 独立目录（用完即删），内含 workbench MCP server
-    // 注册（stdio 归 codex 拉起；工具经 /mcp 端点回环访问本进程能力）。
-    // 隔离用户级 ~/.codex/config.toml（model_provider=custom 劫持 base_url，8317 案例）。
-    // 动态 import 避免 service↔server 循环依赖。
-    const tempHome = mkdtempSync(join(app.getPath('temp'), 'wb-codex-'))
-    const { getServerPort } = await import('../server')
-    const serverPort = getServerPort()
-    this.mcpAvailable = serverPort != null
-    if (serverPort) {
-      const mcpUrl = `http://127.0.0.1:${serverPort}/mcp`
-      writeFileSync(
-        join(tempHome, 'config.toml'),
-        [
-          `[mcp_servers.workbench]`,
-          `url = "${mcpUrl}"`,
-          `bearer_token_env_var = "WORKBENCH_MCP_TOKEN"`,
-          // approve：exec 单轮 approval_policy=never、workspace-write 沙箱下唯一
-          // 无条件放行值（codex mcp_tool_call.rs：只有 AppToolApproval::Approve
-          // 不看注解直接豁免；auto/writes 对非 read-only 工具仍要弹窗→被拒）。
-          // wb_* 全部经 validatePlanLocal 白名单校验、上下文绑会话，安全面可控。
-          `default_tools_approval_mode = "approve"`,
-          ``,
-          // workspace-write 沙箱默认禁网 —— MCP(streamable HTTP) 属 executor 侧
-          // 网络，不放行则每次工具调用被 sandbox network proxy 拦截（探针实测
-          // "MCP tool call failed"，模型只能放弃编排）。仅放行回环 MCP 端点。
-          `[sandbox_workspace_write]`,
-          `network_access = true`,
-          ``
-        ].join('\n')
-      )
-    }
-    beginWorkbenchToolContext(sessionId)
-    const codex = new Codex({
-      codexPathOverride: binary,
-      // 显式注入 config.base_url（new-api 网关）> deepseek 默认
-      baseUrl: resolveCodexBaseUrl({
-        baseUrl: codexBaseUrl
-      }),
-      apiKey: cfg.api_key || process.env.CODEX_API_KEY || '',
-      env: {
-        ...process.env,
-        CODEX_HOME: tempHome,
-        // provider 用 env_key 字段读 API key（codex 0.149.x 的 provider 段
-        // 没有 api_key 字段；环境变量注入是官方自定义 provider 的标准做法）
-        WORKBENCH_CODEX_API_KEY: cfg.api_key || process.env.CODEX_API_KEY || '',
-        ...(serverPort ? { WORKBENCH_MCP_TOKEN: getOrCreateMcpToken() } : {})
-      },
-      // 双保险：即使泄露进 provider 配置，也强制回内置 openai 让 baseUrl 生效。
-      // code_mode/tool_search 关闭：0.149.x 新路由默认把 MCP 工具交给 JS
-      // code-mode runtime / 延迟注册（deferred），exec --experimental-json 单轮
-      // 下两者都不可用 → 模型调用报 "unsupported call: wb_*"（stderr 实测）。
-      // 关掉走经典工具路由，MCP 工具直接注册进 router。
-      config: {
-        // 自定义 provider 强制 HTTPS Streaming：codex 默认先试 WebSocket
-        // /v1/responses，而本机代理（mimo2codex）只实现了 POST 端点 → 每次
-        // 决策都要「404 → 重连 5 次 → 回退 HTTPS」浪费十几秒。保留
-        // wire_api="responses"（能力不变），supports_websockets=false 让引擎
-        // 直接走 HTTPS。
-        //
-        // 字段名必须是 base_url + env_key（0.149.x 引擎实测：api_base_url /
-        // api_key 不被识别，base_url 静默回落到 api.openai.com → 401 →
-        // "Codex Exec exited with code 1"，且 401 前没有任何 WS 尝试，说明
-        // supports_websockets 已生效）。
-        model_provider: 'openai_http',
-        'model_providers.openai_http': {
-          name: 'Artify Workbench HTTP',
-          base_url: resolveCodexBaseUrl({
-            baseUrl: codexBaseUrl
-          }),
-          env_key: 'WORKBENCH_CODEX_API_KEY',
-          wire_api: 'responses',
-          requires_openai_auth: false,
-          supports_websockets: false
-        },
-        features: { code_mode: false, tool_search: false }
-      }
-    })
-    // 沙箱档位:'standard'(默认)仅工作目录可写;'full' 完全放开(C 权限,
-    // 用户显式开启)。档位读取失败一律回退 standard,宁可少权不可多权。
-    let agentAccess: 'standard' | 'full' = 'standard'
-    try {
-      const fromSettings = getSetting('workbenchAgentAccess')
-      const fromConfig = appStoreManager.getConfig().workbenchAgentAccess
-      agentAccess = (fromSettings ?? fromConfig) === 'full' ? 'full' : 'standard'
-    } catch {
-      try {
-        agentAccess =
-          appStoreManager.getConfig().workbenchAgentAccess === 'full' ? 'full' : 'standard'
-      } catch {}
-    }
-    const thread = codex.startThread({
-      model: appStoreManager.getConfig().buildModel || 'glm-5.3-flash',
-      sandboxMode: agentAccess === 'full' ? 'danger-full-access' : 'workspace-write',
-      workingDirectory: process.cwd(),
-      skipGitRepoCheck: true
-    })
-    const { events } = await thread.runStreamed(spec)
+    const { events } = await agent.thread.runStreamed(spec, { signal: opts.signal })
     // codex exec 的 JSONL 原始行（string 形态）——parsePlanFromCodex 容错解析用
     const rawLines: string[] = []
     for await (const event of events) {
@@ -883,22 +996,18 @@ ${userInput}`
       } catch {
         /* ignore */
       }
+      // 轮级 usage 累计（预算监控：每会话 token 总量）
+      if (event.type === 'turn.completed' && event.usage) {
+        agent.totalTokens +=
+          Number(event.usage.input_tokens ?? 0) + Number(event.usage.output_tokens ?? 0)
+      }
       onProgress({ type: 'log', text: 'deciding' })
     }
     const raw = rawLines.join('\n')
-    // decide 单轮结束即关内嵌代理（每次 decide 按需起、用完即停，端口不常驻）
-    if (this.proxyServer) {
-      this.proxyServer.close()
-      this.proxyServer = undefined
-    }
-    // wb_* 工具上下文随之失效（残留调用会得到明确错误而非落错会话）
-    endWorkbenchToolContext(sessionId)
-    // 临时 CODEX_HOME 用完即删（含 mcp 注册与可能的会话缓存）
-    try {
-      rmSync(tempHome, { recursive: true, force: true })
-    } catch {
-      /* 清理失败不影响决策 */
-    }
+    // harness：会话保持（不关代理/不删 tempHome/不失效工具上下文）——
+    // 下一次用户消息/恢复轮继续同一 thread。更新活动时间与轮次预算。
+    this.touchAgentSession(sessionId)
+    agent.turns++
 
     const plan = WorkbenchService.parsePlanFromCodex(raw)
     if (!plan) {
@@ -1579,3 +1688,11 @@ ${userInput}`
 }
 
 export const workbenchService = new WorkbenchService()
+
+// 应用退出时清理会话级 agent 运行时（codex 子进程 / 内嵌代理 / 临时 CODEX_HOME）。
+// 安全包裹：测试环境的 electron mock 可能没有 once。
+try {
+  app.once('before-quit', () => workbenchService.disposeAllAgentSessions())
+} catch {
+  /* 测试环境忽略 */
+}
