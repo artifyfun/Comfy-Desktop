@@ -111,7 +111,8 @@ function makeEntry(
     coldStartPendingReveal: false,
     _installCleanup: null,
     detachInstall: () => {},
-    panelSurface: 'chooser'
+    panelSurface: 'chooser',
+    surfaceBeforeOverlay: null
   }
 }
 

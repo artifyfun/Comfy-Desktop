@@ -142,6 +142,11 @@ export interface ComfyWindowEntry {
    *  window mode) or the native chooser/panel app. `setPanelSurface` navigates
    *  between them; `ensurePanelView` (re)builds to whichever is current. */
   panelSurface: 'artify' | 'chooser'
+  /** While an overlay modal (feedback / mcp-setup / announcement) is open over
+   *  the A UI surface, remembers the surface so `setActivePanel` can navigate
+   *  the panelView back to the A UI when the overlay closes. `null` when the
+   *  panel is hosting the native chooser/panel app or no overlay is pending. */
+  surfaceBeforeOverlay: 'artify' | null
   /** Flip this host in place to install-less (chooser) mode via
    *  `_detachInstallImpl`. No-op when already install-less; always populated. */
   detachInstall: () => void

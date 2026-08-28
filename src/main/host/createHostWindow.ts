@@ -1024,6 +1024,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     // 浮动按钮互切（C 侧 🎨 浮标 loadArtifyLab、A 侧 comfyui 浮标
     // loadComfyUI）。此前单窗口模式开机直进 A UI，安装引导藏在按钮后面。
     panelSurface: 'chooser',
+    surfaceBeforeOverlay: null,
     // Bound below so it can self-reference the freshly-created entry.
     detachInstall: () => {}
   }

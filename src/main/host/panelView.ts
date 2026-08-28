@@ -164,13 +164,22 @@ export function ensurePanelView(
  * `ensurePanelView` (first build) and `setPanelSurface` (surface switch)
  * so both always agree on what the panelView hosts. Loads can reject if
  * the window closes mid-load; swallowed to avoid noisy forwarding.
+ *
+ * Overlay bodies (feedback / mcp-setup / announcement) are rendered by the
+ * native panel app (PanelApp.vue), never by the A UI frontend — so an
+ * overlay target always loads the native panel body even when
+ * `panelSurface === 'artify'`. Without this, opening the MCP setup /
+ * announcement / feedback modal from the C canvas would surface the A UI
+ * instead of the modal (an unintended A/C switch).
  */
 function loadPanelContent(
   wc: Electron.WebContents,
   entry: ComfyWindowEntry,
   panelQuery: Record<string, string>
 ): void {
-  const artifyUrl = entry.panelSurface === 'artify' ? getArtifyPanelUrl() : null
+  const panel = panelQuery.panel as BodyMode
+  const isOverlayBody = panel === 'feedback' || panel === 'mcp-setup' || panel === 'announcement'
+  const artifyUrl = entry.panelSurface === 'artify' && !isOverlayBody ? getArtifyPanelUrl() : null
   if (artifyUrl) {
     void wc.loadURL(artifyUrl).catch(() => {})
     return
@@ -226,6 +235,10 @@ export function destroyPanelView(entry: ComfyWindowEntry): void {
   if (!entry.panelView) return
   const oldPanel = entry.panelView
   entry.panelView = null
+  // The old panel is gone (and with it any A UI it hosted); a stale overlay
+  // restore marker would navigate the rebuilt native panel back to the A UI
+  // on the next close. Clear it so the rebuild starts surface-consistent.
+  entry.surfaceBeforeOverlay = null
   if (!oldPanel.webContents.isDestroyed()) {
     _unregisterExtraBroadcastTarget(oldPanel.webContents)
     oldPanel.webContents.close()
@@ -265,7 +278,13 @@ export function focusActiveBody(entry: ComfyWindowEntry): void {
 export function setActivePanel(windowKey: number, panel: ComfyPanelKey): void {
   const entry = comfyWindows.get(windowKey)
   if (!entry || entry.window.isDestroyed()) return
-  if (entry.activePanel === panel) return
+  const prevPanel = entry.activePanel
+  if (prevPanel === panel) return
+
+  const isOverlayPanel = (p: ComfyPanelKey | BodyMode): boolean =>
+    p === 'feedback' || p === 'mcp-setup' || p === 'announcement'
+  const openingOverlay = isOverlayPanel(panel) && !isOverlayPanel(prevPanel)
+  const closingOverlay = isOverlayPanel(prevPanel) && !isOverlayPanel(panel)
 
   entry.activePanel = panel
   const mode = computeBodyMode(entry)
@@ -276,11 +295,41 @@ export function setActivePanel(windowKey: number, panel: ComfyPanelKey): void {
   }
   // Overlay panels reveal only after the renderer's `overlay-ready` ack (see
   // layoutViews); clear the flag for non-overlay targets so it can't strand.
-  const isOverlay = mode === 'feedback' || mode === 'mcp-setup' || mode === 'announcement'
+  const isOverlay = isOverlayPanel(mode)
   entry.pendingOverlayReveal = isOverlay
   // Drop any prior fallback timer so a stale one can't reveal this open early.
   if (entry.overlayRevealTimer) clearTimeout(entry.overlayRevealTimer)
   entry.overlayRevealTimer = undefined
+  // Overlay modals are rendered by the native panel app (PanelApp.vue), never
+  // by the A UI frontend. When the panelView hosts the A UI (single-window
+  // mode, panelSurface='artify'), opening an overlay must temporarily navigate
+  // the panelView to the native panel body — otherwise the MCP setup /
+  // announcement / feedback modal would resolve to the A UI surface, reading
+  // as an unwanted A/C switch from the C canvas. When the overlay closes,
+  // navigate the panelView back to the A UI it replaced. `entry.panelSurface`
+  // itself is left untouched so the title-bar A/C segment and the next
+  // surface switch stay consistent.
+  if (openingOverlay && entry.panelSurface === 'artify') {
+    entry.surfaceBeforeOverlay = 'artify'
+    const pv = entry.panelView
+    if (pv && !pv.webContents.isDestroyed()) {
+      loadPanelContent(pv.webContents, entry, {
+        installationId: entry.installationId ?? '',
+        panel: mode,
+        firstUseCompleted: String(getSetting('firstUseCompleted') === true)
+      })
+    }
+  } else if (closingOverlay && entry.surfaceBeforeOverlay === 'artify') {
+    entry.surfaceBeforeOverlay = null
+    const pv = entry.panelView
+    if (pv && !pv.webContents.isDestroyed()) {
+      loadPanelContent(pv.webContents, entry, {
+        installationId: entry.installationId ?? '',
+        panel: entry.activePanel,
+        firstUseCompleted: String(getSetting('firstUseCompleted') === true)
+      })
+    }
+  }
   forwardToPanelRenderer(entry, 'panel-switch', {
     panel: mode,
     installationId: entry.installationId ?? ''

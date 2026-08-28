@@ -3,9 +3,14 @@ import { describe, expect, it, vi } from 'vitest'
 // shared.ts (via registry.ts) loads electron at module load, so the mock
 // must be in place before the host module imports.
 vi.mock('electron', () => ({
+  // `default` export + `getAppPath`: the artifylab chain (server.ts's
+  // top-level setupStaticFiles → resourcePaths) is pulled in transitively and
+  // needs both; without them vitest fails the module load before any test runs.
+  default: {},
   app: {
     isPackaged: false,
     getPath: () => '/tmp',
+    getAppPath: () => '/app',
     getVersion: () => '0.0.0-test',
     getLocale: () => 'en'
   },

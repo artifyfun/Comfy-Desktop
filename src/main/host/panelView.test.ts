@@ -6,9 +6,14 @@ const { mockFromId, mockGetInjectSource } = vi.hoisted(() => ({
 }))
 
 vi.mock('electron', () => ({
+  // `default` export: artifylab/services/batchRunner does `import electron
+  // from 'electron'` (pulled in transitively via ../artifylab -> showArtifyLab);
+  // without a default export vitest fails the module load before any test runs.
+  default: {},
   app: {
     isPackaged: false,
     getPath: () => '/tmp',
+    getAppPath: () => '/app',
     getVersion: () => '0.0.0-test',
     getLocale: () => 'en'
   },
@@ -23,6 +28,10 @@ vi.mock('electron', () => ({
 
 vi.mock('./comfyInject', () => ({
   getComfyInjectScriptSource: mockGetInjectSource
+}))
+
+vi.mock('../artifylab/panelMode', () => ({
+  getArtifyPanelUrl: () => 'http://localhost:5000'
 }))
 
 import { _runningSessions } from '../lib/ipc/shared'
@@ -60,22 +69,34 @@ function makeWindow(opts: { destroyed?: boolean; focused?: boolean } = {}): Fake
 interface FakeWebContents {
   destroyed: boolean
   sent: { channel: string; args: unknown[] }[]
+  loaded: Array<['url', string] | ['file', string]>
   isDestroyed: () => boolean
   send: (channel: string, ...args: unknown[]) => void
   focus: () => void
   isLoadingMainFrame: () => boolean
+  loadURL: (url: string) => Promise<void>
+  loadFile: (path: string) => Promise<void>
 }
 
 function makeWc(): FakeWebContents {
   const wc: FakeWebContents = {
     destroyed: false,
     sent: [],
+    loaded: [],
     isDestroyed: () => wc.destroyed,
     send: (channel, ...args) => {
       wc.sent.push({ channel, args })
     },
     focus: () => {},
-    isLoadingMainFrame: () => false
+    isLoadingMainFrame: () => false,
+    loadURL: (url) => {
+      wc.loaded.push(['url', url])
+      return Promise.resolve()
+    },
+    loadFile: (path) => {
+      wc.loaded.push(['file', path])
+      return Promise.resolve()
+    }
   }
   return wc
 }
@@ -84,6 +105,7 @@ function makeEntry(
   opts: {
     installationId?: string | null
     activePanel?: ComfyWindowEntry['activePanel']
+    panelSurface?: ComfyWindowEntry['panelSurface']
     destroyed?: boolean
   } = {}
 ): {
@@ -115,7 +137,8 @@ function makeEntry(
     coldStartPendingReveal: false,
     _installCleanup: null,
     detachInstall: () => {},
-    panelSurface: 'chooser'
+    panelSurface: opts.panelSurface ?? 'chooser',
+    surfaceBeforeOverlay: null
   }
   return {
     entry,
@@ -178,6 +201,69 @@ describe('setActivePanel', () => {
     expect(fixture.entry.activePanel).toBe('comfy')
     expect(computeBodyMode(fixture.entry), 'panel hidden, ComfyUI visible').toBe('comfy')
     expect(fixture.layoutCalls, 'the prewarm lays the views out').toBeGreaterThan(0)
+  })
+
+  // Overlay modals (feedback / mcp-setup / announcement) are rendered by the
+  // native panel app. When the panelView hosts the A UI (panelSurface='artify'),
+  // opening an overlay must navigate the panelView to the native panel body —
+  // otherwise the modal would resolve to the A UI surface (unwanted A/C switch).
+  it('navigates the panel body to the native app when an overlay opens over the A UI surface', () => {
+    const fixture = makeEntry({ installationId: 'inst-A', panelSurface: 'artify' })
+    fixture.entry.panelView = {
+      webContents: makeWc()
+    } as unknown as ComfyWindowEntry['panelView']
+    comfyWindows.set(fixture.entry.windowKey, fixture.entry)
+    indexInstallationId('inst-A', fixture.entry.windowKey)
+    _runningSessions.set('inst-A', {} as never)
+
+    setActivePanel(fixture.entry.windowKey, 'mcp-setup')
+
+    expect(fixture.entry.surfaceBeforeOverlay).toBe('artify')
+    expect(fixture.entry.activePanel).toBe('mcp-setup')
+    const pv = fixture.entry.panelView as unknown as { webContents: FakeWebContents }
+    // The native panel body is a local file, never the A UI URL.
+    expect(pv.webContents.loaded.some(([kind]) => kind === 'file')).toBe(true)
+    expect(pv.webContents.loaded.some(([kind]) => kind === 'url')).toBe(false)
+  })
+
+  it('restores the A UI surface when the overlay closes', () => {
+    const fixture = makeEntry({
+      installationId: 'inst-A',
+      activePanel: 'mcp-setup',
+      panelSurface: 'artify'
+    })
+    fixture.entry.surfaceBeforeOverlay = 'artify'
+    fixture.entry.panelView = {
+      webContents: makeWc()
+    } as unknown as ComfyWindowEntry['panelView']
+    comfyWindows.set(fixture.entry.windowKey, fixture.entry)
+    indexInstallationId('inst-A', fixture.entry.windowKey)
+    _runningSessions.set('inst-A', {} as never)
+
+    setActivePanel(fixture.entry.windowKey, 'comfy')
+
+    expect(fixture.entry.surfaceBeforeOverlay).toBeNull()
+    const pv = fixture.entry.panelView as unknown as { webContents: FakeWebContents }
+    // Back to the A UI URL (panelSurface stayed 'artify').
+    expect(pv.webContents.loaded.some(([kind]) => kind === 'url')).toBe(true)
+    expect(pv.webContents.loaded.some(([kind]) => kind === 'file')).toBe(false)
+  })
+
+  it('leaves the panelView untouched when the surface is the native chooser', () => {
+    const fixture = makeEntry({ installationId: 'inst-A', panelSurface: 'chooser' })
+    fixture.entry.panelView = {
+      webContents: makeWc()
+    } as unknown as ComfyWindowEntry['panelView']
+    comfyWindows.set(fixture.entry.windowKey, fixture.entry)
+    indexInstallationId('inst-A', fixture.entry.windowKey)
+    _runningSessions.set('inst-A', {} as never)
+
+    setActivePanel(fixture.entry.windowKey, 'announcement')
+
+    expect(fixture.entry.surfaceBeforeOverlay).toBeNull()
+    const pv = fixture.entry.panelView as unknown as { webContents: FakeWebContents }
+    // The native panel app is already the host; no navigation is needed.
+    expect(pv.webContents.loaded).toHaveLength(0)
   })
 })
 

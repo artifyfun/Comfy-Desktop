@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => ({
+  // `default` export + `getAppPath`: the artifylab chain (server.ts's
+  // top-level setupStaticFiles → resourcePaths) is pulled in transitively and
+  // needs both; without them vitest fails the module load before any test runs.
+  default: {},
   app: {
     isPackaged: false,
     getPath: () => '/tmp',
+    getAppPath: () => '/app',
     getVersion: () => '0.0.0-test',
     getLocale: () => 'en'
   },
@@ -58,7 +63,8 @@ function makeEntry(window: FakeWindow): ComfyWindowEntry {
     coldStartPendingReveal: false,
     _installCleanup: null,
     detachInstall: () => {},
-    panelSurface: 'chooser'
+    panelSurface: 'chooser',
+    surfaceBeforeOverlay: null
   }
 }
 
