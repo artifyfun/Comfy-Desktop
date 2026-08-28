@@ -1,6 +1,6 @@
 <template>
   <div class="page-container" style="background: var(--wb-bg-base)">
-    <div id="app" class="pb-20 min-h-screen flex flex-col">
+    <div id="app" class="pb-4 min-h-screen flex flex-col">
       <AppHeader
         :first-nav-to="'/'"
         :first-nav-label="t('appCenter')"
@@ -31,7 +31,7 @@
 
         <!-- 中：会话区 -->
         <section
-          class="flex-1 min-w-0 flex flex-col h-[calc(100vh-160px)]"
+          class="flex-1 min-w-0 flex flex-col h-[calc(100vh-96px)]"
           style="border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-card)"
         >
           <!-- 会话头 -->
@@ -281,7 +281,7 @@
         <!-- 右：产物面板（可折叠） -->
         <section
           v-if="panelOpen"
-          class="w-72 shrink-0 flex flex-col h-[calc(100vh-160px)]"
+          class="w-72 shrink-0 flex flex-col h-[calc(100vh-96px)]"
           style="border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-card)"
         >
           <div

@@ -807,6 +807,9 @@ ${userInput}`
       env: {
         ...process.env,
         CODEX_HOME: tempHome,
+        // provider 用 env_key 字段读 API key（codex 0.149.x 的 provider 段
+        // 没有 api_key 字段；环境变量注入是官方自定义 provider 的标准做法）
+        WORKBENCH_CODEX_API_KEY: cfg.api_key || process.env.CODEX_API_KEY || '',
         ...(serverPort ? { WORKBENCH_MCP_TOKEN: getOrCreateMcpToken() } : {})
       },
       // 双保险：即使泄露进 provider 配置，也强制回内置 openai 让 baseUrl 生效。
@@ -819,14 +822,19 @@ ${userInput}`
         // /v1/responses，而本机代理（mimo2codex）只实现了 POST 端点 → 每次
         // 决策都要「404 → 重连 5 次 → 回退 HTTPS」浪费十几秒。保留
         // wire_api="responses"（能力不变），supports_websockets=false 让引擎
-        // 直接走 HTTPS。api_base_url/api_key 在此生效（SDK 的顶层
-        // openai_base_url 只服务内置 openai provider，自定义 provider 用
-        // provider 段字段；requires_openai_auth=false 走 api_key 而非 OAuth）。
+        // 直接走 HTTPS。
+        //
+        // 字段名必须是 base_url + env_key（0.149.x 引擎实测：api_base_url /
+        // api_key 不被识别，base_url 静默回落到 api.openai.com → 401 →
+        // "Codex Exec exited with code 1"，且 401 前没有任何 WS 尝试，说明
+        // supports_websockets 已生效）。
         model_provider: 'openai_http',
         'model_providers.openai_http': {
           name: 'Artify Workbench HTTP',
-          api_base_url: codexBaseUrl,
-          api_key: cfg.api_key || process.env.CODEX_API_KEY || '',
+          base_url: resolveCodexBaseUrl({
+            baseUrl: codexBaseUrl
+          }),
+          env_key: 'WORKBENCH_CODEX_API_KEY',
           wire_api: 'responses',
           requires_openai_auth: false,
           supports_websockets: false
