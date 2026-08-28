@@ -665,8 +665,18 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
       entry.panelView.setBounds(bodyRect)
       entry.panelView.setVisible(true)
       if (isOverlayMode) {
-        activeComfyView.setBounds(bodyRect)
-        activeComfyView.setVisible(true)
+        if (entry.overlayFromChooser) {
+          // Overlay opened on the A UI: the panelView was navigated to the
+          // native panel app (PanelApp renders the modal). Keep ComfyUI hidden
+          // so the modal doesn't read as an A→C switch — it floats where the
+          // A UI was, and closing restores 'chooser'. (The C canvas under an
+          // overlay opened from the C side stays visible, as before.)
+          activeComfyView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
+          activeComfyView.setVisible(false)
+        } else {
+          activeComfyView.setBounds(bodyRect)
+          activeComfyView.setVisible(true)
+        }
       } else {
         // Keep ComfyUI alive but collapsed so it can't intercept input.
         activeComfyView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })

@@ -147,6 +147,13 @@ export interface ComfyWindowEntry {
    *  the panelView back to the A UI when the overlay closes. `null` when the
    *  panel is hosting the native chooser/panel app or no overlay is pending. */
   surfaceBeforeOverlay: 'artify' | null
+  /** While an overlay is open, records which body the user was on when it
+   *  opened ('chooser' = A UI visible, 'comfy' = C canvas visible). Drives
+   *  closeCurrentPanel (restore to the right surface) and layoutViews (whether
+   *  the C canvas stays visible under the overlay). `undefined` when no overlay
+   *  is pending. `surfaceBeforeOverlay` alone can't tell these apart: the C
+   *  canvas with a hidden A UI panel also carries panelSurface='artify'. */
+  overlayFromChooser?: boolean
   /** Flip this host in place to install-less (chooser) mode via
    *  `_detachInstallImpl`. No-op when already install-less; always populated. */
   detachInstall: () => void

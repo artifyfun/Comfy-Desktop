@@ -265,6 +265,65 @@ describe('setActivePanel', () => {
     // The native panel app is already the host; no navigation is needed.
     expect(pv.webContents.loaded).toHaveLength(0)
   })
+
+  // Overlay 从 A 界面（activePanel='chooser'）打开：overlayFromChooser=true，
+  // 关闭时 closeCurrentPanel 才能回到 'chooser'（A UI），而不是被卡在 C 画布。
+  it('marks overlayFromChooser when the overlay opens from the A UI body', () => {
+    const fixture = makeEntry({
+      installationId: 'inst-A',
+      activePanel: 'chooser',
+      panelSurface: 'artify'
+    })
+    fixture.entry.panelView = {
+      webContents: makeWc()
+    } as unknown as ComfyWindowEntry['panelView']
+    comfyWindows.set(fixture.entry.windowKey, fixture.entry)
+    indexInstallationId('inst-A', fixture.entry.windowKey)
+    _runningSessions.set('inst-A', {} as never)
+
+    setActivePanel(fixture.entry.windowKey, 'announcement')
+
+    expect(fixture.entry.overlayFromChooser).toBe(true)
+  })
+
+  it('marks overlayFromChooser=false when the overlay opens from the C canvas', () => {
+    const fixture = makeEntry({
+      installationId: 'inst-A',
+      activePanel: 'comfy',
+      panelSurface: 'artify'
+    })
+    fixture.entry.panelView = {
+      webContents: makeWc()
+    } as unknown as ComfyWindowEntry['panelView']
+    comfyWindows.set(fixture.entry.windowKey, fixture.entry)
+    indexInstallationId('inst-A', fixture.entry.windowKey)
+    _runningSessions.set('inst-A', {} as never)
+
+    setActivePanel(fixture.entry.windowKey, 'announcement')
+
+    expect(fixture.entry.overlayFromChooser).toBe(false)
+  })
+
+  it('clears overlayFromChooser when the overlay closes', () => {
+    const fixture = makeEntry({
+      installationId: 'inst-A',
+      activePanel: 'announcement',
+      panelSurface: 'artify'
+    })
+    fixture.entry.surfaceBeforeOverlay = 'artify'
+    fixture.entry.overlayFromChooser = true
+    fixture.entry.panelView = {
+      webContents: makeWc()
+    } as unknown as ComfyWindowEntry['panelView']
+    comfyWindows.set(fixture.entry.windowKey, fixture.entry)
+    indexInstallationId('inst-A', fixture.entry.windowKey)
+    _runningSessions.set('inst-A', {} as never)
+
+    setActivePanel(fixture.entry.windowKey, 'chooser')
+
+    expect(fixture.entry.overlayFromChooser).toBeUndefined()
+    expect(fixture.entry.activePanel).toBe('chooser')
+  })
 })
 
 describe('injectPlaygroundScriptIfMatch', () => {

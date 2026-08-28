@@ -239,6 +239,7 @@ export function destroyPanelView(entry: ComfyWindowEntry): void {
   // restore marker would navigate the rebuilt native panel back to the A UI
   // on the next close. Clear it so the rebuild starts surface-consistent.
   entry.surfaceBeforeOverlay = null
+  entry.overlayFromChooser = undefined
   if (!oldPanel.webContents.isDestroyed()) {
     _unregisterExtraBroadcastTarget(oldPanel.webContents)
     oldPanel.webContents.close()
@@ -309,6 +310,13 @@ export function setActivePanel(windowKey: number, panel: ComfyPanelKey): void {
   // navigate the panelView back to the A UI it replaced. `entry.panelSurface`
   // itself is left untouched so the title-bar A/C segment and the next
   // surface switch stay consistent.
+  // `overlayFromChooser` records which body the user was on before the overlay
+  // ('chooser' = A UI, 'comfy' = C canvas): closeCurrentPanel must restore to
+  // that same body, and layoutViews needs it to decide whether the C canvas
+  // stays visible under the overlay. Only set/cleared on enter/exit — a switch
+  // between two overlays (announcement → feedback) must keep the original.
+  if (openingOverlay) entry.overlayFromChooser = prevPanel === 'chooser'
+  else if (closingOverlay) entry.overlayFromChooser = undefined
   if (openingOverlay && entry.panelSurface === 'artify') {
     entry.surfaceBeforeOverlay = 'artify'
     const pv = entry.panelView
@@ -447,10 +455,15 @@ export function registerPanelViewIpc(): void {
 
   // Page-level X close inside the panel: same effect as a pill click. Resolve the host via
   // the panel's WebContents sender (walking entries, since the panelView is lazily created).
+  // Restore to the body the overlay was opened from: an overlay opened on the A UI
+  // (overlayFromChooser) must land back on 'chooser' so the A UI shows again — 'comfy'
+  // would leave the user on the C canvas while the title-bar A/C segment still reads
+  // 'artify' (and its A click no-ops), trapping them off the A surface. Everything else
+  // closes back to the Comfy canvas.
   ipcMain.on('comfy-window:close-current-panel', (event) => {
     for (const [id, entry] of comfyWindows) {
       if (entry.panelView?.webContents === event.sender) {
-        setActivePanel(id, 'comfy')
+        setActivePanel(id, entry.overlayFromChooser ? 'chooser' : 'comfy')
         return
       }
     }
