@@ -1062,11 +1062,31 @@ function toolItemDetail(item) {
   }
 }
 
+/**
+ * codex 内部噪音条目：网络重连 / 元数据降级 / /v1/responses 路由探测失败等。
+ * 这些只是 SDK 的自我修复过程，对用户没有信息量，不占对话行（完整原始输出
+ * 仍在「复制调试信息」里）。避免一次对话出现 5-8 条红色报错行，观感像断线。
+ */
+function isNoisyItem(item) {
+  if (item?.type !== 'error') return false
+  const m = item.message || ''
+  return (
+    /reconnecting/i.test(m) ||
+    /falling back from websockets/i.test(m) ||
+    /model metadata for/i.test(m) ||
+    /no route for (GET|POST) \/v1\/responses/i.test(m)
+  )
+}
+
 function handleThreadItem(evt) {
   if (!evt || typeof evt !== 'object') return
   const phase = evt.type // started | updated | completed
   const item = evt.item
   if (!item || !item.id) return
+  // PLAN 原文（agent_message）由 plan 事件渲染为执行计划卡，不重复占行
+  if (item.type === 'agent_message') return
+  // codex 内部重连/降级噪音不占行
+  if (isNoisyItem(item)) return
   if (phase === 'started' && !toolItemIndex.has(item.id)) {
     messages.value.push({
       role: 'agent',

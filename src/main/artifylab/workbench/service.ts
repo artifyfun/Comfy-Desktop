@@ -1099,7 +1099,13 @@ ${userInput}`
   ): void {
     const session = this.getSession(sessionId)
     if (!session) return
-    const log = (session.debugLogs ?? []).find((l) => l.promptId === promptId)
+    const logs = session.debugLogs ?? []
+    // 优先按 promptId 匹配（poll 终态）；找不到时回退最后一条尚未绑定
+    // promptId 的 log —— recordDebug 在 decide 阶段记录，promptId 那时还
+    // 未知，execute 提交后由 routes 用本方法回填（此前只按 promptId 查
+    // 永远匹配不到，调试信息里「执行」一直显示未执行）。
+    let log = logs.find((l) => l.promptId === promptId)
+    if (!log) log = [...logs].reverse().find((l) => !l.promptId)
     if (log) Object.assign(log, patch)
   }
 
