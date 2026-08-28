@@ -871,8 +871,14 @@ async function send() {
     kind: 'chat',
     text,
     attachments: attachments.length ? attachments : undefined,
+    createdAt: Date.now(),
   })
-  messages.value.push({ role: 'agent', kind: 'progress', text: t('workbenchDeciding') })
+  messages.value.push({
+    role: 'agent',
+    kind: 'progress',
+    text: t('workbenchDeciding'),
+    createdAt: Date.now(),
+  })
   scrollToBottom()
   try {
     const res = await fetch(`${origin.value}/api/workbench/chat`, {
@@ -896,7 +902,12 @@ async function send() {
       for (const part of parts) handleSse(part)
     }
   } catch (e) {
-    messages.value.push({ role: 'agent', kind: 'error', text: e.message })
+    messages.value.push({
+      role: 'agent',
+      kind: 'error',
+      text: e.message,
+      createdAt: Date.now(),
+    })
   } finally {
     busy.value = false
     scrollToBottom()
@@ -973,14 +984,26 @@ function handleThreadItem(evt) {
   const item = evt.item
   if (!item || !item.id) return
   if (phase === 'started' && !toolItemIndex.has(item.id)) {
-    messages.value.push({ role: 'agent', kind: 'tool_item', text: '', toolItem: item })
+    messages.value.push({
+      role: 'agent',
+      kind: 'tool_item',
+      text: '',
+      toolItem: item,
+      createdAt: Date.now(),
+    })
     toolItemIndex.set(item.id, messages.value.length - 1)
     return
   }
   const idx = toolItemIndex.get(item.id)
   if (idx === undefined) {
     // 错过 started（如重连）——直接补一行
-    messages.value.push({ role: 'agent', kind: 'tool_item', text: '', toolItem: item })
+    messages.value.push({
+      role: 'agent',
+      kind: 'tool_item',
+      text: '',
+      toolItem: item,
+      createdAt: Date.now(),
+    })
     toolItemIndex.set(item.id, messages.value.length - 1)
     return
   }
@@ -1006,17 +1029,38 @@ function handleSse(chunk) {
     messages.value.pop()
   }
   if (event === 'reply') {
-    messages.value.push({ role: 'agent', kind: 'chat', text: data.reply || '' })
+    messages.value.push({
+      role: 'agent',
+      kind: 'chat',
+      text: data.reply || '',
+      createdAt: Date.now(),
+    })
   } else if (event === 'item') {
     handleThreadItem(data.event)
   } else if (event === 'plan') {
-    messages.value.push({ role: 'agent', kind: 'card', text: '', plan: data.plan })
+    messages.value.push({
+      role: 'agent',
+      kind: 'card',
+      text: '',
+      plan: data.plan,
+      createdAt: Date.now(),
+    })
   } else if (event === 'stage') {
-    messages.value.push({ role: 'agent', kind: 'progress', text: stageText(data.stage) })
+    messages.value.push({
+      role: 'agent',
+      kind: 'progress',
+      text: stageText(data.stage),
+      createdAt: Date.now(),
+    })
   } else if (event === 'submitted') {
     const lp = messages.value[messages.value.length - 1]
     if (lp && lp.kind === 'progress') messages.value.pop()
-    messages.value.push({ role: 'agent', kind: 'chat', text: t('workbenchSubmitted') })
+    messages.value.push({
+      role: 'agent',
+      kind: 'chat',
+      text: t('workbenchSubmitted'),
+      createdAt: Date.now(),
+    })
     artifacts.value.unshift({
       promptId: data.promptId,
       templateId: data.templateId,
@@ -1033,9 +1077,15 @@ function handleSse(chunk) {
       role: 'agent',
       kind: 'error',
       text: t('workbenchPlanInvalid') + ': ' + (data.issues ?? []).map((i) => i.message).join('；'),
+      createdAt: Date.now(),
     })
   } else if (event === 'error') {
-    messages.value.push({ role: 'agent', kind: 'error', text: data.message || 'error' })
+    messages.value.push({
+      role: 'agent',
+      kind: 'error',
+      text: data.message || 'error',
+      createdAt: Date.now(),
+    })
   } else if (event === 'done') {
     // 会话摘要 → 侧栏刷新（标题可能被自动生成更新）
     if (data.session) {
@@ -1093,6 +1143,7 @@ function startBatchPoll(promptId) {
             job.status === 'completed'
               ? t('workbenchBatchDone', { total: job.total, success: job.success })
               : `${t('workbenchFailed')}: 批量任务 ${job.status}`,
+          createdAt: Date.now(),
         })
         scrollToBottom()
         stopBatchPoll(promptId)
@@ -1138,6 +1189,7 @@ function startPoll(promptId) {
             r.status === 'success'
               ? t('workbenchDone')
               : `${t('workbenchFailed')}: ${(r.error || '').slice(0, 300)}`,
+          createdAt: Date.now(),
         })
         scrollToBottom()
         stopPoll(promptId)
@@ -1301,7 +1353,12 @@ async function doPublish() {
     const json = await res.json()
     if (!res.ok || !json?.success) throw new Error(json?.message || 'publish failed')
     publishOpen.value = false
-    messages.value.push({ role: 'agent', kind: 'chat', text: t('workbenchPublished') })
+    messages.value.push({
+      role: 'agent',
+      kind: 'chat',
+      text: t('workbenchPublished'),
+      createdAt: Date.now(),
+    })
     router.push('/')
   } catch (e) {
     message.error(e.message)
@@ -1394,6 +1451,7 @@ function fmtTokens(n) {
 function sameDay(a, b) {
   const da = new Date(a)
   const db = new Date(b)
+  if (isNaN(da.getTime()) || isNaN(db.getTime())) return false
   return (
     da.getFullYear() === db.getFullYear() &&
     da.getMonth() === db.getMonth() &&
@@ -1408,6 +1466,7 @@ function showDateDivider(i) {
 
 function dateDividerLabel(ts) {
   const d = new Date(ts)
+  if (isNaN(d.getTime())) return ''
   const now = new Date()
   const yest = new Date(now)
   yest.setDate(now.getDate() - 1)
@@ -1418,6 +1477,7 @@ function dateDividerLabel(ts) {
 
 function timeLabel(ts) {
   const d = new Date(ts)
+  if (isNaN(d.getTime())) return ''
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
