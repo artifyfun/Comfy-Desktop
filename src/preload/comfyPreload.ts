@@ -1,19 +1,19 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import type {
-  ComfyDesktop2Bridge,
+  ComfyDesktop2BridgeImplementation,
   ComfyDesktop2LogsBridge,
+  ComfyDesktop2TelemetryBridge,
   ComfyDesktop2TerminalBridge,
   ComfyDownloadProgress,
   LogsOutputMsg,
   LogsRestore,
   TerminalRestore
-} from '@comfyorg/comfyui-desktop-bridge-types'
-import type { ComfyDesktop2TelemetryBridge } from '../types/comfyDesktopBridge'
+} from '../types/comfyDesktopBridge'
 import { startLocalFirebaseAuthMonitor } from './localFirebaseAuthMonitor'
 import { electronAPI } from './electronAPI'
 
-type LegacyTerminalBridge = ComfyDesktop2TerminalBridge & {
+export type LegacyTerminalBridge = ComfyDesktop2TerminalBridge & {
   restore(): Promise<TerminalRestore>
 }
 
@@ -96,13 +96,6 @@ const Telemetry: ComfyDesktop2TelemetryBridge = {
 
 startLocalFirebaseAuthMonitor(reportFirebaseAuthState)
 
-type ComfyDesktop2RuntimeBridge = ComfyDesktop2Bridge & {
-  Telemetry: ComfyDesktop2TelemetryBridge
-  openModelAccessPage: (url: string) => Promise<boolean>
-  openTerminal: () => Promise<boolean>
-  openMcpSetup: () => Promise<boolean>
-}
-
 const bridge = {
   isRemote: (): boolean => ipcRenderer.sendSync('desktop2-is-remote') as boolean,
   openModelAccessPage: (url: string): Promise<boolean> => {
@@ -141,7 +134,7 @@ const bridge = {
   Terminal,
   Logs,
   Telemetry
-} satisfies ComfyDesktop2RuntimeBridge
+} satisfies ComfyDesktop2BridgeImplementation
 
 contextBridge.exposeInMainWorld('__comfyDesktop2', bridge)
 // Legacy bridge for the injected artifylab floating switch button

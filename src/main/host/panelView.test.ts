@@ -26,8 +26,19 @@ vi.mock('./comfyInject', () => ({
 }))
 
 import { _runningSessions } from '../lib/ipc/shared'
-import { comfyWindows, indexInstallationId, nextWindowKey, type ComfyWindowEntry } from './registry'
-import { injectPlaygroundScriptIfMatch, refreshComfyTabBody, setActivePanel } from './panelView'
+import {
+  comfyWindows,
+  computeBodyMode,
+  indexInstallationId,
+  nextWindowKey,
+  type ComfyWindowEntry
+} from './registry'
+import {
+  injectPlaygroundScriptIfMatch,
+  prewarmAttachedPanel,
+  refreshComfyTabBody,
+  setActivePanel
+} from './panelView'
 
 interface FakeWindow {
   destroyed: boolean
@@ -144,6 +155,29 @@ describe('setActivePanel', () => {
     setActivePanel(fixture.entry.windowKey, 'feedback')
     expect(fixture.layoutCalls).toBe(0)
     expect(fixture.entry.activePanel).toBe('comfy')
+  })
+
+  // After a chooser-pick in-place attach the picker leaves the host on
+  // 'progress'; prewarmAttachedPanel must reset it to 'comfy' so the rebuilt
+  // panel stays hidden instead of covering the just-attached canvas.
+  it('prewarms the attached panel hidden by resetting a progress host to comfy', () => {
+    const fixture = makeEntry({ installationId: 'inst-A', activePanel: 'progress' })
+    // A pre-set panelView makes the real ensurePanelView short-circuit, so the
+    // helper runs without constructing an Electron WebContentsView.
+    fixture.entry.panelView = {
+      webContents: makeWc()
+    } as unknown as ComfyWindowEntry['panelView']
+    comfyWindows.set(fixture.entry.windowKey, fixture.entry)
+    indexInstallationId('inst-A', fixture.entry.windowKey)
+    _runningSessions.set('inst-A', {} as never)
+
+    expect(computeBodyMode(fixture.entry), 'starts stranded on progress').toBe('progress')
+
+    prewarmAttachedPanel(fixture.entry)
+
+    expect(fixture.entry.activePanel).toBe('comfy')
+    expect(computeBodyMode(fixture.entry), 'panel hidden, ComfyUI visible').toBe('comfy')
+    expect(fixture.layoutCalls, 'the prewarm lays the views out').toBeGreaterThan(0)
   })
 })
 
