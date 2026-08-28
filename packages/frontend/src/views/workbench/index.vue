@@ -578,6 +578,10 @@ const pendingIssues = ref([])
 const input = ref('')
 const busy = ref(false)
 const uploading = ref(false)
+// 执行失败自动恢复：单会话最多自动重试 N 次（防死循环烧 token），切会话清零
+const recoverCount = ref(0)
+const recovering = ref(false)
+const MAX_AUTO_RECOVERS = 2
 const draftAttachments = ref([])
 const skills = ref([])
 const presets = ref([])
@@ -657,6 +661,8 @@ async function loadSkills() {
 async function selectSession(s) {
   sessionId.value = s.id
   toolItemIndex.clear() // 条目索引是 per-render 的，切会话必须清（防 upsert 错位）
+  recoverCount.value = 0 // 恢复计数是会话级的，切会话清零
+  recovering.value = false
   router.replace({ query: { session: s.id } })
   const res = await fetch(`${origin.value}/api/workbench/session/${s.id}`)
   const json = await res.json()
@@ -846,37 +852,30 @@ function kindIcon(kind) {
 }
 
 // ---------- 发送 ----------
-async function send() {
-  const text = input.value.trim()
-  const readyAttachments = draftAttachments.value.filter((a) => !a.uploading)
-  // 文本或已上传附件至少其一即可发送（dsh 语义：附件可作为唯一输入）
-  if ((!text && readyAttachments.length === 0) || busy.value) return
-  const attachments = readyAttachments.map((a) => ({
-    name: a.name,
-    subfolder: a.subfolder,
-    type: a.type,
-    kind: a.kind,
-    filename: a.filename,
-    size: a.size,
-    mime: a.mime,
-    localPath: a.localPath,
-  }))
-  input.value = ''
-  for (const a of draftAttachments.value) if (a._preview) URL.revokeObjectURL(a._preview)
-  draftAttachments.value = []
+/**
+ * 执行一轮 chat（decide → 校验 → 执行）。用户发送与「执行失败自动恢复」共用，
+ * 避免恢复轮复制一份 SSE 消费逻辑。
+ * @param inputText 发给后端 decide 的输入
+ * @param attachments 附件元信息
+ * @param opts.userBubble 用户气泡文案；null 时不 push 用户气泡（自动恢复场景）
+ * @param opts.progressText deciding 占位气泡文案
+ */
+async function runChat(inputText, attachments, opts = {}) {
   busy.value = true
   pendingIssues.value = []
-  messages.value.push({
-    role: 'user',
-    kind: 'chat',
-    text,
-    attachments: attachments.length ? attachments : undefined,
-    createdAt: Date.now(),
-  })
+  if (opts.userBubble != null) {
+    messages.value.push({
+      role: 'user',
+      kind: 'chat',
+      text: opts.userBubble,
+      attachments: attachments.length ? attachments : undefined,
+      createdAt: Date.now(),
+    })
+  }
   messages.value.push({
     role: 'agent',
     kind: 'progress',
-    text: t('workbenchDeciding'),
+    text: opts.progressText ?? t('workbenchDeciding'),
     createdAt: Date.now(),
   })
   scrollToBottom()
@@ -884,7 +883,7 @@ async function send() {
     const res = await fetch(`${origin.value}/api/workbench/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: sessionId.value, input: text, attachments }),
+      body: JSON.stringify({ sessionId: sessionId.value, input: inputText, attachments }),
     })
     if (!res.ok) {
       const j = await res.json().catch(() => null)
@@ -912,6 +911,51 @@ async function send() {
     busy.value = false
     scrollToBottom()
   }
+}
+
+/**
+ * 执行失败自动恢复：把失败原因喂回 decide，让 AI 自行分析并继续（修复参数重试 /
+ * 换模板 / 说明原因）。只对快路径（PLAN 直接执行）的单次执行生效——编排模式
+ * （wb_execute_template）失败本就以工具结果回到模型，不需要此通道。单会话限
+ * MAX_AUTO_RECOVERS 次，防死循环；恢复轮再次失败会继续递减余量。
+ */
+async function autoRecover(errorText) {
+  if (recovering.value || busy.value || recoverCount.value >= MAX_AUTO_RECOVERS) return
+  recoverCount.value++
+  recovering.value = true
+  try {
+    const hint =
+      `${t('workbenchAutoRecoverIntro')}\n\n` +
+      `上次执行失败信息：${(errorText || '').slice(0, 800)}\n\n` +
+      t('workbenchAutoRecoverAsk')
+    await runChat(hint, [], {
+      userBubble: null,
+      progressText: t('workbenchAutoRecovering'),
+    })
+  } finally {
+    recovering.value = false
+  }
+}
+
+async function send() {
+  const text = input.value.trim()
+  const readyAttachments = draftAttachments.value.filter((a) => !a.uploading)
+  // 文本或已上传附件至少其一即可发送（dsh 语义：附件可作为唯一输入）
+  if ((!text && readyAttachments.length === 0) || busy.value) return
+  const attachments = readyAttachments.map((a) => ({
+    name: a.name,
+    subfolder: a.subfolder,
+    type: a.type,
+    kind: a.kind,
+    filename: a.filename,
+    size: a.size,
+    mime: a.mime,
+    localPath: a.localPath,
+  }))
+  input.value = ''
+  for (const a of draftAttachments.value) if (a._preview) URL.revokeObjectURL(a._preview)
+  draftAttachments.value = []
+  await runChat(text, attachments, { userBubble: text })
 }
 
 // ---------- codex 条目流转写（抄 codex app-server/dsh transcript：
@@ -1193,6 +1237,8 @@ function startPoll(promptId) {
         })
         scrollToBottom()
         stopPoll(promptId)
+        // 快路径执行失败：自动发起恢复轮（限次防死循环），让 AI 分析原因并继续
+        if (r.status === 'error') void autoRecover(r.error || '')
         loadSessions().then(() => {
           const s = sessions.value.find((x) => x.id === sessionId.value)
           const exec = s?.executions?.find((e) => e.promptId === promptId)

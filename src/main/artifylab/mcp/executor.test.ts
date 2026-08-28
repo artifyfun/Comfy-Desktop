@@ -194,6 +194,69 @@ describe('getExecutionStatus', () => {
     expect(res.error).toContain('boom')
   })
 
+  it('execution_error 事件 → 提取节点与异常消息（不再倒整数组噪音）', async () => {
+    const app = makeApp({ '1': { class_type: 'KSampler', inputs: { seed: 123 } } })
+    await executeApp(app, {}, ORIGIN)
+    const promptId = 'p-test-1'
+    const messages = [
+      ['execution_start', { prompt_id: promptId, timestamp: 1 }],
+      ['execution_cached', { nodes: [], prompt_id: promptId, timestamp: 2 }],
+      [
+        'execution_error',
+        {
+          prompt_id: promptId,
+          node_id: '16',
+          node_type: 'KSampler',
+          exception_message: 'ValueError: seed must be a number',
+          exception_type: 'ValueError',
+          traceback: '…'
+        }
+      ]
+    ]
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes(`/history/${promptId}`)) {
+        return new Response(
+          JSON.stringify({ [promptId]: { status: { status_str: 'error', messages } } }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+      throw new Error(`unexpected: ${url}`)
+    })
+    const res = await getExecutionStatus(ORIGIN, promptId)
+    expect(res.status).toBe('error')
+    expect(res.error).toContain('KSampler')
+    expect(res.error).toContain('ValueError: seed must be a number')
+    expect(res.error).not.toContain('execution_start')
+    expect(res.error).not.toContain('traceback')
+  })
+
+  it('execution_error 缺 exception_message → 回退保留事件摘要', async () => {
+    const app = makeApp({ '1': { class_type: 'KSampler', inputs: { seed: 123 } } })
+    await executeApp(app, {}, ORIGIN)
+    const promptId = 'p-test-1'
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes(`/history/${promptId}`)) {
+        return new Response(
+          JSON.stringify({
+            [promptId]: {
+              status: {
+                status_str: 'error',
+                messages: [['execution_error', { node_id: '3', node_type: 'LoadImage' }]]
+              }
+            }
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+      throw new Error(`unexpected: ${url}`)
+    })
+    const res = await getExecutionStatus(ORIGIN, promptId)
+    expect(res.status).toBe('error')
+    // 无 exception_message/type 时保留该事件（有信息量），而非整数组
+    expect(res.error).toContain('execution_error')
+    expect(res.error).not.toContain('execution_start')
+  })
+
   it('success → 只返回声明的 output 节点产物', async () => {
     const app = makeApp({ '1': { class_type: 'KSampler', inputs: { seed: 123 } } }, [
       { id: 9, category: 'output', type: 'SaveImage', name: 'result' }

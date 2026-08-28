@@ -390,6 +390,11 @@ const translations = {
     workbenchSubmitted: '已提交到 ComfyUI 队列',
     workbenchDone: '生成完成，见右侧产物区',
     workbenchFailed: '执行失败',
+    workbenchAutoRecoverIntro:
+      '检测到一次执行失败，请分析失败原因，修复参数后重试，或更换更合适的模板继续完成任务',
+    workbenchAutoRecoverAsk:
+      '请直接给出下一步动作（调整参数重试 / 换模板 / 说明失败原因并给出可执行的建议）',
+    workbenchAutoRecovering: '执行失败，AI 正在分析原因并继续…',
     workbenchArtifacts: '产物',
     workbenchNoArtifacts: '暂无产物，发送需求开始生成',
     workbenchPublish: '固化成应用',
@@ -1180,6 +1185,11 @@ const translations = {
     workbenchSubmitted: 'Submitted to ComfyUI queue',
     workbenchDone: 'Done — see artifacts panel',
     workbenchFailed: 'Execution failed',
+    workbenchAutoRecoverIntro:
+      'An execution failed. Analyze the cause, retry with fixed params, or switch to a more suitable template to finish the task',
+    workbenchAutoRecoverAsk:
+      'State your next move directly (retry with adjusted params / switch template / explain the failure and give actionable suggestions)',
+    workbenchAutoRecovering: 'Execution failed — AI is analyzing and continuing…',
     workbenchArtifacts: 'Artifacts',
     workbenchNoArtifacts: 'No artifacts yet — send a request to start',
     workbenchPublish: 'Publish as App',

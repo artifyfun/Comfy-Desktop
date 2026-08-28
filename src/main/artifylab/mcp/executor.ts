@@ -229,6 +229,32 @@ export async function executeApp(
 }
 
 /**
+ * 从 ComfyUI history 的 status.messages 事件数组提取 execution_error 的可读摘要：
+ * `[["execution_start",…],["execution_error",{"node_type":"KSampler","node_id":"16",
+ * "exception_message":"…","exception_type":"…","traceback":"…"}],…]`。
+ * 直接 JSON.stringify 整数组会把执行过程噪音全倒进错误文案（前端 500 字符截断后
+ * 只剩残缺 JSON）；这里只取出错节点 + 异常消息。找不到 execution_error 返回 null。
+ */
+export function extractExecutionError(messages: unknown[]): string | null {
+  for (const entry of messages) {
+    if (!Array.isArray(entry) || entry[0] !== 'execution_error') continue
+    const d = entry[1]
+    if (!d || typeof d !== 'object') continue
+    const err = d as {
+      node_type?: string
+      node_id?: string
+      exception_message?: string
+      exception_type?: string
+    }
+    const where = [err.node_type, err.node_id ? `#${err.node_id}` : ''].filter(Boolean).join(' ')
+    const what = err.exception_message || err.exception_type
+    if (what) return where ? `${where}: ${what}` : what
+    return JSON.stringify(entry)
+  }
+  return null
+}
+
+/**
  * 轮询状态（H2 + M2 + M3）：
  * 404/无 entry → running；entry.status.status_str==='error' → error；
  * 否则 success（M2：用 extractOutputs 过滤为 app 声明的输出节点）。
@@ -250,10 +276,13 @@ export async function getExecutionStatus(
   if (!entry) return { prompt_id: promptId, status: 'running' }
   const status = entry.status as { status_str?: string; messages?: unknown[] } | undefined
   if (status?.status_str === 'error') {
+    const msgs = status.messages ?? []
+    // 优先提取 execution_error 事件的可读摘要（节点+异常消息），整数组兜底
+    const readable = extractExecutionError(msgs)
     return {
       prompt_id: promptId,
       status: 'error',
-      error: JSON.stringify(status.messages ?? 'ComfyUI execution error')
+      error: readable ?? (msgs.length ? JSON.stringify(msgs) : 'ComfyUI execution error')
     }
   }
   const rawOutputs = (entry.outputs as Record<string, unknown>) ?? {}
