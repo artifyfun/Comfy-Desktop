@@ -796,7 +796,22 @@ ${userInput}`
       // 下两者都不可用 → 模型调用报 "unsupported call: wb_*"（stderr 实测）。
       // 关掉走经典工具路由，MCP 工具直接注册进 router。
       config: {
-        model_provider: 'openai',
+        // 自定义 provider 强制 HTTPS Streaming：codex 默认先试 WebSocket
+        // /v1/responses，而本机代理（mimo2codex）只实现了 POST 端点 → 每次
+        // 决策都要「404 → 重连 5 次 → 回退 HTTPS」浪费十几秒。保留
+        // wire_api="responses"（能力不变），supports_websockets=false 让引擎
+        // 直接走 HTTPS。api_base_url/api_key 在此生效（SDK 的顶层
+        // openai_base_url 只服务内置 openai provider，自定义 provider 用
+        // provider 段字段；requires_openai_auth=false 走 api_key 而非 OAuth）。
+        model_provider: 'openai_http',
+        'model_providers.openai_http': {
+          name: 'Artify Workbench HTTP',
+          api_base_url: codexBaseUrl,
+          api_key: cfg.api_key || process.env.CODEX_API_KEY || '',
+          wire_api: 'responses',
+          requires_openai_auth: false,
+          supports_websockets: false
+        },
         features: { code_mode: false, tool_search: false }
       }
     })
