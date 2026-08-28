@@ -113,6 +113,24 @@
           <a-form-item :label="t('appName')">
             <a-input v-model:value="copyName" class="wb-tech-input" />
           </a-form-item>
+          <a-form-item :label="t('workbenchPresetSkills')">
+            <div
+              class="max-h-40 overflow-y-auto space-y-1.5 p-2 rounded-lg border border-slate-700/60"
+            >
+              <label
+                v-for="sk in skillsList"
+                :key="sk.id"
+                class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer"
+              >
+                <input v-model="copySkills" type="checkbox" :value="sk.id" class="wb-tech-check" />
+                <span class="truncate">{{ sk.name }}</span>
+              </label>
+              <div v-if="!skillsList.length" class="text-xs text-slate-500">
+                {{ t('workbenchNoSkillsYet') }}
+              </div>
+            </div>
+            <div class="text-[11px] text-slate-500 mt-1">{{ t('workbenchCopySkillsHint') }}</div>
+          </a-form-item>
         </a-form>
       </a-modal>
     </div>
@@ -189,14 +207,18 @@ const sortedPresets = computed(() =>
 const copyFrom = ref('')
 const copyId = ref('')
 const copyName = ref('')
+const copySkills = ref([])
 const copying = ref(false)
 
 const origin = computed(() => appStore.config?.serverHost || window.location.origin)
 
-function openCopy(p) {
+async function openCopy(p) {
   copyFrom.value = p.id
   copyId.value = ''
   copyName.value = ''
+  // 一步到位:预勾源预设的技能,可当场增删(源是内置时其技能多继承自 spec)
+  copySkills.value = [...(p.skillIds ?? [])]
+  if (skillsList.value.length === 0) await loadSkillsList()
   copyOpen.value = true
 }
 
@@ -214,6 +236,14 @@ async function doCopy() {
     })
     const json = await res.json()
     if (!res.ok || !json?.success) throw new Error(json?.message || 'create failed')
+    // 一步到位:勾了技能就写入新预设(与编辑技能同一端点)
+    if (copySkills.value.length > 0) {
+      await fetch(`${origin.value}/api/workbench/presets/skills`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: copyId.value, skillIds: copySkills.value }),
+      })
+    }
     copyOpen.value = false
     message.success(t('workbenchPresetCreated'))
     emit('changed')
