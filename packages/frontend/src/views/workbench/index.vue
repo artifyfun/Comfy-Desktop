@@ -901,6 +901,7 @@ async function runChat(inputText, attachments, opts = {}) {
       for (const part of parts) handleSse(part)
     }
   } catch (e) {
+    dismissDecidingProgress()
     messages.value.push({
       role: 'agent',
       kind: 'error',
@@ -1055,6 +1056,21 @@ function handleThreadItem(evt) {
   messages.value[idx] = { ...messages.value[idx], toolItem: item }
 }
 
+/**
+ * 移除 AI 占位进度气泡（「AI 正在决策…」/「执行失败，AI 正在分析…」）。
+ * 不能只 pop 尾部：decide 阶段的过程条目（tool_item）追加在占位之后，占位
+ * 可能已不在数组末尾，尾部 pop 会漏掉它，导致 loading 气泡残留/错位。
+ */
+function dismissDecidingProgress() {
+  const placeholders = [t('workbenchDeciding'), t('workbenchAutoRecovering')]
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const m = messages.value[i]
+    if (m.kind === 'progress' && placeholders.includes(m.text)) {
+      messages.value.splice(i, 1)
+    }
+  }
+}
+
 function handleSse(chunk) {
   let event = 'message'
   let data = null
@@ -1068,10 +1084,15 @@ function handleSse(chunk) {
       }
     }
   }
-  const last = messages.value[messages.value.length - 1]
-  if (last && last.kind === 'progress' && last.text === t('workbenchDeciding')) {
-    messages.value.pop()
+  if (event === 'item') {
+    // 过程条目（reasoning / command / file_change 等）只是 decide 的实时过程，
+    // 不打断「AI 正在决策…」loading——否则条目一出现 loading 就消失，而 decide
+    // 可能还要几十秒才出结论，观感像断了。条目行追加在 loading 气泡之后。
+    handleThreadItem(data.event)
+    return
   }
+  // 决定性/阶段事件（plan/reply/stage/submitted/error/invalid/done）才替换占位。
+  dismissDecidingProgress()
   if (event === 'reply') {
     messages.value.push({
       role: 'agent',
@@ -1079,8 +1100,6 @@ function handleSse(chunk) {
       text: data.reply || '',
       createdAt: Date.now(),
     })
-  } else if (event === 'item') {
-    handleThreadItem(data.event)
   } else if (event === 'plan') {
     messages.value.push({
       role: 'agent',
@@ -1097,6 +1116,7 @@ function handleSse(chunk) {
       createdAt: Date.now(),
     })
   } else if (event === 'submitted') {
+    // 收掉「校验中/提交中」等 stage 进度，再落「已提交」气泡
     const lp = messages.value[messages.value.length - 1]
     if (lp && lp.kind === 'progress') messages.value.pop()
     messages.value.push({
