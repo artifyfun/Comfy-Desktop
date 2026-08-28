@@ -125,6 +125,8 @@ export interface WorkbenchExecution {
   startedAt: number
   /** batch 编排执行:batchRunner 的 job id */
   batchJobId?: string
+  /** 失败原因（轮询回填；产物卡「复制错误全文」用） */
+  error?: string
 }
 
 /** 收藏的产物文件（跨会话收藏夹,落 workbench-sessions.json store 根） */
@@ -982,7 +984,11 @@ ${userInput}`
     if (result.status === 'error' && result.error) {
       const session = this.getSession(sessionId)
       const exec = session?.executions.find((e) => e.promptId === promptId)
-      if (exec) exec.status = 'error'
+      // 完整错误落执行记录（产物卡可复制全文；截断防会话文件膨胀）
+      if (exec) {
+        exec.status = 'error'
+        exec.error = result.error.slice(0, 2000)
+      }
       this.appendMessage(sessionId, {
         role: 'agent',
         kind: 'error',

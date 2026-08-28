@@ -303,9 +303,19 @@
                 >
                   {{ a.status }}
                 </a-tag>
-                <span class="text-xs text-[var(--wb-text-2)] truncate max-w-[140px]">{{
-                  a.templateName
-                }}</span>
+                <span class="flex items-center gap-1 min-w-0">
+                  <span class="text-xs text-[var(--wb-text-2)] truncate max-w-[140px]">{{
+                    a.templateName
+                  }}</span>
+                  <!-- 复制执行 ID：排查/反馈时贴给 AI 或开发者 -->
+                  <button
+                    class="shrink-0 text-slate-500 hover:text-slate-200 text-xs px-1"
+                    :title="t('workbenchCopyPromptId')"
+                    @click="copyPromptId(a)"
+                  >
+                    <i class="far fa-copy"></i>
+                  </button>
+                </span>
               </div>
               <!-- 批量任务进度条 -->
               <div v-if="a.batchStatus && a.batchStatus !== 'completed'" class="mb-2">
@@ -374,6 +384,21 @@
               </div>
               <div v-else-if="a.outputs.length" class="text-xs text-[var(--wb-text-2)] break-all">
                 {{ a.outputs.join(' · ') }}
+              </div>
+              <!-- 执行失败：错误摘要 + 复制全文（完整错误在轮询回填的 a.error） -->
+              <div
+                v-if="a.status === 'error' && a.error"
+                class="mt-2 flex items-center justify-between gap-2 rounded bg-red-500/10 border border-red-500/30 px-2 py-1.5"
+              >
+                <span class="text-xs text-red-300 truncate flex-1" :title="a.error">{{
+                  a.error
+                }}</span>
+                <button
+                  class="shrink-0 text-xs text-red-200 hover:text-white flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-red-500/20"
+                  @click="copyArtifactError(a)"
+                >
+                  <i class="far fa-copy"></i>{{ t('workbenchCopyError') }}
+                </button>
               </div>
               <!-- 卡级操作收敛到每文件 dropdown;此处仅保留批量终态徽标 -->
               <div
@@ -675,6 +700,7 @@ async function selectSession(s) {
     templateId: e.templateId,
     templateName: e.templateId,
     status: e.status,
+    error: e.error ?? '',
     outputs: (e.outputs ?? []).map((f) => (typeof f === 'string' ? f : f.filename)),
     // v2 outputs 为完整引用对象；旧数据字符串只有 filename（lightbox 降级直开）
     files: (e.outputs ?? []).filter((f) => typeof f === 'object'),
@@ -1130,6 +1156,7 @@ function handleSse(chunk) {
       templateId: data.templateId,
       templateName: data.templateId,
       status: 'running',
+      error: '',
       outputs: [],
       files: [],
     })
@@ -1240,6 +1267,7 @@ function startPoll(promptId) {
       const artifact = artifacts.value.find((a) => a.promptId === promptId)
       if (artifact) {
         artifact.status = r.status
+        if (r.status === 'error') artifact.error = (r.error || '').slice(0, 2000)
         if (r.status === 'success' && r.outputs) {
           artifact.outputs = extractFiles(r.outputs).map((f) => f.filename)
           artifact.files = extractFiles(r.outputs)
@@ -1312,6 +1340,25 @@ function onFileAction(key, artifact, f) {
   else if (key === 'favorite') favoriteArtifact(artifact, f)
   else if (key === 'publish') openPublish(artifact)
   else if (key === 'open') openInFolder(artifact, f)
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    message.success(t('workbenchCopied'))
+  } catch (e) {
+    message.error(String(e?.message || e))
+  }
+}
+
+/** 复制执行失败错误全文（对话气泡只截断 500 字符，产物卡保存完整 2000 字符） */
+async function copyArtifactError(a) {
+  await copyText(a.error || '')
+}
+
+/** 复制执行 ID：反馈/排查时把卡片信息贴给 AI 或开发者 */
+async function copyPromptId(a) {
+  await copyText(a.promptId || '')
 }
 
 // 在系统文件管理器中定位产物(同机 ComfyUI)

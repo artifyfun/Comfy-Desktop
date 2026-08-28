@@ -395,6 +395,9 @@ const translations = {
     workbenchAutoRecoverAsk:
       '请直接给出下一步动作（调整参数重试 / 换模板 / 说明失败原因并给出可执行的建议）',
     workbenchAutoRecovering: '执行失败，AI 正在分析原因并继续…',
+    workbenchCopyError: '复制错误',
+    workbenchCopyPromptId: '复制执行 ID',
+    workbenchCopied: '已复制',
     workbenchArtifacts: '产物',
     workbenchNoArtifacts: '暂无产物，发送需求开始生成',
     workbenchPublish: '固化成应用',
@@ -1190,6 +1193,9 @@ const translations = {
     workbenchAutoRecoverAsk:
       'State your next move directly (retry with adjusted params / switch template / explain the failure and give actionable suggestions)',
     workbenchAutoRecovering: 'Execution failed — AI is analyzing and continuing…',
+    workbenchCopyError: 'Copy error',
+    workbenchCopyPromptId: 'Copy execution ID',
+    workbenchCopied: 'Copied',
     workbenchArtifacts: 'Artifacts',
     workbenchNoArtifacts: 'No artifacts yet — send a request to start',
     workbenchPublish: 'Publish as App',
