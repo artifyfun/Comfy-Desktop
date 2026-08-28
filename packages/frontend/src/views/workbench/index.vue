@@ -616,6 +616,9 @@ const uploading = ref(false)
 const recoverCount = ref(0)
 const recovering = ref(false)
 const MAX_AUTO_RECOVERS = 2
+// 单次执行占位气泡：promptId → messages 下标；poll 终态原位更新，避免
+// 「已提交」「生成完成」「执行失败」各占一个气泡把对话流切碎
+const execProgressIndex = new Map()
 const draftAttachments = ref([])
 const skills = ref([])
 const presets = ref([])
@@ -695,6 +698,7 @@ async function loadSkills() {
 async function selectSession(s) {
   sessionId.value = s.id
   toolItemIndex.clear() // 条目索引是 per-render 的，切会话必须清（防 upsert 错位）
+  execProgressIndex.clear() // 执行占位下标同样 per-render，切会话清
   recoverCount.value = 0 // 恢复计数是会话级的，切会话清零
   recovering.value = false
   router.replace({ query: { session: s.id } })
@@ -1151,15 +1155,9 @@ function handleSse(chunk) {
       createdAt: Date.now(),
     })
   } else if (event === 'submitted') {
-    // 收掉「校验中/提交中」等 stage 进度，再落「已提交」气泡
+    // 收掉「校验中/提交中」等 stage 进度
     const lp = messages.value[messages.value.length - 1]
     if (lp && lp.kind === 'progress') messages.value.pop()
-    messages.value.push({
-      role: 'agent',
-      kind: 'chat',
-      text: t('workbenchSubmitted'),
-      createdAt: Date.now(),
-    })
     artifacts.value.unshift({
       promptId: data.promptId,
       templateId: data.templateId,
@@ -1169,8 +1167,21 @@ function handleSse(chunk) {
       outputs: [],
       files: [],
     })
-    if (data.batch?.jobId) startBatchPoll(data.batch.jobId)
-    else startPoll(data.promptId)
+    if (data.batch?.jobId) {
+      // 批量：不额外占气泡，入队文案由服务端 reply 事件带出（产物卡有进度条）
+      startBatchPoll(data.batch.jobId)
+    } else {
+      // 单次执行：一个「执行中」占位气泡，poll 终态原位更新成结果，
+      // 避免「已提交到队列」「生成完成」「执行失败」各占一个气泡
+      messages.value.push({
+        role: 'agent',
+        kind: 'progress',
+        text: t('workbenchExecuting'),
+        createdAt: Date.now(),
+      })
+      execProgressIndex.set(data.promptId, messages.value.length - 1)
+      startPoll(data.promptId)
+    }
   } else if (event === 'invalid') {
     pendingIssues.value = data.issues ?? []
     messages.value.push({
@@ -1283,15 +1294,30 @@ function startPoll(promptId) {
         }
       }
       if (r.status === 'success' || r.status === 'error') {
-        messages.value.push({
-          role: 'agent',
-          kind: r.status === 'success' ? 'chat' : 'error',
-          text:
+        // 原位更新执行占位气泡为最终结果；找不到（重进会话/切会话后恢复轮询）
+        // 时兜底 push 新气泡
+        const execIdx = execProgressIndex.get(promptId)
+        execProgressIndex.delete(promptId)
+        if (execIdx !== undefined && messages.value[execIdx]) {
+          messages.value[execIdx] =
             r.status === 'success'
-              ? t('workbenchDone')
-              : `${t('workbenchFailed')}: ${(r.error || '').slice(0, 300)}`,
-          createdAt: Date.now(),
-        })
+              ? { ...messages.value[execIdx], kind: 'chat', text: t('workbenchDone') }
+              : {
+                  ...messages.value[execIdx],
+                  kind: 'error',
+                  text: `${t('workbenchFailed')}: ${(r.error || '').slice(0, 300)}`,
+                }
+        } else {
+          messages.value.push({
+            role: 'agent',
+            kind: r.status === 'success' ? 'chat' : 'error',
+            text:
+              r.status === 'success'
+                ? t('workbenchDone')
+                : `${t('workbenchFailed')}: ${(r.error || '').slice(0, 300)}`,
+            createdAt: Date.now(),
+          })
+        }
         scrollToBottom()
         stopPoll(promptId)
         // 快路径执行失败：自动发起恢复轮（限次防死循环），让 AI 分析原因并继续
