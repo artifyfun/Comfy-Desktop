@@ -16,6 +16,7 @@ interface MockDownloadsTrayState {
 
 interface MockBridgeState {
   panelChangedCallbacks: ((panel: string) => void)[]
+  bodyModeChangedCallbacks: ((mode: string) => void)[]
   titleChangedCallbacks: ((title: string) => void)[]
   sourceCategoryChangedCallbacks: ((category: string | null) => void)[]
   zoomChangedCallbacks: ((level: number) => void)[]
@@ -71,6 +72,7 @@ function installMockBridge(
 ): MockBridgeState {
   const state: MockBridgeState = {
     panelChangedCallbacks: [],
+    bodyModeChangedCallbacks: [],
     titleChangedCallbacks: [],
     sourceCategoryChangedCallbacks: [],
     zoomChangedCallbacks: [],
@@ -122,6 +124,10 @@ function installMockBridge(
     },
     onPanelChanged: (cb: (panel: string) => void) => {
       state.panelChangedCallbacks.push(cb)
+      return () => {}
+    },
+    onBodyModeChanged: (cb: (mode: string) => void) => {
+      state.bodyModeChangedCallbacks.push(cb)
       return () => {}
     },
     onSurfaceChanged: (cb: (surface: 'artify' | 'chooser') => void) => {
@@ -346,12 +352,20 @@ describe('TitleBarApp', () => {
     await flushPromises()
     const segs = wrapper.findAll('.surface-switch-seg')
     expect(segs.length).toBe(2)
-    // cold boot: chooser side active
+    // cold boot: chooser side active; A segment disabled until the canvas is up
     expect(segs[1].classes()).toContain('is-active')
     expect(segs[0].classes()).not.toContain('is-active')
+    expect(segs[0].attributes('disabled')).toBeDefined()
+    // canvas not up: clicking A is a no-op (gated)
+    await segs[0].trigger('click')
+    expect(bridgeState.setSurfaceCalls).toEqual([])
     // A→C: clicking the C seg is a no-op when already on chooser
     await segs[1].trigger('click')
     expect(bridgeState.setPanelCalls).toEqual([])
+    // main reports the ComfyUI canvas is live → A segment enables
+    bridgeState.bodyModeChangedCallbacks.forEach((cb) => cb('comfy'))
+    await flushPromises()
+    expect(segs[0].attributes('disabled')).toBeUndefined()
     // C→A: clicking the A seg routes through setSurface('artify')
     await segs[0].trigger('click')
     expect(bridgeState.setSurfaceCalls).toEqual(['artify'])

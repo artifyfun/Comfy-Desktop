@@ -99,6 +99,7 @@ interface Bridge {
   hideCoachmark: () => void
   onCoachmarkDismissed: (cb: () => void) => () => void
   onPanelChanged: (cb: (panel: ComfyPanelKey) => void) => () => void
+  onBodyModeChanged: (cb: (mode: string) => void) => () => void
   onSurfaceChanged: (cb: (surface: 'artify' | 'chooser') => void) => () => void
   onTitleChanged: (cb: (title: string) => void) => () => void
   /** Install source-category pushes from main. The raw category
@@ -220,6 +221,13 @@ const activePanel = ref<ComfyPanelKey>('comfy')
  * segmented switch next to the center pill.
  */
 const surface = ref<'artify' | 'chooser'>(bridge?.getSurface() ?? 'chooser')
+/** Body mode pushed by main: 'comfy' = live ComfyUI canvas fills the body.
+ *  Anything else (chooser / comfy-lifecycle) means the canvas isn't up and
+ *  the A segment of the A/C switch must stay disabled. */
+const bodyMode = ref<string>('chooser')
+/** A segment may only be clicked once the ComfyUI canvas is live; when the
+ *  A UI is already showing the segment is (visibly) the active side. */
+const canSwitchToArtify = computed(() => surface.value === 'artify' || bodyMode.value === 'comfy')
 /** A→C: flip the body to the ComfyUI view. Same set-panel path the
  *  existing panel pills take, so chooser/panel semantics are unchanged. */
 const switchToComfy = (): void => {
@@ -570,6 +578,7 @@ watch(downloadsStartedAt, (next) => {
 })
 
 let unsubPanel: (() => void) | undefined
+let unsubBodyMode: (() => void) | undefined
 let unsubSurface: (() => void) | undefined
 let unsubInstallationId: (() => void) | undefined
 let unsubZoom: (() => void) | undefined
@@ -615,6 +624,12 @@ onMounted(() => {
   if (!bridge) return
   unsubPanel = bridge.onPanelChanged((panel) => {
     activePanel.value = panel
+  })
+  // Body mode ('comfy' = live canvas) gates the A-segment of the A/C
+  // switch. Start conservative ('chooser' → A disabled) until main's
+  // authoritative push lands on title-bar-ready.
+  unsubBodyMode = bridge.onBodyModeChanged((mode) => {
+    bodyMode.value = mode
   })
   unsubSurface = bridge.onSurfaceChanged((s) => {
     surface.value = s
@@ -673,6 +688,7 @@ watch(
 onUnmounted(() => {
   unmounted = true
   unsubPanel?.()
+  unsubBodyMode?.()
   unsubSurface?.()
   unsubInstallationId?.()
   unsubZoom?.()
@@ -780,9 +796,10 @@ onUnmounted(() => {
         <button
           type="button"
           class="surface-switch-seg"
-          :class="{ 'is-active': surface === 'artify' }"
+          :class="{ 'is-active': surface === 'artify', 'is-disabled': !canSwitchToArtify }"
           role="tab"
           :aria-selected="surface === 'artify'"
+          :disabled="!canSwitchToArtify"
           v-bind="tooltipAttrs('Artify 工坊')"
           @click="switchToArtify"
         >
@@ -1176,6 +1193,14 @@ onUnmounted(() => {
 }
 .title-bar.is-light .surface-switch-seg:hover {
   background: rgba(0, 0, 0, 0.08);
+}
+/* A segment while the ComfyUI canvas isn't up yet (chooser / lifecycle):
+   disabled state — muted, no hover lift. */
+.surface-switch-seg.is-disabled,
+.surface-switch-seg:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 .surface-switch-seg.is-active {
   background: #0b8ce9;

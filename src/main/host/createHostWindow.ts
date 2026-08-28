@@ -786,6 +786,12 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     if (titleBarView.webContents.isDestroyed()) return
     const entry = comfyWindows.get(windowKey)
     titleBarView.webContents.send('comfy-titlebar:panel-changed', entry?.activePanel ?? 'comfy')
+    // Authoritative body-mode push: gates the A-segment of the A/C switch
+    // (A UI only enterable once the ComfyUI canvas is live).
+    titleBarView.webContents.send(
+      'comfy-titlebar:body-mode-changed',
+      entry ? computeBodyMode(entry) : 'comfy'
+    )
     if (entry) {
       // Authoritative surface push so the A/C segmented switch paints
       // the right side on cold boot (URL `surface` param is only a

@@ -72,6 +72,12 @@ export interface ComfyTitleBarBridge {
 
   /** Subscribe to panel-active changes coming from main. */
   onPanelChanged(cb: (panel: ComfyPanelKey) => void): () => void
+  /** Subscribe to body-mode pushes from main. `'comfy'` means the live
+   *  ComfyUI canvas fills the body; `'chooser'` (install-less host) and
+   *  `'comfy-lifecycle'` (stopped / starting) mean the canvas is NOT up.
+   *  The A/C switch's A segment is gated on this: the A UI may only be
+   *  entered once the canvas is live. */
+  onBodyModeChanged(cb: (mode: string) => void): () => void
   /** Subscribe to panelView surface flips (artify ↔ chooser) coming
    *  from main. Fired by `setPanelSurface` so the title-bar A/C
    *  segmented switch stays in sync with programmatic flips (the
@@ -308,6 +314,13 @@ const bridge: ComfyTitleBarBridge = {
     }
     ipcRenderer.on('comfy-titlebar:panel-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:panel-changed', handler)
+  },
+  onBodyModeChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, mode: unknown): void => {
+      if (typeof mode === 'string') cb(mode)
+    }
+    ipcRenderer.on('comfy-titlebar:body-mode-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:body-mode-changed', handler)
   },
   onSurfaceChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, surface: unknown): void => {

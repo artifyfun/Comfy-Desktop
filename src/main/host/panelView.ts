@@ -356,6 +356,7 @@ export function setActivePanel(windowKey: number, panel: ComfyPanelKey): void {
     // Pill stays on the user-visible key, not 'comfy-lifecycle'.
     entry.titleBarView.webContents.send('comfy-titlebar:panel-changed', panel)
   }
+  pushBodyModeToTitleBar(entry, mode)
   focusActiveBody(entry)
 }
 
@@ -397,9 +398,21 @@ export function refreshComfyTabBody(installationId: string): void {
       lifecyclePanel.setBackgroundColor(opaquePanelBg())
     }
   }
+  pushBodyModeToTitleBar(entry, mode)
   forwardToPanelRenderer(entry, 'panel-switch', { panel: mode, installationId })
   entry.layoutViews()
   focusActiveBody(entry)
+}
+
+/**
+ * Push the entry's current body mode to the title bar. Drives the A/C
+ * surface switch's A-segment gate: the A UI may only be entered once the
+ * ComfyUI canvas is actually visible (`'comfy'`), not while the chooser
+ * (install-less) or the lifecycle panel (stopped / starting) fills the body.
+ */
+function pushBodyModeToTitleBar(entry: ComfyWindowEntry, mode: BodyMode): void {
+  if (entry.titleBarView.webContents.isDestroyed()) return
+  entry.titleBarView.webContents.send('comfy-titlebar:body-mode-changed', mode)
 }
 
 /**
@@ -445,11 +458,16 @@ export function registerPanelViewIpc(): void {
   // single-window surface flip (and chooser-window cleanup) behaves
   // identically to the existing C→A path. The A→C direction is just
   // `setPanel('comfy')` and needs no surface special-case.
+  // Gate: the A UI may only be entered once the ComfyUI canvas is live
+  // (body mode 'comfy'). While the chooser or lifecycle panel fills the
+  // body, refuse the switch — the title bar also disables the segment,
+  // this is the main-side backstop.
   ipcMain.on('comfy-window:set-surface', (event, payload: { surface: string }) => {
     const found = findEntryByTitleBarSender(event.sender)
     if (!found) return
     if (payload?.surface !== 'artify') return
     if (found.entry.panelSurface === 'artify') return
+    if (computeBodyMode(found.entry) !== 'comfy') return
     void showArtifyLab().catch(() => {})
   })
 
