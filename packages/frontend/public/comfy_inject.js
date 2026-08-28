@@ -208,7 +208,6 @@
           // Standalone mode: Load the active app workflow automatically
           handleComfyuiContext(() => {
             console.log('[ArtifyInject] Standalone mode detected, loading default workflow')
-            setButton()
             loadWorkflow()
             // A→C 切换时主进程会重放这个函数：ComfyUI 页面可能早已加载
             // （实例先启动），面板切换不会重载页面，只有重跑 loadWorkflow
@@ -234,18 +233,8 @@
   if (document.readyState === 'complete') {
     window.dispatchEvent(new Event('load'))
   }
-
-  // 浮标按钮尽早创建：切换 A UI 不依赖画布就绪。此前按钮在
-  // checkComfyUIReady 成功后才建，Comfy Cloud / 新版前端可能不暴露
-  // window.LiteGraph 或节点注册超时（60s 轮询窗口耗尽），按钮就永不
-  // 出现。iframe/playground/readonly 模式不需要按钮。
-  if (!artify_inject && !isIframe && !artify_playground && isElectron) {
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', setButton)
-    } else {
-      setButton()
-    }
-  }
+  // C→A 切换已由标题栏原生 A/C 开关承担（comfy-window:set-surface），
+  // 页面内浮动按钮已移除。
 
   function uuidv4() {
     return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (a) =>
@@ -1054,56 +1043,6 @@
   function getQueryParam(key) {
     const params = new URLSearchParams(window.location.search)
     return params.get(key)
-  }
-
-  function setButton() {
-    // 幂等：脚本加载即建一次 + ComfyUI 就绪回调再调一次，防重复
-    if (document.getElementById('floating-btn')) return
-    const style = document.createElement('style')
-    // Comfy 风格浮标：ink 圆角方 + 电光黄 A 字（与 app icon 同语言），
-    // hover 提亮描边，无渐变/无发光/无旋转
-    style.innerHTML = `
-      #floating-btn {
-          position: fixed;
-          bottom: 205px;
-          right: 10px;
-          width: 40px;
-          height: 40px;
-          border-radius: 8px;
-          background: #211927;
-          color: #f0ff41;
-          border: 1px solid #494a50;
-          cursor: pointer;
-          font-size: 20px;
-          font-weight: 800;
-          font-family: 'Inter', -apple-system, sans-serif;
-          line-height: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: border-color 0.15s ease, background 0.15s ease;
-          z-index: 10000;
-      }
-
-      #floating-btn:hover {
-          border-color: #f0ff41;
-      }
-
-      #floating-btn:active {
-          background: #171718;
-      }
-  `
-    document.head.appendChild(style)
-    const floatingBtn = document.createElement('button')
-    floatingBtn.id = 'floating-btn'
-    floatingBtn.title = 'ArtifyLab'
-    floatingBtn.ariaLabel = 'ArtifyLab'
-    floatingBtn.textContent = 'A'
-    document.body.appendChild(floatingBtn)
-
-    floatingBtn.addEventListener('click', () => {
-      window.electronAPI.ArtifyLab.loadArtifyLab()
-    })
   }
 
   async function getElectronConfig() {
