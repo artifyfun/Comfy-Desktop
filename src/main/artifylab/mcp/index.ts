@@ -13,6 +13,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import { randomUUID } from 'node:crypto'
 import appStoreManager from '../appStore'
 import { createToolRegistry } from './tools'
+import { createWorkbenchAugmentedRegistry } from './workbenchTools'
 import { getOrCreateMcpToken, validateMcpToken } from './auth'
 import { logger } from '../utils/logger'
 
@@ -22,7 +23,9 @@ export function getMcpToken(): string {
 
 export function createMcpRouter(): Router {
   const router = Router()
-  const registry = createToolRegistry()
+  // 组合 registry：外部 app 工具 + 工作台编排工具（wb_*，decide agent 用）。
+  // 外部客户端也能看到 wb_*，但无 decide 上下文时调用会得到明确错误（工具内校验）。
+  const registry = createWorkbenchAugmentedRegistry(createToolRegistry())
 
   // H1：每 session 独立 (server, transport)，共享 registry；支持多客户端与重连
   const sessions = new Map<string, { server: Server; transport: StreamableHTTPServerTransport }>()

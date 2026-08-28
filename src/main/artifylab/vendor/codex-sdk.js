@@ -265,6 +265,13 @@ var CodexExec = class {
     if (child.stderr) {
       child.stderr.on("data", (data) => {
         stderrChunks.push(data);
+        // 诊断通道：WB_DEBUG_STDERR=1 时把 codex 子进程 stderr 落盘
+        // （MCP 启动/工具调用失败只走 stderr，exec JSONL 不可见）
+        if (process.env.WB_DEBUG_STDERR) {
+          try {
+            import("fs").then((m) => m.appendFileSync("/tmp/wb-codex-stderr.log", String(data))).catch(() => {});
+          } catch {}
+        }
       });
     }
     const exitPromise = new Promise(

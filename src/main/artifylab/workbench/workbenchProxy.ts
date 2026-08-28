@@ -50,6 +50,34 @@ function select(cfg: WorkbenchProxyConfig, clientModel: string): SelectedRequest
   return { provider, upstreamModel: cfg.model }
 }
 
+/**
+ * codex 的 responses 请求里，MCP 工具以 `{type:"namespace", name, tools:[…]}` 包装：
+ * 模型侧只见裸工具名，执行时 codex 按 `namespace` 字段把调用派回对应 runtime。
+ * chat-completions 协议没有 namespace 概念——翻译层把 wrapper 拍平成裸名
+ * function tools 后这个归属关系会丢；回程若不带 namespace，codex 一律按默认
+ * "functions" namespace 查路由表，MCP 工具查不到 →
+ * `codex_core::tools::router: error=unsupported call: wb_*`（stderr 实测）。
+ * 这里在请求侧把「裸工具名 → wrapper 名」收进 Map，回程翻译时附回 namespace。
+ */
+function buildNamespaceMap(tools: unknown): Map<string, string> {
+  const map = new Map<string, string>()
+  if (!Array.isArray(tools)) return map
+  for (const t of tools) {
+    if (!t || typeof t !== 'object' || (t as Record<string, unknown>).type !== 'namespace') {
+      continue
+    }
+    const ns = t as { name?: unknown; tools?: unknown }
+    if (typeof ns.name !== 'string' || !Array.isArray(ns.tools)) continue
+    for (const inner of ns.tools) {
+      if (inner && typeof inner === 'object') {
+        const name = (inner as Record<string, unknown>).name
+        if (typeof name === 'string') map.set(name, ns.name)
+      }
+    }
+  }
+  return map
+}
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body)
   res.writeHead(status, { 'Content-Type': 'application/json' })
@@ -126,6 +154,7 @@ export function startWorkbenchProxy(
         if (isProbe(payload)) {
           return sendJson(res, 200, probeResponse(payload))
         }
+        const namespaceMap = buildNamespaceMap(payload.tools)
 
         const { provider, upstreamModel } = select(config, String(payload.model))
         const chat = provider.preprocessResponses(payload, {
@@ -158,7 +187,7 @@ export function startWorkbenchProxy(
           const responses = respToResponses(chatJson, payload, {
             exposeReasoning: true,
             extractInlineThink: false,
-            namespaceMap: undefined
+            namespaceMap
           })
           return sendJson(res, 200, responses)
         }
@@ -211,7 +240,7 @@ export function startWorkbenchProxy(
             },
             { chunks },
             payload,
-            { exposeReasoning: true, extractInlineThink: false, namespaceMap: undefined }
+            { exposeReasoning: true, extractInlineThink: false, namespaceMap }
           )
         } catch (err) {
           if (!res.writableEnded && !res.destroyed) {

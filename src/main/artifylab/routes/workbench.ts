@@ -538,6 +538,17 @@ export function createWorkbenchRouter(): express.Router {
         finish()
         return
       }
+      // 编排去重：codex 在 decide 轮内经 wb_execute_template 真实执行过时，
+      // 最终 PLAN 只是"编排总结的载体"——产物/卡片已由工具链路落会话，跳过重复执行。
+      if (workbenchService.consumeOrchestratedFlag(sessionId)) {
+        send('submitted', { orchestrated: true })
+        send('reply', {
+          intent: plan.intent,
+          reply: plan.reply ?? '多步编排已完成，产物见上方过程流。'
+        })
+        finish()
+        return
+      }
       if (!local.template) {
         send('invalid', { issues: [{ field: 'templateId', message: '模板不存在' }] })
         finish()

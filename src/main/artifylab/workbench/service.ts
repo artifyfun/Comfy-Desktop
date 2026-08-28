@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import type { Server as HttpServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import appStoreManager from '../appStore'
 import { logger } from '../utils/logger'
@@ -42,6 +42,8 @@ import {
 import { renderEnvSnapshot, SELF_KNOWLEDGE_TEXT, type WorkbenchEnvSnapshot } from './selfKnowledge'
 import { extractDocText, isDocumentAttachment, renderDocContext } from './docContext'
 import { get as getSetting } from '../../settings'
+import { getOrCreateMcpToken } from '../mcp/auth'
+import { beginWorkbenchToolContext, endWorkbenchToolContext } from '../mcp/workbenchTools'
 import {
   executeApp,
   getExecutionStatus,
@@ -213,6 +215,10 @@ class WorkbenchService {
   private flushTimer: NodeJS.Timeout | null = null
   /** decide 期间按需起的内嵌 responses→chat 转换代理（用完即关） */
   private proxyServer?: HttpServer
+  /** /mcp 端点可用性（decide 前探测，决定 spec 是否注入 wb_* 编排段） */
+  private mcpAvailable = false
+  /** 编排去重标记：decide 轮内 wb_execute_template 真实执行过 → 最终 PLAN 不再重复执行 */
+  private orchestratedSessions = new Set<string>()
 
   constructor() {
     this.load()
@@ -361,6 +367,20 @@ class WorkbenchService {
     this.store.memories = next
     this.flush()
     return true
+  }
+
+  // ---------------- 编排去重（wb_* 工具真实执行过 → 最终 PLAN 跳过执行） ----------------
+
+  /** wb_execute_template 提交成功后由工具层调用 */
+  markOrchestrated(sessionId: string): void {
+    this.orchestratedSessions.add(sessionId)
+  }
+
+  /** 读取并清除标记（decide 收尾时由路由调用，返回"本轮是否已真实执行过"） */
+  consumeOrchestratedFlag(sessionId: string): boolean {
+    const had = this.orchestratedSessions.has(sessionId)
+    this.orchestratedSessions.delete(sessionId)
+    return had
   }
 
   /** decide spec 的「用户长期记忆」注入段(空记忆返回空串) */
@@ -566,6 +586,18 @@ class WorkbenchService {
     const titleRule = `
 ## 标题（可选）
 若为首条消息，可在 JSON 中加 "title":"≤15字会话标题"。`
+    // 编排能力声明：wb_* MCP 工具（decide 轮内自主多步执行的抓手）。
+    // 仅在 /mcp 端点可用（server 已监听）时注入。
+    const orchestrationRule = this.mcpAvailable
+      ? `
+## 多步编排（wb_* 工具）
+简单需求（选一个模板出图/出视频/答一句话）**直接输出 PLAN JSON**，不要调工具。
+**多步需求**（先调研/生成，再基于结果继续生成或写文案，如「查XX主题→文生图→图生视频→写文案」）逐步自主执行：
+1. wb_list_templates 看可用模板（研究类需求可用你的 shell 联网检索，结论作为后续 prompt 输入）。
+2. wb_execute_template(template_id, params, wait=true) 逐步执行；链式步骤传 use_previous_output=true 自动引用上一步产物。
+3. 每步产物自动落会话（用户实时可见）；全部完成后，最终回复（agent_message）输出：完整编排总结 + 交付文案（若需要）+ 仍输出 PLAN JSON（intent 标记为最后一个生成步骤，系统会跳过重复执行）。
+用户偏好/硬件等跨会话事实可用 wb_remember/wb_forget 沉淀。`
+      : ''
     // 跨会话记忆注入(dsh memory 语义):读取段 + 自我更新授权
     const memorySection = this.renderMemoryContext()
     const memoryRule = `
@@ -592,7 +624,7 @@ class WorkbenchService {
 3. intent=chat 用于追问澄清或闲聊，回复放 reply。
 4. 模板库为空或不匹配时选 chat 并说明。3.5 可跨会话保留的偏好/事实用 intent=memory（见「长期记忆」段）。
 5. 用户上传了素材时，倾向选择带媒体输入参数的模板（图生图/视频驱动），参数值填素材文件名（已上传）。
-6. 存在「会话预设约束」段落时，其 intent 限制是**硬性规则**，违反的输出会被系统直接拒绝——你必须输出该 intent。${chainHint}${constraint}${attachmentHint}${docHint}${batchRule}${shortcutHint}${titleRule}${memoryRule}
+6. 存在「会话预设约束」段落时，其 intent 限制是**硬性规则**，违反的输出会被系统直接拒绝——你必须输出该 intent。7. 有「多步编排」段时优先按它执行；单步需求仍直接出 PLAN JSON。${chainHint}${constraint}${attachmentHint}${docHint}${batchRule}${shortcutHint}${titleRule}${memoryRule}${orchestrationRule}
 
 ## 模板库
 ${catalog}
@@ -677,6 +709,38 @@ ${userInput}`
         text: `responses→chat 代理已就绪 ${proxy.baseUrl} → ${upstreamBaseUrl}`
       })
     }
+    // 临时 CODEX_HOME：每次 decide 独立目录（用完即删），内含 workbench MCP server
+    // 注册（stdio 归 codex 拉起；工具经 /mcp 端点回环访问本进程能力）。
+    // 隔离用户级 ~/.codex/config.toml（model_provider=custom 劫持 base_url，8317 案例）。
+    // 动态 import 避免 service↔server 循环依赖。
+    const tempHome = mkdtempSync(join(app.getPath('temp'), 'wb-codex-'))
+    const { getServerPort } = await import('../server')
+    const serverPort = getServerPort()
+    this.mcpAvailable = serverPort != null
+    if (serverPort) {
+      const mcpUrl = `http://127.0.0.1:${serverPort}/mcp`
+      writeFileSync(
+        join(tempHome, 'config.toml'),
+        [
+          `[mcp_servers.workbench]`,
+          `url = "${mcpUrl}"`,
+          `bearer_token_env_var = "WORKBENCH_MCP_TOKEN"`,
+          // approve：exec 单轮 approval_policy=never、workspace-write 沙箱下唯一
+          // 无条件放行值（codex mcp_tool_call.rs：只有 AppToolApproval::Approve
+          // 不看注解直接豁免；auto/writes 对非 read-only 工具仍要弹窗→被拒）。
+          // wb_* 全部经 validatePlanLocal 白名单校验、上下文绑会话，安全面可控。
+          `default_tools_approval_mode = "approve"`,
+          ``,
+          // workspace-write 沙箱默认禁网 —— MCP(streamable HTTP) 属 executor 侧
+          // 网络，不放行则每次工具调用被 sandbox network proxy 拦截（探针实测
+          // "MCP tool call failed"，模型只能放弃编排）。仅放行回环 MCP 端点。
+          `[sandbox_workspace_write]`,
+          `network_access = true`,
+          ``
+        ].join('\n')
+      )
+    }
+    beginWorkbenchToolContext(sessionId)
     const codex = new Codex({
       codexPathOverride: binary,
       // 显式注入 config.base_url（new-api 网关）> deepseek 默认
@@ -684,12 +748,20 @@ ${userInput}`
         baseUrl: codexBaseUrl
       }),
       apiKey: cfg.api_key || process.env.CODEX_API_KEY || '',
-      // 隔离 CODEX_HOME：应用自带打包二进制，不读用户级 ~/.codex/config.toml
-      // （其中 model_provider=custom 等用户本地配置会劫持 base_url，实测 8317 案例）。
-      // 临时干净 HOME + 显式 config 覆盖 = 完全自理，零外部依赖。
-      env: { ...process.env, CODEX_HOME: app.getPath('temp') },
-      // 双保险：即使泄露进 provider 配置，也强制回内置 openai 让 baseUrl 生效
-      config: { model_provider: 'openai' }
+      env: {
+        ...process.env,
+        CODEX_HOME: tempHome,
+        ...(serverPort ? { WORKBENCH_MCP_TOKEN: getOrCreateMcpToken() } : {})
+      },
+      // 双保险：即使泄露进 provider 配置，也强制回内置 openai 让 baseUrl 生效。
+      // code_mode/tool_search 关闭：0.149.x 新路由默认把 MCP 工具交给 JS
+      // code-mode runtime / 延迟注册（deferred），exec --experimental-json 单轮
+      // 下两者都不可用 → 模型调用报 "unsupported call: wb_*"（stderr 实测）。
+      // 关掉走经典工具路由，MCP 工具直接注册进 router。
+      config: {
+        model_provider: 'openai',
+        features: { code_mode: false, tool_search: false }
+      }
     })
     // 沙箱档位:'standard'(默认)仅工作目录可写;'full' 完全放开(C 权限,
     // 用户显式开启)。档位读取失败一律回退 standard,宁可少权不可多权。
@@ -734,6 +806,14 @@ ${userInput}`
     if (this.proxyServer) {
       this.proxyServer.close()
       this.proxyServer = undefined
+    }
+    // wb_* 工具上下文随之失效（残留调用会得到明确错误而非落错会话）
+    endWorkbenchToolContext(sessionId)
+    // 临时 CODEX_HOME 用完即删（含 mcp 注册与可能的会话缓存）
+    try {
+      rmSync(tempHome, { recursive: true, force: true })
+    } catch {
+      /* 清理失败不影响决策 */
     }
 
     const plan = WorkbenchService.parsePlanFromCodex(raw)
