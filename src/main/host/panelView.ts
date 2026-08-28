@@ -371,6 +371,12 @@ export function setActivePanel(windowKey: number, panel: ComfyPanelKey): void {
  */
 export function prewarmAttachedPanel(entry: ComfyWindowEntry): void {
   setActivePanel(entry.windowKey, 'comfy')
+  // `setActivePanel` early-returns (and skips its body-mode push) when
+  // activePanel is already 'comfy' — the chooser host's initial value. But
+  // this attach just changed the body from 'chooser' (install-less) to
+  // 'comfy' (install + running), so push explicitly or the title-bar A
+  // segment stays disabled forever after a chooser-pick attach.
+  pushBodyModeToTitleBar(entry, computeBodyMode(entry))
   ensurePanelView(entry.windowKey, entry, computeBodyMode(entry))
   entry.layoutViews()
 }

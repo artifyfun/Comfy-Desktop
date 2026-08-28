@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => ({
+  default: {},
   app: {
     isPackaged: false,
     getPath: () => '/tmp',
+    getAppPath: () => '/tmp',
     getVersion: () => '0.0.0-test',
     getLocale: () => 'en',
     on: () => {}

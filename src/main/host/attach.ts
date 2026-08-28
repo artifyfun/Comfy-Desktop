@@ -5,6 +5,7 @@ import { getComfyInjectScriptSource } from './comfyInject'
 import { getModelDownloadContentScript } from '../lib/comfyContentScript'
 import { getComfyTerminalContentScript } from '../lib/comfyTerminalContentScript'
 import { getMcpSidebarContentScript } from '../lib/mcpSidebarContentScript'
+import { refreshComfyTabBody } from './panelView'
 import { getFlagAsync, recordExposure } from '../lib/experiments'
 import { closeInstallPopouts } from '../lib/popoutWindows'
 import { _operationAborts, sourceMap } from '../lib/ipc/shared'
@@ -425,6 +426,12 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     `})()`
 
   const onDomReady = (): void => {
+    // The ComfyUI page reached the canvas — re-evaluate the body mode now.
+    // Attach may have run while the process was still spawning (so the
+    // title-bar push said 'comfy-lifecycle' and prewarmAttachedPanel's
+    // early-return path left the A-segment gated); dom-ready is the exact
+    // "loaded into the canvas" moment the gate waits for.
+    refreshComfyTabBody(installationId)
     comfyContents.executeJavaScript(COMFY_THEME_OBSERVER_JS).catch(() => {})
     comfyContents.executeJavaScript(getModelDownloadContentScript()).catch(() => {})
     // Inject the artifylab floating switch button so the user can flip

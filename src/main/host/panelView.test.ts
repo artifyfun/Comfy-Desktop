@@ -203,6 +203,30 @@ describe('setActivePanel', () => {
     expect(fixture.layoutCalls, 'the prewarm lays the views out').toBeGreaterThan(0)
   })
 
+  // A chooser host's activePanel is already 'comfy' when the picker attaches,
+  // so setActivePanel early-returns inside prewarmAttachedPanel and skips its
+  // body-mode push. The attach changed computeBodyMode 'chooser' → 'comfy' —
+  // the title-bar A/C gate depends on the explicit push (else A stays gated
+  // forever after the first chooser-pick attach).
+  it('pushes the comfy body mode on prewarm even when activePanel was already comfy', () => {
+    const fixture = makeEntry({ installationId: 'inst-A', activePanel: 'comfy' })
+    fixture.entry.panelView = {
+      webContents: makeWc()
+    } as unknown as ComfyWindowEntry['panelView']
+    comfyWindows.set(fixture.entry.windowKey, fixture.entry)
+    indexInstallationId('inst-A', fixture.entry.windowKey)
+    _runningSessions.set('inst-A', {} as never)
+
+    prewarmAttachedPanel(fixture.entry)
+
+    expect(fixture.entry.activePanel).toBe('comfy')
+    const bodyPushes = fixture.titleBarWc.sent.filter(
+      (m) => m.channel === 'comfy-titlebar:body-mode-changed'
+    )
+    expect(bodyPushes.length).toBeGreaterThan(0)
+    expect(bodyPushes[bodyPushes.length - 1]!.args[0]).toBe('comfy')
+  })
+
   // Overlay modals (feedback / mcp-setup / announcement) are rendered by the
   // native panel app. When the panelView hosts the A UI (panelSurface='artify'),
   // opening an overlay must navigate the panelView to the native panel body —

@@ -795,7 +795,7 @@ onUnmounted(() => {
       >
         <button
           type="button"
-          class="surface-switch-seg"
+          class="surface-switch-seg surface-switch-seg--artify"
           :class="{ 'is-active': surface === 'artify', 'is-disabled': !canSwitchToArtify }"
           role="tab"
           :aria-selected="surface === 'artify'"
@@ -804,10 +804,11 @@ onUnmounted(() => {
           @click="switchToArtify"
         >
           <span class="surface-switch-mark" aria-hidden="true">A</span>
+          <span class="surface-switch-label">{{ t('titleBar.surfaceArtify') }}</span>
         </button>
         <button
           type="button"
-          class="surface-switch-seg"
+          class="surface-switch-seg surface-switch-seg--comfy"
           :class="{ 'is-active': surface !== 'artify' }"
           role="tab"
           :aria-selected="surface !== 'artify'"
@@ -815,6 +816,7 @@ onUnmounted(() => {
           @click="switchToComfy"
         >
           <ComfyCLogo :size="14" class="surface-switch-c" aria-hidden="true" />
+          <span class="surface-switch-label">{{ t('titleBar.surfaceComfy') }}</span>
         </button>
       </div>
       <!-- Center identity pill. Install-backed hosts render as a
@@ -1153,10 +1155,10 @@ onUnmounted(() => {
 .title-feedback-button {
   color: var(--titlebar-icon);
 }
-/* A/C surface switch — segmented pair of 26px segments in an 8px-radius
-   tray. Comfy token language: transparent resting, hover surface,
-   azure fill + white text for the active side, hairline tray border.
-   No gradients, no glow. */
+/* A/C surface switch — labeled segmented pair in an 8px-radius tray.
+   Comfy token language: transparent resting, hover surface, azure fill +
+   white text for the active side, hairline tray border. Labels ('工坊' /
+   '画布') make the A surface discoverable instead of a lone 11px letter. */
 .surface-switch {
   -webkit-app-region: no-drag;
   display: inline-flex;
@@ -1164,20 +1166,20 @@ onUnmounted(() => {
   gap: 2px;
   padding: 2px;
   margin-right: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
   flex-shrink: 0;
 }
 .title-bar.is-light .surface-switch {
-  border-color: rgba(0, 0, 0, 0.12);
+  border-color: rgba(0, 0, 0, 0.14);
 }
 .surface-switch-seg {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 20px;
-  padding: 0;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -1187,33 +1189,54 @@ onUnmounted(() => {
     background 0.15s ease,
     color 0.15s ease;
 }
-.surface-switch-seg:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--titlebar-icon, #fff);
-}
-.title-bar.is-light .surface-switch-seg:hover {
-  background: rgba(0, 0, 0, 0.08);
-}
 /* A segment while the ComfyUI canvas isn't up yet (chooser / lifecycle):
    disabled state — muted, no hover lift. */
 .surface-switch-seg.is-disabled,
 .surface-switch-seg:disabled {
-  opacity: 0.35;
+  opacity: 0.32;
   cursor: not-allowed;
   pointer-events: none;
 }
+/* An enabled (not yet active) segment hints it's clickable: slight fill so
+   it reads as a button, brightening on hover. */
+.surface-switch-seg:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+}
+.title-bar.is-light .surface-switch-seg:not(:disabled) {
+  background: rgba(0, 0, 0, 0.05);
+}
+/* Hover after the enabled fill so the lift wins at equal specificity;
+   excluded for the active side so azure stays put on hover. */
+.surface-switch-seg:hover:not(:disabled):not(.is-active) {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--titlebar-icon, #fff);
+}
+.title-bar.is-light .surface-switch-seg:hover:not(:disabled):not(.is-active) {
+  background: rgba(0, 0, 0, 0.1);
+}
+/* Active side: azure fill + white text. Declared last so it wins at equal
+   specificity. */
 .surface-switch-seg.is-active {
   background: #0b8ce9;
   color: #fff;
 }
 .surface-switch-mark {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 800;
   font-family:
     'Inter',
     -apple-system,
     sans-serif;
   line-height: 1;
+}
+.surface-switch-label {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+.surface-switch-c {
+  flex-shrink: 0;
 }
 
 .title-announcement-button {
