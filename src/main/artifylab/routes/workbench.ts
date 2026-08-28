@@ -44,6 +44,21 @@ export function createWorkbenchRouter(): express.Router {
     res.json(createSuccessResponse(templateLibrary.list()))
   })
 
+  // 最近一轮调试快照（前端「复制调试信息」数据源：spec/原始输出/PLAN/校验/执行）
+  router.get('/api/workbench/debug/last', (req, res) => {
+    const sessionId = (req.query as { sessionId?: string }).sessionId
+    if (!sessionId) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('sessionId is required'))
+      return
+    }
+    const log = workbenchService.lastDebugLog(sessionId)
+    if (!log) {
+      res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse('no debug log yet'))
+      return
+    }
+    res.json(createSuccessResponse(log))
+  })
+
   router.get('/api/workbench/sessions', (req, res) => {
     const archivedQ = (req.query as { archived?: string }).archived
     const archived = archivedQ === undefined ? undefined : archivedQ === 'true'
@@ -597,6 +612,12 @@ export function createWorkbenchRouter(): express.Router {
         local.template,
         attachments ?? []
       )
+      // 调试日志回填执行信息（模板/参数/状态）
+      workbenchService.patchDebugExecution(sessionId, execution.promptId, {
+        promptId: execution.promptId,
+        templateId: execution.templateId,
+        executionStatus: execution.status
+      })
       // 单次执行提交提示落盘(与前端 workbenchSubmitted 文案一致)
       workbenchService.appendMessage(sessionId, {
         role: 'agent',

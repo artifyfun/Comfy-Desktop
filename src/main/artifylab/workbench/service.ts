@@ -166,6 +166,36 @@ export interface WorkbenchSession {
   archived?: boolean
   /** 用户手动改过标题（自动生成不覆盖） */
   titleLocked?: boolean
+  /** 调试日志（每轮 decide 的完整上下文；cap 10 条防会话文件膨胀） */
+  debugLogs?: WorkbenchDebugLog[]
+}
+
+/**
+ * 一轮 decide 的调试快照：spec(决策提示词全文) + codex 原始输出(含思考) +
+ * 解析后的 PLAN + 校验 + 执行回填。前端「复制调试信息」按钮序列化整条，
+ * 便于复盘工作台到底怎么想/怎么选的模板与参数。
+ */
+export interface WorkbenchDebugLog {
+  /** 会话内轮次序号（1 起） */
+  seq: number
+  ts: number
+  /** 预设展开后的实际决策输入 */
+  effectiveInput: string
+  presetId?: string
+  templateShortcut?: string
+  /** 决策提示词（模板目录/会话近史/环境快照/规则），截断保护 */
+  spec: string
+  /** codex 原始输出（JSONL，含思考与工具调用），截断保护 */
+  rawOutput: string
+  plan: WorkbenchPlan | null
+  issues: PlanValidationIssue[]
+  remoteIssues?: PlanValidationIssue[]
+  /** 执行回填（recordDebug 后由 execute/poll 补齐） */
+  promptId?: string
+  templateId?: string
+  executionStatus?: string
+  executionError?: string
+  model?: string
 }
 
 interface SessionStore {
@@ -179,6 +209,11 @@ interface SessionStore {
 
 const MAX_SESSIONS = 50
 const FLUSH_DEBOUNCE_MS = 500
+/** 会话内保留的最大调试日志条数（每条 ~10KB，防 workbench-sessions.json 膨胀） */
+const MAX_DEBUG_LOGS = 10
+/** 调试日志字段截断：spec 决策提示词 / codex 原始输出 */
+const DEBUG_SPEC_LIMIT = 4000
+const DEBUG_RAW_LIMIT = 8000
 
 /** 递归收集模型文件名（去重，cap 80，仅常见权重扩展） */
 function collectModelNames(dir: string, out: string[], depth: number): void {
@@ -820,6 +855,17 @@ ${userInput}`
 
     const plan = WorkbenchService.parsePlanFromCodex(raw)
     if (!plan) {
+      // 决策失败也留调试日志（原始输出最能说明模型为什么没给出 JSON）
+      this.recordDebug(sessionId, {
+        effectiveInput,
+        presetId,
+        templateShortcut,
+        spec,
+        rawOutput: raw,
+        plan: null,
+        issues: [{ field: 'plan', message: 'codex 未输出可解析的 JSON PLAN' }],
+        model: appStoreManager.getConfig().buildModel
+      })
       return {
         plan: null,
         issues: [{ field: 'plan', message: 'codex 未输出可解析的 JSON PLAN' }],
@@ -851,6 +897,16 @@ ${userInput}`
       session.updatedAt = Date.now()
       this.flush()
     }
+    this.recordDebug(sessionId, {
+      effectiveInput,
+      presetId,
+      templateShortcut,
+      spec,
+      rawOutput: raw,
+      plan,
+      issues: [...presetIssues, ...validation.issues],
+      model: appStoreManager.getConfig().buildModel
+    })
     return {
       plan,
       issues: [...presetIssues, ...validation.issues],
@@ -950,6 +1006,8 @@ ${userInput}`
     const result = await getExecutionStatus(comfyOrigin, promptId)
     let outputsText = ''
     if (result.status === 'success') {
+      // 调试日志同步最终执行状态
+      this.patchDebugExecution(sessionId, promptId, { executionStatus: 'success' })
       outputsText = JSON.stringify(result.outputs ?? {}, null, 1)
       // 回填会话
       const session = this.getSession(sessionId)
@@ -989,6 +1047,11 @@ ${userInput}`
         exec.status = 'error'
         exec.error = result.error.slice(0, 2000)
       }
+      // 调试日志同步最终执行状态
+      this.patchDebugExecution(sessionId, promptId, {
+        executionStatus: 'error',
+        executionError: result.error.slice(0, 2000)
+      })
       this.appendMessage(sessionId, {
         role: 'agent',
         kind: 'error',
@@ -998,6 +1061,54 @@ ${userInput}`
       this.flush()
     }
     return { ...result, outputsText }
+  }
+
+  /** 记录一轮 decide 的调试快照（cap MAX_DEBUG_LOGS 条，字段截断保护） */
+  recordDebug(
+    sessionId: string,
+    d: Omit<WorkbenchDebugLog, 'seq' | 'ts' | 'spec' | 'rawOutput'> & {
+      spec?: string
+      rawOutput?: string
+    }
+  ): void {
+    const session = this.getSession(sessionId)
+    if (!session) return
+    const logs = (session.debugLogs ??= [])
+    const seq = logs.length ? logs[logs.length - 1]!.seq + 1 : 1
+    logs.push({
+      ...d,
+      spec: (d.spec ?? '').slice(0, DEBUG_SPEC_LIMIT),
+      rawOutput: (d.rawOutput ?? '').slice(0, DEBUG_RAW_LIMIT),
+      seq,
+      ts: Date.now()
+    })
+    if (logs.length > MAX_DEBUG_LOGS) logs.splice(0, logs.length - MAX_DEBUG_LOGS)
+    this.flush()
+  }
+
+  /** 执行结果回填到调试日志（execute 后与 poll 终态按 promptId 匹配） */
+  patchDebugExecution(
+    sessionId: string,
+    promptId: string,
+    patch: {
+      promptId?: string
+      templateId?: string
+      executionStatus?: string
+      executionError?: string
+    }
+  ): void {
+    const session = this.getSession(sessionId)
+    if (!session) return
+    const log = (session.debugLogs ?? []).find((l) => l.promptId === promptId)
+    if (log) Object.assign(log, patch)
+  }
+
+  /** 最近一条调试日志（无则 null）；调试信息复制入口的数据源 */
+  lastDebugLog(sessionId: string): WorkbenchDebugLog | null {
+    const session = this.getSession(sessionId)
+    const logs = session?.debugLogs
+    if (!logs || logs.length === 0) return null
+    return logs[logs.length - 1]!
   }
 
   /** 固化：把模板+参数做成新 app（复用 appStore.createApp + appAssets 链路） */

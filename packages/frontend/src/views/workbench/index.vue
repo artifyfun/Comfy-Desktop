@@ -86,6 +86,15 @@
             <div class="flex-1 text-white text-sm truncate font-medium">
               {{ currentSession?.title || t('workbench') }}
             </div>
+            <!-- 复制调试信息：spec 提示词 + 模型原始输出(含思考) + PLAN + 校验 + 执行 -->
+            <a-button
+              size="small"
+              :title="t('workbenchCopyDebug')"
+              :disabled="!sessionId"
+              @click="copyDebugInfo"
+            >
+              <i class="fas fa-bug"></i>
+            </a-button>
             <a-button size="small" @click="panelOpen = !panelOpen">
               <i class="fas fa-table-columns"></i>
             </a-button>
@@ -1359,6 +1368,69 @@ async function copyArtifactError(a) {
 /** 复制执行 ID：反馈/排查时把卡片信息贴给 AI 或开发者 */
 async function copyPromptId(a) {
   await copyText(a.promptId || '')
+}
+
+/** 把一轮调试快照格式化为可读文本（markdown 风格，粘贴后可直接贴给开发者） */
+function formatDebugLog(log) {
+  const planJson = JSON.stringify(log.plan ?? null, null, 2)
+  const lines = [
+    `# 工作台调试信息（第 ${log.seq} 轮）`,
+    `时间：${new Date(log.ts).toLocaleString()}`,
+    `模型：${log.model || '（默认）'}`,
+    '',
+    '## 决策输入',
+    log.effectiveInput || '（空）',
+    log.presetId ? `预设：${log.presetId}` : '',
+    log.templateShortcut ? `模板快捷方式：${log.templateShortcut}` : '',
+    '',
+    '## 决策提示词（spec，前端不可见）',
+    log.spec || '（空）',
+    '',
+    '## 模型原始输出（raw，含思考过程）',
+    log.rawOutput || '（空）',
+    '',
+    '## 解析后的 PLAN',
+    planJson,
+    '',
+    '## 校验问题',
+    log.issues?.length ? log.issues.map((i) => `- [${i.field}] ${i.message}`).join('\n') : '（无）',
+    log.remoteIssues?.length
+      ? '远端校验：\n' + log.remoteIssues.map((i) => `- [${i.field}] ${i.message}`).join('\n')
+      : '',
+    '',
+    '## 执行',
+    `promptId: ${log.promptId || '（未执行）'}`,
+    `templateId: ${log.templateId || '—'}`,
+    `status: ${log.executionStatus || '—'}`,
+    log.executionError ? `error: ${log.executionError}` : '',
+  ]
+  return lines.filter(Boolean).join('\n')
+}
+
+/** 复制最近一轮完整调试信息（服务端记录的 decide 快照） */
+async function copyDebugInfo() {
+  if (!sessionId.value) {
+    message.warning(t('workbenchNoSession'))
+    return
+  }
+  try {
+    const res = await fetch(
+      `${origin.value}/api/workbench/debug/last?sessionId=${encodeURIComponent(sessionId.value)}`,
+    )
+    if (!res.ok) {
+      const j = await res.json().catch(() => null)
+      throw new Error(j?.message || `HTTP ${res.status}`)
+    }
+    const json = await res.json()
+    const log = json?.data
+    if (!log) {
+      message.warning(t('workbenchNoDebugLog'))
+      return
+    }
+    await copyText(formatDebugLog(log))
+  } catch (e) {
+    message.error(String(e?.message || e))
+  }
 }
 
 // 在系统文件管理器中定位产物(同机 ComfyUI)
