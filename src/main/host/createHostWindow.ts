@@ -775,6 +775,10 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     const entry = comfyWindows.get(windowKey)
     titleBarView.webContents.send('comfy-titlebar:panel-changed', entry?.activePanel ?? 'comfy')
     if (entry) {
+      // Authoritative surface push so the A/C segmented switch paints
+      // the right side on cold boot (URL `surface` param is only a
+      // seed; setPanelSurface flips it at runtime).
+      titleBarView.webContents.send('comfy-titlebar:surface-changed', entry.panelSurface)
       titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
       titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
       titleBarView.webContents.send('comfy-titlebar:source-category-changed', entry.sourceCategory)

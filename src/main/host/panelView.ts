@@ -20,6 +20,7 @@ import {
 } from './registry'
 import type { BodyMode, ComfyPanelKey, ComfyWindowEntry } from './registry'
 import { getArtifyPanelUrl } from '../artifylab/panelMode'
+import { showArtifyLab } from '../artifylab'
 import { getComfyInjectScriptSource } from './comfyInject'
 
 /** Opaque panel background matching the title-bar chrome, used while the panel
@@ -197,6 +198,13 @@ function loadPanelContent(
 export function setPanelSurface(entry: ComfyWindowEntry, surface: 'artify' | 'chooser'): void {
   if (entry.panelSurface === surface) return
   entry.panelSurface = surface
+  // Keep the title-bar A/C segmented switch in sync with programmatic
+  // flips (float-button paths, attach/detach). Sent before the
+  // destroyed-panelView early-return so the push lands even when the
+  // switch happens via a panelView rebuild.
+  if (!entry.titleBarView.webContents.isDestroyed()) {
+    entry.titleBarView.webContents.send('comfy-titlebar:surface-changed', surface)
+  }
   if (!entry.panelView || entry.panelView.webContents.isDestroyed()) return
   const panelQuery: Record<string, string> = {
     installationId: entry.installationId ?? '',
@@ -342,6 +350,19 @@ export function registerPanelViewIpc(): void {
     const panel = payload?.panel as ComfyPanelKey
     if (!VALID_PANELS.has(panel)) return
     setActivePanel(found.id, panel)
+  })
+
+  // Title-bar A/C segmented switch, C→A direction. Routes through the
+  // same `showArtifyLab()` focus handler the float button uses, so the
+  // single-window surface flip (and chooser-window cleanup) behaves
+  // identically to the existing C→A path. The A→C direction is just
+  // `setPanel('comfy')` and needs no surface special-case.
+  ipcMain.on('comfy-window:set-surface', (event, payload: { surface: string }) => {
+    const found = findEntryByTitleBarSender(event.sender)
+    if (!found) return
+    if (payload?.surface !== 'artify') return
+    if (found.entry.panelSurface === 'artify') return
+    void showArtifyLab().catch(() => {})
   })
 
   // Page-level X close inside the panel: same effect as a pill click. Resolve the host via

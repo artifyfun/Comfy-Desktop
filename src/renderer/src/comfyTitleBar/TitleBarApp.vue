@@ -63,6 +63,10 @@ interface Bridge {
   getInstallationId: () => string | null
   isMac: () => boolean
   setPanel: (panel: ComfyPanelKey) => void
+  /** Title-bar A/C switch, C→A direction — see ComfyTitleBarBridge. */
+  setSurface: (surface: 'artify' | 'chooser') => void
+  /** Cold-boot surface seed from the `surface` query param. */
+  getSurface: () => 'artify' | 'chooser'
   openNewWindow: () => void
   /** Pop the File menu natively (avoids WebContentsView clipping the popup). */
   openFileMenu: (anchor: MenuAnchor) => void
@@ -94,6 +98,7 @@ interface Bridge {
   hideCoachmark: () => void
   onCoachmarkDismissed: (cb: () => void) => () => void
   onPanelChanged: (cb: (panel: ComfyPanelKey) => void) => () => void
+  onSurfaceChanged: (cb: (surface: 'artify' | 'chooser') => void) => () => void
   onTitleChanged: (cb: (title: string) => void) => () => void
   /** Install source-category pushes from main. The raw category
    *  string drives the install-type icon next to the install name
@@ -201,6 +206,28 @@ const isMac = ref(bridge?.isMac() ?? false)
  *  Directories). The pill itself no longer reflects this — the pill is
  *  an identity label, not a tab indicator. */
 const activePanel = ref<ComfyPanelKey>('comfy')
+/**
+ * PanelView surface — `'artify'` when the panel body hosts the Artify
+ * A UI, `'chooser'` when it hosts the native panel app. Seeded from the
+ * URL `surface` query param (cold boot) and kept live via
+ * `onSurfaceChanged` pushes from main (float-button flips,
+ * attach/detach, and this switch's own C→A handler). Drives the A/C
+ * segmented switch next to the center pill.
+ */
+const surface = ref<'artify' | 'chooser'>(bridge?.getSurface() ?? 'chooser')
+/** A→C: flip the body to the ComfyUI view. Same set-panel path the
+ *  existing panel pills take, so chooser/panel semantics are unchanged. */
+const switchToComfy = (): void => {
+  if (surface.value === 'chooser') return
+  bridge?.setPanel('comfy')
+}
+/** C→A: request the Artify surface. Main routes this through the same
+ *  focus handler as the float button (single-window flip + window
+ *  focus), then pushes the new surface back via onSurfaceChanged. */
+const switchToArtify = (): void => {
+  if (surface.value === 'artify') return
+  bridge?.setSurface('artify')
+}
 /**
  * Install-less host window flag — `true` when the host has no install
  * backing it. Drives the center pill's static identity label and
@@ -507,6 +534,7 @@ watch(downloadsStartedAt, (next) => {
 })
 
 let unsubPanel: (() => void) | undefined
+let unsubSurface: (() => void) | undefined
 let unsubInstallationId: (() => void) | undefined
 let unsubZoom: (() => void) | undefined
 let unsubCoachmarkDismissed: (() => void) | undefined
@@ -551,6 +579,9 @@ onMounted(() => {
   if (!bridge) return
   unsubPanel = bridge.onPanelChanged((panel) => {
     activePanel.value = panel
+  })
+  unsubSurface = bridge.onSurfaceChanged((s) => {
+    surface.value = s
   })
   unsubZoom = bridge.onZoomChanged((level) => {
     zoomLevel.value = level
@@ -606,6 +637,7 @@ watch(
 onUnmounted(() => {
   unmounted = true
   unsubPanel?.()
+  unsubSurface?.()
   unsubInstallationId?.()
   unsubZoom?.()
   unsubCoachmarkDismissed?.()
@@ -696,6 +728,42 @@ onUnmounted(() => {
          user-action controls; the install-update pill remains here so
          it stays adjacent to the install identity. -->
     <div class="title-center">
+      <!-- A/C surface switch (segmented). Native title-bar replacement
+           for the page-embedded float buttons: left segment flips the
+           panel body to the Artify A UI, right segment to the ComfyUI
+           view. Hidden on first-use lockdown (chrome is locked down
+           during bootstrap). Active side = azure fill + white text;
+           inactive = muted mark on transparent, matching the app's
+           Comfy token language. -->
+      <div
+        v-if="!isFirstUseLockdown"
+        class="surface-switch"
+        role="tablist"
+        aria-label="Artify / ComfyUI"
+      >
+        <button
+          type="button"
+          class="surface-switch-seg"
+          :class="{ 'is-active': surface === 'artify' }"
+          role="tab"
+          :aria-selected="surface === 'artify'"
+          v-bind="tooltipAttrs('Artify 工坊')"
+          @click="switchToArtify"
+        >
+          <span class="surface-switch-mark" aria-hidden="true">A</span>
+        </button>
+        <button
+          type="button"
+          class="surface-switch-seg"
+          :class="{ 'is-active': surface !== 'artify' }"
+          role="tab"
+          :aria-selected="surface !== 'artify'"
+          v-bind="tooltipAttrs('ComfyUI')"
+          @click="switchToComfy"
+        >
+          <ComfyCLogo :size="14" class="surface-switch-c" aria-hidden="true" />
+        </button>
+      </div>
       <!-- Center identity pill. Install-backed hosts render as a
            button that opens the instance-picker popover (matching the
            rest of the title-bar dropdown buttons — waffle menu +
@@ -1022,6 +1090,61 @@ onUnmounted(() => {
 .title-feedback-button {
   color: var(--titlebar-icon);
 }
+/* A/C surface switch — segmented pair of 26px segments in an 8px-radius
+   tray. Comfy token language: transparent resting, hover surface,
+   azure fill + white text for the active side, hairline tray border.
+   No gradients, no glow. */
+.surface-switch {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  margin-right: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.title-bar.is-light .surface-switch {
+  border-color: rgba(0, 0, 0, 0.12);
+}
+.surface-switch-seg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--titlebar-icon, rgba(255, 255, 255, 0.55));
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.surface-switch-seg:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--titlebar-icon, #fff);
+}
+.title-bar.is-light .surface-switch-seg:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+.surface-switch-seg.is-active {
+  background: #0b8ce9;
+  color: #fff;
+}
+.surface-switch-mark {
+  font-size: 11px;
+  font-weight: 800;
+  font-family:
+    'Inter',
+    -apple-system,
+    sans-serif;
+  line-height: 1;
+}
+
 .title-install-pill {
   -webkit-app-region: no-drag;
   display: inline-flex;

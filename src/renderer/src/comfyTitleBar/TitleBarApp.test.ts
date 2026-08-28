@@ -39,6 +39,8 @@ interface MockBridgeState {
   }) => void)[]
   downloadsChangedCallbacks: ((state: MockDownloadsTrayState) => void)[]
   setPanelCalls: string[]
+  setSurfaceCalls: string[]
+  surfaceChangedCallbacks: ((surface: 'artify' | 'chooser') => void)[]
   newWindowCalls: number
   fileMenuAnchors: { x: number; y: number }[]
   fileMenuDismisses: number
@@ -65,7 +67,7 @@ interface MockBridgeState {
 }
 
 function installMockBridge(
-  opts: { isMac?: boolean; installationId?: string | null } = {}
+  opts: { isMac?: boolean; installationId?: string | null; surface?: 'artify' | 'chooser' } = {}
 ): MockBridgeState {
   const state: MockBridgeState = {
     panelChangedCallbacks: [],
@@ -83,6 +85,8 @@ function installMockBridge(
     installUpdateAvailableCallbacks: [],
     downloadsChangedCallbacks: [],
     setPanelCalls: [],
+    setSurfaceCalls: [],
+    surfaceChangedCallbacks: [],
     newWindowCalls: 0,
     fileMenuAnchors: [],
     fileMenuDismisses: 0,
@@ -105,6 +109,8 @@ function installMockBridge(
     getInstallationId: () => installationId,
     isMac: () => !!opts.isMac,
     setPanel: (panel: string) => state.setPanelCalls.push(panel),
+    setSurface: (surface: 'artify' | 'chooser') => state.setSurfaceCalls.push(surface),
+    getSurface: (): 'artify' | 'chooser' => opts.surface ?? 'chooser',
     openNewWindow: () => {
       state.newWindowCalls += 1
     },
@@ -116,6 +122,10 @@ function installMockBridge(
     },
     onPanelChanged: (cb: (panel: string) => void) => {
       state.panelChangedCallbacks.push(cb)
+      return () => {}
+    },
+    onSurfaceChanged: (cb: (surface: 'artify' | 'chooser') => void) => {
+      state.surfaceChangedCallbacks.push(cb)
       return () => {}
     },
     onTitleChanged: (cb: (title: string) => void) => {
@@ -328,6 +338,42 @@ describe('TitleBarApp', () => {
     bridgeState.panelChangedCallbacks.forEach((cb) => cb('settings'))
     await flushPromises()
     expect(wrapper.find('.title-install-pill').classes()).not.toContain('active')
+  })
+
+  it('renders the A/C surface switch and routes clicks through setSurface / setPanel', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    const segs = wrapper.findAll('.surface-switch-seg')
+    expect(segs.length).toBe(2)
+    // cold boot: chooser side active
+    expect(segs[1].classes()).toContain('is-active')
+    expect(segs[0].classes()).not.toContain('is-active')
+    // A→C: clicking the C seg is a no-op when already on chooser
+    await segs[1].trigger('click')
+    expect(bridgeState.setPanelCalls).toEqual([])
+    // C→A: clicking the A seg routes through setSurface('artify')
+    await segs[0].trigger('click')
+    expect(bridgeState.setSurfaceCalls).toEqual(['artify'])
+    // main acknowledges the flip; the active side follows the push
+    bridgeState.surfaceChangedCallbacks.forEach((cb) => cb('artify'))
+    await flushPromises()
+    expect(segs[0].classes()).toContain('is-active')
+    // A→C: now the C seg routes setPanel('comfy') (existing path)
+    await segs[1].trigger('click')
+    expect(bridgeState.setPanelCalls).toEqual(['comfy'])
+  })
+
+  it('hides the surface switch during first-use lockdown', async () => {
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    expect(wrapper.find('.surface-switch').exists()).toBe(true)
+    // drive firstUseMode → first-use lockdown via the identity composable's push
+    const firstUseCallbacks = bridgeState.firstUseModeChangedCallbacks ?? []
+    firstUseCallbacks.forEach((cb) => cb('consent-lockdown'))
+    await flushPromises()
+    expect(wrapper.find('.surface-switch').exists()).toBe(false)
   })
 
   it('does not render any title-bar nav buttons (back/forward chevrons removed with the takeover layout)', async () => {
