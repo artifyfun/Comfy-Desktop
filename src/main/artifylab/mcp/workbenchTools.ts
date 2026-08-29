@@ -22,6 +22,7 @@ import {
   type PlanValidationIssue
 } from '../workbench/plan'
 import { workbenchService } from '../workbench/service'
+import { listBatchQueue, type BatchJobSummary } from '../services/batchRunner'
 import { inferFirstMediaSlot } from './executor'
 import type { ComfyPrompt, ParamNode } from '../appStore'
 import appStoreManager from '../appStore'
@@ -54,12 +55,22 @@ function text(data: unknown) {
 /** wb_execute_template 参数 → WorkbenchPlan（与 decide 快路径同构，命名 snake_case 亲和 MCP） */
 function toPlan(args: Record<string, unknown>): WorkbenchPlan {
   const intent = String(args.intent ?? 'image') as WorkbenchPlan['intent']
+  // 批量编排：batch_items = 数据行数组；batch_shared_params = 全行共享参数。
+  // 行键 = 模板参数名（executeBatch 会按 paramsNodes 过滤未知键并告警）。
+  let batch: WorkbenchPlan['batch']
+  if (Array.isArray(args.batch_items) && args.batch_items.length > 0) {
+    batch = {
+      items: args.batch_items as Array<Record<string, unknown>>,
+      sharedParams: (args.batch_shared_params as Record<string, unknown>) ?? undefined
+    }
+  }
   return {
     intent,
     templateId: args.template_id ? String(args.template_id) : undefined,
     params: (args.params as Record<string, unknown>) ?? {},
     usePreviousOutput: Boolean(args.use_previous_output),
     nodeOverrides: args.node_overrides as WorkbenchPlan['nodeOverrides'],
+    batch,
     reason: args.reason ? String(args.reason) : undefined
   }
 }
@@ -98,6 +109,40 @@ async function pollUntilDone(
         prompt_id: promptId,
         error: '10min 超时，可用 wb_poll_execution 稍后再查'
       }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000))
+  }
+}
+
+/**
+ * 批量任务轮询到终态（completed/stopped/failed）。批量可能上百行，
+ * 单行快任务也至少 2s 间隔，deadline 放宽到 60min；超时不失败——
+ * 任务仍在队列里继续跑，返回当前快照让 LLM 告知用户稍后查看。
+ */
+async function pollBatchUntilDone(jobId: string): Promise<BatchJobSummary> {
+  const deadline = Date.now() + 60 * 60 * 1000
+  for (;;) {
+    const job = listBatchQueue().find((j) => j.id === jobId)
+    if (!job) {
+      // 队列被清（clear/delete）——返回空壳避免无限等
+      return {
+        id: jobId,
+        status: 'stopped',
+        total: 0,
+        processed: 0,
+        success: 0,
+        failed: 0,
+        percent: 0,
+        currentIndex: 0,
+        currentPreview: '',
+        createdAt: '',
+        updatedAt: '',
+        logs: [],
+        results: []
+      }
+    }
+    if (['completed', 'stopped', 'failed'].includes(job.status) || Date.now() > deadline) {
+      return job
     }
     await new Promise((resolve) => setTimeout(resolve, 3000))
   }
@@ -168,6 +213,17 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
             type: 'boolean',
             description: '链式：把本会话上一次执行的产物作为媒体输入'
           },
+          batch_items: {
+            type: 'array',
+            description:
+              '批量编排：数据行数组（2~200 行，每行一个对象，键=模板参数名）。提供时本计划走批量队列串行执行（进度经 /api/batch 通道），不再单次执行。用户明确要「批量/多组/每个都来一张」时使用；行数超 200 请分批多次调用。',
+            items: { type: 'object', additionalProperties: true }
+          },
+          batch_shared_params: {
+            type: 'object',
+            description: '批量共享参数：所有行公用的参数（与 params 合并，行内值优先）。',
+            additionalProperties: true
+          },
           wait: {
             type: 'boolean',
             description: 'true=阻塞到执行完成并直接返回产物（推荐；失败/超时也会明确返回）'
@@ -186,8 +242,29 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       if (validation.issues.length > 0 || !validation.template) {
         return text({ ok: false, stage: 'validation', issues: validation.issues })
       }
-      const execution = await workbenchService.execute(sessionId, plan, validation.template, [])
       workbenchService.markOrchestrated(sessionId)
+      // 批量编排：走 batchRunner 队列（串行、可暂停/取消），进度经
+      // /api/batch 通道。行级失败不互相阻塞，终态汇总返回。
+      if (plan.batch) {
+        const { jobId, total } = await workbenchService.executeBatch(
+          sessionId,
+          plan,
+          validation.template,
+          []
+        )
+        const done = await pollBatchUntilDone(jobId)
+        return text({
+          ok: done.status === 'completed',
+          stage: 'batch',
+          job_id: jobId,
+          total,
+          success: done.success,
+          failed: done.failed,
+          status: done.status,
+          outputs: done.results.flatMap((r) => r.files ?? [])
+        })
+      }
+      const execution = await workbenchService.execute(sessionId, plan, validation.template, [])
       if (args.wait === false) {
         return text({
           ok: true,

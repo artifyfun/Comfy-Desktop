@@ -12,7 +12,8 @@ vi.mock('../workbench/service', () => {
     executed: [] as Array<{ sessionId: string; templateId?: string }>,
     marked: [] as string[],
     remembered: [] as Array<{ key: string; value: string }>,
-    forgotten: [] as string[]
+    forgotten: [] as string[],
+    batchPlan: undefined as unknown
   }
   const mockTemplate = {
     id: 'app:t2i',
@@ -76,6 +77,10 @@ vi.mock('../workbench/service', () => {
       forgetMemory: vi.fn((key: string) => {
         calls.forgotten.push(key)
         return key === 'known'
+      }),
+      executeBatch: vi.fn(async (_sid: string, plan: { batch?: { items?: unknown[] } }) => {
+        calls.batchPlan = plan
+        return { jobId: 'job-1', total: plan.batch?.items?.length ?? 0 }
       })
     },
     __calls: calls
@@ -86,6 +91,27 @@ vi.mock('../appStore', () => ({
   default: {
     getConfig: () => ({ comfyHost: 'http://127.0.0.1:8188' })
   }
+}))
+
+// batchRunner 拖 electron 依赖（持久化/通知），工具层只读 listBatchQueue——mock 成空队列
+vi.mock('../services/batchRunner', () => ({
+  listBatchQueue: () => [
+    {
+      id: 'job-1',
+      status: 'completed',
+      total: 2,
+      processed: 2,
+      success: 2,
+      failed: 0,
+      percent: 100,
+      currentIndex: 2,
+      currentPreview: '',
+      createdAt: '',
+      updatedAt: '',
+      logs: [],
+      results: [{ index: 0, success: true, durationMs: 1, files: [{ filename: 'b.png' }] }]
+    }
+  ]
 }))
 
 vi.mock('../workbench/templates', () => ({
@@ -215,5 +241,34 @@ describe('workbench wb_* MCP tools', () => {
     const base = { list: () => [], handle: vi.fn(async () => ({ from: 'base' })), sync: () => {} }
     const r = createWorkbenchAugmentedRegistry(base)
     await expect(r.handle('list_apps', {})).resolves.toEqual({ from: 'base' })
+  })
+
+  it('wb_execute_template batch_items：走 executeBatch 队列并回汇总', async () => {
+    beginWorkbenchToolContext('s1')
+    const r = registry()
+    const out = await r.handle('wb_execute_template', {
+      template_id: 'app:t2i',
+      intent: 'image',
+      batch_items: [{ prompt: 'A' }, { prompt: 'B', steps: 28 }],
+      batch_shared_params: { prompt: 'shared prompt' }
+    })
+    const parsed = JSON.parse((out as { content: Array<{ text: string }> }).content[0]!.text)
+    expect(parsed.ok).toBe(true)
+    expect(parsed.stage).toBe('batch')
+    expect(parsed.job_id).toBe('job-1')
+    expect(parsed.total).toBe(2)
+    expect(parsed.success).toBe(2)
+    expect(parsed.outputs).toEqual([{ filename: 'b.png' }])
+    // 不应走单次 execute
+    expect(mocked.execute).not.toHaveBeenCalled()
+    // plan.batch 映射正确（items 透传、sharedParams 进 plan）
+    const svc = workbenchService as unknown as {
+      executeBatch: ReturnType<typeof vi.fn>
+    }
+    const planArg = svc.executeBatch.mock.calls[0]?.[1] as {
+      batch?: { items?: unknown[]; sharedParams?: Record<string, unknown> }
+    }
+    expect(planArg.batch?.items).toEqual([{ prompt: 'A' }, { prompt: 'B', steps: 28 }])
+    expect(planArg.batch?.sharedParams).toEqual({ prompt: 'shared prompt' })
   })
 })

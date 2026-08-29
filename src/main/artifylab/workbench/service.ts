@@ -910,6 +910,7 @@ class WorkbenchService {
     const batchRule = `
 ## 批量 / 记忆
 用户需要多条产出（列出行/表格/N 个变体）→ batch 计划；用户表达跨会话偏好/事实 → intent=memory。
+**批量 PLAN JSON 合法字段**（顶层 schema 补充）：{"intent":"...","templateId":"...","params":{...},"batch":{"items":[{参数名:值},...],"sharedParams":{全行共享参数，可选}},"reason":"..."}——items 2~200 行，每行键=模板参数名；行内值优先于 params/sharedParams。
 详细格式见 wb-batch-memory skill（可用时先读 SKILL.md 再输出）。
 `
     const titleRule = `

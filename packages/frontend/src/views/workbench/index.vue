@@ -15,6 +15,75 @@
         <i class="fas fa-thumbtack mr-1"></i>{{ canvasAttachNotice }}
       </div>
 
+      <!-- embed 画布感知条（M1：实时感知宿主 ComfyUI 画布） -->
+      <div
+        v-if="isEmbed && canvasState"
+        class="mx-2 mt-2 px-3 py-1.5 flex items-center gap-3 text-[11px] rounded-lg shrink-0 overflow-hidden"
+        style="border: 1px solid var(--wb-stroke); background: var(--wb-surface-deep); color: var(--wb-text-2)"
+        :title="t('workbenchCanvasSense')"
+      >
+        <span class="flex items-center gap-1 shrink-0" style="color: var(--wb-accent)">
+          <i class="fas fa-circle-nodes"></i>
+          <span class="max-w-[140px] truncate inline-block">{{ canvasState.workflowName }}</span>
+        </span>
+        <span class="shrink-0">{{ t('workbenchCanvasNodes').replace('{n}', String(canvasState.nodeCount)) }}</span>
+        <span v-if="canvasState.models?.length" class="truncate" style="color: var(--wb-text-1)">
+          {{ canvasState.models[0] }}
+        </span>
+        <span
+          v-if="canvasState.queue?.running || canvasState.queue?.pending"
+          class="ml-auto shrink-0 px-2 py-0.5 rounded-full"
+          style="background: var(--wb-accent)/15; color: var(--wb-accent)"
+        >
+          <i class="fas fa-spinner fa-spin-mr-1"></i>
+          {{ canvasState.queue.running }}/{{ canvasState.queue.running + canvasState.queue.pending }}
+        </span>
+      </div>
+
+      <!-- embed 写回 diff 确认卡（M2：LLM ops → 人审 → 下发注入桥） -->
+      <div
+        v-if="isEmbed && pendingOps"
+        class="mx-2 mt-2 px-3 py-2 rounded-lg shrink-0 text-[11px]"
+        style="border: 1px solid var(--wb-accent); background: var(--wb-surface-deep)"
+      >
+        <div class="flex items-center gap-2 mb-1.5" style="color: var(--wb-accent)">
+          <i class="fas fa-pen-to-square"></i>
+          <span class="font-medium">{{ t('workbenchOpsTitle') }}</span>
+          <span v-if="opsApplying" class="ml-auto" style="color: var(--wb-text-2)">
+            <i class="fas fa-spinner fa-spin mr-1"></i>{{ t('workbenchOpsApplying') }}
+          </span>
+        </div>
+        <div class="space-y-0.5 mb-2" style="color: var(--wb-text-1)">
+          <div v-for="(line, i) in opsDiffLines" :key="i" class="truncate" :title="line">
+            <span style="color: var(--wb-text-2)">·</span> {{ line }}
+          </div>
+        </div>
+        <div v-if="opsResultMsg" class="mb-2" :style="{ color: opsResultOk ? 'var(--wb-accent)' : '#f87171' }">
+          {{ opsResultMsg }}
+        </div>
+        <div class="flex items-center gap-2">
+          <button
+            class="px-3 py-1 rounded-md font-medium disabled:opacity-50"
+            style="background: var(--wb-accent); color: #fff"
+            :disabled="opsApplying"
+            @click="confirmApplyOps"
+          >
+            <i class="fas fa-check mr-1"></i>{{ t('workbenchOpsApply') }}
+          </button>
+          <button
+            class="px-3 py-1 rounded-md"
+            style="border: 1px solid var(--wb-stroke); color: var(--wb-text-2)"
+            :disabled="opsApplying"
+            @click="discardPendingOps"
+          >
+            {{ t('workbenchOpsDiscard') }}
+          </button>
+          <span v-if="canvasState" class="ml-auto truncate" style="color: var(--wb-text-2)" :title="t('workbenchOpsBase')">
+            {{ t('workbenchOpsBase') }}: {{ canvasState.workflowName }} · {{ canvasState.nodeCount }}
+          </span>
+        </div>
+      </div>
+
       <div
         class="flex flex-1 min-h-0 mx-auto mt-2 gap-4 w-full"
         :class="isEmbed ? 'px-2' : 'px-4 max-w-[1600px] sm:px-6 lg:px-8'"
@@ -185,6 +254,9 @@
                         <i class="fas fa-diagram-project mr-1"></i>{{ t('workbenchPlan') }}
                       </div>
                       <div class="text-xs opacity-80 mb-2">{{ m.plan.reason }}</div>
+                      <div class="text-xs mb-2" style="color: var(--wb-accent)">
+                        <i class="fas fa-layer-group mr-1"></i>{{ batchSummaryText(m.plan) }}
+                      </div>
                       <div class="text-xs">{{ cardText(m.plan) }}</div>
                     </template>
                     <template v-else-if="m.kind === 'progress'">
@@ -1791,6 +1863,14 @@ function pushCardsToCanvas(files) {
 // （直接构造已就绪附件形态：文件已在 ComfyUI output 目录，/view 直出，
 // 无需再走 /api/workbench/upload）
 const canvasAttachNotice = ref('')
+// 画布感知（M1）：注入桥实时推送的宿主画布摘要
+const canvasState = ref(null)
+function applyCanvasState(data) {
+  if (!data || typeof data.seq !== 'number') return
+  // 防乱序：旧序号不覆盖新序号（iframe 重连时可能收到迟到的推送）
+  if (canvasState.value && data.seq <= canvasState.value.seq) return
+  canvasState.value = data
+}
 function onWindowMessage(event) {
   let data = event.data
   if (typeof data === 'string') {
@@ -1799,6 +1879,10 @@ function onWindowMessage(event) {
     } catch {
       return
     }
+  }
+  if (data && data.type === 'artify:canvas-state') {
+    applyCanvasState(data.state)
+    return
   }
   if (!data || data.type !== 'artify:card-attach') return
   const files = Array.isArray(data.files) ? data.files : []
@@ -1822,6 +1906,122 @@ function onWindowMessage(event) {
   }
 }
 if (isEmbed.value) window.addEventListener('message', onWindowMessage)
+// embed 首屏：主动要一份当前画布摘要（注入桥可能早于 iframe 就绪推过）
+if (isEmbed.value) {
+  setTimeout(() => {
+    try {
+      window.parent.postMessage(JSON.stringify({ type: 'artify:get-canvas-state' }), '*')
+    } catch {
+      return
+    }
+  }, 400)
+}
+
+// ---------- 写回 diff 确认（M2：LLM ops → 人审 → 注入桥执行） ----------
+const pendingOps = ref(null) // Array<op> | null
+const opsApplying = ref(false)
+const opsResultMsg = ref('')
+const opsResultOk = ref(false)
+let opsRequestSeq = 0
+
+/**
+ * ops → 人类可读 diff 行（确认卡正文）。
+ * 刻意不展示 JSON：用户审的是「改了什么」，不是协议。
+ */
+const opsDiffLines = computed(() => {
+  const ops = pendingOps.value || []
+  return ops.map((op) => {
+    switch (op.type) {
+      case 'setWidget': {
+        const v = typeof op.value === 'object' ? JSON.stringify(op.value) : String(op.value)
+        return t('workbenchOpsSetWidget')
+          .replace('{node}', String(op.nodeId))
+          .replace('{widget}', String(op.widget))
+          .replace('{value}', v)
+      }
+      case 'addNode':
+        return t('workbenchOpsAddNode').replace('{type}', String(op.nodeType))
+      case 'removeNode':
+        return t('workbenchOpsRemoveNode').replace('{node}', String(op.nodeId))
+      case 'relink':
+        return t('workbenchOpsRelink')
+          .replace('{from}', String(op.fromNodeId))
+          .replace('{to}', String(op.toNodeId))
+      case 'loadWorkflow':
+        return t('workbenchOpsLoad')
+      default:
+        return `${op.type}`
+    }
+  })
+})
+
+/** 供对话流调用：AI 产出 ops 后进入人审（不直接执行） */
+function proposeCanvasOps(ops, _ctx) {
+  if (!isEmbed.value || !Array.isArray(ops) || !ops.length) return false
+  opsResultMsg.value = ''
+  pendingOps.value = ops
+  return true
+}
+
+function discardPendingOps() {
+  pendingOps.value = null
+  opsResultMsg.value = ''
+}
+
+async function confirmApplyOps() {
+  const ops = pendingOps.value
+  if (!ops?.length || opsApplying.value) return
+  opsApplying.value = true
+  opsResultMsg.value = ''
+  const requestId = `ops-${Date.now()}-${++opsRequestSeq}`
+  const reply = await new Promise((resolve) => {
+    const onAck = (event) => {
+      let data = event.data
+      if (typeof data === 'string') {
+        try {
+          data = JSON.parse(data)
+        } catch {
+          return
+        }
+      }
+      if (data && data.type === 'artify:canvas-ops-result' && data.requestId === requestId) {
+        window.removeEventListener('message', onAck)
+        resolve(data)
+      }
+    }
+    window.addEventListener('message', onAck)
+    // 8s 超时：桥未就绪（tab 未打开过）时不无限等
+    setTimeout(() => {
+      window.removeEventListener('message', onAck)
+      resolve({ ok: false, error: 'bridge timeout' })
+    }, 8000)
+    try {
+      window.parent.postMessage(JSON.stringify({ type: 'artify:canvas-ops', ops, requestId, reason: 'workbench-confirm' }), '*')
+    } catch (e) {
+      window.removeEventListener('message', onAck)
+      resolve({ ok: false, error: String(e).slice(0, 80) })
+    }
+  })
+  opsApplying.value = false
+  opsResultOk.value = !!reply.ok
+  const applied = Number(reply.applied) || 0
+  const failed = Array.isArray(reply.results) ? reply.results.filter((r) => r && r.ok === false) : []
+  opsResultMsg.value = reply.ok
+    ? t('workbenchOpsDone').replace('{n}', String(applied))
+    : t('workbenchOpsFailed') + (reply.error ? `: ${reply.error}` : '')
+  if (reply.ok && failed.length) {
+    opsResultMsg.value += ` (${failed.length} failed)`
+  }
+  // 应用成功 3s 后收卡（感知条会反映新状态）
+  if (reply.ok) {
+    setTimeout(() => {
+      if (opsResultOk.value) {
+        pendingOps.value = null
+        opsResultMsg.value = ''
+      }
+    }, 3000)
+  }
+}
 
 function isVideoFile(f) {
   return /\.(mp4|webm|mov|gif)$/i.test(f?.filename ?? '')
@@ -2211,6 +2411,16 @@ function cardText(plan) {
     .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
     .join('，')
   return `${plan.intent} · ${plan.templateId ?? ''}${ps ? ' · ' + ps : ''}`
+}
+
+/** 计划卡批量摘要行：无 batch 返回空串（行不渲染） */
+function batchSummaryText(plan) {
+  const n = plan?.batch?.items?.length ?? 0
+  if (!n) return ''
+  const shared = Object.keys(plan.batch?.sharedParams ?? {}).length
+  return t('workbenchBatchPlan')
+    .replace('{n}', String(n))
+    .replace('{shared}', String(shared))
 }
 
 function scrollToBottom() {
