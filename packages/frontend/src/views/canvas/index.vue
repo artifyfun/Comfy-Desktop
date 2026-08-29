@@ -1,12 +1,13 @@
 <template>
-  <div class="page-container bg-tech-dark">
+  <div class="page-container bg-tech-dark flex flex-col h-screen overflow-hidden">
     <AppHeader
+      class="shrink-0"
       :first-nav-to="'/market'"
       :first-nav-label="t('market')"
       first-nav-icon="mr-2 fas fa-store"
     />
-    <!-- 画布 + 右侧工作台 侧边栏布局 -->
-    <div class="flex mx-4 mt-2 h-[calc(100vh-120px)] gap-2">
+    <!-- 画布 + 右侧工作台 侧边栏布局（flex 撑满视口剩余高度，不留底边距） -->
+    <div class="flex flex-1 min-h-0 mx-4 mt-2 mb-2 gap-2">
       <div
         ref="wrapEl"
         class="relative flex-1 min-w-0 overflow-hidden rounded-xl border border-[var(--wb-stroke)]"
