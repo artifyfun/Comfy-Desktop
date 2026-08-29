@@ -127,9 +127,9 @@
       <!-- 右侧工作台侧边栏（可收起） -->
       <aside
         v-if="wbOpen"
-        class="w-[400px] shrink-0 rounded-xl border border-[var(--wb-stroke)] overflow-hidden bg-[var(--wb-bg-base)]"
+        class="w-[400px] shrink-0 flex flex-col rounded-xl border border-[var(--wb-stroke)] overflow-hidden bg-[var(--wb-bg-base)]"
       >
-        <Workbench :canvas-embedded="true" />
+        <Workbench class="flex-1 min-h-0" :canvas-embedded="true" />
       </aside>
     </div>
 

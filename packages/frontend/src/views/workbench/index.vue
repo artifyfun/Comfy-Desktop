@@ -1,6 +1,10 @@
 <template>
-  <div class="page-container" style="background: var(--wb-bg-base)">
-    <div id="app" class="pb-4 min-h-screen flex flex-col">
+  <div
+    class="page-container"
+    :class="isCanvasEmbedded ? 'h-full flex flex-col' : ''"
+    style="background: var(--wb-bg-base)"
+  >
+    <div id="app" class="flex flex-col" :class="isCanvasEmbedded ? 'flex-1 min-h-0' : 'pb-4 min-h-screen'">
       <AppHeader
         v-if="isStandalone"
         :first-nav-to="'/'"
@@ -111,7 +115,7 @@
         <!-- 中：会话区（embed 模式占满 iframe 高度；顶部还有感知条 mt-2+行高≈36px） -->
         <section
           class="flex-1 min-w-0 flex flex-col"
-          :class="isNarrow ? 'h-[calc(100vh-52px)]' : 'h-[calc(100vh-96px)]'"
+          :class="isCanvasEmbedded ? 'flex-1 min-h-0' : isEmbed ? 'h-[calc(100vh-52px)]' : 'h-[calc(100vh-96px)]'"
           style="border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-card)"
         >
           <!-- 会话头 -->
