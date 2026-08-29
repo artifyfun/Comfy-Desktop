@@ -1,6 +1,7 @@
 <template>
-  <!-- 常驻批量任务浮层：main 进程执行，不随页面卸载。任何页面右下角可见/可操作。 -->
-  <div v-if="visible" class="batch-float">
+  <!-- 常驻批量任务浮层：main 进程执行，不随页面卸载。任何页面右下角可见/可操作。
+       embed 窄容器：贴左侧、抬高到 Composer 上方（bottom 172 ≈ 输入卡高度），不遮发送钮 -->
+  <div v-if="visible" class="batch-float" :class="{ 'batch-float-embed': isEmbed }">
     <div v-if="!expanded" class="batch-float-pill" @click="expanded = true">
       <span class="dot" :class="statusClass"></span>
       <span class="pill-text">{{ pillText }}</span>
@@ -140,6 +141,9 @@ const router = useRouter()
 const expanded = ref(false)
 const showConfig = ref(false)
 const notifyUrlDraft = ref('')
+// embed 模式（ComfyUI 侧栏 iframe）：右下角与 Composer 发送钮重叠，
+// 浮层收到输入区上方（bottom 让出 Composer 高度），左对齐避免盖发送钮
+const isEmbed = computed(() => new URLSearchParams(window.location.search).get('embed') === '1')
 
 const cfg = computed(() => store.queueConfig)
 const s = computed(() => store.status || {})
@@ -278,6 +282,14 @@ function goDetail() {
   z-index: 1100;
   font-size: 12px;
   user-select: none;
+}
+
+/* embed 侧栏（312px iframe）：避让右下角 Composer 发送钮 */
+.batch-float-embed {
+  right: auto;
+  left: 10px;
+  bottom: 172px;
+  max-width: calc(100vw - 20px);
 }
 
 /* 收起态：小胶囊 */

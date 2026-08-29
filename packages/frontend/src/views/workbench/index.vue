@@ -261,7 +261,12 @@
                         <i class="fas fa-diagram-project mr-1"></i>{{ t('workbenchPlan') }}
                       </div>
                       <div class="text-xs opacity-80 mb-2">{{ m.plan.reason }}</div>
-                      <div class="text-xs mb-2" style="color: var(--wb-accent)">
+                      <!-- 批量摘要行：仅 batch 计划渲染（空串时连图标也不该出现） -->
+                      <div
+                        v-if="batchSummaryText(m.plan)"
+                        class="text-xs mb-2"
+                        style="color: var(--wb-accent)"
+                      >
                         <i class="fas fa-layer-group mr-1"></i>{{ batchSummaryText(m.plan) }}
                       </div>
                       <div class="text-xs">{{ cardText(m.plan) }}</div>
@@ -1480,13 +1485,24 @@ function handleSse(chunk) {
       createdAt: Date.now(),
     })
   } else if (event === 'plan') {
-    pushMsg({
-      role: 'agent',
-      kind: 'card',
-      text: '',
-      plan: data.plan,
-      createdAt: Date.now(),
-    })
+    // 纯 chat 意图（无 batch/无模板/无参数）不产计划卡——内容与随后的 reply
+    // 重复，窄容器里还多出一块视觉噪音；直接降级为不渲染
+    const p = data.plan
+    const trivial =
+      p &&
+      p.intent === 'chat' &&
+      !p.batch &&
+      !p.templateId &&
+      Object.keys(p.params ?? {}).length === 0
+    if (!trivial) {
+      pushMsg({
+        role: 'agent',
+        kind: 'card',
+        text: '',
+        plan: p,
+        createdAt: Date.now(),
+      })
+    }
   } else if (event === 'stage') {
     pushMsg({
       role: 'agent',

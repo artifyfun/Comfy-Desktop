@@ -1,7 +1,7 @@
 <template>
   <div
     v-if="open"
-    class="absolute bottom-full left-0 mb-2 w-80 max-h-80 overflow-y-auto rounded-lg border border-[var(--wb-stroke-strong)] bg-[var(--wb-surface-deep)] shadow-2xl z-50"
+    class="absolute bottom-full left-0 mb-2 w-80 max-w-[calc(100vw-24px)] max-h-80 overflow-y-auto rounded-lg border border-[var(--wb-stroke-strong)] bg-[var(--wb-surface-deep)] shadow-2xl z-50"
   >
     <div
       class="p-2 text-xs text-[var(--wb-text-2)] border-b border-[var(--wb-stroke)] sticky top-0 bg-[var(--wb-surface-deep)]"
