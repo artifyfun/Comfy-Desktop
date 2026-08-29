@@ -12,6 +12,10 @@ import {
   bboxOf,
   serializeDoc,
   parseDoc,
+  linkEndpoints,
+  linkMidpoint,
+  distToSegment,
+  cropRectFor,
 } from './engine'
 
 describe('canvas engine: viewport', () => {
@@ -157,5 +161,65 @@ describe('canvas engine: bbox & doc', () => {
     // 非法物件被过滤
     const doc = parseDoc('{"objects":[{"x":1,"y":2,"width":3,"height":4},{"bad":true}]}')
     expect(doc.objects).toHaveLength(1)
+  })
+})
+
+describe('canvas engine: links', () => {
+  const objs = [
+    { id: 'a', type: 'image', x: 0, y: 0, width: 100, height: 80 },
+    { id: 'b', type: 'image', x: 300, y: 200, width: 60, height: 60 },
+  ]
+  it('linkEndpoints 取两边中心为端点', () => {
+    const segs = linkEndpoints([{ id: 'L1', from: 'a', to: 'b' }], objs)
+    expect(segs).toHaveLength(1)
+    expect(segs[0].x1).toBe(50) // 0+100/2
+    expect(segs[0].y1).toBe(40) // 0+80/2
+    expect(segs[0].x2).toBe(330) // 300+60/2
+    expect(segs[0].y2).toBe(230) // 200+60/2
+  })
+  it('悬空连线返回 null（渲染层跳过）', () => {
+    const segs = linkEndpoints([{ id: 'L', from: 'a', to: 'ghost' }], objs)
+    expect(segs[0]).toBeNull()
+  })
+  it('linkMidpoint 中点', () => {
+    const m = linkMidpoint({ x1: 50, y1: 40, x2: 330, y2: 230 })
+    expect(m.x).toBe(190)
+    expect(m.y).toBe(135)
+  })
+  it('distToSegment 点到直线的垂直距离', () => {
+    // 点 (1,2) 到线 (0,0)-(3,4)：|1*4-2*3|/5 = 2/5 = 0.4
+    expect(distToSegment(1, 2, 0, 0, 3, 4)).toBeCloseTo(0.4)
+  })
+  it('distToSegment 垂足在线段外取端点距离', () => {
+    expect(distToSegment(-5, 0, 0, 0, 10, 0)).toBe(5)
+  })
+  it('distToSegment 斜线几何正确', () => {
+    // 线 (0,0)-(3,4)，点 (3,0)：|3*4-0*3|/5 = 2.4（垂足 t=0.6 在段内）
+    expect(distToSegment(3, 0, 0, 0, 3, 4)).toBeCloseTo(2.4)
+  })
+})
+
+describe('canvas engine: cropRectFor', () => {
+  const img = { id: 'i', x: 0, y: 0, width: 200, height: 100, naturalWidth: 400, naturalHeight: 200 }
+  it('世界矩形换算为源像素区域（2x 素材）', () => {
+    const c = cropRectFor(img, 50, 25, 100, 50)
+    expect(c.sx).toBe(100)
+    expect(c.sy).toBe(50)
+    expect(c.sw).toBe(200)
+    expect(c.sh).toBe(100)
+    expect(c.x).toBe(50)
+    expect(c.y).toBe(25)
+    expect(c.width).toBe(100)
+  })
+  it('不相交返回 null', () => {
+    expect(cropRectFor(img, 500, 500, 10, 10)).toBeNull()
+  })
+  it('裁剪矩形超出图片边界时取交集', () => {
+    const c = cropRectFor(img, -50, -50, 100, 100)
+    expect(c.x).toBe(0)
+    expect(c.y).toBe(0)
+    expect(c.width).toBe(50)
+    expect(c.height).toBe(50)
+    expect(c.sw).toBe(100) // 50/200*400
   })
 })

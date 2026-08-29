@@ -145,28 +145,116 @@ export function bboxOf(objects) {
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
 }
 
-/** 序列化：画布文档 → 可持久化 JSON（版本号前置，向后兼容迁移用） */
-export function serializeDoc(objects, viewport, name = 'Untitled') {
-  return JSON.stringify({
-    version: 1,
-    name,
-    viewport: { scale: viewport.scale, x: viewport.x, y: viewport.y },
-    objects: objects.map((o) => ({ ...o })),
+/**
+ * 连线端点：物件间连线从边缘中点出发，指向对方中心。
+ * links: {id, from, to, kind?}; objects 按 id 索引；返回 Konva 可绘线段端点。
+ * 悬空连线（端点物件不存在）返回 null（渲染层跳过）。
+ */
+export function linkEndpoints(links, objects) {
+  const byId = new Map(objects.map((o) => [o.id, o]))
+  return links.map((l) => {
+    const a = byId.get(l.from)
+    const b = byId.get(l.to)
+    if (!a || !b) return null
+    return {
+      ...l,
+      x1: a.x + a.width / 2,
+      y1: a.y + a.height / 2,
+      x2: b.x + b.width / 2,
+      y2: b.y + b.height / 2,
+    }
   })
 }
 
-/** 反序列化：容忍残缺文档，坏档返回空文档 */
+/** 连线中点（箭头/删除热点用） */
+export function linkMidpoint(seg) {
+  return { x: (seg.x1 + seg.x2) / 2, y: (seg.y1 + seg.y2) / 2 }
+}
+
+/**
+ * 命中点 (px,py) 到线段 (x1,y1)-(x2,y2) 的距离（世界坐标）。
+ * 连线点击删除/选中用，阈值由调用方按缩放换算。
+ */
+export function distToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1
+  const dy = y2 - y1
+  const lenSq = dx * dx + dy * dy
+  let t = lenSq === 0 ? 0 : ((px - x1) * dx + (py - y1) * dy) / lenSq
+  t = Math.max(0, Math.min(1, t))
+  const cx = x1 + t * dx
+  const cy = y1 + t * dy
+  return Math.hypot(px - cx, py - cy)
+}
+
+/**
+ * 圈选裁剪：把世界坐标矩形换算为图片物件的源图像素区域。
+ * img: 画布 image 物件（x/y/width/height/src）；rect 世界坐标矩形。
+ * 相交为空返回 null；结果为 Konva 层裁剪 drawImage 参数。
+ */
+export function cropRectFor(img, rx, ry, rw, rh) {
+  const left = Math.min(rx, rx + rw)
+  const top = Math.min(ry, ry + rh)
+  const right = Math.max(rx, rx + rw)
+  const bottom = Math.max(ry, ry + rh)
+  const ix2 = img.x + img.width
+  const iy2 = img.y + img.height
+  // 求交
+  const cx1 = Math.max(img.x, left)
+  const cy1 = Math.max(img.y, top)
+  const cx2 = Math.min(ix2, right)
+  const cy2 = Math.min(iy2, bottom)
+  if (cx1 >= cx2 || cy1 >= cy2) return null
+  const sx = ((cx1 - img.x) / img.width) * (img.naturalWidth || img.width)
+  const sy = ((cy1 - img.y) / img.height) * (img.naturalHeight || img.height)
+  const sw = ((cx2 - cx1) / img.width) * (img.naturalWidth || img.width)
+  const sh = ((cy2 - cy1) / img.height) * (img.naturalHeight || img.height)
+  return {
+    sx,
+    sy,
+    sw,
+    sh,
+    // 画布上呈现的矩形（世界坐标）
+    x: cx1,
+    y: cy1,
+    width: cx2 - cx1,
+    height: cy2 - cy1,
+  }
+}
+
+/** 序列化：画布文档 → 可持久化 JSON（v2：含连线/组合/降采样存档） */
+export function serializeDoc(objects, viewport, name = 'Untitled', links = [], groups = []) {
+  return JSON.stringify({
+    version: 2,
+    name,
+    viewport: { scale: viewport.scale, x: viewport.x, y: viewport.y },
+    objects: objects.map((o) => ({ ...o })),
+    links: links.map((l) => ({ ...l })),
+    groups: groups.map((g) => ({ ...g })),
+  })
+}
+
+/** 反序列化：容忍残缺文档，坏档返回空文档（v1 档无 links/groups 字段 → 空数组） */
 export function parseDoc(json) {
+  const empty = () => ({ version: 2, name: 'Untitled', viewport: makeViewport(), objects: [], links: [], groups: [] })
   try {
     const d = JSON.parse(json)
-    if (!d || !Array.isArray(d.objects)) return { version: 1, name: 'Untitled', viewport: makeViewport(), objects: [] }
+    if (!d || !Array.isArray(d.objects)) return empty()
     return {
       version: d.version ?? 1,
       name: d.name ?? 'Untitled',
       viewport: makeViewport(d.viewport?.scale ?? 1, d.viewport?.x ?? 0, d.viewport?.y ?? 0),
       objects: d.objects.filter((o) => o && typeof o.x === 'number' && typeof o.y === 'number'),
+      links: Array.isArray(d.links)
+        ? d.links.filter((l) => l && typeof l.id === 'string' && typeof l.from === 'string' && typeof l.to === 'string')
+        : [],
+      groups: Array.isArray(d.groups)
+        ? d.groups
+            .filter((g) => g && typeof g.id === 'string' && Array.isArray(g.members))
+            .map((g) => ({ ...g, members: g.members.filter((m) => typeof m === 'string') }))
+            .filter((g) => g.members.length > 1)
+        : [],
     }
   } catch {
-    return { version: 1, name: 'Untitled', viewport: makeViewport(), objects: [] }
+    return empty()
   }
 }

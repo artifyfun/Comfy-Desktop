@@ -99,6 +99,11 @@ export default defineConfig(({ command, mode }) => {
         },
     server: {
       proxy: {
+        // 画布「圈选裁剪」用同源 /view 取图（ComfyUI 直链会污染 canvas）
+        '/view': {
+          target: 'http://localhost:3008',
+          changeOrigin: true,
+        },
         // "/comfyui": {
         //   target: "http://localhost:9528",
         //   changeOrigin: false,

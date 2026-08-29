@@ -17,6 +17,7 @@ function bus() {
     window[BUS_KEY] = {
       resultListeners: new Set(),
       attachmentListeners: new Set(),
+      stateListeners: new Set(),
     }
   }
   return window[BUS_KEY]
@@ -41,9 +42,18 @@ export function useCanvasMode() {
     emitAttachments(files) {
       b.attachmentListeners.forEach((cb) => cb(files))
     },
+    /** 画布侧：选区/物件摘要 → 工作台感知条（与 embed postMessage 通道同构） */
+    onCanvasState(cb) {
+      b.stateListeners.add(cb)
+      return () => b.stateListeners.delete(cb)
+    },
+    emitCanvasState(state) {
+      b.stateListeners.forEach((cb) => cb(state))
+    },
     clear() {
       b.resultListeners.clear()
       b.attachmentListeners.clear()
+      b.stateListeners.clear()
     },
   }
 }

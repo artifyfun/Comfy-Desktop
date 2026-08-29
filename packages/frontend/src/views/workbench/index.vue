@@ -31,6 +31,9 @@
           <span class="max-w-[140px] truncate inline-block">{{ canvasState.workflowName }}</span>
         </span>
         <span class="shrink-0">{{ t('workbenchCanvasNodes').replace('{n}', String(canvasState.nodeCount)) }}</span>
+        <span v-if="canvasState.selection?.length" class="truncate" style="color: var(--wb-accent)">
+          <i class="fas fa-vector-square mr-1"></i>{{ canvasState.selection.join(' · ') }}
+        </span>
         <span v-if="canvasState.models?.length" class="truncate" style="color: var(--wb-text-1)">
           {{ canvasState.models[0] }}
         </span>
@@ -820,9 +823,8 @@ import PresetManager from './components/PresetManager.vue'
 import { canApplyFix } from './diagnosis'
 import { pushFiles, drainAttachments, drainFiles } from '@/utils/canvasBridge'
 import { useCanvasMode } from '@/utils/canvasMode'
-
 const { t, getCurrentLanguage } = useI18n()
-const { onResult, emitResult, onAttachments } = useCanvasMode()
+const { onResult, emitResult, onAttachments, onCanvasState } = useCanvasMode()
 // 画布侧栏模式：store 模式由画布页设置；这里只需把产物经 emitResult 推给宿主
 const appStore = useAppStore()
 const route = useRoute()
@@ -1077,7 +1079,8 @@ async function saveModelOverride(v) {
 }
 
 // ---------- 附件 ----------
-async function uploadFiles(files) {
+// silent: 裁剪图等自动通道上传时免 toast（uploadFiles 也被画布附件分支复用）
+async function uploadFiles(files, { silent = false } = {}) {
   uploading.value = true
   for (const f of files) {
     const preview = f.type.startsWith('image/') ? URL.createObjectURL(f) : null
@@ -1088,7 +1091,7 @@ async function uploadFiles(files) {
         : f.type.startsWith('audio/')
           ? 'audio'
           : 'file'
-    if (kind === 'file') {
+    if (kind === 'file' && !silent) {
       // 文档类：不参与工作流媒体槽位（ComfyUI 不吃文档），仅作为 AI 决策上下文。
       // 明示给用户，避免"传了却没被用"的困惑。
       message.info(t('workbenchDocAsContext', { name: f.name }))
@@ -1113,7 +1116,7 @@ async function uploadFiles(files) {
       if (!res.ok || !json?.success) throw new Error(json?.message || 'upload failed')
       Object.assign(draftAttachments.value[idx], json.data, { uploading: false })
     } catch (e) {
-      message.error(`${f.name}: ${e.message}`)
+      if (!silent) message.error(`${f.name}: ${e.message}`)
       draftAttachments.value.splice(idx, 1)
     }
   }
@@ -1984,6 +1987,7 @@ function onWindowMessage(event) {
         : /\.(mp3|wav|ogg|flac|m4a)$/i.test(f.filename || '')
           ? 'audio'
           : 'image',
+      name: f.subfolder ? `${f.subfolder}/${f.filename}` : f.filename,
       filename: f.filename,
       subfolder: f.subfolder ?? '',
       type: f.type ?? 'output',
@@ -1994,15 +1998,46 @@ function onWindowMessage(event) {
   }
 }
 if (isEmbed.value) window.addEventListener('message', onWindowMessage)
+// 画布页侧栏：宿主画布经 window 总线推送选区/物件摘要（与 embed postMessage 同构）
+if (isCanvasEmbedded.value) onCanvasState(applyCanvasState)
 
 // 画布侧栏模式：接收宿主画布选区「发送到工作台」的活通道（侧栏常驻，mounted-drain 只覆盖跨路由场景）
+// 附件统一补 name = [subfolder/]filename——执行期 resolveAttachmentRef 只认 name，
+// 没有它画布回填附件发消息后媒体槽不会填（静默丢参考图）。
+function canvasRefName(f) {
+  return f.subfolder ? `${f.subfolder}/${f.filename}` : f.filename
+}
 function pushCanvasAttachments(files) {
   if (!Array.isArray(files) || !files.length) return
   canvasAttachNotice.value = t('workbenchCardAttached').replace('{n}', String(files.length))
   setTimeout(() => (canvasAttachNotice.value = ''), 4000)
   for (const f of files) {
+    // 裁剪图等内存文件：走现成上传通道落地成可执行附件（name 由上传回填）
+    if (f.file instanceof File) {
+      // 上传不可达（如纯前端 dev server，无 express 反代）时降级 dataURL chip：
+      // 至少在输入框可见；执行端对 data: 值另有 uploadMedia 上传兜底
+      uploadFiles([f.file], { silent: true }).catch(() => {})
+      const probe = new FileReader()
+      probe.onload = () => {
+        // 上传成功（chip 已有同名且 uploading:false 带 name）则不重复；
+        // 失败被 splice 后才落 dataUrl 兜底 chip
+        if (!draftAttachments.value.some((a) => a.filename === f.filename)) {
+          draftAttachments.value.push({
+            kind: 'image',
+            filename: f.filename,
+            mime: 'image/png',
+            uploading: false,
+            fromCanvas: true,
+            _preview: probe.result,
+          })
+        }
+      }
+      probe.readAsDataURL(f.file)
+      continue
+    }
     draftAttachments.value.push({
       kind: /\.(mp4|webm|mov|gif)$/i.test(f.filename || '') ? 'video' : 'image',
+      name: canvasRefName(f),
       filename: f.filename,
       subfolder: f.subfolder ?? '',
       type: f.type ?? 'output',

@@ -193,6 +193,42 @@ export function createProxyRouter(): express.Router {
   })
 
   // ---------- ComfyUI 代理 ----------
+  // GET /view：同源图片代理。前端画布「圈选裁剪」要把产物图画进 canvas 再导出，
+  // 直接 img.src=comfy_origin 会污染 canvas（ComfyUI 不带 CORS 头）→ toBlob 抛
+  // SecurityError。走本代理后图片与页面同源，canvas 可导出。
+  router.get('/view', async (req, res) => {
+    try {
+      const config = artifyUtils.getConfig()
+      const queryString = new URLSearchParams(req.query as Record<string, string>).toString()
+      const imageResponse = await fetchWithRetry(
+        `${config.comfy_origin}/view?${queryString}`,
+        { method: 'GET' }
+      )
+      if (!imageResponse.ok) {
+        res.status(imageResponse.status).json(createErrorResponse('Failed to fetch image'))
+        return
+      }
+      res.setHeader(
+        'Content-Type',
+        imageResponse.headers.get('Content-Type') || 'application/octet-stream'
+      )
+      res.setHeader('Cache-Control', 'public, max-age=3600')
+      if (imageResponse.body) {
+        for await (const chunk of imageResponse.body as unknown as AsyncIterable<Uint8Array>) {
+          res.write(chunk)
+        }
+        res.end()
+      } else {
+        res
+          .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+          .json(createErrorResponse('No image data received'))
+      }
+    } catch (error) {
+      logger.error('Failed to get image', error)
+      handleApiError(error, res)
+    }
+  })
+
   router.post('/view', async (req, res) => {
     try {
       const config = artifyUtils.getConfig()

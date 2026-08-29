@@ -69,8 +69,36 @@
             <v-rect :config="noteRectConfig(o)" />
             <v-text :config="noteTextConfig(o)" />
           </v-group>
+          <!-- 连线（箭头指向 to 端；线体不抢物件命中，点中点圆点删线） -->
+          <v-group v-for="seg in linkSegs" :key="'lk' + seg.id">
+            <v-line
+              :config="{
+                points: [seg.x1, seg.y1, seg.x2, seg.y2],
+                stroke: 'rgba(56,189,248,0.75)',
+                strokeWidth: 2 / viewport.scale,
+                pointerLength: 10 / viewport.scale,
+                pointerWidth: 8 / viewport.scale,
+                lineCap: 'round',
+                listening: false,
+              }"
+            />
+            <v-circle
+              :config="{
+                id: seg.id,
+                x: (seg.x1 + seg.x2) / 2,
+                y: (seg.y1 + seg.y2) / 2,
+                radius: 7 / viewport.scale,
+                fill: '#0ea5e9',
+                opacity: 0.45,
+                cursor: 'pointer',
+              }"
+              @mousedown="deleteLinkAt"
+            />
+          </v-group>
           <!-- 框选橡皮筋 -->
           <v-rect v-if="rubber" :config="rubberConfig" />
+          <!-- 圈选裁剪橡皮筋 -->
+          <v-rect v-if="cropRect" :config="cropRectConfig" />
         </v-layer>
       </v-stage>
 
@@ -81,10 +109,23 @@
           :key="b.icon"
           :title="b.title"
           :disabled="b.disabled"
-          class="w-9 h-9 rounded-lg bg-[var(--wb-surface)] border border-[var(--wb-stroke)] text-[var(--wb-text-1)] hover:border-[var(--wb-accent)] transition flex items-center justify-center disabled:opacity-40 disabled:pointer-events-none"
+          class="w-9 h-9 rounded-lg bg-[var(--wb-surface)] border text-[var(--wb-text-1)] transition flex items-center justify-center disabled:opacity-40 disabled:pointer-events-none"
+          :class="b.active ? 'border-[var(--wb-accent)] text-[var(--wb-accent)] bg-[var(--wb-accent)]/10' : 'border-[var(--wb-stroke)] hover:border-[var(--wb-accent)]'"
           @click="b.action"
         >
           <i :class="b.icon"></i>
+        </button>
+      </div>
+
+      <!-- 模式提示条（连线/裁剪工具激活时） -->
+      <div
+        v-if="tool"
+        class="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur text-xs text-slate-200 flex items-center gap-2 z-10"
+      >
+        <i class="fas" :class="tool === 'link' ? 'fa-bezier-curve text-sky-400' : 'fa-vector-square text-sky-400'"></i>
+        <span>{{ tool === 'link' ? (linkDraft ? t('canvasLinkPickSecond') : t('canvasLinkPickFirst')) : t('canvasCropHint') }}</span>
+        <button class="text-slate-400 hover:text-white" :title="t('canvasToolCancel')" @click.stop="setTool(null)">
+          <i class="fas fa-times"></i>
         </button>
       </div>
 
@@ -168,12 +209,15 @@ import {
   bboxOf,
   serializeDoc,
   parseDoc,
+  linkEndpoints,
+  distToSegment,
+  cropRectFor,
 } from './engine'
 
 const { t } = useI18n()
 const appStore = useAppStore()
-const { onResult, emitAttachments } = useCanvasMode()
-const wbOpen = ref(true) // 右侧工作台侧边栏开合
+const { onResult, emitAttachments, emitCanvasState } = useCanvasMode()
+const wbOpen = ref(true) // 工作台侧边栏开合
 
 const STORAGE_KEY = 'artify.canvas.doc.v1'
 const MIN_SCALE = 0.1
@@ -185,10 +229,17 @@ const stageEl = ref(null)
 const size = reactive({ w: 800, h: 600 })
 const viewport = ref(makeViewport())
 const objects = ref([])
+const links = ref([]) // {id, from, to} 物件 id；渲染为箭头，级联删除
+const groups = ref([]) // {id, members:[objectId]} 组合；成员联动拖动/选择/删除
 const selection = ref([]) // 选中的 object id 列表
 const guides = reactive({ v: [], h: [] })
 const rubber = ref(null) // {x,y,w,h} 世界坐标
 const drag = reactive({ mode: null, item: -1, last: null, moved: false })
+// 交互工具模式：null=选择 | 'link'=点两个物件连线 | 'crop'=圈图裁剪
+const tool = ref(null)
+const linkDraft = ref(null) // 'link' 模式：已点第一个物件 id
+const spaceDown = ref(false) // 空格按住 = 强制平移
+const cropRect = ref(null) // 'crop' 模式拖出的世界矩形
 
 // stage 不整体 draggable——空地平移由容器级 mousedown 自实现（bg 矩形会抢物件命中）
 const stageConfig = computed(() => ({ width: size.w, height: size.h }))
@@ -208,7 +259,7 @@ const gridStyle = computed(() => {
 const imageObjects = computed(() => objects.value.filter((o) => o.type === 'image'))
 const noteObjects = computed(() => objects.value.filter((o) => o.type === 'note'))
 
-// Konva 图片缓存
+// Konva 图片缓存（记 naturalWidth/Height 供裁剪换算）
 const imgCache = new Map()
 function loadImage(src) {
   if (imgCache.has(src)) return imgCache.get(src)
@@ -217,6 +268,13 @@ function loadImage(src) {
   img.src = src
   imgCache.set(src, img)
   return img
+}
+function naturalOf(o) {
+  if (o.naturalWidth && o.naturalHeight) return o
+  const img = imgCache.get(o.src)
+  const nw = o.naturalWidth || img?.naturalWidth || o.width
+  const nh = o.naturalHeight || img?.naturalHeight || o.height
+  return { ...o, naturalWidth: nw, naturalHeight: nh }
 }
 function layerRefresh() {
   const layer = stageEl.value?.getStage?.()?.getLayers?.()[0]
@@ -270,6 +328,20 @@ function rubberConfig() {
     strokeWidth: 1,
   }
 }
+// 连线几何（物件移动后端点跟随——由 computed 每帧重算）
+const linkSegs = computed(() => linkEndpoints(links.value, objects.value).filter(Boolean))
+function cropRectConfig() {
+  return {
+    x: Math.min(cropRect.value.x, cropRect.value.x + cropRect.value.w),
+    y: Math.min(cropRect.value.y, cropRect.value.y + cropRect.value.h),
+    width: Math.abs(cropRect.value.w),
+    height: Math.abs(cropRect.value.h),
+    fill: 'rgba(16,185,129,0.10)',
+    stroke: 'rgba(16,185,129,0.7)',
+    strokeWidth: 1,
+    dash: [6, 4],
+  }
+}
 function guideConfig(v, axis) {
   const s = 4000
   return axis === 'v'
@@ -301,6 +373,37 @@ function onWheel(e) {
 
 function onItemDown(i, e) {
   // 物件按下：记录待拖，交给 Konva 的节点拖拽；框选模式空地按下走 onMouseDown
+  if (tool.value === 'link') {
+    // 连线模式：点第一个物件记起点，点第二个建连线
+    const id = objects.value[i].id
+    if (!linkDraft.value) {
+      linkDraft.value = id
+      message.info(t('canvasLinkPickSecond'))
+    } else if (linkDraft.value !== id) {
+      const exists = links.value.some(
+        (l) => (l.from === linkDraft.value && l.to === id) || (l.from === id && l.to === linkDraft.value),
+      )
+      if (!exists) {
+        links.value.push({ id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5), from: linkDraft.value, to: id })
+        saveSoon()
+      }
+      linkDraft.value = null
+      tool.value = null
+      syncDraggables()
+    }
+    drag.mode = 'link-wait'
+    return
+  }
+  if (tool.value === 'crop') {
+    // 圈选裁剪：允许从图片上起圈（拖拽交给 stage 级 mousemove/mouseup 完成）
+    const st = stageEl.value.getStage()
+    const p = st.getPointerPosition()
+    const w = screenToWorld(viewport.value, p.x, p.y)
+    drag.mode = 'crop'
+    drag.last = { x: p.x, y: p.y }
+    cropRect.value = { x: w.x, y: w.y, w: 0, h: 0 }
+    return
+  }
   drag.mode = 'item'
   drag.item = i
   drag.moved = false
@@ -308,17 +411,24 @@ function onItemDown(i, e) {
   if (!selection.value.includes(id)) {
     selection.value = e.evt.shiftKey ? [...selection.value, id] : [id]
   }
+  // 组：整组选中高亮（成员各自渲染 stroke）
 }
 
 function onMouseDown(e) {
   // 空地（没点到任何 shape）按下：
-  //   普通拖 = 平移画布；Shift/中键 拖 = 框选
+  //   普通拖 = 平移画布；Shift/中键 拖 = 框选；crop 工具 = 圈选裁剪
   // 物件按下（onItemDown 先触发，drag.mode='item'）时 stage 级事件直接跳过
-  if (drag.mode === 'item') return
+  if (drag.mode === 'item' || drag.mode === 'link-wait') return
   const st = stageEl.value.getStage()
   if (e.target !== st) return // 物件由节点拖拽处理
   const p = st.getPointerPosition()
   const w = screenToWorld(viewport.value, p.x, p.y)
+  if (tool.value === 'crop') {
+    drag.mode = 'crop'
+    drag.last = { x: p.x, y: p.y }
+    cropRect.value = { x: w.x, y: w.y, w: 0, h: 0 }
+    return
+  }
   if (e.evt.button === 1 || e.evt.shiftKey) {
     drag.mode = 'rubber'
     drag.last = { x: p.x, y: p.y }
@@ -326,7 +436,7 @@ function onMouseDown(e) {
   } else {
     drag.mode = 'pan'
     drag.last = { x: p.x, y: p.y }
-    selection.value = []
+    if (!spaceDown.value) selection.value = []
   }
 }
 
@@ -345,6 +455,9 @@ function onMouseMove(e) {
   } else if (drag.mode === 'rubber' && rubber.value) {
     const w = screenToWorld(viewport.value, p.x, p.y)
     rubber.value = { ...rubber.value, w: w.x - rubber.value.x, h: w.y - rubber.value.y }
+  } else if (drag.mode === 'crop' && cropRect.value) {
+    const w = screenToWorld(viewport.value, p.x, p.y)
+    cropRect.value = { ...cropRect.value, w: w.x - cropRect.value.x, h: w.y - cropRect.value.y }
   }
 }
 
@@ -356,9 +469,17 @@ function onMouseUp() {
       selection.value = hits.map((i) => objects.value[i].id)
     }
     rubber.value = null
+  } else if (drag.mode === 'crop' && cropRect.value) {
+    const r = cropRect.value
+    if (Math.abs(r.w) > 8 && Math.abs(r.h) > 8) cropAndSend(r)
+    cropRect.value = null
+    tool.value = null
+    syncDraggables()
   }
-  drag.mode = null
-  drag.last = null
+  if (drag.mode !== 'link-wait') {
+    drag.mode = null
+    drag.last = null
+  }
   saveSoon()
 }
 
@@ -385,8 +506,30 @@ function onNodeDragEnd(e) {
   guides.h = []
   const o = objects.value.find((x) => x.id === e.target.id())
   if (o) {
+    // 组联动：以拖拽物数据旧值为基准算增量，同步同组成员（数据 + Konva 节点双写）
+    const g = groups.value.find((gr) => gr.members.includes(o.id))
+    const oldX = o.x
+    const oldY = o.y
     o.x = e.target.x()
     o.y = e.target.y()
+    if (g) {
+      const ddx = o.x - oldX
+      const ddy = o.y - oldY
+      if (ddx || ddy) {
+        for (const m of g.members) {
+          if (m === o.id) continue
+          const mo = objects.value.find((x) => x.id === m)
+          if (!mo) continue
+          mo.x += ddx
+          mo.y += ddy
+          const node = stageEl.value?.getStage?.()?.findOne('#' + CSS.escape(m))
+          if (node) {
+            node.x(mo.x)
+            node.y(mo.y)
+          }
+        }
+      }
+    }
   }
   saveSoon()
 }
@@ -394,6 +537,30 @@ function onNodeDragEnd(e) {
 // —— 工具条 —— 
 const tools = computed(() => [
   { icon: 'fas fa-plus', title: t('canvasAddNote'), action: addNote },
+  {
+    icon: 'fas fa-vector-square',
+    title: t('canvasCropTool'),
+    action: () => setTool('crop'),
+    active: tool.value === 'crop',
+  },
+  {
+    icon: 'fas fa-bezier-curve',
+    title: t('canvasLinkTool'),
+    action: () => setTool('link'),
+    active: tool.value === 'link',
+  },
+  {
+    icon: 'fas fa-object-group',
+    title: t('canvasGroupSel'),
+    action: groupSelected,
+    disabled: selection.value.length < 2,
+  },
+  {
+    icon: 'fas fa-object-ungroup',
+    title: t('canvasUngroupSel'),
+    action: ungroupSelection,
+    disabled: !selection.value.some((id) => groupOf(id)),
+  },
   { icon: 'fas fa-crosshairs', title: t('canvasFitAll'), action: fitAll },
   { icon: 'fas fa-expand', title: t('canvasResetView'), action: resetView },
   {
@@ -404,6 +571,17 @@ const tools = computed(() => [
   },
   { icon: 'fas fa-trash', title: t('canvasDeleteSelected'), action: deleteSelected },
 ])
+// 工具模式下禁用物件拖拽（否则 Konva dragstart 会吞掉 crop/link 的 mousedown 语义）
+function syncDraggables() {
+  const st = stageEl.value?.getStage?.()
+  if (st) st.find('Group').forEach((g) => g.draggable(tool.value === null))
+}
+function setTool(m) {
+  tool.value = tool.value === m ? null : m
+  linkDraft.value = null
+  if (m) selection.value = []
+  syncDraggables()
+}
 
 // 选中物件 → 工作台参考图附件（仅 image 物件可反解出 /view 引用）
 function refOf(id) {
@@ -424,6 +602,7 @@ function refOf(id) {
 function sendSelectionToWorkbench() {
   const refs = selection.value.map(refOf).filter(Boolean)
   if (!refs.length) return
+  lastSourceIds = [...selection.value] // 溯源：产物落布时自动连线
   if (wbOpen.value) {
     // 侧边栏工作台常驻：走活通道，附件立即可见
     emitAttachments(refs)
@@ -479,14 +658,180 @@ function applyViewport() {
 
 function deleteSelected() {
   if (!selection.value.length) return
-  objects.value = objects.value.filter((o) => !selection.value.includes(o.id))
+  const gone = new Set(selection.value)
+  objects.value = objects.value.filter((o) => !gone.has(o.id))
+  // 级联：删除物件上的连线、所在组
+  links.value = links.value.filter((l) => !gone.has(l.from) && !gone.has(l.to))
+  groups.value = groups.value
+    .map((g) => ({ ...g, members: g.members.filter((m) => !gone.has(m)) }))
+    .filter((g) => g.members.length > 1)
   selection.value = []
   saveSoon()
+}
+
+// —— 组合与解组 ——
+function groupSelected() {
+  if (selection.value.length < 2) return
+  const members = [...selection.value]
+  // 已在其他组的成员先从原组移除
+  groups.value = groups.value
+    .map((g) => ({ ...g, members: g.members.filter((m) => !members.includes(m)) }))
+    .filter((g) => g.members.length > 1)
+  groups.value.push({ id: 'g' + Date.now(), members })
+  message.success(t('canvasGrouped').replace('{n}', String(members.length)))
+  saveSoon()
+}
+function ungroupSelection() {
+  const sel = new Set(selection.value)
+  const before = groups.value.length
+  groups.value = groups.value
+    .map((g) => ({ ...g, members: g.members.filter((m) => !sel.has(m)) }))
+    .filter((g) => g.members.length > 1)
+  if (groups.value.length < before) {
+    message.success(t('canvasUngrouped'))
+    saveSoon()
+  }
+}
+function groupOf(id) {
+  return groups.value.find((g) => g.members.includes(id))
+}
+
+// —— 连线删除：点击箭头本体（渲染层 line 绑定 mousedown）——
+function deleteLinkAt(e) {
+  const id = e.target.id()
+  links.value = links.value.filter((l) => l.id !== id)
+  saveSoon()
+}
+
+// —— 圈选裁剪：把 crop 矩形与所压图片的交集裁下来，作为新图发工作台 ——
+// 取图走同源 /view 代理（express GET 代理 / vite dev proxy）：直接用 ComfyUI
+// 绝对 URL 画 canvas 会被污染（ComfyUI 不带 CORS 头）→ toBlob 抛 SecurityError。
+async function fetchImageForCrop(src) {
+  const qIndex = src.indexOf('?')
+  const query = qIndex >= 0 ? src.slice(qIndex + 1) : ''
+  const candidates = []
+  if (query && !/^(data|blob):/.test(src)) candidates.push('/view?' + query)
+  if (!/^(data|blob):/.test(src)) candidates.push(src)
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url, { mode: 'cors' })
+      if (!res.ok) continue
+      const blob = await res.blob()
+      if (!blob.type.startsWith('image/')) continue
+      return await createImageBitmap(blob)
+    } catch (e) {
+      /* 试下一个候选 */
+    }
+  }
+  return loadImage(src)
+}
+
+async function cropAndSend(r) {
+  const hits = hitTestRect(objects.value, r.x, r.y, r.w, r.h).filter(
+    (i) => objects.value[i].type === 'image',
+  )
+  if (!hits.length) {
+    message.warning(t('canvasCropNoImage'))
+    return
+  }
+  // 按面积取最大相交图片（圈多图时取最主要的一张，避免多附件歧义）
+  let best = null
+  for (const i of hits) {
+    const o = objects.value[i]
+    const c = cropRectFor(naturalOf(o), r.x, r.y, r.w, r.h)
+    if (c && (!best || c.width * c.height > best.area)) best = { o, c, area: c.width * c.height }
+  }
+  if (!best) return
+  const o = naturalOf(best.o)
+  const c = best.c
+  let srcImg
+  try {
+    srcImg = await fetchImageForCrop(o.src)
+  } catch (e) {
+    message.warning(t('canvasCropNoImage'))
+    return
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(c.sw))
+  canvas.height = Math.max(1, Math.round(c.sh))
+  const ctx = canvas.getContext('2d')
+  ctx.drawImage(srcImg, c.sx, c.sy, c.sw, c.sh, 0, 0, canvas.width, canvas.height)
+  // toBlob 在 canvas 被污染时会同步抛 SecurityError，这里兜住降级为提示
+  const blob = await new Promise((resolve) => {
+    try {
+      canvas.toBlob(resolve, 'image/png')
+    } catch (e) {
+      resolve(null)
+    }
+  })
+  if (!blob) {
+    message.warning(t('canvasCropNoImage'))
+    return
+  }
+  const f = new File([blob], 'crop-' + Date.now() + '.png', { type: 'image/png' })
+  // 裁剪图走附件通道 file 字段，工作台侧复用 uploadFiles 上传落地（可执行附件）
+  if (wbOpen.value) emitAttachments([{ filename: f.name, file: f }])
+  else pushAttachments([{ filename: f.name, file: f }])
+  message.success(t('workbenchCardAttached').replace('{n}', '1'))
+  // 同时在画布上落一个小缩略物（可删），紧贴原裁剪区右下角
+  const thumb = document.createElement('canvas')
+  const tw = 180
+  thumb.width = tw
+  thumb.height = Math.max(1, Math.round((canvas.height / canvas.width) * tw))
+  thumb.getContext('2d').drawImage(canvas, 0, 0, thumb.width, thumb.height)
+  thumb.toBlob((tb) => {
+    if (!tb) return
+    const turl = URL.createObjectURL(tb)
+    const probe = new Image()
+    probe.onload = () => {
+      objects.value.push({
+        id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+        type: 'image',
+        x: c.x + c.width + 12,
+        y: c.y + c.height - probe.height,
+        width: probe.width,
+        height: probe.height,
+        src: turl,
+      })
+      saveSoon()
+    }
+    probe.src = turl
+  })
 }
 
 function clamp(v, a, b) {
   return Math.min(b, Math.max(a, v))
 }
+
+// —— 画布 → 侧栏工作台感知条（选区/物件摘要，与 C 宿主 embed 感知条同构）——
+let canvasSeq = 0
+const canvasDigest = computed(() => {
+  const imgs = objects.value.filter((o) => o.type === 'image').length
+  const notes = objects.value.filter((o) => o.type === 'note').length
+  return {
+    seq: 0, // 实例序号在 emit 时自增（computed 本身无副作用）
+    workflowName: t('canvasDigestName'),
+    nodeCount: objects.value.length,
+    models: [],
+    selection: selection.value.map((id) => {
+      const o = objects.value.find((x) => x.id === id)
+      if (!o) return null
+      return o.type === 'image' ? `image ${o.width}×${o.height}` : 'note'
+    }).filter(Boolean),
+    counts: { images: imgs, notes, links: links.value.length, groups: groups.value.length },
+    queue: { running: 0, pending: 0 },
+    ts: Date.now(),
+  }
+})
+watch(
+  () => [selection.value.slice(), objects.value.length, links.value.length, groups.value.length],
+  () => {
+    if (!wbOpen.value) return
+    const d = { ...canvasDigest.value, seq: ++canvasSeq }
+    emitCanvasState(d)
+  },
+  { deep: false },
+)
 
 // —— minimap：全景（物件 bbox ∪ 视口框，等比缩到 160x110 内）—— 
 const MINI_W = 160
@@ -547,7 +892,7 @@ function saveSoon() {
 }
 function saveNow() {
   try {
-    localStorage.setItem(STORAGE_KEY, serializeDoc(objects.value, viewport.value, 'Untitled'))
+    localStorage.setItem(STORAGE_KEY, serializeDoc(objects.value, viewport.value, 'Untitled', links.value, groups.value))
   } catch {
     /* 容量满时静默，画布仍可用 */
   }
@@ -557,20 +902,63 @@ function loadNow() {
   if (!raw) return
   const doc = parseDoc(raw)
   objects.value = doc.objects
+  links.value = doc.links
+  groups.value = doc.groups
   viewport.value = doc.viewport
 }
 
-// 键盘：Delete 删除选中
+// 键盘：Delete 删除选中；空格按住=平移；Esc=退工具；Ctrl+G/Ctrl+Shift+G=组
 function onKey(e) {
-  if ((e.key === 'Delete' || e.key === 'Backspace') && selection.value.length) {
-    const tag = document.activeElement?.tagName
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return
-    deleteSelected()
+  const tag = document.activeElement?.tagName
+  const inEditor = tag === 'INPUT' || tag === 'TEXTAREA'
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (inEditor) return
+    if (selection.value.length) {
+      e.preventDefault()
+      deleteSelected()
+    }
+  } else if (e.code === 'Space' && !e.repeat) {
+    spaceDown.value = true
+    if (!inEditor) e.preventDefault()
+  } else if (e.key === 'Escape') {
+    if (tool.value) {
+      tool.value = null
+      linkDraft.value = null
+      syncDraggables()
+    } else if (!inEditor) selection.value = []
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'g' || e.key === 'G')) {
+    if (inEditor) return
+    e.preventDefault()
+    if (e.shiftKey) ungroupSelection()
+    else groupSelected()
   }
 }
+function onKeyUp(e) {
+  if (e.code === 'Space') spaceDown.value = false
+}
 
-// —— 图片落画布：文件拖入 + 剪贴板粘贴 —— 
+// —— 图片落画布：文件拖入 + 剪贴板粘贴 ——
 const dragOver = ref(false)
+// blob 图持久化：降采样到最长边 640 转 JPEG dataURL 存进文档（画布显示用原 blob
+// URL 保持清晰；存档用 persist dataURL，刷新/重开仍在）。
+function persistImage(o) {
+  const probe = new Image()
+  probe.onload = () => {
+    const MAX = 640
+    const s = Math.min(1, MAX / Math.max(probe.naturalWidth, probe.naturalHeight))
+    const cv = document.createElement('canvas')
+    cv.width = Math.max(1, Math.round(probe.naturalWidth * s))
+    cv.height = Math.max(1, Math.round(probe.naturalHeight * s))
+    cv.getContext('2d').drawImage(probe, 0, 0, cv.width, cv.height)
+    try {
+      o.persist = cv.toDataURL('image/jpeg', 0.72)
+    } catch {
+      return // 跨域图无法导出（/view 同源时不会发生）：只留会话内
+    }
+    saveSoon()
+  }
+  probe.src = o.src
+}
 function filesToObjects(files, world) {
   const made = []
   let cursorY = world.y
@@ -582,7 +970,7 @@ function filesToObjects(files, world) {
       const scale = Math.min(1, 260 / probe.naturalWidth)
       const w = Math.round(probe.naturalWidth * scale)
       const h = Math.round(probe.naturalHeight * scale)
-      objects.value.push({
+      const o = {
         id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
         type: 'image',
         x: world.x,
@@ -590,7 +978,10 @@ function filesToObjects(files, world) {
         width: w,
         height: h,
         src: url,
-      })
+        persist: null,
+      }
+      objects.value.push(o)
+      persistImage(o)
       cursorY += h + 16
       saveSoon()
     }
@@ -621,19 +1012,23 @@ function onPaste(e) {
 // —— 工作台产物落画布（公共通道）——
 // 文件引用是 ComfyUI /view 参数（filename/subfolder/type），URL 直出常驻。
 // 起点 = 当前视野中心，横向往右排布；加载失败的文件跳过不落破图。
+// 溯源：落布时与「发送参考图时记下的来源物件」自动连线。
+let lastSourceIds = [] // sendSelectionToWorkbench 记录，供产物回落后连线
 function placeFiles(files) {
   if (!files?.length) return
   const origin = appStore.config?.comfyHost || 'http://127.0.0.1:8188'
   const c = viewportCenterWorld()
   let cursorX = c.x - 130
   const at = c.y
+  const sourceIds = lastSourceIds.filter((id) => objects.value.some((o) => o.id === id))
   for (const f of files) {
     const url = `${origin}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? '')}&type=${encodeURIComponent(f.type ?? 'output')}`
     const probe = new Image()
     probe.onload = () => {
       const scale = Math.min(1, 260 / probe.naturalWidth)
+      const id = 'n' + Date.now() + Math.random().toString(36).slice(2, 6)
       objects.value.push({
-        id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+        id,
         type: 'image',
         x: cursorX,
         y: at,
@@ -641,6 +1036,10 @@ function placeFiles(files) {
         height: Math.round(probe.naturalHeight * scale),
         src: url,
       })
+      // 溯源连线：参考图 → 产物
+      for (const srcId of sourceIds) {
+        links.value.push({ id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5), from: srcId, to: id })
+      }
       cursorX += Math.round(probe.naturalWidth * scale) + 16
       saveSoon()
     }
@@ -649,6 +1048,7 @@ function placeFiles(files) {
     }
     probe.src = url
   }
+  lastSourceIds = []
 }
 function viewportCenterWorld() {
   return screenToWorld(viewport.value, size.w / 2, size.h / 2)
@@ -685,6 +1085,7 @@ onMounted(() => {
   ro = new ResizeObserver(measure)
   ro.observe(el)
   window.addEventListener('keydown', onKey)
+  window.addEventListener('keyup', onKeyUp)
   window.addEventListener('paste', onPaste)
   // stage 初始变换
   requestAnimationFrame(applyViewport)
@@ -702,6 +1103,7 @@ watch(
 onBeforeUnmount(() => {
   ro?.disconnect()
   window.removeEventListener('keydown', onKey)
+  window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('paste', onPaste)
   clearTimeout(saveTimer)
 })

@@ -10,8 +10,8 @@
         class="w-16 h-16 rounded-lg overflow-hidden bg-[var(--wb-surface-deep)] border border-[var(--wb-stroke-strong)] flex items-center justify-center"
       >
         <img
-          v-if="a.kind === 'image' && a.previewUrl"
-          :src="a.previewUrl"
+          v-if="a.kind === 'image' && (a._preview || a.previewUrl)"
+          :src="a._preview || a.previewUrl"
           class="w-full h-full object-cover"
           :alt="a.filename"
         />
@@ -45,6 +45,7 @@ defineProps({
 defineEmits(['remove'])
 
 function kindIcon(kind) {
+  if (kind === 'image') return 'fas fa-image'
   if (kind === 'video') return 'fas fa-film'
   if (kind === 'audio') return 'fas fa-music'
   return 'fas fa-file'
