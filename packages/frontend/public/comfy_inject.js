@@ -1900,6 +1900,86 @@
   }
 
   /**
+   * 侧栏宽度治理（「拉到最大后收不回来」修复）：
+   * 官方侧栏是 PrimeVue Splitter（.side-bar-panel / .p-splitter-gutter），
+   * 拉满后 gutter 贴住窗口右缘（命中区只剩 ~4px 且紧邻窗口 resize 热区），
+   * 真实鼠标极难抓住 → 表现为「收不回来」。治理三件事：
+   *  1) 钳制最大宽度：flex-basis 上限 45%（保留画布可用区；官方默认 ~20%，正常拖拽不受影响）
+   *  2) 加宽 gutter 命中区（4px → 视觉不变、热区 ~14px），贴边也好抓
+   *  3) 双击 gutter 一键复位 20%（卡住时的逃生门）
+   * 幂等： observers/监听只挂一次；样式注入用专用 class 标记。
+   */
+  function installSidebarWidthGovernor() {
+    const MAX_PCT = 45
+    const RESET_PCT = 20
+    const GUTTER_HOT = 14
+    try {
+      if (document.getElementById('artify-sidebar-governor-style')) return
+      const style = document.createElement('style')
+      style.id = 'artify-sidebar-governor-style'
+      style.textContent = `
+        .p-splitter-horizontal > .p-splitter-gutter { position: relative; }
+        .p-splitter-horizontal > .p-splitter-gutter::before {
+          content: ''; position: absolute; top: 0; bottom: 0; left: -${Math.floor(GUTTER_HOT / 2)}px; right: -${Math.floor(GUTTER_HOT / 2)}px;
+        }
+        .p-splitter-horizontal > .p-splitter-gutter { cursor: col-resize; }
+      `
+      document.head.appendChild(style)
+    } catch (_e) { /* 样式失败不影响主流程 */ }
+
+    let patching = false
+    const clampPanel = () => {
+      if (patching) return
+      const panel = document.querySelector('.p-splitterpanel.side-bar-panel')
+      if (!panel) return
+      const m = /calc\(([\d.]+)%/.exec(panel.style.flexBasis || '')
+      if (m && parseFloat(m[1]) > MAX_PCT) {
+        patching = true
+        panel.style.flexBasis = `calc(${MAX_PCT}% - 4px)`
+        // 同步把另一半面板补回剩余空间，避免出现空隙/塌陷
+        const other = panel.parentElement
+          ? Array.from(panel.parentElement.children).find(
+              (el) => el !== panel && el.classList && el.classList.contains('p-splitterpanel'),
+            )
+          : null
+        if (other) other.style.flexBasis = `calc(${100 - MAX_PCT}% - 4px)`
+        patching = false
+      }
+    }
+
+    // MutationObserver 盯 flex-basis 变化（拖拽中实时钳制）
+    const panel = document.querySelector('.p-splitterpanel.side-bar-panel')
+    if (panel && !window.__artifySidebarGovObserver) {
+      window.__artifySidebarGovObserver = new MutationObserver(clampPanel)
+      window.__artifySidebarGovObserver.observe(panel, { attributes: true, attributeFilter: ['style'] })
+    }
+
+    // 双击 gutter 复位（逃生门）；捕获层挂 document，幂等
+    if (!window.__artifySidebarGovDbl) {
+      window.__artifySidebarGovDbl = true
+      document.addEventListener(
+        'dblclick',
+        (e) => {
+          const g = e.target && e.target.closest && e.target.closest('.p-splitter-horizontal > .p-splitter-gutter')
+          if (!g) return
+          const p = document.querySelector('.p-splitterpanel.side-bar-panel')
+          if (!p) return
+          p.style.flexBasis = `calc(${RESET_PCT}% - 4px)`
+          const other = p.parentElement
+            ? Array.from(p.parentElement.children).find(
+                (el) => el !== p && el.classList && el.classList.contains('p-splitterpanel'),
+              )
+            : null
+          if (other) other.style.flexBasis = `calc(${100 - RESET_PCT}% - 4px)`
+          e.preventDefault()
+          e.stopPropagation()
+        },
+        true,
+      )
+    }
+  }
+
+  /**
    * 注册 A UI 工作台 sidebar tab（iframe 嵌工作台 /workbench?embed=1）。
    * 时序：registerSidebarTab 需 extensionManager 就绪（app.setup 后）；
    * 采用轮询重试直到注册成功（extensionManager 未就绪时抛错→退避重试）。
@@ -1910,6 +1990,7 @@
       setTimeout(ensureArtifySidebarTab, 1500)
       return
     }
+    installSidebarWidthGovernor()
     // 卡片节点类型注册（extensionManager 就绪 ⇒ app.setup 完成 ⇒ LiteGraph 已加载）。
     // 放在 tab 去重 early-return 之前：幂等（registerArtifyCardNode 自查重），
     // 且老版本 tab 已存在时升级也能补上节点类型。
