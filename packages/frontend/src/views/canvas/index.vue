@@ -5,7 +5,14 @@
       :first-nav-label="t('market')"
       first-nav-icon="mr-2 fas fa-store"
     />
-    <div ref="wrapEl" class="relative h-[calc(100vh-120px)] overflow-hidden rounded-xl mx-4 mt-2 border border-[var(--wb-stroke)]">
+    <div
+      ref="wrapEl"
+      class="relative h-[calc(100vh-120px)] overflow-hidden rounded-xl mx-4 mt-2 border border-[var(--wb-stroke)]"
+      :class="dragOver ? 'ring-2 ring-[var(--wb-accent)]' : ''"
+      @dragover.prevent="dragOver = true"
+      @dragleave.prevent="dragOver = false"
+      @drop.prevent="onDrop"
+    >
       <!-- 网格背景（随视口平移/缩放，纯 CSS） -->
       <div class="absolute inset-0 pointer-events-none" :style="gridStyle"></div>
       <v-stage
@@ -75,13 +82,42 @@
       <div class="absolute bottom-3 left-3 px-2 py-1 rounded bg-black/40 text-xs text-slate-300 font-mono">
         {{ Math.round(viewport.scale * 100) }}%
       </div>
+
+      <!-- minimap：全景小窗（点击/拖动跳转视口） -->
+      <div
+        v-if="objects.length"
+        class="absolute bottom-3 right-3 w-[160px] h-[110px] rounded-lg bg-black/50 border border-[var(--wb-stroke)] overflow-hidden cursor-pointer"
+        @pointerdown="miniJump"
+      >
+        <div
+          v-for="m in miniItems"
+          :key="m.id"
+          class="absolute rounded-sm"
+          :class="m.type === 'image' ? 'bg-sky-400/70' : 'bg-slate-400/70'"
+          :style="{ left: m.x + 'px', top: m.y + 'px', width: m.w + 'px', height: m.h + 'px' }"
+        ></div>
+        <!-- 当前视口框 -->
+        <div
+          class="absolute border border-[var(--wb-accent)] pointer-events-none"
+          :style="{ left: miniView.x + 'px', top: miniView.y + 'px', width: miniView.w + 'px', height: miniView.h + 'px' }"
+        ></div>
+      </div>
+
       <!-- 空状态 -->
       <div
-        v-if="!objects.length"
+        v-if="!objects.length && !dragOver"
         class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-2"
       >
         <i class="fas fa-shapes text-4xl opacity-30"></i>
         <p class="text-sm opacity-50">{{ t('canvasEmptyHint') }}</p>
+      </div>
+      <!-- 拖放提示 -->
+      <div
+        v-if="dragOver"
+        class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-2 bg-[var(--wb-accent)]/5"
+      >
+        <i class="fas fa-image text-4xl text-[var(--wb-accent)] opacity-70"></i>
+        <p class="text-sm text-[var(--wb-accent)]">{{ t('canvasDropImage') }}</p>
       </div>
     </div>
   </div>
@@ -385,6 +421,57 @@ function clamp(v, a, b) {
   return Math.min(b, Math.max(a, v))
 }
 
+// —— minimap：全景（物件 bbox ∪ 视口框，等比缩到 160x110 内）—— 
+const MINI_W = 160
+const MINI_H = 110
+const MINI_PAD = 10
+const mini = computed(() => {
+  const b = bboxOf(objects.value)
+  let x0 = b.x, y0 = b.y, x1 = b.x + b.width, y1 = b.y + b.height
+  // 把当前视口也纳入范围
+  const vw = size.w / viewport.value.scale
+  const vh = size.h / viewport.value.scale
+  const vx0 = -viewport.value.x / viewport.value.scale
+  const vy0 = -viewport.value.y / viewport.value.scale
+  x0 = Math.min(x0, vx0); y0 = Math.min(y0, vy0)
+  x1 = Math.max(x1, vx0 + vw); y1 = Math.max(y1, vy0 + vh)
+  const s = Math.min((MINI_W - MINI_PAD * 2) / (x1 - x0), (MINI_H - MINI_PAD * 2) / (y1 - y0))
+  return { x0, y0, s }
+})
+const miniItems = computed(() =>
+  objects.value.map((o) => ({
+    id: o.id,
+    type: o.type,
+    x: MINI_PAD + (o.x - mini.value.x0) * mini.value.s,
+    y: MINI_PAD + (o.y - mini.value.y0) * mini.value.s,
+    w: Math.max(4, o.width * mini.value.s),
+    h: Math.max(3, o.height * mini.value.s),
+  })),
+)
+const miniView = computed(() => {
+  const vx0 = -viewport.value.x / viewport.value.scale
+  const vy0 = -viewport.value.y / viewport.value.scale
+  return {
+    x: MINI_PAD + (vx0 - mini.value.x0) * mini.value.s,
+    y: MINI_PAD + (vy0 - mini.value.y0) * mini.value.s,
+    w: (size.w / viewport.value.scale) * mini.value.s,
+    h: (size.h / viewport.value.scale) * mini.value.s,
+  }
+})
+function miniJump(e) {
+  const r = e.currentTarget.getBoundingClientRect()
+  // 小窗坐标 → 世界坐标 → 居中该点
+  const wx = mini.value.x0 + (e.clientX - r.left - MINI_PAD) / mini.value.s
+  const wy = mini.value.y0 + (e.clientY - r.top - MINI_PAD) / mini.value.s
+  viewport.value = {
+    scale: viewport.value.scale,
+    x: size.w / 2 - wx * viewport.value.scale,
+    y: size.h / 2 - wy * viewport.value.scale,
+  }
+  applyViewport()
+  saveSoon()
+}
+
 // —— 持久化（localStorage 防抖 500ms）—— 
 let saveTimer = null
 function saveSoon() {
@@ -415,6 +502,55 @@ function onKey(e) {
   }
 }
 
+// —— 图片落画布：文件拖入 + 剪贴板粘贴 —— 
+const dragOver = ref(false)
+function filesToObjects(files, world) {
+  const made = []
+  let cursorY = world.y
+  for (const f of files) {
+    if (!f.type.startsWith('image/')) continue
+    const url = URL.createObjectURL(f)
+    const probe = new Image()
+    probe.onload = () => {
+      const scale = Math.min(1, 260 / probe.naturalWidth)
+      const w = Math.round(probe.naturalWidth * scale)
+      const h = Math.round(probe.naturalHeight * scale)
+      objects.value.push({
+        id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+        type: 'image',
+        x: world.x,
+        y: cursorY,
+        width: w,
+        height: h,
+        src: url,
+      })
+      cursorY += h + 16
+      saveSoon()
+    }
+    probe.src = url
+    made.push(f.name)
+  }
+  return made
+}
+function onDrop(e) {
+  dragOver.value = false
+  const files = [...(e.dataTransfer?.files || [])]
+  if (!files.length) return
+  const st = stageEl.value?.getStage?.()
+  const p = st.getPointerPosition() || { x: size.w / 2, y: size.h / 2 }
+  const w = screenToWorld(viewport.value, p.x, p.y)
+  filesToObjects(files, w)
+}
+function onPaste(e) {
+  const items = [...(e.clipboardData?.items || [])]
+  const files = items.filter((it) => it.kind === 'file').map((it) => it.getAsFile()).filter(Boolean)
+  if (!files.length) return
+  const st = stageEl.value?.getStage?.()
+  const p = st?.getPointerPosition() || { x: size.w / 2, y: size.h / 2 }
+  const w = screenToWorld(viewport.value, p.x, p.y)
+  filesToObjects(files, w)
+}
+
 let ro = null
 // vue-konva 3.4 的 template @事件 绑定在小组件初始化时序下不稳（监听偶发丢失）
 // ——所有 Konva 节点事件统一在这里手动绑定，可靠：
@@ -441,6 +577,7 @@ onMounted(() => {
   ro = new ResizeObserver(measure)
   ro.observe(el)
   window.addEventListener('keydown', onKey)
+  window.addEventListener('paste', onPaste)
   // stage 初始变换
   requestAnimationFrame(applyViewport)
 })
@@ -452,6 +589,7 @@ watch(
 onBeforeUnmount(() => {
   ro?.disconnect()
   window.removeEventListener('keydown', onKey)
+  window.removeEventListener('paste', onPaste)
   clearTimeout(saveTimer)
 })
 </script>
