@@ -6,8 +6,14 @@
       :first-nav-label="t('market')"
       first-nav-icon="mr-2 fas fa-store"
     />
-    <!-- 画布 + 右侧工作台 侧边栏布局（flex 撑满视口剩余高度，不留底边距） -->
+    <!-- 工作台侧边栏（左侧，可收起） + 画布 布局（flex 撑满视口剩余高度） -->
     <div class="flex flex-1 min-h-0 mx-4 mt-2 mb-2 gap-2">
+      <aside
+        v-if="wbOpen"
+        class="w-[400px] shrink-0 flex flex-col rounded-xl border border-[var(--wb-stroke)] overflow-hidden bg-[var(--wb-bg-base)]"
+      >
+        <Workbench class="flex-1 min-h-0" :canvas-embedded="true" />
+      </aside>
       <div
         ref="wrapEl"
         class="relative flex-1 min-w-0 overflow-hidden rounded-xl border border-[var(--wb-stroke)]"
@@ -124,24 +130,16 @@
         <p class="text-sm text-[var(--wb-accent)]">{{ t('canvasDropImage') }}</p>
       </div>
       </div>
-
-      <!-- 右侧工作台侧边栏（可收起） -->
-      <aside
-        v-if="wbOpen"
-        class="w-[400px] shrink-0 flex flex-col rounded-xl border border-[var(--wb-stroke)] overflow-hidden bg-[var(--wb-bg-base)]"
-      >
-        <Workbench class="flex-1 min-h-0" :canvas-embedded="true" />
-      </aside>
     </div>
 
-    <!-- 工作台开合按钮（画布区右上角外沿） -->
+    <!-- 工作台开合按钮（画布区左上角外沿，随侧栏在左） -->
     <button
-      class="fixed z-40 top-[76px] w-7 h-9 rounded-l-md bg-[var(--wb-surface)] border border-[var(--wb-stroke)] border-r-0 text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] transition flex items-center justify-center"
-      :style="wbOpen ? 'right: 416px' : 'right: 16px'"
+      class="fixed z-40 top-[76px] w-7 h-9 rounded-r-md bg-[var(--wb-surface)] border border-[var(--wb-stroke)] border-l-0 text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] transition flex items-center justify-center"
+      :style="wbOpen ? 'left: 416px' : 'left: 16px'"
       :title="wbOpen ? t('canvasCloseWb') : t('canvasOpenWb')"
       @click="wbOpen = !wbOpen"
     >
-      <i class="fas text-xs" :class="wbOpen ? 'fa-chevron-right' : 'fa-chevron-left'"></i>
+      <i class="fas text-xs" :class="wbOpen ? 'fa-chevron-left' : 'fa-chevron-right'"></i>
     </button>
   </div>
 </template>
