@@ -233,6 +233,52 @@ export function serializeDoc(objects, viewport, name = 'Untitled', links = [], g
   })
 }
 
+// —— 撤销/重做：有界快照栈（纯函数，UI 层负责调用时机） ——
+
+/** 新建历史栈 */
+export function createHistory(limit = 50) {
+  return { past: [], future: [], limit }
+}
+
+/**
+ * 记录一次变更：snapshot 为变更【后】的完整文档状态。
+ * 返回新历史对象（不可变风格，方便测试）；容量超限丢最老。
+ */
+export function pushHistory(history, snapshot) {
+  const past = [...history.past, snapshot]
+  while (past.length > history.limit) past.shift()
+  return { past, future: [], limit: history.limit }
+}
+
+/** 可撤销？ */
+export function canUndo(history) {
+  return history.past.length > 0
+}
+
+/** 可重做？ */
+export function canRedo(history) {
+  return history.future.length > 0
+}
+
+/**
+ * 撤销：返回 { history, snapshot }；snapshot 为回退到的状态（栈顶前一个）。
+ * 不可撤销时 snapshot 为 null。
+ */
+export function undo(history, current) {
+  if (!history.past.length) return { history, snapshot: null }
+  const past = [...history.past]
+  const snapshot = past.pop()
+  return { history: { past, future: [current, ...history.future].slice(0, history.limit), limit: history.limit }, snapshot }
+}
+
+/** 重做：返回 { history, snapshot }；不可重做时 snapshot 为 null */
+export function redo(history, current) {
+  if (!history.future.length) return { history, snapshot: null }
+  const future = [...history.future]
+  const snapshot = future.shift()
+  return { history: { past: [...history.past, current].slice(-history.limit), future, limit: history.limit }, snapshot }
+}
+
 /** 反序列化：容忍残缺文档，坏档返回空文档（v1 档无 links/groups 字段 → 空数组） */
 export function parseDoc(json) {
   const empty = () => ({ version: 2, name: 'Untitled', viewport: makeViewport(), objects: [], links: [], groups: [] })
@@ -257,4 +303,63 @@ export function parseDoc(json) {
   } catch {
     return empty()
   }
+}
+
+// —— Frame 分区：几何与成员归属（纯函数） ——
+
+/**
+ * 判定物件中心是否落在 frame 矩形内（frame 为 {x,y,width,height} 世界坐标）。
+ */
+export function objectInFrame(obj, frame) {
+  if (!obj || !frame) return false
+  const cx = obj.x + (obj.width || 0) / 2
+  const cy = obj.y + (obj.height || 0) / 2
+  return cx >= frame.x && cx <= frame.x + frame.width && cy >= frame.y && cy <= frame.y + frame.height
+}
+
+/**
+ * 列出 frame 内的所有物件 id（按 objects 数组顺序）。
+ */
+export function objectsInFrame(objects, frame) {
+  return objects.filter((o) => objectInFrame(o, frame)).map((o) => o.id)
+}
+
+/**
+ * 把一组物件按列网格排布：cols 列、cellW/cellH 单元、gapX/gapY 间距。
+ * 返回 [{id, x, y}]（不含原物件其余字段）。
+ */
+export function gridLayout(ids, originX, originY, cellW, cellH, gapX, gapY, cols) {
+  return ids.map((id, i) => ({
+    id,
+    x: originX + (i % cols) * (cellW + gapX),
+    y: originY + Math.floor(i / cols) * (cellH + gapY),
+  }))
+}
+
+// —— 版本树（同一源产物多次生成的变体链，纯函数） ——
+
+/**
+ * 从 links 中找出 rootId 的全部直接子产物 id。
+ * links: [{id,from,to}]；方向 from=参考 → to=产物。
+ */
+export function childrenOf(links, rootId) {
+  return links.filter((l) => l.from === rootId).map((l) => l.to)
+}
+
+/**
+ * 以 root 为根的整棵产物树（BFS 多层），返回去重后的 id 数组（含根）。
+ */
+export function subtreeOf(links, rootId) {
+  const seen = new Set([rootId])
+  const queue = [rootId]
+  while (queue.length) {
+    const cur = queue.shift()
+    for (const child of childrenOf(links, cur)) {
+      if (!seen.has(child)) {
+        seen.add(child)
+        queue.push(child)
+      }
+    }
+  }
+  return [...seen]
 }

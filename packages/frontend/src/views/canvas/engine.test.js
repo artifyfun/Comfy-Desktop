@@ -16,6 +16,17 @@ import {
   linkMidpoint,
   distToSegment,
   cropRectFor,
+  createHistory,
+  pushHistory,
+  undo,
+  redo,
+  canUndo,
+  canRedo,
+  objectInFrame,
+  objectsInFrame,
+  gridLayout,
+  childrenOf,
+  subtreeOf,
 } from './engine'
 
 describe('canvas engine: viewport', () => {
@@ -221,5 +232,83 @@ describe('canvas engine: cropRectFor', () => {
     expect(c.width).toBe(50)
     expect(c.height).toBe(50)
     expect(c.sw).toBe(100) // 50/200*400
+  })
+})
+
+// —— P0/P2 新增：撤销栈 / Frame / 版本树 / 网格排布 ——
+
+describe('createHistory / pushHistory / undo / redo', () => {
+  it('undo 恢复上一个快照并把当前压入 future', () => {
+    let h = createHistory(3)
+    h = pushHistory(h, 'A')
+    h = pushHistory(h, 'B')
+    const r1 = undo(h, 'C')
+    expect(r1.snapshot).toBe('B')
+    expect(canRedo(r1.history)).toBe(true)
+    // redo 回到 C
+    const r2 = redo(r1.history, r1.snapshot)
+    expect(r2.snapshot).toBe('C')
+  })
+
+  it('新变更清空 future（redo 失效）', () => {
+    let h = createHistory(3)
+    h = pushHistory(h, 'A')
+    const r = undo(h, 'B')
+    expect(r.snapshot).toBe('A')
+    h = pushHistory(r.history, 'X')
+    expect(canRedo(h)).toBe(false)
+  })
+
+  it('容量超限丢最老快照', () => {
+    let h = createHistory(2)
+    h = pushHistory(h, 'A')
+    h = pushHistory(h, 'B')
+    h = pushHistory(h, 'C')
+    expect(h.past).toEqual(['B', 'C'])
+    const r = undo(h, 'D')
+    expect(r.snapshot).toBe('C')
+  })
+
+  it('空栈 undo/redo 返回 null snapshot', () => {
+    const h = createHistory(3)
+    expect(undo(h, 'X').snapshot).toBeNull()
+    expect(redo(h, 'X').snapshot).toBeNull()
+  })
+})
+
+describe('objectInFrame / objectsInFrame / gridLayout', () => {
+  const frame = { x: 0, y: 0, width: 400, height: 300 }
+  it('中心点判定归属', () => {
+    expect(objectInFrame({ x: 180, y: 130, width: 40, height: 40 }, frame)).toBe(true)
+    expect(objectInFrame({ x: 390, y: 130, width: 40, height: 40 }, frame)).toBe(false)
+    expect(objectInFrame(null, frame)).toBe(false)
+  })
+  it('objectsInFrame 返回成员 id 列表', () => {
+    const objs = [
+      { id: 'a', x: 10, y: 10, width: 20, height: 20 },
+      { id: 'b', x: 500, y: 10, width: 20, height: 20 },
+      { id: 'c', x: 30, y: 30, width: 20, height: 20 },
+    ]
+    expect(objectsInFrame(objs, frame)).toEqual(['a', 'c'])
+  })
+  it('gridLayout 按列排布', () => {
+    const out = gridLayout(['p1', 'p2', 'p3'], 100, 100, 80, 60, 20, 20, 2)
+    expect(out[0]).toEqual({ id: 'p1', x: 100, y: 100 })
+    expect(out[1]).toEqual({ id: 'p2', x: 200, y: 100 })
+    expect(out[2]).toEqual({ id: 'p3', x: 100, y: 180 })
+  })
+})
+
+describe('childrenOf / subtreeOf 版本树', () => {
+  const links = [
+    { id: 'l1', from: 'src', to: 'v1' },
+    { id: 'l2', from: 'src', to: 'v2' },
+    { id: 'l3', from: 'v1', to: 'v1a' },
+  ]
+  it('childrenOf 返回直接子代', () => {
+    expect(childrenOf(links, 'src')).toEqual(['v1', 'v2'])
+  })
+  it('subtreeOf BFS 全树去重', () => {
+    expect(subtreeOf(links, 'src').sort()).toEqual(['src', 'v1', 'v1a', 'v2'])
   })
 })

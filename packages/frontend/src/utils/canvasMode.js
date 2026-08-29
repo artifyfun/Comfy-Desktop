@@ -18,9 +18,13 @@ function bus() {
       resultListeners: new Set(),
       attachmentListeners: new Set(),
       stateListeners: new Set(),
+      promptListeners: new Set(),
     }
   }
-  return window[BUS_KEY]
+  // 防御旧实例先建的单例缺新字段（vite 多实例：同一模块可能以不同 URL 加载两份）
+  const b = window[BUS_KEY]
+  if (!b.promptListeners) b.promptListeners = new Set()
+  return b
 }
 
 export function useCanvasMode() {
@@ -50,10 +54,19 @@ export function useCanvasMode() {
     emitCanvasState(state) {
       b.stateListeners.forEach((cb) => cb(state))
     },
+    /** 画布侧：prompt 下发 → 工作台输入框（autoSend=true 时填完即发送） */
+    onPrompt(cb) {
+      b.promptListeners.add(cb)
+      return () => b.promptListeners.delete(cb)
+    },
+    emitPrompt(text, { autoSend = false, attachments = [] } = {}) {
+      b.promptListeners.forEach((cb) => cb({ text, autoSend, attachments }))
+    },
     clear() {
       b.resultListeners.clear()
       b.attachmentListeners.clear()
       b.stateListeners.clear()
+      b.promptListeners.clear()
     },
   }
 }

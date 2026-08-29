@@ -824,7 +824,7 @@ import { canApplyFix } from './diagnosis'
 import { pushFiles, drainAttachments, drainFiles } from '@/utils/canvasBridge'
 import { useCanvasMode } from '@/utils/canvasMode'
 const { t, getCurrentLanguage } = useI18n()
-const { onResult, emitResult, onAttachments, onCanvasState } = useCanvasMode()
+const { onResult, emitResult, onAttachments, onCanvasState, onPrompt } = useCanvasMode()
 // 画布侧栏模式：store 模式由画布页设置；这里只需把产物经 emitResult 推给宿主
 const appStore = useAppStore()
 const route = useRoute()
@@ -2000,6 +2000,15 @@ function onWindowMessage(event) {
 if (isEmbed.value) window.addEventListener('message', onWindowMessage)
 // 画布页侧栏：宿主画布经 window 总线推送选区/物件摘要（与 embed postMessage 同构）
 if (isCanvasEmbedded.value) onCanvasState(applyCanvasState)
+// 画布 → 工作台 prompt 下发（A14 选区指令条 / N3 生成节点 / A5 分镜批量共用）：
+// 填输入框；autoSend=true 时下一 tick 自动发送；attachments 直接走画布附件通道
+if (isCanvasEmbedded.value) {
+  onPrompt(({ text, autoSend, attachments }) => {
+    if (Array.isArray(attachments) && attachments.length) pushCanvasAttachments(attachments)
+    if (typeof text === 'string' && text.trim()) input.value = text.trim()
+    if (autoSend) nextTick(() => send())
+  })
+}
 
 // 画布侧栏模式：接收宿主画布选区「发送到工作台」的活通道（侧栏常驻，mounted-drain 只覆盖跨路由场景）
 // 附件统一补 name = [subfolder/]filename——执行期 resolveAttachmentRef 只认 name，
