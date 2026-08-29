@@ -72,7 +72,8 @@ export interface ErrorInput {
 }
 
 /** 模型类输入名/文件后缀：value_not_in_list 命中即缺模型 */
-const MODEL_INPUT_RE = /ckpt|checkpoint|lora|vae|unet|clip_\d|control_net|upscale_model|style_model/i
+const MODEL_INPUT_RE =
+  /ckpt|checkpoint|lora|vae|unet|clip_\d|control_net|upscale_model|style_model/i
 const MODEL_FILE_RE = /\.(safetensors|ckpt|pt|gguf|bin|sft)$/i
 /** 从 details 里抽 'xxx.safetensors' 或 'xxx.ckpt' 模型文件名 */
 const MODEL_NAME_RE = /['"]([\w./-]+\.(?:safetensors|ckpt|pt|gguf|bin|sft))['"]/i
@@ -97,7 +98,8 @@ function buildParamFix(
       .filter(Boolean)
     // 推荐合法清单第一项（ComfyUI 枚举首项通常是默认值）
     const fix = options[0]
-    const ops: FixOp[] = fix !== undefined ? [{ type: 'setWidget', nodeId, widget: name, value: fix }] : []
+    const ops: FixOp[] =
+      fix !== undefined ? [{ type: 'setWidget', nodeId, widget: name, value: fix }] : []
     return {
       inputName: name,
       suggestion: {
@@ -155,7 +157,12 @@ export function classifyExecutionError(input: ErrorInput): ClassifiedError {
             }
           }
         }
-        const { suggestion, inputName: name } = buildParamFix(nid, classType, inputName ?? '', details)
+        const { suggestion, inputName: name } = buildParamFix(
+          nid,
+          classType,
+          inputName ?? '',
+          details
+        )
         return {
           category: 'bad_param',
           severity: 'blocking',
@@ -184,7 +191,12 @@ export function classifyExecutionError(input: ErrorInput): ClassifiedError {
         }
       }
       if (firstErr.type === 'out_of_range') {
-        const { suggestion, inputName: name } = buildParamFix(nid, classType, inputName ?? '', details)
+        const { suggestion, inputName: name } = buildParamFix(
+          nid,
+          classType,
+          inputName ?? '',
+          details
+        )
         return {
           category: 'bad_param',
           severity: 'blocking',
@@ -236,7 +248,11 @@ export function classifyExecutionError(input: ErrorInput): ClassifiedError {
       }
     }
   }
-  if (/required input.*missing|return type mismatch|prompt has no outputs|invalid connections/i.test(errorText)) {
+  if (
+    /required input.*missing|return type mismatch|prompt has no outputs|invalid connections/i.test(
+      errorText
+    )
+  ) {
     return {
       category: 'broken_graph',
       severity: 'blocking',
@@ -257,7 +273,9 @@ export function classifyExecutionError(input: ErrorInput): ClassifiedError {
     ...loc,
     suggestion: {
       kind: 'manual',
-      text: errorText ? `未识别的错误类型，原始信息：${errorText}` : '未知错误，请查看 ComfyUI 日志获取详情。'
+      text: errorText
+        ? `未识别的错误类型，原始信息：${errorText}`
+        : '未知错误，请查看 ComfyUI 日志获取详情。'
     }
   }
 }

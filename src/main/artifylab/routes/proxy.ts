@@ -200,10 +200,9 @@ export function createProxyRouter(): express.Router {
     try {
       const config = artifyUtils.getConfig()
       const queryString = new URLSearchParams(req.query as Record<string, string>).toString()
-      const imageResponse = await fetchWithRetry(
-        `${config.comfy_origin}/view?${queryString}`,
-        { method: 'GET' }
-      )
+      const imageResponse = await fetchWithRetry(`${config.comfy_origin}/view?${queryString}`, {
+        method: 'GET'
+      })
       if (!imageResponse.ok) {
         res.status(imageResponse.status).json(createErrorResponse('Failed to fetch image'))
         return

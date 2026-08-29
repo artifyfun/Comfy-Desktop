@@ -69,7 +69,10 @@ describe('canvas routes', () => {
       expect(body.ok).toBe(true)
       expect(body.data.seq).toBe(1)
       const st = await fetch(`${base2}/api/canvas/state`)
-      const stBody = (await st.json()) as { ok: boolean; data: { state: { workflowName: string } | null } }
+      const stBody = (await st.json()) as {
+        ok: boolean
+        data: { state: { workflowName: string } | null }
+      }
       expect(stBody.data.state).toMatchObject({ workflowName: 'wf' })
     } finally {
       await new Promise<void>((resolve) => s2.close(() => resolve()))

@@ -59,7 +59,10 @@ describe('canvas ops channel', () => {
   })
 
   it('queues valid ops for bridge pickup', async () => {
-    const res = await post('/api/canvas/ops', { ops: [{ type: 'setWidget', nodeId: 4, widget: 'steps', value: 20 }], reason: 'test' })
+    const res = await post('/api/canvas/ops', {
+      ops: [{ type: 'setWidget', nodeId: 4, widget: 'steps', value: 20 }],
+      reason: 'test'
+    })
     expect(res.status).toBe(200)
     const body = (await res.json()) as { ok: boolean; data: { queued: number } }
     expect(body.ok).toBe(true)
@@ -72,8 +75,14 @@ describe('canvas ops channel', () => {
   })
 
   it('checkpoints and lists newest first', async () => {
-    await post('/api/canvas/checkpoint', { reason: 'before-add', workflow: { nodes: [], links: [] } })
-    const res2 = await post('/api/canvas/checkpoint', { reason: 'before-remove', workflow: { nodes: [], links: [] } })
+    await post('/api/canvas/checkpoint', {
+      reason: 'before-add',
+      workflow: { nodes: [], links: [] }
+    })
+    const res2 = await post('/api/canvas/checkpoint', {
+      reason: 'before-remove',
+      workflow: { nodes: [], links: [] }
+    })
     const b2 = (await res2.json()) as { data: { checkpointId: number } }
     expect(b2.data.checkpointId).toBe(2)
 
@@ -85,11 +94,15 @@ describe('canvas ops channel', () => {
 
   it('rollback marks target and clears pending ops', async () => {
     await post('/api/canvas/checkpoint', { reason: 'cp1', workflow: { nodes: [{ id: 1 }] } })
-    await post('/api/canvas/ops', { ops: [{ type: 'setWidget', nodeId: 1, widget: 'steps', value: 1 }] })
+    await post('/api/canvas/ops', {
+      ops: [{ type: 'setWidget', nodeId: 1, widget: 'steps', value: 1 }]
+    })
 
     const res = await post('/api/canvas/rollback', { checkpointId: 1 })
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { data: { rollbackTo: number; workflow: { nodes: Array<{ id: number }> } | null } }
+    const body = (await res.json()) as {
+      data: { rollbackTo: number; workflow: { nodes: Array<{ id: number }> } | null }
+    }
     expect(body.data.rollbackTo).toBe(1)
     expect(body.data.workflow?.nodes[0]?.id).toBe(1)
 

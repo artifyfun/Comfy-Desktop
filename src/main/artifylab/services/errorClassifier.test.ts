@@ -17,7 +17,7 @@ describe('classifyExecutionError', () => {
   it('缺模型：ckpt_name not in [] → missing_model + 下载指引（无自动 ops）', () => {
     const r = classifyExecutionError({
       ...base,
-      error: "Value not in list",
+      error: 'Value not in list',
       nodeErrors: {
         '4': {
           errors: [

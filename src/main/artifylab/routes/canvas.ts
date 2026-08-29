@@ -69,7 +69,12 @@ export interface CheckpointStore {
 }
 
 const defaultDigestStore: CanvasDigestStore = { latest: null }
-const defaultCheckpointStore: CheckpointStore = { items: [], nextId: 1, rollbackTo: null, audit: [] }
+const defaultCheckpointStore: CheckpointStore = {
+  items: [],
+  nextId: 1,
+  rollbackTo: null,
+  audit: []
+}
 
 /** 供其他模块读取默认 store（不导出可变引用） */
 export function getLatestCanvasDigest(): CanvasDigest | null {
@@ -161,7 +166,9 @@ export function createCanvasRouter(
     const body = req.body as { ops?: unknown; reason?: unknown } | undefined
     const ops = sanitizeOps(body?.ops)
     if (!ops) {
-      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('ops must be a non-empty array of known types'))
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(createErrorResponse('ops must be a non-empty array of known types'))
       return
     }
     checkpoints.audit.push({
@@ -178,7 +185,9 @@ export function createCanvasRouter(
     const id = Number(body?.checkpointId)
     const cp = checkpoints.items.find((c) => c.id === id)
     if (!cp) {
-      res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse(`checkpoint ${body?.checkpointId} not found`))
+      res
+        .status(HTTP_STATUS.NOT_FOUND)
+        .json(createErrorResponse(`checkpoint ${body?.checkpointId} not found`))
       return
     }
     checkpoints.rollbackTo = cp.id
@@ -193,13 +202,15 @@ export function createCanvasRouter(
   // comfyOrigin 可选：bad_param 且枚举清单被 ComfyUI 截断（"list of length N"）
   // 时，反查 /object_info 补全合法值，给出可一键修复的 fixOps。
   router.post('/api/canvas/debug', async (req: Request, res: Response) => {
-    const body = req.body as {
-      error?: unknown
-      nodeErrors?: unknown
-      nodeType?: unknown
-      nodeId?: unknown
-      comfyOrigin?: unknown
-    } | undefined
+    const body = req.body as
+      | {
+          error?: unknown
+          nodeErrors?: unknown
+          nodeType?: unknown
+          nodeId?: unknown
+          comfyOrigin?: unknown
+        }
+      | undefined
     if (!body || (typeof body.error !== 'string' && typeof body.nodeErrors !== 'object')) {
       res
         .status(HTTP_STATUS.BAD_REQUEST)
@@ -208,7 +219,9 @@ export function createCanvasRouter(
     }
     const classified = classifyExecutionError({
       error: typeof body.error === 'string' ? body.error : undefined,
-      nodeErrors: (body.nodeErrors as Parameters<typeof classifyExecutionError>[0]['nodeErrors']) ?? undefined,
+      nodeErrors:
+        (body.nodeErrors as Parameters<typeof classifyExecutionError>[0]['nodeErrors']) ??
+        undefined,
       nodeType: typeof body.nodeType === 'string' ? body.nodeType : undefined,
       nodeId: typeof body.nodeId === 'string' ? body.nodeId : undefined
     })
@@ -224,14 +237,22 @@ export function createCanvasRouter(
       try {
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), 3000)
-        const infoRes = await fetch(`${origin}/object_info/${encodeURIComponent(classified.nodeType)}`, {
-          signal: controller.signal
-        })
+        const infoRes = await fetch(
+          `${origin}/object_info/${encodeURIComponent(classified.nodeType)}`,
+          {
+            signal: controller.signal
+          }
+        )
         clearTimeout(timer)
         if (infoRes.ok) {
-          const info = (await infoRes.json()) as Record<string, { input?: { required?: Record<string, unknown>; optional?: Record<string, unknown> } }>
+          const info = (await infoRes.json()) as Record<
+            string,
+            { input?: { required?: Record<string, unknown>; optional?: Record<string, unknown> } }
+          >
           const node = info[classified.nodeType]
-          const spec = (node?.input?.required ?? {})[classified.inputName] ?? (node?.input?.optional ?? {})[classified.inputName]
+          const spec =
+            (node?.input?.required ?? {})[classified.inputName] ??
+            (node?.input?.optional ?? {})[classified.inputName]
           if (Array.isArray(spec) && Array.isArray(spec[0]) && (spec[0] as unknown[]).length > 0) {
             const options = (spec[0] as unknown[]).map((v) => String(v))
             const fix = options[0]
@@ -239,7 +260,14 @@ export function createCanvasRouter(
               classified.suggestion = {
                 kind: 'param_fix',
                 text: `${classified.suggestion.text} 合法值（前 8）：${options.slice(0, 8).join('、')}。`,
-                fixOps: [{ type: 'setWidget', nodeId: classified.nodeId, widget: classified.inputName, value: fix }]
+                fixOps: [
+                  {
+                    type: 'setWidget',
+                    nodeId: classified.nodeId,
+                    widget: classified.inputName,
+                    value: fix
+                  }
+                ]
               }
             }
           }
