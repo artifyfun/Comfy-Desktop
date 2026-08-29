@@ -522,6 +522,32 @@
                   <i class="far fa-copy"></i>{{ t('workbenchCopyError') }}
                 </button>
               </div>
+              <!-- M4 调试路由：失败后自动分类的诊断卡（分类徽标 + 建议 + 一键修复） -->
+              <div
+                v-if="a.status === 'error' && diagnosisOf(a)"
+                class="mt-2 rounded border px-2 py-1.5 text-xs"
+                style="border-color: var(--wb-stroke); background: rgba(255, 255, 255, 0.03)"
+              >
+                <div class="flex items-center gap-2 mb-1">
+                  <span
+                    class="px-1.5 py-0.5 rounded font-mono text-[10px]"
+                    style="background: var(--wb-accent-bg, rgba(56, 189, 248, 0.15)); color: var(--wb-accent)"
+                    >{{ t('workbenchDiagCat_' + diagnosisOf(a).category) }}</span
+                  >
+                  <span v-if="diagnosisOf(a).nodeType" class="opacity-70 font-mono">
+                    {{ diagnosisOf(a).nodeType }}<template v-if="diagnosisOf(a).nodeId"> #{{ diagnosisOf(a).nodeId }}</template>
+                  </span>
+                </div>
+                <div class="opacity-90 mb-1.5">{{ diagnosisOf(a).suggestion.text }}</div>
+                <button
+                  v-if="diagnosisOf(a).suggestion.fixOps && isEmbed"
+                  class="text-[11px] px-2 py-0.5 rounded hover:opacity-80"
+                  style="background: var(--wb-accent); color: #04121c"
+                  @click="applyDiagnosisFix(a)"
+                >
+                  <i class="fas fa-wrench mr-1"></i>{{ t('workbenchDiagFix') }}
+                </button>
+              </div>
               <!-- 卡级操作收敛到每文件 dropdown;此处仅保留批量终态徽标 -->
               <div
                 v-if="a.batchStatus && ['completed', 'stopped', 'failed'].includes(a.batchStatus)"
@@ -775,6 +801,7 @@ import WbMarkdown from './components/WbMarkdown.vue'
 import Composer from './components/Composer.vue'
 import NewSessionDialog from './components/NewSessionDialog.vue'
 import PresetManager from './components/PresetManager.vue'
+import { canApplyFix } from './diagnosis'
 
 const { t, getCurrentLanguage } = useI18n()
 const appStore = useAppStore()
@@ -1591,7 +1618,11 @@ function startPoll(promptId) {
       const artifact = artifacts.value.find((a) => a.promptId === promptId)
       if (artifact) {
         artifact.status = r.status
-        if (r.status === 'error') artifact.error = (r.error || '').slice(0, 2000)
+        if (r.status === 'error') {
+          artifact.error = (r.error || '').slice(0, 2000)
+          // M4 调试路由：失败即自动分类（异步填 diagnosis，卡片出现后可一键修）
+          void diagnoseArtifact(artifact)
+        }
         if (r.status === 'success' && r.outputs) {
           artifact.outputs = extractFiles(r.outputs).map((f) => f.filename)
           artifact.files = extractFiles(r.outputs)
@@ -1961,6 +1992,41 @@ function proposeCanvasOps(ops, _ctx) {
   opsResultMsg.value = ''
   pendingOps.value = ops
   return true
+}
+
+// ---------------- M4 调试路由：失败自动分类 + 一键修复 ----------------
+// 纯函数层在 ./diagnosis.js（可单测）；副作用（fetch/proposeCanvasOps）留在本文件
+const diagnosisMap = new Map() // artifact.promptId → 分类结果
+
+async function diagnoseArtifact(artifact) {
+  try {
+    const res = await fetch(`${origin.value}/api/canvas/debug`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        error: artifact.error || '',
+        // embed 模式工作台寄生在 ComfyUI 页面内：同源即 comfy origin，
+        // 供服务端反查 /object_info 补全被截断的枚举清单
+        comfyOrigin: isEmbed.value ? window.location.origin : undefined
+      })
+    })
+    if (!res.ok) return
+    const json = await res.json()
+    if (json?.data?.category) diagnosisMap.set(artifact.promptId, json.data)
+  } catch {
+    /* 诊断失败不影响错误展示主路径 */
+  }
+}
+
+function diagnosisOf(artifact) {
+  return diagnosisMap.get(artifact.promptId) || null
+}
+
+/** 一键修复：把诊断建议的 fixOps 送进 M2 人审确认卡（不直接执行） */
+function applyDiagnosisFix(artifact) {
+  const d = diagnosisOf(artifact)
+  if (!canApplyFix(d, isEmbed.value)) return
+  proposeCanvasOps(d.suggestion.fixOps, { source: 'diagnosis', promptId: artifact.promptId })
 }
 
 function discardPendingOps() {

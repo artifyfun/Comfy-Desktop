@@ -23,6 +23,7 @@
 import express, { type Router, type Request, type Response } from 'express'
 import { HTTP_STATUS } from '../config/constants'
 import { createErrorResponse, createSuccessResponse } from '../utils/errorHandler'
+import { classifyExecutionError } from '../services/errorClassifier'
 
 /** 画布摘要投影（注入桥 buildCanvasDigest 的产物） */
 export interface CanvasDigest {
@@ -184,6 +185,70 @@ export function createCanvasRouter(
     // 回滚意味着旧 ops 作废
     checkpoints.audit = []
     res.json(createSuccessResponse({ rollbackTo: cp.id, workflow: cp.workflow }))
+  })
+
+  // M4 canvas.debug：错误诊断（无副作用纯分类）。请求体任意组合：
+  // { error } / { nodeErrors } / { error, nodeType, nodeId }——取自
+  // extractExecutionError 摘要、/prompt 400 响应、execution_error 事件。
+  // comfyOrigin 可选：bad_param 且枚举清单被 ComfyUI 截断（"list of length N"）
+  // 时，反查 /object_info 补全合法值，给出可一键修复的 fixOps。
+  router.post('/api/canvas/debug', async (req: Request, res: Response) => {
+    const body = req.body as {
+      error?: unknown
+      nodeErrors?: unknown
+      nodeType?: unknown
+      nodeId?: unknown
+      comfyOrigin?: unknown
+    } | undefined
+    if (!body || (typeof body.error !== 'string' && typeof body.nodeErrors !== 'object')) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(createErrorResponse('error (string) or nodeErrors (object) required'))
+      return
+    }
+    const classified = classifyExecutionError({
+      error: typeof body.error === 'string' ? body.error : undefined,
+      nodeErrors: (body.nodeErrors as Parameters<typeof classifyExecutionError>[0]['nodeErrors']) ?? undefined,
+      nodeType: typeof body.nodeType === 'string' ? body.nodeType : undefined,
+      nodeId: typeof body.nodeId === 'string' ? body.nodeId : undefined
+    })
+    // 枚举截断增强：bad_param + 无 fixOps + 有节点/输入名 + 提供了 origin
+    const origin = typeof body.comfyOrigin === 'string' ? body.comfyOrigin : undefined
+    if (
+      classified.category === 'bad_param' &&
+      !classified.suggestion.fixOps &&
+      classified.nodeType &&
+      classified.inputName &&
+      origin
+    ) {
+      try {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 3000)
+        const infoRes = await fetch(`${origin}/object_info/${encodeURIComponent(classified.nodeType)}`, {
+          signal: controller.signal
+        })
+        clearTimeout(timer)
+        if (infoRes.ok) {
+          const info = (await infoRes.json()) as Record<string, { input?: { required?: Record<string, unknown>; optional?: Record<string, unknown> } }>
+          const node = info[classified.nodeType]
+          const spec = (node?.input?.required ?? {})[classified.inputName] ?? (node?.input?.optional ?? {})[classified.inputName]
+          if (Array.isArray(spec) && Array.isArray(spec[0]) && (spec[0] as unknown[]).length > 0) {
+            const options = (spec[0] as unknown[]).map((v) => String(v))
+            const fix = options[0]
+            if (fix !== undefined && classified.nodeId) {
+              classified.suggestion = {
+                kind: 'param_fix',
+                text: `${classified.suggestion.text} 合法值（前 8）：${options.slice(0, 8).join('、')}。`,
+                fixOps: [{ type: 'setWidget', nodeId: classified.nodeId, widget: classified.inputName, value: fix }]
+              }
+            }
+          }
+        }
+      } catch {
+        // object_info 反查失败：保留原建议（纯文本指引）
+      }
+    }
+    res.json(createSuccessResponse(classified))
   })
 
   return router

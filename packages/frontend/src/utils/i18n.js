@@ -421,6 +421,13 @@ const translations = {
     workbenchOpsRelink: '把 {from} 的输出连到 {to}',
     workbenchOpsLoad: '替换为 LLM 提供的完整工作流',
     workbenchBatchPlan: '批量编排：{n} 行数据 × 共享参数 {shared} 项',
+    workbenchDiagCat_missing_model: '缺模型',
+    workbenchDiagCat_bad_param: '参数错误',
+    workbenchDiagCat_broken_graph: '工作流结构',
+    workbenchDiagCat_oom: '显存不足',
+    workbenchDiagCat_auth: '需要登录',
+    workbenchDiagCat_unknown: '未知错误',
+    workbenchDiagFix: '应用修复',
     workbenchAutoRecoverIntro:
       '检测到一次执行失败，请分析失败原因，修复参数后重试，或更换更合适的模板继续完成任务',
     workbenchAutoRecoverAsk:
@@ -1254,6 +1261,13 @@ const translations = {
     workbenchOpsRelink: 'Connect {from} output to {to}',
     workbenchOpsLoad: 'Replace with the LLM-provided full workflow',
     workbenchBatchPlan: 'Batch orchestration: {n} rows × {shared} shared params',
+    workbenchDiagCat_missing_model: 'Missing model',
+    workbenchDiagCat_bad_param: 'Bad parameter',
+    workbenchDiagCat_broken_graph: 'Workflow structure',
+    workbenchDiagCat_oom: 'Out of memory',
+    workbenchDiagCat_auth: 'Login required',
+    workbenchDiagCat_unknown: 'Unknown error',
+    workbenchDiagFix: 'Apply fix',
     workbenchAutoRecoverIntro:
       'An execution failed. Analyze the cause, retry with fixed params, or switch to a more suitable template to finish the task',
     workbenchAutoRecoverAsk:
