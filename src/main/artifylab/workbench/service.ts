@@ -12,7 +12,15 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import type { Server as HttpServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import type { Dirent } from 'node:fs'
 import appStoreManager, { type App, type ComfyPrompt, type ParamNode } from '../appStore'
 import { logger } from '../utils/logger'
@@ -50,7 +58,7 @@ import {
   executeApp,
   executePrompt,
   getExecutionStatus,
-  inferOutputNodeIds,
+  inferOutputParamNodes,
   uploadMediaBuffer,
   type ExecutionResult
 } from '../mcp/executor'
@@ -252,6 +260,58 @@ function sessionsPath(): string {
   return join(app.getPath('userData'), 'workbench-sessions.json')
 }
 
+/**
+ * 部署工作台 skill 到 codex 的 $CODEX_HOME/skills/（渐进式加载）。
+ *
+ * skill 源码随包发布（src/main/artifylab/public/workbench-skills/<name>/SKILL.md，
+ * extraResources 复制到 resources/workbench-skills——与 design-system/codex-bin
+ * 同一套打包模式），每次会话创建时复制到临时 CODEX_HOME——codex 0.149.x 启动
+ * 时扫描该目录，把「name + description + SKILL.md 路径」注入系统提示
+ * （## Skills 段），SKILL.md 正文由模型按需完整读取。决策提示词只保留触发
+ * 提示，长规则（编排/媒体参数/批量与记忆）下沉到 skill，常驻 token 大幅下降。
+ *
+ * 不可用时（打包路径变化/复制失败）静默降级：决策提示词内的最小触发提示
+ * 仍能让模型走对路径，只是少了详细指南。
+ */
+function deployWorkbenchSkills(codexHome: string): void {
+  // 生产：electron-builder extraResources → resources/workbench-skills；
+  // 开发：源码目录原位（app.getAppPath() = 仓库根）。
+  const candidates = [
+    process.resourcesPath ? join(process.resourcesPath, 'workbench-skills') : '',
+    join(app.getAppPath(), 'src/main/artifylab/public/workbench-skills')
+  ].filter(Boolean)
+  const srcRoot = candidates.find((p) => existsSync(p))
+  if (!srcRoot) {
+    logger.debug('workbench skills source not found; skip deploy')
+    return
+  }
+  const destRoot = join(codexHome, 'skills')
+  mkdirSync(destRoot, { recursive: true })
+  for (const entry of readdirSync(srcRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const skillMd = join(srcRoot, entry.name, 'SKILL.md')
+    if (!existsSync(skillMd)) continue
+    const destDir = join(destRoot, entry.name)
+    mkdirSync(destDir, { recursive: true })
+    writeFileSync(join(destDir, 'SKILL.md'), readFileSync(skillMd))
+  }
+}
+
+/** 测试入口：绕过 electron app 路径探测，直接指定 skill 源目录 */
+export function deployWorkbenchSkillsForTest(codexHome: string, srcRoot: string): void {
+  if (!existsSync(srcRoot)) return
+  const destRoot = join(codexHome, 'skills')
+  mkdirSync(destRoot, { recursive: true })
+  for (const entry of readdirSync(srcRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const skillMd = join(srcRoot, entry.name, 'SKILL.md')
+    if (!existsSync(skillMd)) continue
+    const destDir = join(destRoot, entry.name)
+    mkdirSync(destDir, { recursive: true })
+    writeFileSync(join(destDir, 'SKILL.md'), readFileSync(skillMd))
+  }
+}
+
 /** 会话级 agent 运行时状态（harness P1）：codex+thread 跨消息复用 */
 interface AgentSession {
   codex: Codex
@@ -269,6 +329,8 @@ interface AgentSession {
 const AGENT_IDLE_MS = 10 * 60 * 1000
 /** 单会话 agent 轮次上限（防 harness 无限循环烧 token） */
 const MAX_AGENT_TURNS = 24
+/** 会话 token 预算上限（spec §4.2④：轮次 + 预算双闸）。input+output 合计。 */
+const MAX_SESSION_TOKENS = 2_000_000
 
 class WorkbenchService {
   private store: SessionStore = { sessions: [] }
@@ -347,6 +409,16 @@ class WorkbenchService {
           ``
         ].join('\n')
       )
+    }
+    // 渐进式加载（skill 机制）：codex 0.149.x 原生扫描 $CODEX_HOME/skills/
+    // 下每个 <name>/SKILL.md（frontmatter name/description），把「name+description
+    // +路径」目录注入系统提示（## Skills 段），SKILL.md 正文按需完整读取——
+    // 决策提示词只留触发提示，长规则下沉 skill，省常驻 token 且不互相干扰。
+    try {
+      deployWorkbenchSkills(tempHome)
+    } catch (e) {
+      // skill 部署失败不阻断会话创建：决策提示词内保留了最小触发提示
+      logger.warn('workbench skill deploy failed', e)
     }
     beginWorkbenchToolContext(sessionId)
     const codex = new Codex({
@@ -790,37 +862,33 @@ class WorkbenchService {
       templateShortcut?: string
     } = {}
   ): Promise<string> {
+    // 模板 catalog 瘦身（渐进式加载）：常驻只注入 id/name/mediaType + 参数名
+    // 一行清单（让模型能判断"哪个模板大概能干这活"）；完整参数 schema
+    // （类型/枚举/范围/rc）下沉到 wb_list_templates 工具按需查。
     const templates = templateLibrary.list()
-    const catalog = JSON.stringify(
-      templates.map((t) => ({
-        id: t.id,
-        name: t.name,
-        description: t.description,
-        mediaType: t.mediaType,
-        chainable: t.chainable ?? false,
-        params: t.paramsNodes
-          .filter((p) => p.category === 'input')
-          .map((p) => ({
-            name: p.name,
-            type: p.selectedWidget?.type ?? p.type,
-            widget: p.selectedWidget?.name,
-            // renderComponent 决定参数真实语义：*-uploader 是「素材文件」槽
-            // （只能传已上传素材文件名或 data:/http URL），绝不是提示词文本。
-            rc: p.renderComponent ?? null,
-            options: p.selectedWidget?.options ?? undefined
-          }))
-      })),
-      null,
-      1
-    )
-    // 分支树(dsh 同款):decide 历史只走当前激活分支;
-    // 过程条目(tool_item/card/progress)不回灌,只取对话语义消息,防上下文爆炸
-    const recent = this.activePath(session.id)
-      .map((i) => session.messages[i]!)
-      .filter((m) => m.kind === 'chat' || m.kind === 'error')
-      .slice(-8)
-      .map((m) => `${m.role}: ${m.text.slice(0, 200)}`)
+    const catalog = templates
+      .map(
+        (t) =>
+          `- ${t.id}（${t.name}，${t.mediaType}）参数: ${t.paramsNodes
+            .filter((p) => p.category === 'input')
+            .map((p) => p.name)
+            .join(', ')}`
+      )
       .join('\n')
+    // 分支树(dsh 同款):decide 历史只走当前激活分支。
+    // 注：codex thread 本身跨轮复用（完整工具调用/执行结果都在上下文里），
+    // 文本近史只在 fresh thread（agent 运行时被回收重建）时兜底注入一次，
+    // 不再每轮拼接——重复注入同一信息既费 token 又稀释模型注意力。
+    const agent0 = this.agentSessions.get(session.id)
+    const recent =
+      !agent0 || agent0.turns === 0
+        ? this.activePath(session.id)
+            .map((i) => session.messages[i]!)
+            .filter((m) => m.kind === 'chat' || m.kind === 'error')
+            .slice(-8)
+            .map((m) => `${m.role}: ${m.text.slice(0, 200)}`)
+            .join('\n')
+        : ''
     const lastExec = this.lastExecution(session.id)
     const chainHint = lastExec
       ? `\n## 上一次执行产物\n模板 ${lastExec.templateId}，promptId ${lastExec.promptId}，产物 ${lastExec.outputs.join('、') || '（无）'}。usePreviousOutput=true 时可将其作为图/视频输入。`
@@ -837,53 +905,34 @@ class WorkbenchService {
     const shortcutHint = opts.templateShortcut
       ? `\n## 用户显式指定模板\n必须使用 templateId="${opts.templateShortcut}"。`
       : ''
-    // 批量编排能力声明:模型可在识别出多行数据/多变体需求时输出 batch 计划
+    // 批量编排能力声明:模型可在识别出多行数据/多变体需求时输出 batch 计划。
+    // 详细规则已迁移 wb-batch-memory skill（渐进式加载），这里只留触发提示。
     const batchRule = `
-## 批量编排（batch）
-用户需要多条产出（明确列出行、给表格/清单、要求 N 个变体）时，输出 batch 字段：
-"batch": { "items": [ {…参数行}, … ], "sharedParams": {…全批次共享覆盖} }
-- items 每行是一个参数对象，键=模板参数名，仅写与默认值不同的键；2~200 行
-- 行内值覆盖 sharedParams 覆盖模板默认值；未提到的参数用模板默认
-- 例：「这两个提示词各出一张图」→ items:[{"prompt":"A"},{"prompt":"B"}]
+## 批量 / 记忆
+用户需要多条产出（列出行/表格/N 个变体）→ batch 计划；用户表达跨会话偏好/事实 → intent=memory。
+详细格式见 wb-batch-memory skill（可用时先读 SKILL.md 再输出）。
 `
     const titleRule = `
 ## 标题（可选）
 若为首条消息，可在 JSON 中加 "title":"≤15字会话标题"。`
     // 编排能力声明：wb_* MCP 工具（decide 轮内自主多步执行的抓手）。
-    // 仅在 /mcp 端点可用（server 已监听）时注入。
+    // 仅在 /mcp 端点可用（server 已监听）时注入。详细指南已迁移
+    // wb-orchestration skill（渐进式加载），常驻只留触发条件与工具清单。
     const orchestrationRule = this.mcpAvailable
       ? `
-## 多步编排（wb_* 工具）
-简单需求（选一个模板出图/出视频/答一句话）**直接输出 PLAN JSON**，不要调工具。
-**多步需求**（先调研/生成，再基于结果继续生成或写文案，如「查XX主题→文生图→图生视频→写文案」）逐步自主执行：
-1. wb_list_templates 看可用模板（研究类需求可用你的 shell 联网检索，结论作为后续 prompt 输入）。
-2. wb_execute_template(template_id, params, wait=true) 逐步执行；链式步骤传 use_previous_output=true 自动引用上一步产物。
-3. 每步产物自动落会话（用户实时可见）；全部完成后，最终回复（agent_message）输出：完整编排总结 + 交付文案（若需要）+ 仍输出 PLAN JSON（intent 标记为最后一个生成步骤，系统会跳过重复执行）。
-用户偏好/硬件等跨会话事实可用 wb_remember/wb_forget 沉淀。
-
-## 节点级控制（wb_* 工具 + node_overrides）
-用户要求**更精细的参数**（改采样步数/CFG/尺寸/换模型/改任意节点参数，模板未暴露的）时：
-1. wb_list_nodes(template_id) 查模板节点图与可写 widget（含类型/枚举/范围，源自 ComfyUI /object_info）。
-2. 在 PLAN 里带 node_overrides 精确覆盖：{"节点id": {"class_type": "KSampler", "widgetOverrides": {"steps": 40, "cfg": 7}}}；wb_execute_template 同样接受 node_overrides。
-3. **链接型字段**（值是 ["nodeId", slot] 引用）不能直接赋值——改它上游节点的输出参数。
-4. 校验失败会打回原因（字段不存在/类型错/越界/是链接），按提示修正后重试。
-模板参数够用时**优先用 params（省 token）**；确实要动模板未暴露的节点才用 node_overrides。
-
-## 工作流创作（wb_* 工具）
-现有模板无法表达需求时（要自定义节点连线/组合）：
-1. wb_list_templates 确认没有可用的；wb_validate_workflow(workflow) 先校验你的 API 格式 workflow JSON（节点类型/链接完整性，可迭代修正）。
-2. wb_run_workflow(workflow, wait=true) 直接运行；seed/node_overrides 可传。产物自动落会话。
-3. 效果好的可 wb_publish_workflow(name, workflow) 固化为新模板，供后续复用。
-API 格式：{"节点id": {"class_type": "节点类名", "inputs": {"参数名": 值 或 ["上游id", 端口号]}}}；链接字段值为 ["上游节点id", 输出端口下标]。`
+## 多步编排 / 工作流创作（wb_* 工具）
+- **简单需求**（选一个模板出图/出视频/答一句话）直接输出 PLAN JSON，不要调工具。
+- **多步需求**（先调研/生成，再基于结果继续）或**模板表达不了**（自定义节点连线/组合）或**节点级精细参数**（node_overrides）→ 读 wb-orchestration skill 后按它执行。
+- 工具清单：wb_list_templates / wb_execute_template（wait=true 阻塞拿产物）/ wb_get_outputs（非阻塞查产物）/ wb_list_nodes（查节点图；无参=全量节点类型）/ wb_validate_workflow / wb_run_workflow / wb_clone_template / wb_publish_workflow / wb_remember / wb_forget。
+- 链式：wb_execute_template / wb_run_workflow 传 use_previous_output=true 引用上一步产物。
+`
       : ''
     // 跨会话记忆注入(dsh memory 语义):读取段 + 自我更新授权
     const memorySection = this.renderMemoryContext()
     const memoryRule = `
 ## 长期记忆（intent=memory）
-用户表达可跨会话保留的偏好/事实（「以后都用...」「记住我喜欢...」「我的显卡是...」）时：
-{"intent":"memory","memory":{"action":"remember","key":"短标签(英文-kebab,如 preferred-style)","value":"一句话内容"},"reply":"向用户确认记住了什么"}
-用户要求忘掉某事（「别再用...」「忘掉...」）时 action=forget（只需 key；不匹配任何键时用最接近的键并在 reply 说明）。
-环境快照/会话近史与你已知记忆冲突时，以用户新表述为准主动 remember 更新同 key。`
+用户表达可跨会话保留的偏好/事实（「以后都用...」「记住我喜欢...」「我的显卡是...」）→ intent=memory；要求忘掉 → action=forget。
+详细格式见 wb-batch-memory skill（可用时先读 SKILL.md 再输出）。`
     // 自我认知 + 环境快照（AGENTS.md 语义：常驻能力说明与本地环境感知）
     let envSection = ''
     try {
@@ -893,26 +942,23 @@ API 格式：{"节点id": {"class_type": "节点类名", "inputs": {"参数名":
       logger.debug('workbench env snapshot render failed', e)
     }
     return `${SELF_KNOWLEDGE_TEXT}${envSection}
-## 会话延续（agent 上下文）
-你在本会话**此前的工具调用、推理与执行结果仍在上下文中**——复盘失败时优先参考它们（例如上次把提示词文本传进了图片加载槽导致 No such file、或某个模板实际不吃文本），基于事实修正而非凭空重试。首次进入本会话则忽略此段。
 根据用户需求从模板库选择模板并填参数，输出**只含一个 JSON 对象**（无 markdown 代码块、无解释文字）：
 {"intent":"image|video|audio|text|chat|memory","templateId":"...","params":{...},"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text/memory 时直接给用户的回复","memory":{"action":"remember|forget","key":"...","value":"remember 时必填"},"title":"仅首条消息时提供"}
 
 规则：
-1. intent=image/video/audio 必须从下列模板中选 templateId，params 只用模板声明的参数，数值遵守 min/max，枚举必须完全匹配可选值。
+1. **简单需求**（能直接映射到某个模板的参数面）→ 直接输出 PLAN JSON：intent=image/video/audio 选 templateId，params 数值遵守 min/max，枚举必须完全匹配可选值。模板给不出用户要的效果时，按 5.2 变通，不要硬凑模板参数。
 2. intent=text 走纯文本生成（文案/起名/总结等），把生成结果放 reply。
 3. intent=chat 用于追问澄清或闲聊，回复放 reply。
-4. 模板库为空或不匹配时选 chat 并说明。3.5 可跨会话保留的偏好/事实用 intent=memory（见「长期记忆」段）。
+4. 模板库为空或不匹配时选 chat 并说明。可跨会话保留的偏好/事实用 intent=memory（见「长期记忆」段）。
 5. 用户上传了素材时，倾向选择带媒体输入参数的模板（图生图/视频驱动），参数值填素材文件名（已上传）。
-5.1 **参数类型铁律**：模板参数里的 rc（renderComponent）为 *-uploader 的是**素材文件槽**——只能传已上传素材的文件名或 data:/http(s): URL，**绝不能传提示词文本**。只有 rc=textarea/select/slider/number（或无 rc 的文本型）参数才收提示词/数值。把中文描述塞进 image-uploader 参数 = ComfyUI 报 No such file or directory。
-5.2 **模板不合适就变通，不要盲目重试**：如果用户要文生图、但候选模板的关键参数全是素材槽（图生图/槽位替换类），不要硬传文本：先用 wb_list_nodes 查看模板节点图确认各节点类型 → 用 PLAN 的 node_overrides 修改节点参数（如把 LoadImageFromPath 换成 EmptyLatentImage 或直接改下游节点输入）→ 或 wb_run_workflow 提交自组 API 工作流 → 或 wb_clone_template 派生可编辑变体。重试同参数只会重复同样的失败。
-6. 存在「会话预设约束」段落时，其 intent 限制是**硬性规则**，违反的输出会被系统直接拒绝——你必须输出该 intent。7. 有「多步编排」段时优先按它执行；单步需求仍直接出 PLAN JSON。${chainHint}${constraint}${attachmentHint}${docHint}${batchRule}${shortcutHint}${titleRule}${memoryRule}${orchestrationRule}
+5.1 **参数类型**：模板参数里的 rc（renderComponent）为 *-uploader 的是**素材文件槽**——只能传已上传素材的文件名或 data:/http(s): URL，不能传提示词文本（会导致 ComfyUI 报 No such file or directory）。只有 rc=textarea/select/slider/number（或无 rc 的文本型）参数才收提示词/数值。
+5.2 **模板不合适就变通，不要盲目重试**：关键参数全是素材槽而用户要文生图时，先复盘本会话此前的工具调用与执行结果（基于事实修正而非凭空重试），然后读 wb-media-params skill（可用时）按变通路径处理：node_overrides 改节点参数 → wb_run_workflow 自组工作流 → wb_clone_template 派生变体。重试同参数只会重复同样的失败。
+6. 存在「会话预设约束」段落时，其 intent 限制是**硬性规则**，违反的输出会被系统直接拒绝——你必须输出该 intent。7. 有「多步编排」段时优先按它执行；单步需求仍直接出 PLAN JSON。
+8. 填 params 前若不确定某参数的类型/可选值，wb_list_templates 查完整 schema（枚举必须完全匹配可选值）。${chainHint}${constraint}${attachmentHint}${docHint}${batchRule}${shortcutHint}${titleRule}${memoryRule}${orchestrationRule}
 
-## 模板库
+## 模板库（清单；完整参数 schema 用 wb_list_templates 查）
 ${catalog}
-
-## 会话近史
-${recent || '（空）'}${memorySection}
+${recent ? `\n## 会话近史（fresh thread 兜底；有此段时它就是本会话此前对话）\n${recent}\n` : ''}${memorySection}
 
 ## 用户需求
 ${userInput}`
@@ -973,6 +1019,9 @@ ${userInput}`
     const agent = await this.getOrCreateAgentSession(sessionId, onProgress)
     if (agent.turns >= MAX_AGENT_TURNS) {
       throw new Error(`本会话 agent 轮次已达上限（${MAX_AGENT_TURNS} 轮），请新建会话继续`)
+    }
+    if (agent.totalTokens >= MAX_SESSION_TOKENS) {
+      throw new Error(`本会话 token 用量已达预算上限（${MAX_SESSION_TOKENS}），请新建会话继续`)
     }
     const spec = await this.buildDecisionSpec(effectiveInput, session, {
       preset,
@@ -1250,16 +1299,7 @@ ${userInput}`
    * paramsNodes（缺省按输出节点推断）→ createApp。复用现有 publish 链路。
    */
   publishWorkflow(name: string, workflow: ComfyPrompt, paramsNodes?: ParamNode[]): App | null {
-    const inferred = paramsNodes?.length
-      ? paramsNodes
-      : inferOutputNodeIds(workflow).map((id) => ({
-          id: Number(id) || 0,
-          category: 'output' as const,
-          type: 'output',
-          name: 'result',
-          renderComponent: 'image-uploader',
-          selectedWidget: { id, name: 'images' }
-        }))
+    const inferred = paramsNodes?.length ? paramsNodes : inferOutputParamNodes(workflow)
     const newApp = appStoreManager.createApp({
       name,
       description: name,

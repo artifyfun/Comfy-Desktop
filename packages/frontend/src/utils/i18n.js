@@ -390,6 +390,20 @@ const translations = {
     workbenchSubmitted: '已提交到 ComfyUI 队列',
     workbenchDone: '生成完成，见右侧产物区',
     workbenchFailed: '执行失败',
+    workbenchStop: '停止执行',
+    workbenchStopped: '已停止',
+    workbenchImportWorkflow: '导入工作流',
+    workbenchImportNamePlaceholder: '工作流名称（可选）',
+    workbenchImportJsonPlaceholder:
+      '粘贴 ComfyUI API 格式的 workflow JSON（导出 API 版 .json 的内容）',
+    workbenchImportBadJson: 'JSON 解析失败：请粘贴 API 格式 workflow（顶层为节点 id → 节点对象）',
+    workbenchRunNow: '立即执行',
+    workbenchAdvParams: '高级参数',
+    workbenchAdvPickTemplate: '选择模板',
+    workbenchAdvJsonPlaceholder:
+      '节点级覆盖 JSON：{"节点id": {"class_type": "KSampler", "widgetOverrides": {"steps": 40}}}（wb_list_nodes 可查节点图）',
+    workbenchAdvValidate: '校验',
+    workbenchAdvOk: '校验通过',
     workbenchAutoRecoverIntro:
       '检测到一次执行失败，请分析失败原因，修复参数后重试，或更换更合适的模板继续完成任务',
     workbenchAutoRecoverAsk:
@@ -1191,6 +1205,21 @@ const translations = {
     workbenchSubmitted: 'Submitted to ComfyUI queue',
     workbenchDone: 'Done — see artifacts panel',
     workbenchFailed: 'Execution failed',
+    workbenchStop: 'Stop',
+    workbenchStopped: 'Stopped',
+    workbenchImportWorkflow: 'Import workflow',
+    workbenchImportNamePlaceholder: 'Workflow name (optional)',
+    workbenchImportJsonPlaceholder:
+      'Paste a ComfyUI API-format workflow JSON (the exported "API version" .json)',
+    workbenchImportBadJson:
+      'JSON parse failed: paste an API-format workflow (top level is node id → node object)',
+    workbenchRunNow: 'Run now',
+    workbenchAdvParams: 'Advanced params',
+    workbenchAdvPickTemplate: 'Pick a template',
+    workbenchAdvJsonPlaceholder:
+      'Node-level overrides JSON: {"node id": {"class_type": "KSampler", "widgetOverrides": {"steps": 40}}} (wb_list_nodes lists the node graph)',
+    workbenchAdvValidate: 'Validate',
+    workbenchAdvOk: 'Validation passed',
     workbenchAutoRecoverIntro:
       'An execution failed. Analyze the cause, retry with fixed params, or switch to a more suitable template to finish the task',
     workbenchAutoRecoverAsk:

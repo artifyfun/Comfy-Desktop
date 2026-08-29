@@ -7,6 +7,7 @@
  */
 import type { ComfyPrompt } from '../appStore'
 import type { WorkflowTemplate } from './templateCore'
+import { checkNodeOverrides, looksLikeMediaValue, looksLikeTextBlob } from '../mcp/executor'
 import { logger } from '../utils/logger'
 
 /** codex 决策输出的结构化执行计划 */
@@ -96,13 +97,10 @@ function validateParams(
     // 此校验在 executor 提交前拦截，模型恢复轮能立即看到明确问题。
     const rc = String(node.renderComponent ?? '').toLowerCase()
     if (rc.includes('uploader') && typeof v === 'string') {
-      const looksLikeUrl = /^(data:|https?:)/i.test(v)
-      const looksLikeFile =
-        /\.(png|jpe?g|webp|gif|bmp|mp4|webm|mov|mp3|wav|flac|safetensors|bin)$/i.test(v)
-      const hasChinese = /[\u4e00-\u9fff]/.test(v)
-      if (!looksLikeUrl && !looksLikeFile) {
-        const hint = hasChinese
-          ? `收到文本描述（含中文），但该参数是 ${node.renderComponent ?? '媒体上传'}，只能传已上传素材的文件名或 data:/http(s) URL`
+      // 媒体值判定与 executor 同源（looksLikeMediaValue / looksLikeTextBlob）
+      if (!looksLikeMediaValue(v)) {
+        const hint = looksLikeTextBlob(v)
+          ? `收到文本描述（含中文或长文本），但该参数是 ${node.renderComponent ?? '媒体上传'}，只能传已上传素材的文件名或 data:/http(s) URL`
           : `该参数是 ${node.renderComponent ?? '媒体上传'}，只能传素材文件名或 data:/http(s) URL`
         issues.push({ field: `params.${k}`, message: hint })
         continue
@@ -162,52 +160,19 @@ export async function validateAgainstObjectInfo(
 
 /**
  * 节点覆盖的本地校验（同步、不发网络）：节点存在 → class_type 匹配 →
- * 字段存在 → 非链接引用。执行端的 applyNodeOverrides 与这里必须同一套规则。
+ * 字段存在 → 非链接引用 → 值可序列化。
+ * 规则实现统一走 executor.checkNodeOverrides（单一事实源）——校验层与
+ * 执行端 applyNodeOverrides 天然同规则，不再靠注释纪律双写。
  */
 export function validateNodeOverridesLocal(
   prompt: ComfyPrompt,
   nodeOverrides?: Record<string, { class_type?: string; widgetOverrides?: Record<string, unknown> }>
 ): PlanValidationIssue[] {
-  const issues: PlanValidationIssue[] = []
-  if (!nodeOverrides) return issues
-  for (const [nodeId, cfg] of Object.entries(nodeOverrides)) {
-    const node = prompt[nodeId]
-    if (!node) {
-      issues.push({ field: `nodeOverrides.${nodeId}`, message: `节点不存在: ${nodeId}` })
-      continue
-    }
-    if (cfg.class_type && node.class_type !== cfg.class_type) {
-      issues.push({
-        field: `nodeOverrides.${nodeId}.class_type`,
-        message: `节点 ${nodeId} 类型不匹配：期望 ${cfg.class_type}，实际 ${node.class_type}`
-      })
-    }
-    for (const [k, v] of Object.entries(cfg.widgetOverrides ?? {})) {
-      if (!(k in node.inputs)) {
-        issues.push({
-          field: `nodeOverrides.${nodeId}.${k}`,
-          message: `节点 ${nodeId} 无输入 ${k}`
-        })
-        continue
-      }
-      if (Array.isArray(node.inputs[k])) {
-        issues.push({
-          field: `nodeOverrides.${nodeId}.${k}`,
-          message: `字段 ${k} 是链接引用（["nodeId", slot]），不能直接赋值——请改它的上游节点`
-        })
-        continue
-      }
-      // 值可 JSON 序列化（防函数/undefined 混入）
-      if (typeof v === 'function' || v === undefined) {
-        issues.push({ field: `nodeOverrides.${nodeId}.${k}`, message: `值不可序列化` })
-      }
-    }
-  }
-  return issues
+  return checkNodeOverrides(prompt, nodeOverrides)
 }
 
-/** /object_info 的节点输入 schema（widget 定义） */
-interface ObjectInfoNode {
+/** /object_info 的节点输入 schema（widget 定义）。workbenchTools 等处共用。 */
+export interface ObjectInfoNode {
   input?: {
     required?: Record<string, [unknown, Record<string, unknown>?] | [unknown]>
   }

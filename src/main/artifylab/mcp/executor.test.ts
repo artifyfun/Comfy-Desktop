@@ -8,6 +8,8 @@ import {
   assertSafeMediaUrl,
   getSeed,
   inferOutputNodeIds,
+  inferOutputParamNodes,
+  inferFirstMediaSlot,
   freeIfWorkflowChanged,
   forceFreeAndTrack,
   resolveWorkflowKey,
@@ -341,10 +343,11 @@ describe('applyNodeOverrides', () => {
       '99': { widgetOverrides: { a: 1 } },
       '13': { widgetOverrides: { clip: ['4', 0] } }
     })
+    // 错误文案与校验层（plan.validateNodeOverridesLocal）同源（checkNodeOverrides）
     expect(errors).toEqual([
-      'nodeOverrides: 节点 12 无输入 nonexistent',
-      'nodeOverrides: 字段 13.clip 是链接引用，不能直接赋值（请改上游节点）',
-      'nodeOverrides: 节点不存在 99'
+      'nodeOverrides.12.nonexistent: 节点 12 无输入 nonexistent',
+      'nodeOverrides.13.clip: 字段 clip 是链接引用（["nodeId", slot]），不能直接赋值——请改它的上游节点',
+      'nodeOverrides.99: 节点不存在: 99'
     ])
     // 失败项不写入
     expect(p['13']!.inputs.clip).toEqual(['4', 1])
@@ -368,6 +371,55 @@ describe('inferOutputNodeIds', () => {
       '3': { class_type: 'VHS_VideoCombine', inputs: { images: ['1', 0] } }
     })
     expect(ids).toEqual(['2', '3'])
+  })
+
+  it('Load* 节点即使名字含 Video/Audio 也不算产物出口（防误判）', () => {
+    const ids = inferOutputNodeIds({
+      '1': { class_type: 'LoadVideo', inputs: { video: 'a.mp4' } },
+      '2': { class_type: 'LoadAudio', inputs: { audio: 'a.wav' } },
+      '3': { class_type: 'LoadImageFromPath', inputs: { image: 'a.png' } },
+      '4': { class_type: 'SaveImage', inputs: { images: ['1', 0] } }
+    })
+    expect(ids).toEqual(['4'])
+  })
+})
+
+describe('inferOutputParamNodes', () => {
+  it('输出节点转 paramsNodes：selectedWidget.name 保留原始节点 id', () => {
+    const nodes = inferOutputParamNodes({
+      '9': { class_type: 'SaveImage', inputs: {} }
+    })
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]).toMatchObject({
+      category: 'output',
+      name: 'result',
+      selectedWidget: { id: '9', name: 'images' }
+    })
+  })
+})
+
+describe('inferFirstMediaSlot', () => {
+  it('返回第一个 Load* 节点的首个字符串输入字段', () => {
+    const slot = inferFirstMediaSlot({
+      '1': { class_type: 'KSampler', inputs: { seed: 1 } },
+      '2': { class_type: 'LoadImageFromPath', inputs: { image: 'a.png', upload: 'button' } },
+      '3': { class_type: 'LoadVideo', inputs: { video: 'b.mp4' } }
+    })
+    expect(slot).toEqual({ nodeId: '2', inputKey: 'image' })
+  })
+
+  it('跳过值为链接数组的字段，不把上游引用当媒体槽', () => {
+    const slot = inferFirstMediaSlot({
+      '1': { class_type: 'LoadImageInput', inputs: { image: ['5', 0] } }
+    })
+    expect(slot).toBeNull()
+  })
+
+  it('没有 Load 节点时返回 null', () => {
+    const slot = inferFirstMediaSlot({
+      '1': { class_type: 'SaveImage', inputs: { images: [] } }
+    })
+    expect(slot).toBeNull()
   })
 })
 

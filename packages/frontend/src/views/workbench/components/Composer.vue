@@ -26,12 +26,12 @@
         @remove="(i) => $emit('remove-attachment', i)"
       />
 
-      <!-- 输入区：全宽 textarea，自适应长高 -->
+      <!-- 输入区：全宽 textarea，自适应长高（busy 仅锁发送位为停止位，不打断输入） -->
       <textarea
         ref="textareaEl"
         v-model="draft"
         :placeholder="t('workbenchInputPlaceholder')"
-        :disabled="busy"
+        :disabled="uploading && !busy"
         class="w-full bg-transparent border-none outline-none resize-none text-[14px] leading-[22px] text-white placeholder-slate-500 max-h-40 min-h-[66px] py-1"
         @input="autoResize"
         @keydown.enter.exact.prevent="onEnter"
@@ -92,18 +92,21 @@
         <span v-if="slashOpen" class="text-[11px] text-[var(--wb-text-3)] mr-2 hidden sm:inline">
           ↑↓ {{ t('workbenchNavigate') }} · Tab/{{ t('confirm') }} · Esc
         </span>
+        <!-- busy 时发送位变停止位（dsh 语义）：icon 在 ▲/■ 间切换，宽度不变不跳动 -->
         <button
-          class="w-8 h-8 rounded-full flex items-center justify-center transition disabled:opacity-40"
+          class="w-8 h-8 rounded-full flex items-center justify-center transition"
           :class="
-            canSend
-              ? 'bg-[var(--wb-accent)] text-white hover:brightness-110'
-              : 'bg-[var(--wb-surface-hover)] text-[var(--wb-text-2)]'
+            busy
+              ? 'bg-[var(--wb-surface-hover)] text-white hover:bg-red-500/80'
+              : canSend
+                ? 'bg-[var(--wb-accent)] text-white hover:brightness-110'
+                : 'bg-[var(--wb-surface-hover)] text-[var(--wb-text-2)]'
           "
-          :disabled="!canSend"
-          :title="t('workbenchSend')"
-          @click="$emit('send')"
+          :disabled="busy ? stopping : !canSend"
+          :title="busy ? t('workbenchStop') : t('workbenchSend')"
+          @click="busy ? $emit('stop') : $emit('send')"
         >
-          <i class="fas fa-arrow-up"></i>
+          <i :class="busy ? 'fas fa-stop text-[11px]' : 'fas fa-arrow-up'"></i>
         </button>
       </div>
     </div>
@@ -129,6 +132,7 @@ import SkillMenu from './SkillMenu.vue'
 
 const props = defineProps({
   busy: { type: Boolean, default: false },
+  stopping: { type: Boolean, default: false },
   uploading: { type: Boolean, default: false },
   attachments: { type: Array, default: () => [] },
   skills: { type: Array, default: () => [] },
@@ -138,6 +142,7 @@ const props = defineProps({
 const emit = defineEmits([
   'update:modelValue',
   'send',
+  'stop',
   'upload-files',
   'reference-files',
   'remove-attachment',
@@ -199,7 +204,10 @@ function autoResize(e) {
 function onEnter() {
   if (slashOpen.value && filteredSkills.value.length) {
     onSkillPick(filteredSkills.value[activeIndex.value])
-  } else if (!slashOpen.value) {
+  } else if (props.busy) {
+    // 执行中 Enter = 停止（与按钮一致）
+    emit('stop')
+  } else {
     emit('send')
   }
 }

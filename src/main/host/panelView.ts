@@ -15,6 +15,7 @@ import {
   computeBodyMode,
   findEntryByTitleBarSender,
   getEntryByInstallationId,
+  isOverlayPanel,
   revealColdStartHostIfPending,
   VALID_PANELS
 } from './registry'
@@ -178,8 +179,8 @@ function loadPanelContent(
   panelQuery: Record<string, string>
 ): void {
   const panel = panelQuery.panel as BodyMode
-  const isOverlayBody = panel === 'feedback' || panel === 'mcp-setup' || panel === 'announcement'
-  const artifyUrl = entry.panelSurface === 'artify' && !isOverlayBody ? getArtifyPanelUrl() : null
+  const overlayBody = isOverlayPanel(panel)
+  const artifyUrl = entry.panelSurface === 'artify' && !overlayBody ? getArtifyPanelUrl() : null
   if (artifyUrl) {
     void wc.loadURL(artifyUrl).catch(() => {})
     return
@@ -282,8 +283,6 @@ export function setActivePanel(windowKey: number, panel: ComfyPanelKey): void {
   const prevPanel = entry.activePanel
   if (prevPanel === panel) return
 
-  const isOverlayPanel = (p: ComfyPanelKey | BodyMode): boolean =>
-    p === 'feedback' || p === 'mcp-setup' || p === 'announcement'
   const openingOverlay = isOverlayPanel(panel) && !isOverlayPanel(prevPanel)
   const closingOverlay = isOverlayPanel(prevPanel) && !isOverlayPanel(panel)
 

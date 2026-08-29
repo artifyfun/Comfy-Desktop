@@ -86,7 +86,24 @@
             <div class="flex-1 text-white text-sm truncate font-medium">
               {{ currentSession?.title || t('workbench') }}
             </div>
+            <!-- 高级参数（节点级覆盖）：粘贴 nodeOverrides JSON → 预检/执行 -->
+            <a-button
+              size="small"
+              :title="t('workbenchAdvParams')"
+              :disabled="!sessionId || busy"
+              @click="openAdvDrawer"
+            >
+              <i class="fas fa-sliders"></i>
+            </a-button>
             <!-- 复制调试信息：spec 提示词 + 模型原始输出(含思考) + PLAN + 校验 + 执行 -->
+            <a-button
+              size="small"
+              :title="t('workbenchImportWorkflow')"
+              :disabled="!sessionId || busy"
+              @click="importOpen = true"
+            >
+              <i class="fas fa-file-import"></i>
+            </a-button>
             <a-button
               size="small"
               :title="t('workbenchCopyDebug')"
@@ -106,7 +123,7 @@
               <i class="fas fa-wand-magic-sparkles text-4xl mb-3 opacity-40"></i>
               <p>{{ t('workbenchIntro') }}</p>
             </div>
-            <template v-for="(m, i) in messages" :key="i">
+            <template v-for="(m, i) in messages" :key="m._key ?? i">
               <div v-if="showDateDivider(i)" class="w-full pt-1 pb-2 text-center shrink-0">
                 <span
                   class="text-[11px] text-[var(--wb-text-3)] bg-[var(--wb-bg-base)] rounded-full px-3 py-1"
@@ -265,12 +282,14 @@
           <Composer
             ref="composerEl"
             v-model="input"
-            :busy="busy"
+            :busy="busy || executingCount > 0"
+            :stopping="stopping"
             :uploading="uploading"
             :attachments="draftAttachments"
             :skills="skills"
             :model-override="modelOverride"
             @send="send"
+            @stop="stopChat"
             @upload-files="uploadFiles"
             @reference-files="referenceLocalFiles"
             @remove-attachment="removeAttachment"
@@ -307,7 +326,13 @@
               <div class="flex items-center justify-between mb-1">
                 <a-tag
                   :color="
-                    a.status === 'success' ? 'green' : a.status === 'error' ? 'red' : 'processing'
+                    a.status === 'success'
+                      ? 'green'
+                      : a.status === 'error'
+                        ? 'red'
+                        : a.status === 'stopped'
+                          ? 'default'
+                          : 'processing'
                   "
                 >
                   {{ a.status }}
@@ -579,6 +604,74 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <!-- 导入工作流：粘贴 API 格式 workflow JSON 直接执行（L2 用户侧入口） -->
+    <a-modal
+      v-model:open="importOpen"
+      :title="t('workbenchImportWorkflow')"
+      :confirm-loading="importing"
+      :ok-text="t('workbenchRunNow')"
+      :cancel-text="t('cancel')"
+      @ok="runImportedWorkflow"
+    >
+      <div class="space-y-3">
+        <a-input
+          v-model:value="importName"
+          :placeholder="t('workbenchImportNamePlaceholder')"
+        />
+        <textarea
+          v-model="importJson"
+          rows="10"
+          class="w-full wb-tech-input font-mono text-xs"
+          :placeholder="t('workbenchImportJsonPlaceholder')"
+        ></textarea>
+        <div v-if="importError" class="text-xs text-red-400">{{ importError }}</div>
+      </div>
+    </a-modal>
+
+    <!-- 高级参数：节点级 nodeOverrides 覆盖（模板未暴露的任意直值字段） -->
+    <a-modal
+      v-model:open="advOpen"
+      :title="t('workbenchAdvParams')"
+      :footer="null"
+    >
+      <div class="space-y-3">
+        <a-select
+          v-model:value="advTemplateId"
+          show-search
+          option-filter-prop="label"
+          :options="advTemplateOptions"
+          :placeholder="t('workbenchAdvPickTemplate')"
+          class="w-full"
+        />
+        <textarea
+          v-model="advJson"
+          rows="8"
+          class="w-full wb-tech-input font-mono text-xs"
+          :placeholder='t("workbenchAdvJsonPlaceholder")'
+        ></textarea>
+        <div v-if="advIssues.length" class="space-y-1">
+          <div v-for="(issue, i) in advIssues" :key="i" class="text-xs text-red-400">
+            {{ issue.field }}: {{ issue.message }}
+          </div>
+        </div>
+        <div v-else-if="advValidated" class="text-xs text-green-400">{{ t('workbenchAdvOk') }}</div>
+        <div class="flex gap-2 justify-end">
+          <a-button size="small" :loading="advChecking" @click="checkAdvOverrides">
+            {{ t('workbenchAdvValidate') }}
+          </a-button>
+          <a-button
+            size="small"
+            type="primary"
+            :loading="advRunning"
+            :disabled="!advTemplateId || !advOk"
+            @click="runAdvOverrides"
+          >
+            {{ t('workbenchRunNow') }}
+          </a-button>
+        </div>
+      </div>
+    </a-modal>
   </div>
 </template>
 
@@ -611,14 +704,37 @@ const artifacts = ref([])
 const pendingIssues = ref([])
 const input = ref('')
 const busy = ref(false)
+const stopping = ref(false)
+/** 当前 chat 轮的 reader：stopChat() 时 cancel 掉 SSE 流（后端 res close 会 abort 决策） */
+let chatReader = null
 const uploading = ref(false)
 // 执行失败自动恢复：单会话最多自动重试 N 次（防死循环烧 token），切会话清零
 const recoverCount = ref(0)
 const recovering = ref(false)
 const MAX_AUTO_RECOVERS = 2
-// 单次执行占位气泡：promptId → messages 下标；poll 终态原位更新，避免
-// 「已提交」「生成完成」「执行失败」各占一个气泡把对话流切碎
+// 单次执行占位气泡：promptId → 消息 _key；poll 终态原位更新，避免
+// 「已提交」「生成完成」「执行失败」各占一个气泡把对话流切碎。
+// 存稳定 key 而非数组下标——dismissDecidingProgress 的 splice 会使下标整体
+// 前移，下标寻址会打错行；key 寻址不受影响。
 const execProgressIndex = new Map()
+// 渲染层稳定 key：客户端推送/服务端加载的每条消息都有，:key 与原位更新共用
+let msgKeySeq = 0
+function nextMsgKey() {
+  return `k${++msgKeySeq}`
+}
+
+/**
+ * 统一推消息入口：自动注入稳定 _key。原位更新（tool_item / 执行占位气泡）
+ * 按 _key 寻址而不是数组下标——splice 删除占位气泡后下标会整体前移，
+ * 下标寻址会更新到错误的行。
+ */
+function pushMsg(m) {
+  const msg = { ...m, _key: nextMsgKey() }
+  messages.value.push(msg)
+  return msg
+}
+// 执行中计数（响应式）：SSE 结束后 ComfyUI 仍在跑（轮询阶段），停止按钮要持续显示
+const executingCount = ref(0)
 const draftAttachments = ref([])
 const skills = ref([])
 const presets = ref([])
@@ -649,7 +765,7 @@ const sidebarSessions = computed(() =>
 
 // ---------- 初始化 ----------
 onMounted(async () => {
-  await Promise.all([loadSessions(), loadPresets(), loadSkills()])
+  await Promise.all([loadSessions(), loadPresets(), loadSkills(), loadAdvTemplates()])
   const sid = route.query.session
   if (sid && sessions.value.some((s) => s.id === sid)) {
     await selectSession({ id: sid })
@@ -695,6 +811,14 @@ async function loadSkills() {
   skills.value = json?.data ?? []
 }
 
+// 模板清单（高级参数抽屉的模板选择数据源；onMounted 拉一次）
+const advTemplates = ref([])
+async function loadAdvTemplates() {
+  const res = await fetch(`${origin.value}/api/workbench/templates`)
+  const json = await res.json()
+  advTemplates.value = json?.data ?? []
+}
+
 async function selectSession(s) {
   sessionId.value = s.id
   toolItemIndex.clear() // 条目索引是 per-render 的，切会话必须清（防 upsert 错位）
@@ -707,7 +831,8 @@ async function selectSession(s) {
   if (!res.ok || !json?.success) return
   const session = json.data
   curSession.value = session
-  messages.value = session.messages ?? []
+  // 服务端消息补稳定 key（存储序下标作 key 种子，切会话重载时保持稳定）
+  messages.value = (session.messages ?? []).map((m, i) => ({ ...m, _key: m._key ?? `s${i}` }))
   artifacts.value = [...(session.executions ?? [])].reverse().map((e) => ({
     promptId: e.promptId,
     templateId: e.templateId,
@@ -903,7 +1028,7 @@ async function runChat(inputText, attachments, opts = {}) {
   busy.value = true
   pendingIssues.value = []
   if (opts.userBubble != null) {
-    messages.value.push({
+    pushMsg({
       role: 'user',
       kind: 'chat',
       text: opts.userBubble,
@@ -911,7 +1036,7 @@ async function runChat(inputText, attachments, opts = {}) {
       createdAt: Date.now(),
     })
   }
-  messages.value.push({
+  pushMsg({
     role: 'agent',
     kind: 'progress',
     text: opts.progressText ?? t('workbenchDeciding'),
@@ -929,6 +1054,7 @@ async function runChat(inputText, attachments, opts = {}) {
       throw new Error(j?.message || `HTTP ${res.status}`)
     }
     const reader = res.body.getReader()
+    chatReader = reader
     const decoder = new TextDecoder()
     let buf = ''
     for (;;) {
@@ -940,16 +1066,73 @@ async function runChat(inputText, attachments, opts = {}) {
       for (const part of parts) handleSse(part)
     }
   } catch (e) {
-    dismissDecidingProgress()
-    messages.value.push({
-      role: 'agent',
-      kind: 'error',
-      text: e.message,
-      createdAt: Date.now(),
-    })
+    if (!isStopCancelled(e)) {
+      dismissDecidingProgress()
+      pushMsg({
+        role: 'agent',
+        kind: 'error',
+        text: e.message,
+        createdAt: Date.now(),
+      })
+    }
   } finally {
+    chatReader = null
     busy.value = false
     scrollToBottom()
+  }
+}
+
+/** 用户停止导致的流中断：reader.cancel() 的 TypeError / fetch 的 AbortError 都不算错误 */
+function isStopCancelled(e) {
+  return (
+    stopping.value &&
+    (e?.name === 'AbortError' || /cancel|abort/i.test(String(e?.message || e)))
+  )
+}
+
+/**
+ * 停止当前轮：先发 /stop（后端置停止标记 → 中断决策流 + ComfyUI /interrupt），
+ * 再 cancel 本地 SSE reader（连接断开也会触发后端 abort）。轮询中的执行一并
+ * 停掉：清定时器、产物卡标 stopped、占位气泡收尾为「已停止」。
+ */
+async function stopChat() {
+  if (stopping.value || (!busy.value && executingCount.value === 0)) return
+  stopping.value = true
+  try {
+    // 先发出 /stop 再断流：后端 chatStopRequested 置位后，chat 轮的 catch
+    // 才会以「已停止」落盘而不是静默/报错
+    const stopReq = fetch(`${origin.value}/api/workbench/stop`, { method: 'POST' }).catch(() => {})
+    const reader = chatReader
+    chatReader = null
+    if (reader) {
+      try {
+        await reader.cancel()
+      } catch {
+        /* 流已结束：忽略 */
+      }
+    }
+    dismissDecidingProgress()
+    for (const promptId of [...execProgressIndex.keys()]) {
+      stopPoll(promptId)
+      execProgressIndex.delete(promptId)
+      const a = artifacts.value.find((x) => x.promptId === promptId)
+      if (a && (a.status === 'running' || a.status === 'queued')) a.status = 'stopped'
+    }
+    const lp = messages.value[messages.value.length - 1]
+    if (lp && lp.kind === 'progress') messages.value.pop()
+    pushMsg({
+      role: 'agent',
+      kind: 'chat',
+      text: t('workbenchStopped'),
+      createdAt: Date.now(),
+    })
+    await stopReq
+    scrollToBottom()
+  } finally {
+    // 让 runChat 的 finally（busy=false）先落地，避免误判「停止引发的取消」
+    setTimeout(() => {
+      stopping.value = false
+    }, 0)
   }
 }
 
@@ -960,6 +1143,8 @@ async function runChat(inputText, attachments, opts = {}) {
  * MAX_AUTO_RECOVERS 次，防死循环；恢复轮再次失败会继续递减余量。
  */
 async function autoRecover(errorText) {
+  // 用户刚主动停止的轮次不自动恢复（恢复=违背用户停止意图，且可能与下一轮并发）
+  if (stopping.value) return
   if (recovering.value || busy.value || recoverCount.value >= MAX_AUTO_RECOVERS) return
   recoverCount.value++
   recovering.value = true
@@ -1097,30 +1282,22 @@ function handleThreadItem(evt) {
   if (item.type === 'agent_message') return
   // codex 内部重连/降级噪音不占行
   if (isNoisyItem(item)) return
-  if (phase === 'started' && !toolItemIndex.has(item.id)) {
-    messages.value.push({
+  // 按 item.id 登记 _key；原位更新按 _key 查找（下标会被 splice 位移，key 不会）
+  let key = toolItemIndex.get(item.id)
+  if (key === undefined) {
+    // started 或错过 started（如重连）都走这里：占一行
+    const msg = pushMsg({
       role: 'agent',
       kind: 'tool_item',
       text: '',
       toolItem: item,
       createdAt: Date.now(),
     })
-    toolItemIndex.set(item.id, messages.value.length - 1)
+    toolItemIndex.set(item.id, msg._key)
     return
   }
-  const idx = toolItemIndex.get(item.id)
-  if (idx === undefined) {
-    // 错过 started（如重连）——直接补一行
-    messages.value.push({
-      role: 'agent',
-      kind: 'tool_item',
-      text: '',
-      toolItem: item,
-      createdAt: Date.now(),
-    })
-    toolItemIndex.set(item.id, messages.value.length - 1)
-    return
-  }
+  const idx = messages.value.findIndex((m) => m._key === key)
+  if (idx === -1) return
   // 原位更新（Vue3 响应式数组元素替换）
   messages.value[idx] = { ...messages.value[idx], toolItem: item }
 }
@@ -1163,14 +1340,14 @@ function handleSse(chunk) {
   // 决定性/阶段事件（plan/reply/stage/submitted/error/invalid/done）才替换占位。
   dismissDecidingProgress()
   if (event === 'reply') {
-    messages.value.push({
+    pushMsg({
       role: 'agent',
       kind: 'chat',
       text: data.reply || '',
       createdAt: Date.now(),
     })
   } else if (event === 'plan') {
-    messages.value.push({
+    pushMsg({
       role: 'agent',
       kind: 'card',
       text: '',
@@ -1178,7 +1355,7 @@ function handleSse(chunk) {
       createdAt: Date.now(),
     })
   } else if (event === 'stage') {
-    messages.value.push({
+    pushMsg({
       role: 'agent',
       kind: 'progress',
       text: stageText(data.stage),
@@ -1201,27 +1378,28 @@ function handleSse(chunk) {
       // 批量：不额外占气泡，入队文案由服务端 reply 事件带出（产物卡有进度条）
       startBatchPoll(data.batch.jobId)
     } else {
-      // 单次执行：一个「执行中」占位气泡，poll 终态原位更新成结果，
+      // 单次执行：一个「执行中」占位气泡，poll 终态按 _key 原位更新成结果，
       // 避免「已提交到队列」「生成完成」「执行失败」各占一个气泡
-      messages.value.push({
+      const msg = pushMsg({
         role: 'agent',
         kind: 'progress',
         text: t('workbenchExecuting'),
         createdAt: Date.now(),
       })
-      execProgressIndex.set(data.promptId, messages.value.length - 1)
+      execProgressIndex.set(data.promptId, msg._key)
+      executingCount.value++
       startPoll(data.promptId)
     }
   } else if (event === 'invalid') {
     pendingIssues.value = data.issues ?? []
-    messages.value.push({
+    pushMsg({
       role: 'agent',
       kind: 'error',
       text: t('workbenchPlanInvalid') + ': ' + (data.issues ?? []).map((i) => i.message).join('；'),
       createdAt: Date.now(),
     })
   } else if (event === 'error') {
-    messages.value.push({
+    pushMsg({
       role: 'agent',
       kind: 'error',
       text: data.message || 'error',
@@ -1277,7 +1455,7 @@ function startBatchPoll(promptId) {
       }
       if (['completed', 'stopped', 'failed'].includes(job.status)) {
         artifact.status = job.status === 'completed' ? 'success' : 'error'
-        messages.value.push({
+        pushMsg({
           role: 'agent',
           kind: job.status === 'completed' ? 'chat' : 'error',
           text:
@@ -1324,11 +1502,14 @@ function startPoll(promptId) {
         }
       }
       if (r.status === 'success' || r.status === 'error') {
-        // 原位更新执行占位气泡为最终结果；找不到（重进会话/切会话后恢复轮询）
-        // 时兜底 push 新气泡
-        const execIdx = execProgressIndex.get(promptId)
+        // 按 _key 原位更新执行占位气泡为最终结果；找不到（重进会话/切会话后
+        // 恢复轮询/停止后清理）时兜底 push 新气泡
+        const execKey = execProgressIndex.get(promptId)
         execProgressIndex.delete(promptId)
-        if (execIdx !== undefined && messages.value[execIdx]) {
+        if (executingCount.value > 0) executingCount.value--
+        const execIdx =
+          execKey !== undefined ? messages.value.findIndex((m) => m._key === execKey) : -1
+        if (execIdx !== -1) {
           messages.value[execIdx] =
             r.status === 'success'
               ? { ...messages.value[execIdx], kind: 'chat', text: t('workbenchDone') }
@@ -1338,7 +1519,7 @@ function startPoll(promptId) {
                   text: `${t('workbenchFailed')}: ${(r.error || '').slice(0, 300)}`,
                 }
         } else {
-          messages.value.push({
+          pushMsg({
             role: 'agent',
             kind: r.status === 'success' ? 'chat' : 'error',
             text:
@@ -1568,6 +1749,174 @@ function isVideoFile(f) {
 const publishOpen = ref(false)
 const publishName = ref('')
 const publishBuildUi = ref(true)
+
+// ---------- 导入工作流（L2 用户侧入口） ----------
+const importOpen = ref(false)
+const importing = ref(false)
+const importName = ref('')
+const importJson = ref('')
+const importError = ref('')
+
+async function runImportedWorkflow() {
+  if (!sessionId.value) return
+  let workflow
+  try {
+    workflow = JSON.parse(importJson.value)
+  } catch {
+    importError.value = t('workbenchImportBadJson')
+    return
+  }
+  if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow)) {
+    importError.value = t('workbenchImportBadJson')
+    return
+  }
+  importing.value = true
+  importError.value = ''
+  try {
+    const res = await fetch(`${origin.value}/api/workbench/run-workflow`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: sessionId.value,
+        workflow,
+        name: importName.value.trim() || undefined,
+      }),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      importError.value = json?.message || json?.error || `HTTP ${res.status}`
+      return
+    }
+    importOpen.value = false
+    importJson.value = ''
+    importName.value = ''
+    pushMsg({
+      role: 'agent',
+      kind: 'progress',
+      text: t('workbenchExecuting'),
+      createdAt: Date.now(),
+    })
+    execProgressIndex.set(json.data.promptId, messages.value[messages.value.length - 1]._key)
+    executingCount.value++
+    startPoll(json.data.promptId)
+    scrollToBottom()
+  } catch (e) {
+    importError.value = String(e?.message || e)
+  } finally {
+    importing.value = false
+  }
+}
+
+// ---------- 高级参数（节点级 nodeOverrides 覆盖） ----------
+const advOpen = ref(false)
+const advTemplateId = ref('')
+const advJson = ref('')
+const advIssues = ref([])
+const advValidated = ref(false)
+const advChecking = ref(false)
+const advRunning = ref(false)
+
+const advTemplateOptions = computed(() =>
+  advTemplates.value.map((tpl) => ({ value: tpl.id, label: tpl.name || tpl.id }))
+)
+
+const advOk = computed(() => advValidated.value && advIssues.value.length === 0)
+
+function openAdvDrawer() {
+  advOpen.value = true
+  advIssues.value = []
+  advValidated.value = false
+  if (!advJson.value) {
+    advJson.value = JSON.stringify(
+      { '6': { class_type: 'KSampler', widgetOverrides: { steps: 40, cfg: 7 } } },
+      null,
+      2
+    )
+  }
+}
+
+async function checkAdvOverrides() {
+  if (!sessionId.value || !advTemplateId.value) return
+  advValidated.value = false
+  try {
+    const res = await fetch(`${origin.value}/api/workbench/clone-template`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: sessionId.value,
+        templateId: advTemplateId.value,
+        nodeOverrides: JSON.parse(advJson.value || '{}'),
+        validateOnly: true,
+      }),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      advIssues.value = [{ field: 'request', message: json?.message || `HTTP ${res.status}` }]
+      return
+    }
+    advIssues.value = json.data.issues ?? []
+    advValidated.value = true
+  } catch (e) {
+    advIssues.value = [{ field: 'request', message: String(e?.message || e) }]
+  }
+}
+
+async function runAdvOverrides() {
+  if (!sessionId.value || !advOk.value) return
+  advRunning.value = true
+  try {
+    // 1) 克隆出会话级变体（固化 nodeOverrides）
+    const res = await fetch(`${origin.value}/api/workbench/clone-template`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: sessionId.value,
+        templateId: advTemplateId.value,
+        nodeOverrides: JSON.parse(advJson.value || '{}'),
+      }),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      advIssues.value = [{ field: 'request', message: json?.message || `HTTP ${res.status}` }]
+      return
+    }
+    // 2) 直接执行变体（与 chat 执行同一链路，产物落会话）
+    const runRes = await fetch(`${origin.value}/api/workbench/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: sessionId.value,
+        templateId: json.data.templateId,
+        params: {},
+      }),
+    })
+    const runJson = await runRes.json().catch(() => null)
+    if (!runRes.ok || !runJson?.success) {
+      advIssues.value = [
+        { field: 'execute', message: runJson?.message || `HTTP ${runRes.status}` },
+      ]
+      return
+    }
+    advOpen.value = false
+    pushMsg({
+      role: 'agent',
+      kind: 'progress',
+      text: t('workbenchExecuting'),
+      createdAt: Date.now(),
+    })
+    execProgressIndex.set(
+      runJson.data.promptId,
+      messages.value[messages.value.length - 1]._key,
+    )
+    executingCount.value++
+    startPoll(runJson.data.promptId)
+    scrollToBottom()
+  } catch (e) {
+    advIssues.value = [{ field: 'request', message: String(e?.message || e) }]
+  } finally {
+    advRunning.value = false
+  }
+}
 const publishing = ref(false)
 const publishTarget = ref(null)
 
@@ -1594,7 +1943,7 @@ async function doPublish() {
     const json = await res.json()
     if (!res.ok || !json?.success) throw new Error(json?.message || 'publish failed')
     publishOpen.value = false
-    messages.value.push({
+    pushMsg({
       role: 'agent',
       kind: 'chat',
       text: t('workbenchPublished'),

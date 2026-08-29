@@ -47,9 +47,10 @@ describe('renderEnvSnapshot', () => {
 })
 
 describe('SELF_KNOWLEDGE_TEXT', () => {
-  it('常驻能力说明覆盖联网检索与环境适配授权', () => {
+  it('常驻能力说明覆盖联网检索与环境适配授权，且不再内嵌 JSON 格式（权威定义在 spec 规则段）', () => {
     expect(SELF_KNOWLEDGE_TEXT).toContain('联网搜索')
     expect(SELF_KNOWLEDGE_TEXT).toContain('环境快照')
-    expect(SELF_KNOWLEDGE_TEXT).toContain('"intent"') // 输出格式契约保持
+    // JSON 契约只允许出现在 buildDecisionSpec 规则段（单一事实源，防两处漂移）
+    expect(SELF_KNOWLEDGE_TEXT).not.toContain('"intent"')
   })
 })

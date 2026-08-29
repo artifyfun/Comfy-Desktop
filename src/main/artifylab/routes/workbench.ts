@@ -12,6 +12,9 @@
  * - GET  /api/workbench/models           可选模型
  * - POST /api/workbench/upload           附件上传（多素材：图/视频/音频）
  * - POST /api/workbench/chat             SSE：决策→校验→执行；done 事件带会话摘要
+ * - POST /api/workbench/stop             停止当前轮（中断决策流 + ComfyUI /interrupt）
+ * - POST /api/workbench/run-workflow     L2：粘贴 workflow JSON 直接执行（前端导入入口）
+ * - POST /api/workbench/clone-template   L2：模板派生会话级变体（固化 nodeOverrides）
  * - POST /api/workbench/publish          固化成 app
  *
  * SSE/超时/并发锁模式复用 build-app 路由的形态（finally 清理）。
@@ -24,8 +27,10 @@ import { logger } from '../utils/logger'
 import { createErrorResponse, createSuccessResponse } from '../utils/errorHandler'
 import { templateLibrary } from '../workbench/templates'
 import { workbenchService } from '../workbench/service'
-import { validatePlanLocal } from '../workbench/plan'
+import { validatePlanLocal, validateNodeOverridesLocal } from '../workbench/plan'
+import { stopExecution } from '../mcp/executor'
 import type { AttachmentMeta } from '../workbench/presetCore'
+import type { ComfyPrompt } from '../appStore'
 import { buildAppCode } from '../agentDriver'
 import appStoreManager from '../appStore'
 import { get as getSetting } from '../../settings'
@@ -34,6 +39,10 @@ import { get as getSetting } from '../../settings'
 const CHAT_TIMEOUT_MS = 5 * 60 * 1000
 /** 并发锁：同一时刻一个决策会话（codex 子进程开销大） */
 let chatInFlight = false
+/** 当前 chat 轮的取消柄：POST /stop 时 abort（decide 的 AbortSignal 沿链路生效） */
+let chatAbort: AbortController | null = null
+/** /stop 中断的会话：chat 轮收尾时据此落「已停止」而非错误（防止 ErrorException 冒泡） */
+let chatStopRequested = false
 /** 附件上传 multer（内存态，直接透传 ComfyUI；大小限制交给 executor 的 MAX_MEDIA_BYTES） */
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 512 * 1024 * 1024 } })
 
@@ -417,7 +426,9 @@ export function createWorkbenchRouter(): express.Router {
     }
 
     chatInFlight = true
-    const ac = new AbortController()
+    chatAbort = new AbortController()
+    chatStopRequested = false
+    const ac = chatAbort
     const timeout = setTimeout(() => ac.abort(), CHAT_TIMEOUT_MS)
     res.on('close', () => ac.abort())
     // SSE 收尾：附会话摘要供侧栏刷新（不引入 WS）
@@ -632,22 +643,49 @@ export function createWorkbenchRouter(): express.Router {
       })
       finish()
     } catch (error) {
-      // 用户主动取消（SSE close / 超时 abort）：静默收尾，不落错误气泡
-      if (ac.signal.aborted) {
-        finish()
-        return
+      const stopped = chatStopRequested
+      if (stopped) {
+        // 用户主动停止：会话留痕「已停止」而非错误，SSE 静默收尾
+        workbenchService.appendMessage(sessionId, {
+          role: 'agent',
+          kind: 'chat',
+          text: '已停止'
+        })
       }
-      const message = error instanceof Error ? error.message : String(error)
-      logger.error('workbench chat failed', error)
-      // 错误落盘:重进会话仍可见（此前仅前端内存,刷新/切会话即丢）
-      workbenchService.appendMessage(sessionId, { role: 'agent', kind: 'error', text: message })
-      send('error', { message })
+      // 用户主动取消（SSE close / 停止 / 超时 abort）：不落错误气泡
+      if (!stopped && !ac.signal.aborted) {
+        const message = error instanceof Error ? error.message : String(error)
+        logger.error('workbench chat failed', error)
+        // 错误落盘:重进会话仍可见（此前仅前端内存,刷新/切会话即丢）
+        workbenchService.appendMessage(sessionId, { role: 'agent', kind: 'error', text: message })
+        send('error', { message })
+      }
       finish()
     } finally {
       clearTimeout(timeout)
       chatInFlight = false
+      chatAbort = null
       if (!res.writableEnded) res.end()
     }
+  })
+
+  // 用户停止当前轮：中断 chat 决策流，并停止 ComfyUI 正在执行的任务
+  router.post('/api/workbench/stop', async (_req, res) => {
+    const hadChat = chatInFlight && chatAbort != null
+    if (hadChat) {
+      chatStopRequested = true
+      chatAbort!.abort()
+    }
+    // 正在执行的 ComfyUI 任务（chat 已提交到队列/轮询中）同步 interrupt；
+    // 失败不阻断停止确认（ComfyUI 可能已离线或无任务在跑）
+    let interrupted = false
+    try {
+      await stopExecution(appStoreManager.getConfig().comfyHost)
+      interrupted = true
+    } catch (error) {
+      logger.warn('workbench stop: ComfyUI interrupt failed', error)
+    }
+    res.json(createSuccessResponse({ stopped: hadChat, interrupted }))
   })
 
   // 轮询执行状态（前端定时调，成功后拿产物）
@@ -661,6 +699,132 @@ export function createWorkbenchRouter(): express.Router {
     }
     const result = await workbenchService.pollExecution(sessionId, promptId)
     res.json(createSuccessResponse(result))
+  })
+
+  // L2 用户侧入口：直接执行某模板/会话变体（高级参数抽屉「立即执行」用）。
+  // 与 chat 快路径同一 service.execute 链路（校验、媒体槽、产物落会话一致）。
+  router.post('/api/workbench/execute', async (req, res) => {
+    const { sessionId, templateId, params } = req.body as {
+      sessionId?: string
+      templateId?: string
+      params?: Record<string, unknown>
+    }
+    if (!sessionId || !templateId) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(createErrorResponse('sessionId and templateId required'))
+      return
+    }
+    const template = workbenchService.resolveTemplate(sessionId, templateId)
+    if (!template) {
+      res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse('template not found'))
+      return
+    }
+    try {
+      const execution = await workbenchService.execute(
+        sessionId,
+        {
+          intent:
+            template.mediaType === 'video'
+              ? 'video'
+              : template.mediaType === 'audio'
+                ? 'audio'
+                : 'image',
+          templateId,
+          params: params ?? {}
+        },
+        template,
+        []
+      )
+      res
+        .status(HTTP_STATUS.OK)
+        .json(createSuccessResponse({ promptId: execution.promptId, status: execution.status }))
+    } catch (error) {
+      logger.error('workbench execute failed', error)
+      res
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .json(createErrorResponse((error as Error).message))
+    }
+  })
+
+  // L2 用户侧入口：粘贴 workflow JSON 直接跑（spec §4.2/§六）。前端「导入工作流」
+  // 用；与 wb_run_workflow 同一执行链路（产物落会话，前端轮询取产物）。
+  router.post('/api/workbench/run-workflow', async (req, res) => {
+    const { sessionId, workflow, name, seed } = req.body as {
+      sessionId?: string
+      workflow?: ComfyPrompt
+      name?: string
+      seed?: number
+    }
+    if (!sessionId || !workflow || typeof workflow !== 'object' || Array.isArray(workflow)) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(createErrorResponse('sessionId and workflow (API prompt object) required'))
+      return
+    }
+    try {
+      const execution = await workbenchService.executeWorkflow(sessionId, workflow, { name, seed })
+      workbenchService.appendMessage(sessionId, {
+        role: 'agent',
+        kind: 'chat',
+        text: `已提交导入的工作流${name ? `「${name}」` : ''}到 ComfyUI 队列`
+      })
+      res.status(HTTP_STATUS.OK).json(
+        createSuccessResponse({
+          promptId: execution.promptId,
+          status: execution.status
+        })
+      )
+    } catch (error) {
+      logger.error('workbench run-workflow failed', error)
+      res
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .json(createErrorResponse((error as Error).message))
+    }
+  })
+
+  // L2 用户侧入口：模板派生会话级变体（固化 nodeOverrides，可再跑/再改/固化）。
+  // validateOnly=true 时只校验 nodeOverrides 不落模板（前端高级参数抽屉预检用）。
+  router.post('/api/workbench/clone-template', (req, res) => {
+    const { sessionId, templateId, nodeOverrides, validateOnly } = req.body as {
+      sessionId?: string
+      templateId?: string
+      nodeOverrides?: Record<
+        string,
+        { class_type?: string; widgetOverrides?: Record<string, unknown> }
+      >
+      validateOnly?: boolean
+    }
+    if (!sessionId || !templateId) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(createErrorResponse('sessionId and templateId required'))
+      return
+    }
+    const template = workbenchService.resolveTemplate(sessionId, templateId)
+    if (!template) {
+      res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse('template not found'))
+      return
+    }
+    // 预检：不落模板，只返回 issue 清单（前端抽屉实时校验）
+    if (validateOnly) {
+      const issues = validateNodeOverridesLocal(template.prompt, nodeOverrides ?? {})
+      res.status(HTTP_STATUS.OK).json(createSuccessResponse({ ok: issues.length === 0, issues }))
+      return
+    }
+    try {
+      const t = workbenchService.cloneTemplate(sessionId, templateId, nodeOverrides)
+      res.status(HTTP_STATUS.CREATED).json(
+        createSuccessResponse({
+          templateId: t!.id,
+          name: t!.name,
+          nodeCount: Object.keys(t!.prompt).length
+        })
+      )
+    } catch (error) {
+      // cloneTemplate 对非法 nodeOverrides 抛可读错误
+      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse((error as Error).message))
+    }
   })
 
   // 固化成 app：参数快照 → createApp（html 走 build-app）

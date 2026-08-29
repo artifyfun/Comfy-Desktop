@@ -74,6 +74,23 @@ export type BodyMode =
   | 'announcement'
 
 /**
+ * Overlay bodies (feedback / mcp-setup / announcement) are rendered by the
+ * native panel app (PanelApp.vue), never by the A UI frontend. Single source
+ * of truth for that set — panelView's loadPanelContent / setActivePanel /
+ * isOverlayPanel call sites all read this predicate so a new overlay key
+ * can't be added to the type without this decision point lighting up.
+ */
+export const OVERLAY_PANELS: ReadonlySet<string> = new Set([
+  'feedback',
+  'mcp-setup',
+  'announcement'
+])
+
+export function isOverlayPanel(p: string): boolean {
+  return OVERLAY_PANELS.has(p)
+}
+
+/**
  * Per-installation handle for a ComfyUI window. The window is a parent
  * BrowserWindow plus two WebContentsViews (title bar + content). Navigation /
  * restart / splash flows must target `comfyView.webContents`, NOT the parent

@@ -48,6 +48,10 @@ extraResources:
   # agentDriver 在 build 目录里把它拷给 Codex 读取，替代原本固化的提示词、提升出图质感。
   - from: src/main/artifylab/public/design-system
     to: design-system
+  # 工作台 skill（渐进式加载）：workbench service 每次会话创建时把这里的
+  # <name>/SKILL.md 部署进 codex 临时 CODEX_HOME/skills/，长规则按需读取。
+  - from: src/main/artifylab/public/workbench-skills
+    to: workbench-skills
   # codex 原生二进制（scripts/copy-codex-bin.mjs 从 @openai/codex-<platform> 平台包拷入）。
   # agentDriver 通过 Codex SDK 的 codexPathOverride 直接 spawn 内置 exe —— 用户无需安装 codex CLI / node，
   # 只填 DeepSeek key 即可构建应用。

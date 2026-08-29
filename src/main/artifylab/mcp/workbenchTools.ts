@@ -17,20 +17,15 @@ import {
   validateNodeOverridesLocal,
   validatePlanLocal,
   validateAgainstObjectInfo,
+  type ObjectInfoNode,
   type WorkbenchPlan,
   type PlanValidationIssue
 } from '../workbench/plan'
 import { workbenchService } from '../workbench/service'
+import { inferFirstMediaSlot } from './executor'
 import type { ComfyPrompt, ParamNode } from '../appStore'
 import appStoreManager from '../appStore'
 import type { ToolHandler, ToolRegistry } from './tools'
-
-/** /object_info 的节点输入 schema（widget 定义），本地镜像 plan.ts */
-interface ObjectInfoNode {
-  input?: {
-    required?: Record<string, [unknown, Record<string, unknown>?] | [unknown]>
-  }
-}
 
 /** 当前 decide 会话（工具执行上下文）。decide 开始时置位，结束后清空。 */
 let currentDecideSession: string | null = null
@@ -208,24 +203,22 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
     tool: {
       name: 'wb_list_nodes',
       description:
-        '读取模板的完整节点图：节点 id / class_type / 可写 widget（直接值字段，附 /object_info 的类型/枚举/范围）。改节点参数（node_overrides）前先查这里。',
+        '读取模板的完整节点图：节点 id / class_type / 可写 widget（直接值字段，附 /object_info 的类型/枚举/范围）。改节点参数（node_overrides）前先查这里。不传 template_id 时返回 ComfyUI 全量节点类型清单（class_type → 输入 schema 摘要），用于自组工作流（wb_run_workflow）前探查有哪些节点可用。',
       inputSchema: {
         type: 'object',
         properties: {
           template_id: {
             type: 'string',
-            description: '模板 id（wb_list_templates 里查；会话变体 id 也可）'
+            description:
+              '模板 id（wb_list_templates 里查；会话变体 id 也可）。缺省时返回全量节点类型清单'
           }
         },
-        required: ['template_id'],
         additionalProperties: false
       },
       annotations: { readOnlyHint: true }
     },
     fn: async (args) => {
       const sessionId = requireSession()
-      const template = workbenchService.resolveTemplate(sessionId, String(args.template_id))
-      if (!template) return text({ ok: false, error: 'template not found' })
       let info: Record<string, ObjectInfoNode> | null = null
       try {
         const ctrl = new AbortController()
@@ -238,6 +231,25 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       } catch {
         /* schema 补充失败不阻断：只有 current 值 */
       }
+      // 无参调用：返回全量节点类型清单（spec §4.1：不传=读 /object_info 全量）
+      const templateId = args.template_id ? String(args.template_id) : null
+      if (!templateId) {
+        if (!info) return text({ ok: false, error: 'ComfyUI 不可达，无法读取 /object_info' })
+        const kinds = Object.entries(info).map(([classType, def]) => {
+          const required = def?.input?.required ?? {}
+          const inputs = Object.entries(required).map(([k, spec]) => {
+            const combo = Array.isArray(spec) ? spec[0] : undefined
+            return {
+              name: k,
+              type: Array.isArray(combo) ? 'COMBO' : String(combo ?? '?')
+            }
+          })
+          return { class_type: classType, inputs }
+        })
+        return text({ ok: true, mode: 'object_info', count: kinds.length, kinds })
+      }
+      const template = workbenchService.resolveTemplate(sessionId, templateId)
+      if (!template) return text({ ok: false, error: 'template not found' })
       const nodes = Object.entries(template.prompt).map(([id, n]) => {
         const schema = info?.[n.class_type]?.input?.required ?? {}
         return {
@@ -395,6 +407,10 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
             description: '节点级覆盖（同 node_overrides 语义）',
             additionalProperties: true
           },
+          use_previous_output: {
+            type: 'boolean',
+            description: '链式：把本会话上一次执行的产物作为媒体输入（写进首个 Load* 媒体槽）'
+          },
           wait: { type: 'boolean', description: 'true=阻塞到完成（推荐）' }
         },
         required: ['workflow'],
@@ -407,6 +423,17 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       const workflow = args.workflow as ComfyPrompt
       if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow))
         return text({ ok: false, error: 'workflow（API prompt 对象）required' })
+      // 链式：上一次产物写进首个媒体加载槽（图→视频/图→图典型）
+      if (args.use_previous_output) {
+        const last = workbenchService.lastExecution(sessionId)
+        if (!last || last.outputs.length === 0)
+          return text({ ok: false, error: 'no previous execution output to attach' })
+        const slot = inferFirstMediaSlot(workflow)
+        if (!slot) return text({ ok: false, error: 'workflow has no media loader slot (Load*)' })
+        const node = workflow[slot.nodeId]
+        if (!node) return text({ ok: false, error: `loader node ${slot.nodeId} missing` })
+        node.inputs[slot.inputKey] = last.outputs[0]
+      }
       const remote = await validateAgainstObjectInfo(
         appStoreManager.getConfig().comfyHost,
         workflow
@@ -521,6 +548,50 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       const sessionId = requireSession()
       const r = await workbenchService.pollExecution(sessionId, String(args.prompt_id))
       return text({ status: r.status, outputs: r.outputs, error: r.error })
+    }
+  },
+  {
+    tool: {
+      name: 'wb_get_outputs',
+      description:
+        '读取会话最近一次（或指定 prompt_id 的）执行产物文件清单，非阻塞、立即返回。用于执行提交后（wait=false 或跨轮）取产物文件名/引用；要「等跑完再继续」请用 wb_execute_template 的 wait 模式。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          prompt_id: {
+            type: 'string',
+            description: '可选：指定执行的 prompt_id；缺省返回会话最近一次执行'
+          }
+        },
+        additionalProperties: false
+      },
+      annotations: { readOnlyHint: true }
+    },
+    fn: async (args) => {
+      const sessionId = requireSession()
+      const promptId = args.prompt_id ? String(args.prompt_id) : null
+      // 指定 prompt_id：直接查该次执行；缺省：会话最近一次执行
+      const session = workbenchService.getSession(sessionId)
+      const exec = promptId
+        ? session?.executions.find((e) => e.promptId === promptId)
+        : workbenchService.lastExecution(sessionId)
+      if (!exec) return text({ ok: false, error: 'no execution found' })
+      // 还在跑：提示用 wb_poll_execution 轮询（这里不做阻塞等待）
+      if (exec.status === 'queued' || exec.status === 'running') {
+        return text({
+          ok: true,
+          status: exec.status,
+          prompt_id: exec.promptId,
+          hint: 'still running — use wb_poll_execution to await completion'
+        })
+      }
+      return text({
+        ok: true,
+        status: exec.status,
+        prompt_id: exec.promptId,
+        outputs: exec.outputs ?? [],
+        error: exec.error
+      })
     }
   },
   {

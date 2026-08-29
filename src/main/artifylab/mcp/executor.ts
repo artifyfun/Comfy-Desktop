@@ -33,11 +33,57 @@ export function getSeed(n = 15): number {
 }
 
 /** 从 workflow prompt 推断输出节点 id（无 paramsNodes 的裸工作流执行用）：
- *  输出类节点（Save 系列 / Preview / Video / Audio）即产物出口。 */
+ *  输出类节点（Save 系列 / Preview / Video / Audio）即产物出口。
+ *  加载节点（LoadImage、LoadVideo、LoadAudio、LoadImageFromPath 等 Load 开头的
+ *  类名）显式排除——否则「含 Video/Audio 字样」的加载器会被误判为产物出口，
+ *  产物提取落到输入节点上。 */
 export function inferOutputNodeIds(prompt: ComfyPrompt): string[] {
   return Object.entries(prompt)
-    .filter(([, n]) => /Save|Preview|Video|Audio/i.test(n.class_type))
+    .filter(([, n]) => {
+      const cls = n.class_type ?? ''
+      if (/^load/i.test(cls)) return false
+      return /Save|Preview|Video|Audio/i.test(cls)
+    })
     .map(([id]) => id)
+}
+
+/**
+ * 从 workflow prompt 推断产物提取白名单（paramsNodes 形态）。
+ * executePrompt / publishWorkflow 共用此推断（此前两处逐字段复制，且各自
+ * 维护输出节点过滤——抽取后单一事实源）。
+ *
+ * 注意：ComfyUI 节点 id 是字符串键，这里的 ParamNode.id 承载原节点 id
+ * （数字键直通；非数字键折叠为 0，selectedWidget.name 保留原始 id 供
+ * extractOutputs 按 key 匹配）。
+ */
+export function inferOutputParamNodes(prompt: ComfyPrompt): ParamNode[] {
+  return inferOutputNodeIds(prompt).map((id) => ({
+    id: Number(id) || 0,
+    category: 'output' as const,
+    type: 'output',
+    name: 'result',
+    renderComponent: 'image-uploader',
+    selectedWidget: { id, name: 'images' }
+  }))
+}
+
+/**
+ * 找 workflow prompt 里第一个「媒体加载槽」：Load* 节点的首个字符串输入字段
+ * （当前值不是上游链接的），返回 {nodeId, inputKey}；找不到返回 null。
+ * 链式执行（usePreviousOutput）用：把上一次执行的产物文件名写进该槽。
+ * 与 inferOutputNodeIds 的 Load* 判定同源——加载器才吃媒体文件输入。
+ */
+export function inferFirstMediaSlot(prompt: ComfyPrompt): {
+  nodeId: string
+  inputKey: string
+} | null {
+  for (const [id, n] of Object.entries(prompt)) {
+    if (!/^load/i.test(n.class_type ?? '')) continue
+    for (const [k, v] of Object.entries(n.inputs ?? {})) {
+      if (typeof v === 'string') return { nodeId: id, inputKey: k }
+    }
+  }
+  return null
 }
 
 /**
@@ -60,38 +106,72 @@ function applySeed(prompt: ComfyPrompt, args: Record<string, unknown>): void {
 }
 
 /**
+ * 节点级参数覆盖的单一规则源（P1）：按 nodeId 逐条检查，返回结构化错误列表。
+ * 规则：节点存在 → class_type 匹配 → 字段存在 → 非链接引用 → 值可序列化。
+ * 校验层（plan.validateNodeOverridesLocal）与执行层（applyNodeOverrides）
+ * 都基于此函数——此前同一套规则双写靠注释纪律同步，已收敛到这里。
+ */
+export function checkNodeOverrides(
+  prompt: ComfyPrompt,
+  nodeOverrides?: Record<string, { class_type?: string; widgetOverrides?: Record<string, unknown> }>
+): Array<{ field: string; message: string }> {
+  const issues: Array<{ field: string; message: string }> = []
+  if (!nodeOverrides) return issues
+  for (const [nodeId, cfg] of Object.entries(nodeOverrides)) {
+    const node = prompt[nodeId]
+    if (!node) {
+      issues.push({ field: `nodeOverrides.${nodeId}`, message: `节点不存在: ${nodeId}` })
+      continue
+    }
+    if (cfg.class_type && node.class_type !== cfg.class_type) {
+      issues.push({
+        field: `nodeOverrides.${nodeId}.class_type`,
+        message: `节点 ${nodeId} 类型不匹配：期望 ${cfg.class_type}，实际 ${node.class_type}`
+      })
+    }
+    for (const [k, v] of Object.entries(cfg.widgetOverrides ?? {})) {
+      if (!(k in node.inputs)) {
+        issues.push({
+          field: `nodeOverrides.${nodeId}.${k}`,
+          message: `节点 ${nodeId} 无输入 ${k}`
+        })
+        continue
+      }
+      if (Array.isArray(node.inputs[k])) {
+        issues.push({
+          field: `nodeOverrides.${nodeId}.${k}`,
+          message: `字段 ${k} 是链接引用（["nodeId", slot]），不能直接赋值——请改它的上游节点`
+        })
+        continue
+      }
+      // 值可 JSON 序列化（防函数/undefined 混入）
+      if (typeof v === 'function' || v === undefined) {
+        issues.push({ field: `nodeOverrides.${nodeId}.${k}`, message: `值不可序列化` })
+      }
+    }
+  }
+  return issues
+}
+
+/**
  * 节点级参数覆盖合并（P1）：按 nodeId 覆盖任意节点的 widget 直接值。
  * 只接受"直接值"字段；链接引用（["nodeId", slot]）拒绝。返回无法合并的错误
- * 列表（可读），成功项原地写入 prompt。与 plan.validateNodeOverridesLocal
- * 同规则——这里在提交前兜底执行（防止绕过校验层直接调 executePrompt）。
+ * 列表（可读），成功项原地写入 prompt。规则统一走 checkNodeOverrides
+ * （单一事实源），这里在提交前兜底执行（防止绕过校验层直接调 executePrompt）。
  */
 export function applyNodeOverrides(
   prompt: ComfyPrompt,
   nodeOverrides?: Record<string, { class_type?: string; widgetOverrides?: Record<string, unknown> }>
 ): string[] {
-  const errors: string[] = []
-  if (!nodeOverrides) return errors
+  // 校验与错误文案统一走单一规则源；有错就返回，不带病写入
+  const errors = checkNodeOverrides(prompt, nodeOverrides).map((i) => `${i.field}: ${i.message}`)
+  if (errors.length > 0 || !nodeOverrides) return errors
   for (const [nodeId, cfg] of Object.entries(nodeOverrides)) {
     const node = prompt[nodeId]
-    if (!node) {
-      errors.push(`nodeOverrides: 节点不存在 ${nodeId}`)
-      continue
-    }
-    if (cfg.class_type && node.class_type !== cfg.class_type) {
-      errors.push(
-        `nodeOverrides: 节点 ${nodeId} 类型不匹配（期望 ${cfg.class_type}，实际 ${node.class_type}）`
-      )
-      continue
-    }
+    if (!node) continue
+    if (cfg.class_type && node.class_type !== cfg.class_type) continue
     for (const [k, v] of Object.entries(cfg.widgetOverrides ?? {})) {
-      if (!(k in node.inputs)) {
-        errors.push(`nodeOverrides: 节点 ${nodeId} 无输入 ${k}`)
-        continue
-      }
-      if (Array.isArray(node.inputs[k])) {
-        errors.push(`nodeOverrides: 字段 ${nodeId}.${k} 是链接引用，不能直接赋值（请改上游节点）`)
-        continue
-      }
+      if (!(k in node.inputs) || Array.isArray(node.inputs[k])) continue
       node.inputs[k] = v
     }
   }
@@ -102,14 +182,19 @@ function isMediaRender(rc?: string): boolean {
   return rc === 'image-uploader' || rc === 'audio-uploader' || rc === 'video-uploader'
 }
 
-/** 判断字符串值是否"疑似媒体路径/URL"（而不是提示词文本） */
-function looksLikeMediaValue(v: string): boolean {
+/**
+ * 「媒体值 vs 文本」判定（校验层与执行层共用的单一事实源）：
+ * - looksLikeMediaValue：data:/http(s) URL 或常见素材扩展名结尾
+ * - looksLikeTextBlob：含中文，或长文本（>40 且带空格/逗号/顿号/句号）
+ * 校验层（plan.validateParams）据此提前拦截「提示词被塞进媒体槽」；
+ * 执行层（executeApp）据此在提交前兜底。两边正则曾各自漂移，已收敛。
+ */
+export function looksLikeMediaValue(v: string): boolean {
   if (/^(data:|https?:)/i.test(v)) return true
-  return /\.(png|jpe?g|webp|gif|bmp|mp4|webm|mov|mp3|wav|flac)$/i.test(v)
+  return /\.(png|jpe?g|webp|gif|bmp|mp4|webm|mov|mp3|wav|flac|safetensors|bin)$/i.test(v)
 }
 
-/** 判断字符串值是否"疑似描述文本"：含中文，或长文本（>40 且带空格/逗号/顿号） */
-function looksLikeTextBlob(v: string): boolean {
+export function looksLikeTextBlob(v: string): boolean {
   if (/[\u4e00-\u9fff]/.test(v)) return true
   if (v.length <= 40) return false
   return /[\s,，、。]/.test(v)
@@ -363,14 +448,7 @@ export async function executePrompt(
   // 产物提取白名单：显式 paramsNodes 优先，缺省按输出节点推断
   const outputNodes: ParamNode[] = opts.paramsNodes?.length
     ? opts.paramsNodes
-    : inferOutputNodeIds(prompt).map((id) => ({
-        id: Number(id) || 0,
-        type: 'output',
-        name: 'result',
-        category: 'output' as const,
-        renderComponent: 'image-uploader',
-        selectedWidget: { id, name: 'images' }
-      }))
+    : inferOutputParamNodes(prompt)
   promptAppMap.set(promptId, outputNodes)
   if (promptAppMap.size > MAX_PROMPT_ENTRIES) {
     const oldest = promptAppMap.keys().next().value
