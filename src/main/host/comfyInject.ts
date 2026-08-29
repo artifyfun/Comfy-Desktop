@@ -2,6 +2,44 @@ import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import { getFrontendPath } from '../artifylab/utils/resourcePaths'
+import { getArtifyPanelUrl } from '../artifylab/panelMode'
+import { getArtifyLabServerOrigin } from '../artifylab'
+
+/**
+ * A UI 前端 base URL（dev: vite dev server / prod: 本地 express server）。
+ * 注入脚本用它拼 sidebar tab 里工作台 iframe 的 src（/workbench?embed=1）。
+ * 取不到（未启用面板模式/端口未知）时返回 null——tab 仍会注册，但 iframe
+ * 只能拿相对路径，在 ComfyUI 源下 404，用户会看到空白 tab 而非崩溃。
+ */
+function getArtifyLabBaseUrl(): string | null {
+  try {
+    return getArtifyPanelUrl()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 在脚本源码尾部追加 A UI 引导变量：注入脚本运行在 ComfyUI 页面
+ * （无法直接得知 A UI 地址），两个全局变量都在 tab 渲染时才真正取值，
+ * 晚到也安全：
+ *  - `__ARTIFY_LAB_URL__`  前端 base URL（iframe src 用）；
+ *    dev=vite:5000，prod=express 同源
+ *  - `__ARTIFY_LAB_API__`  API server origin（embed 页 server_origin 参数用）；
+ *    dev 与前端分离（express:3008），prod 与前端相同。
+ * 注意 `getArtifyLabServerOrigin` 在 express 未起时返回 null——此时省略
+ * 该变量，embed 页自己有兜底链（URL 参数 → 同源）。
+ */
+function withArtifyLabBootstrap(scriptSource: string): string {
+  const base = getArtifyLabBaseUrl()
+  if (!base) return scriptSource
+  let bootstrap = `window.__ARTIFY_LAB_URL__=${JSON.stringify(base)};`
+  const api = getArtifyLabServerOrigin()
+  if (api) {
+    bootstrap += `window.__ARTIFY_LAB_API__=${JSON.stringify(api)};`
+  }
+  return `${scriptSource};${bootstrap}`
+}
 
 /**
  * 生成注入 comfy_inject.js 的脚本源码（传给 `executeJavaScript`）。
@@ -23,11 +61,11 @@ export function getComfyInjectScriptSource(): string {
   // 在 dev/不同启动方式下并不可靠，曾导致回退读到旧的 min.js 产物。
   const devPath = path.join(app.getAppPath(), 'packages', 'frontend', 'public', 'comfy_inject.js')
   if (fs.existsSync(devPath)) {
-    return fs.readFileSync(devPath, 'utf-8')
+    return withArtifyLabBootstrap(fs.readFileSync(devPath, 'utf-8'))
   }
   const comfyInjectPath = path.join(getFrontendPath(), 'comfy_inject.min.js')
   if (fs.existsSync(comfyInjectPath)) {
-    return fs.readFileSync(comfyInjectPath, 'utf-8')
+    return withArtifyLabBootstrap(fs.readFileSync(comfyInjectPath, 'utf-8'))
   }
   return ''
 }

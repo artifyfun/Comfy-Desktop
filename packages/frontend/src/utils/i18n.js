@@ -404,6 +404,8 @@ const translations = {
       '节点级覆盖 JSON：{"节点id": {"class_type": "KSampler", "widgetOverrides": {"steps": 40}}}（wb_list_nodes 可查节点图）',
     workbenchAdvValidate: '校验',
     workbenchAdvOk: '校验通过',
+    workbenchPinToCanvas: '贴到画布',
+    workbenchCardAttached: '已把画布卡片作为参考图加入输入框',
     workbenchAutoRecoverIntro:
       '检测到一次执行失败，请分析失败原因，修复参数后重试，或更换更合适的模板继续完成任务',
     workbenchAutoRecoverAsk:
@@ -1220,6 +1222,8 @@ const translations = {
       'Node-level overrides JSON: {"node id": {"class_type": "KSampler", "widgetOverrides": {"steps": 40}}} (wb_list_nodes lists the node graph)',
     workbenchAdvValidate: 'Validate',
     workbenchAdvOk: 'Validation passed',
+    workbenchPinToCanvas: 'Pin to canvas',
+    workbenchCardAttached: 'Canvas card added as reference input',
     workbenchAutoRecoverIntro:
       'An execution failed. Analyze the cause, retry with fixed params, or switch to a more suitable template to finish the task',
     workbenchAutoRecoverAsk:

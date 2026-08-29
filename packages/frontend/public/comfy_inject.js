@@ -1234,4 +1234,369 @@
       isArtifyLoading = false
     }
   }
+
+  // ==========================================================================
+  // 画布陈列卡片（Artify Display Cards）
+  //
+  // 形态：自定义 LiteGraph 节点（isVirtualNode + mode=NEVER）——纯展示，
+  // 不序列化进 prompt、永不执行；图片用 litegraph 原生 canvas 绘制管线
+  // （node.imgs + drawImage，官方 PreviewImage 同款），视口裁剪/LOD 免费。
+  //
+  // 上墙：A UI 工作台（sidebar tab iframe）执行完成 → postMessage
+  // { type:'artify:display-card', files:[{filename,subfolder,type}] } →
+  // 本脚本把每张产物铺成卡片（positionNodes 式瀑布排布 + fitToBounds）。
+  //
+  // 回填：卡片右键/双击 → postMessage 给 iframe → 工作台把它作为参考图
+  // 附件（/view URL）发起下一轮。双向都只传文件引用，不传像素。
+  // ==========================================================================
+
+  const ARTIFY_CARD_TYPE = 'ArtifyDisplayCard'
+  /** 与工作台 A UI 的 iframe 通信（内容窗口引用在 sidebar tab 注册时捕获） */
+  let artifyEmbedWindow = null
+  /** 已加载的 Image 对象缓存（filename 键），避免重复解码 */
+  const cardImageCache = new Map()
+
+  /** /view URL：与后端 WorkbenchOutputFile{filename,subfolder,type} 约定一致。
+   * ComfyUI 与本脚本同源（注入页即画布页），直接用相对路径拼 /view。
+   * workbench 后端（server_origin）与 ComfyUI 是两个进程——产出文件在
+   * ComfyUI 的 output 目录，由 ComfyUI 自己的 /view 直出，不走 A UI。 */
+  function artifyViewUrl(f) {
+    const p = new URLSearchParams({ filename: f.filename, type: f.type || 'output' })
+    if (f.subfolder) p.set('subfolder', f.subfolder)
+    return '/view?' + p.toString()
+  }
+
+  function getCardApp() {
+    const app = window.app
+    if (!app || !app.graph) return null
+    return app
+  }
+
+  /**
+   * 注册陈列卡片节点类型（幂等；等 LiteGraph 就绪后由 ensureArtifyCard 注册）。
+   * 绘制逻辑对齐官方 IMAGE_PREVIEW widget：drawImage 平铺 + low_quality 简化。
+   */
+  function registerArtifyCardNode(LiteGraph) {
+    if (!LiteGraph || LiteGraph.registered_node_types[ARTIFY_CARD_TYPE]) return
+    // 新版 litegraph（fork 内嵌 ComfyUI_frontend）在 createNode 里调
+    // node.computeSize() 等基类方法——节点类必须继承 LGraphNode，
+    // 裸 function 构造器会直接 TypeError。
+    const LGBase = window.LGraphNode || LiteGraph.LGraphNode
+    if (!LGBase) {
+      console.warn('[ArtifyInject] LGraphNode not found, skip card node registration')
+      return
+    }
+    class ArtifyDisplayCard extends LGBase {
+      constructor(title) {
+        super(title)
+        this.serialize_widgets = false
+      }
+    }
+    ArtifyDisplayCard.title = 'Artify 卡片'
+    ArtifyDisplayCard.desc = 'AI 工作台产物陈列（不参与执行）'
+    ArtifyDisplayCard.title_color = '#7c5cff'
+    ArtifyDisplayCard.prototype.onConfigure = function () {
+      // 从 workflow JSON 恢复后重建 imgs（序列化只存引用不存 Image 对象）
+      this.size = this.size || [256, 320]
+    }
+
+    LiteGraph.registerNodeType(ARTIFY_CARD_TYPE, ArtifyDisplayCard)
+    const Proto = ArtifyDisplayCard.prototype
+    Proto.isVirtualNode = true
+
+    Proto.onAdded = function () {
+      this.mode = 2 // LGraphEventMode.NEVER
+      this.setDirtyCanvas(true, true)
+    }
+
+    /** files: [{filename,subfolder,type}]；逐张加载解码后进 imgs */
+    Proto.setFiles = function (files) {
+      this.properties = this.properties || {}
+      this.properties.files = files
+      this.imgs = []
+      this.size = this.size || [256, 320]
+      const app = getCardApp()
+      for (const f of files) {
+        const img = new Image()
+        img.onload = () => {
+          if (!this.imgs) this.imgs = []
+          this.imgs.push(img)
+          this.setDirtyCanvas(true, true)
+          this.onResize && this.onResize(this.size)
+        }
+        img.onerror = () => {
+          console.warn('[ArtifyInject] card image failed:', f.filename)
+        }
+        img.src = artifyViewUrl(f)
+      }
+      this.setDirtyCanvas(true, true)
+    }
+
+    // 首帧比例适配：第一张图到位后按图像宽高比调一次高度（宽度固定）
+    Proto.onResize = function () {
+      if (this.imgs && this.imgs[0] && this.imgs[0].naturalWidth) {
+        const img = this.imgs[0]
+        const ratio = img.naturalHeight / img.naturalWidth
+        const h = Math.max(160, Math.min(560, 256 * ratio + 64))
+        if (Math.abs(this.size[1] - h) > 8) {
+          this.size[1] = h
+          this.setDirtyCanvas(true, true)
+        }
+      }
+    }
+
+    Proto.onDrawBackground = function (ctx) {
+      // 图片区域裁剪：标题栏以下（litegraph 在 onDrawBackground 时已平移到内容区）
+      if (!this.imgs || !this.imgs.length) {
+        ctx.fillStyle = 'rgba(255,255,255,0.06)'
+        ctx.fillRect(0, 0, this.size[0], this.size[1])
+        ctx.fillStyle = 'rgba(255,255,255,0.4)'
+        ctx.font = '12px sans-serif'
+        ctx.fillText('…', 8, 18)
+        return
+      }
+      const cols = this.imgs.length > 1 ? 2 : 1
+      const rows = Math.ceil(this.imgs.length / cols)
+      const gap = 4
+      const cw = (this.size[0] - gap * (cols + 1)) / cols
+      const ch = (this.size[1] - gap * (rows + 1)) / rows
+      for (let i = 0; i < this.imgs.length && i < 8; i++) {
+        const img = this.imgs[i]
+        const x = gap + (i % cols) * (cw + gap)
+        const y = gap + Math.floor(i / cols) * (ch + gap)
+        // cover 裁剪绘制（等比放大取中）
+        const iw = img.naturalWidth || img.width
+        const ih = img.naturalHeight || img.height
+        if (!iw || !ih) continue
+        const s = Math.max(cw / iw, ch / ih)
+        const sw = cw / s
+        const sh = ch / s
+        ctx.drawImage(img, (iw - sw) / 2, (ih - sh) / 2, sw, sh, x, y, cw, ch)
+      }
+    }
+
+    /** 双击 → 回填给工作台侧边栏 */
+    Proto.onDblClick = function () {
+      sendCardsToEmbed([this])
+    }
+
+    /** 右键菜单：回填 / 从画布移除（走官方 getNodeMenuOptions 注入） */
+    const origGetNodeMenuOptions = window.LiteGraph && window.LiteGraph.LGraphCanvas
+      ? window.LiteGraph.LGraphCanvas.prototype.getNodeMenuOptions
+      : null
+    if (origGetNodeMenuOptions) {
+      window.LiteGraph.LGraphCanvas.prototype.getNodeMenuOptions = function (node) {
+        const options = origGetNodeMenuOptions.call(this, node)
+        if (node && node.type === ARTIFY_CARD_TYPE) {
+          const cardOptions = [
+            {
+              content: '回填到工作台',
+              callback: () => sendCardsToEmbed([node]),
+            },
+            {
+              content: '从画布移除',
+              callback: () => {
+                const graph = node.graph || (getCardApp() && getCardApp().graph)
+                if (graph) graph.remove(node)
+              },
+            },
+            null, // 分隔线
+          ]
+          // 官方菜单结构：[null, ...options, null]；把卡片项插在最前
+          if (options && options.length) {
+            options.splice(options.length - 1, 0, ...cardOptions)
+          } else {
+            return [null, ...cardOptions, null]
+          }
+        }
+        return options
+      }
+    }
+  }
+
+  /** 把选中卡片的文件引用发给工作台 embed iframe（回填） */
+  function sendCardsToEmbed(nodes) {
+    if (!artifyEmbedWindow) {
+      console.warn('[ArtifyInject] no embed window; card attach skipped')
+      return
+    }
+    const files = []
+    for (const n of nodes) {
+      for (const f of n.properties?.files || []) files.push(f)
+    }
+    if (!files.length) return
+    artifyEmbedWindow.postMessage(
+      JSON.stringify({ type: 'artify:card-attach', files }),
+      '*'
+    )
+  }
+
+  /**
+   * 产物上墙：把 files 铺成卡片（瀑布排布在当前视口右侧空白），完成后 fit。
+   * nodesPerCol 对齐官方 positionNodes 的列式堆叠算法（nodeHeight≈256+64）。
+   */
+  function spawnDisplayCards(files) {
+    const app = getCardApp()
+    if (!app) {
+      console.warn('[ArtifyInject] app not ready; cards dropped')
+      return
+    }
+    const LiteGraph = window.LiteGraph
+    if (!LiteGraph || !LiteGraph.registered_node_types[ARTIFY_CARD_TYPE]) {
+      console.warn('[ArtifyInject] card node type not registered yet')
+      return
+    }
+    // 每张产物一张卡片；单卡最多 8 图网格
+    const created = []
+    for (let i = 0; i < files.length; i += 8) {
+      const chunk = files.slice(i, i + 8)
+      const node = LiteGraph.createNode(ARTIFY_CARD_TYPE, 'Artify 卡片', {})
+      if (!node) continue
+      node.properties = { files: chunk }
+      app.graph.add(node)
+      node.setFiles(chunk)
+      created.push(node)
+    }
+    if (!created.length) return
+
+    // 排布：从当前视口右缘往左排（新卡片落在视野内），列内向下堆叠，
+    // 超出视口高度换列——与 packages/frontend/src/utils/canvasCards.js
+    // layoutDisplayCards() 同一算法（该文件有单测锁定几何）。
+    const dpi = Math.max(window.devicePixelRatio || 1, 1)
+    const area = app.canvas.ds.visible_area
+    const stepX = 256 + 24
+    const startX = area[0] + area[2] / dpi - created.length * stepX - 24 * 2
+    const top = area[1] + 24
+    const bottomLimit = area[1] + area[3] / dpi - 340
+    let x = startX
+    let y = top
+    for (const node of created) {
+      node.pos = [x, y]
+      node.size = [256, 340]
+      y += 340 + 24
+      if (y > bottomLimit) {
+        y = top
+        x += stepX
+      }
+    }
+    // 视口适配到新卡片——fork 内嵌 litegraph 的 fitToBounds 只吃平面
+    // bounds [x,y,w,h]（嵌套数组会算出 NaN 把整个视口搞坏），多卡片手动并集
+    {
+      let bx = Infinity
+      let by = Infinity
+      let br = -Infinity
+      let bb = -Infinity
+      for (const n of created) {
+        const x = +n.pos[0]
+        const y = +n.pos[1]
+        const w = +n.size[0]
+        const h = +n.size[1]
+        if ([x, y, w, h].some((v) => !Number.isFinite(v))) continue
+        bx = Math.min(bx, x)
+        by = Math.min(by, y)
+        br = Math.max(br, x + w)
+        bb = Math.max(bb, y + h)
+      }
+      if (Number.isFinite(bx)) {
+        try {
+          app.canvas.ds.fitToBounds([bx, by, br - bx, bb - by])
+        } catch (_e) {
+          /* fitToBounds 签名随版本漂移，失败则保持当前视口 */
+        }
+      }
+    }
+  }
+
+  /** A UI → ComfyUI 消息：产物上墙（唯一入口，iframe postMessage 进来） */
+  function handleArtifyMessage(data) {
+    if (data.type === 'artify:display-card' && Array.isArray(data.files) && data.files.length) {
+      spawnDisplayCards(data.files)
+    }
+  }
+
+  /**
+   * 注册 A UI 工作台 sidebar tab（iframe 嵌工作台 /workbench?embed=1）。
+   * 时序：registerSidebarTab 需 extensionManager 就绪（app.setup 后）；
+   * 采用轮询重试直到注册成功（extensionManager 未就绪时抛错→退避重试）。
+   */
+  function ensureArtifySidebarTab() {
+    const app = window.app
+    if (!app || !app.extensionManager || typeof app.extensionManager.registerSidebarTab !== 'function') {
+      setTimeout(ensureArtifySidebarTab, 1500)
+      return
+    }
+    // 卡片节点类型注册（extensionManager 就绪 ⇒ app.setup 完成 ⇒ LiteGraph 已加载）。
+    // 放在 tab 去重 early-return 之前：幂等（registerArtifyCardNode 自查重），
+    // 且老版本 tab 已存在时升级也能补上节点类型。
+    try {
+      const { LiteGraph: lg } = getComfyUIApp()
+      if (lg) registerArtifyCardNode(lg)
+    } catch (e) {
+      console.warn('[ArtifyInject] register ArtifyDisplayCard failed:', e)
+    }
+    if (typeof app.extensionManager.getSidebarTabs === 'function') {
+      const existing = app.extensionManager.getSidebarTabs().some((t) => t && t.id === 'artify-workbench')
+      if (existing) return
+    }
+
+    // 提前挂全局消息监听（iframe postMessage 进来的上墙请求）。
+    // 注意不与 readonly 模式既有 ARTIFY_EVENT_TYPES 监听冲突：那个只认 eventType。
+    window.addEventListener('message', (event) => {
+      let data = event.data
+      if (typeof data === 'string') {
+        try {
+          data = JSON.parse(data)
+        } catch (_e) {
+          return
+        }
+      }
+      if (data && typeof data.type === 'string' && data.type.startsWith('artify:')) {
+        if (event.source) artifyEmbedWindow = event.source
+        handleArtifyMessage(data)
+      }
+    })
+
+    try {
+      app.extensionManager.registerSidebarTab({
+        id: 'artify-workbench',
+        title: 'AI 工作台',
+        tooltip: 'AI 工作台',
+        icon: 'pi pi-sparkles',
+        type: 'custom',
+        render: (container) => {
+          // iframe 嵌 A UI 工作台 embed 模式；src 取主进程注入的引导变量
+          // （__ARTIFY_LAB_URL__），兜底相对路径（同源部署形态）。
+          container.style.height = '100%'
+          container.innerHTML = ''
+          const iframe = document.createElement('iframe')
+          iframe.id = 'artify-workbench-embed'
+          iframe.style.cssText =
+            'width:100%;height:100%;border:0;background:transparent;display:block'
+          iframe.setAttribute('allow', 'clipboard-write')
+          const base = window.__ARTIFY_LAB_URL__ || getQueryParam('artify_lab_url') || ''
+          // server_origin 传 API server 真实 origin（__ARTIFY_LAB_API__）：
+          // dev 下前端(vite:5000)与 API(express:3008) 分离，iframe 里没有
+          // electronAPI 桥，workbench 的 API 请求全靠这个参数直连 express
+          const api = window.__ARTIFY_LAB_API__ || base
+          iframe.src = base
+            ? `${base}/workbench?embed=1&server_origin=${encodeURIComponent(api)}`
+            : `/workbench?embed=1`
+          // 直接捕获回填目标：不依赖 iframe 先说话（工作台 embed 页不会
+          // 主动 postMessage，双击/右键回填时 artifyEmbedWindow 必须已就绪）
+          artifyEmbedWindow = iframe.contentWindow
+          container.appendChild(iframe)
+        },
+      })
+      console.log('[ArtifyInject] artify workbench sidebar tab registered')
+    } catch (e) {
+      console.warn('[ArtifyInject] registerSidebarTab failed:', e)
+    }
+  }
+
+  // 启动：等 extensionManager 就绪后注册。仅顶层窗口（comfyView attach 注入）
+  // ——iframe 内嵌形态（WorkflowModal 的 artify_playground 子 frame）再注册
+  // sidebar tab 会嵌套出第二个工作台，必须跳过。
+  if (!isIframe) {
+    ensureArtifySidebarTab()
+  }
 })()

@@ -2,16 +2,26 @@
   <div class="page-container" style="background: var(--wb-bg-base)">
     <div id="app" class="pb-4 min-h-screen flex flex-col">
       <AppHeader
+        v-if="!isEmbed"
         :first-nav-to="'/'"
         :first-nav-label="t('appCenter')"
         first-nav-icon="mr-2 fas fa-home"
       />
+      <!-- embed 回填提示条（画布卡片 → 工作台） -->
+      <div
+        v-if="canvasAttachNotice"
+        class="fixed top-3 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-[var(--wb-accent)]/90 text-white text-xs shadow-lg"
+      >
+        <i class="fas fa-thumbtack mr-1"></i>{{ canvasAttachNotice }}
+      </div>
 
       <div
-        class="flex flex-1 min-h-0 px-4 mx-auto mt-2 w-full max-w-[1600px] sm:px-6 lg:px-8 gap-4"
+        class="flex flex-1 min-h-0 mx-auto mt-2 gap-4 w-full"
+        :class="isEmbed ? 'px-2' : 'px-4 max-w-[1600px] sm:px-6 lg:px-8'"
       >
-        <!-- 左：会话侧栏 -->
+        <!-- 左：会话侧栏（embed 模式收起：宿主画布旁空间有限） -->
         <SessionSidebar
+          v-if="!isEmbed"
           :sessions="sidebarSessions"
           :current-id="sessionId"
           :collapsed="sidebarCollapsed"
@@ -29,9 +39,10 @@
           @show-env="showEnvDialog"
         />
 
-        <!-- 中：会话区 -->
+        <!-- 中：会话区（embed 模式占满 iframe 高度） -->
         <section
-          class="flex-1 min-w-0 flex flex-col h-[calc(100vh-96px)]"
+          class="flex-1 min-w-0 flex flex-col"
+          :class="isEmbed ? 'h-[calc(100vh-12px)]' : 'h-[calc(100vh-96px)]'"
           style="border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-card)"
         >
           <!-- 会话头 -->
@@ -297,9 +308,9 @@
           />
         </section>
 
-        <!-- 右：产物面板（可折叠） -->
+        <!-- 右：产物面板（可折叠；embed 模式产物自动上墙，右栏收起） -->
         <section
-          v-if="panelOpen"
+          v-if="panelOpen && !isEmbed"
           class="w-72 shrink-0 flex flex-col h-[calc(100vh-96px)]"
           style="border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-card)"
         >
@@ -398,6 +409,11 @@
                         <a-menu-item key="favorite">
                           <span class="flex items-center gap-2"
                             ><i class="fas fa-star w-4"></i>{{ t('workbenchFavorite') }}</span
+                          >
+                        </a-menu-item>
+                        <a-menu-item key="pin" v-if="isEmbed">
+                          <span class="flex items-center gap-2"
+                            ><i class="fas fa-thumbtack w-4"></i>{{ t('workbenchPinToCanvas') }}</span
                           >
                         </a-menu-item>
                         <a-menu-item key="publish" v-if="a.status === 'success'">
@@ -693,7 +709,15 @@ const appStore = useAppStore()
 const route = useRoute()
 const router = useRouter()
 
-const origin = computed(() => appStore.config?.serverHost || window.location.origin)
+// API origin：electron 走配置 serverHost；embed（画布 sidebar iframe，无
+// electronAPI 桥）走 URL 上的 server_origin 参数（注入脚本拼好）；普通
+// browser 兜底同源。
+const origin = computed(
+  () =>
+    appStore.config?.serverHost ||
+    new URLSearchParams(window.location.search).get('server_origin') ||
+    window.location.origin,
+)
 const lang = computed(() => (getCurrentLanguage?.() === 'en' ? 'en' : 'zh'))
 
 // ---------- 会话状态 ----------
@@ -1499,6 +1523,8 @@ function startPoll(promptId) {
         if (r.status === 'success' && r.outputs) {
           artifact.outputs = extractFiles(r.outputs).map((f) => f.filename)
           artifact.files = extractFiles(r.outputs)
+          // embed 模式：执行成功自动把产物铺上画布（用户也可手动补贴）
+          pushCardsToCanvas(artifact.files)
         }
       }
       if (r.status === 'success' || r.status === 'error') {
@@ -1586,6 +1612,7 @@ function onFileAction(key, artifact, f) {
   else if (key === 'favorite') favoriteArtifact(artifact, f)
   else if (key === 'publish') openPublish(artifact)
   else if (key === 'open') openInFolder(artifact, f)
+  else if (key === 'pin') pushCardsToCanvas([f])
 }
 
 async function copyText(text) {
@@ -1740,6 +1767,61 @@ async function loadOutputDir() {
 function viewUrl(f) {
   return `${comfyOrigin.value}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? '')}&type=${encodeURIComponent(f.type ?? 'output')}`
 }
+
+// ---------- 画布 embed 模式（ComfyUI sidebar tab iframe） ----------
+// ?embed=1：收起 AppHeader/会话侧栏/产物右栏，只留对话区；同时开通
+// 「产物 → 画布陈列卡片」上墙（postMessage 给父窗口的注入脚本）与
+// 「卡片 → 工作台」回填接收。
+const isEmbed = computed(() => new URLSearchParams(window.location.search).get('embed') === '1')
+
+/** 把产物文件引用发给注入脚本（父窗口），由它铺成画布陈列卡片 */
+function pushCardsToCanvas(files) {
+  if (!isEmbed.value || !files?.length) return
+  try {
+    window.parent.postMessage(
+      JSON.stringify({ type: 'artify:display-card', files }),
+      '*',
+    )
+  } catch (e) {
+    console.warn('[workbench] display-card push failed:', e)
+  }
+}
+
+// 回填：画布卡片右键/双击 → 注入脚本 postMessage 进来 → 作为参考图附件
+// （直接构造已就绪附件形态：文件已在 ComfyUI output 目录，/view 直出，
+// 无需再走 /api/workbench/upload）
+const canvasAttachNotice = ref('')
+function onWindowMessage(event) {
+  let data = event.data
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data)
+    } catch {
+      return
+    }
+  }
+  if (!data || data.type !== 'artify:card-attach') return
+  const files = Array.isArray(data.files) ? data.files : []
+  if (!files.length) return
+  canvasAttachNotice.value = t('workbenchCardAttached').replace('{n}', String(files.length))
+  setTimeout(() => (canvasAttachNotice.value = ''), 4000)
+  for (const f of files) {
+    draftAttachments.value.push({
+      kind: /\.(mp4|webm|mov|gif)$/i.test(f.filename || '')
+        ? 'video'
+        : /\.(mp3|wav|ogg|flac|m4a)$/i.test(f.filename || '')
+          ? 'audio'
+          : 'image',
+      filename: f.filename,
+      subfolder: f.subfolder ?? '',
+      type: f.type ?? 'output',
+      mime: '',
+      uploading: false,
+      fromCanvas: true,
+    })
+  }
+}
+if (isEmbed.value) window.addEventListener('message', onWindowMessage)
 
 function isVideoFile(f) {
   return /\.(mp4|webm|mov|gif)$/i.test(f?.filename ?? '')

@@ -121,7 +121,11 @@ export const useAppStore = defineStore('app', () => {
           }
         }
         localStorage.setItem(LOCAL_CONFIG_KEY, JSON.stringify(config.value))
-        if (!config.value.serverHost) {
+        // embed 模式（画布 sidebar tab iframe）不做 /about 兜底跳转：
+        // iframe 里没有 electronAPI 桥，serverHost 拿不到是常态；跳转会
+        // 把整个工作台顶掉变成宣传页。产物域名在运行时由接口提供。
+        const isEmbed = new URLSearchParams(window.location.search).get('embed') === '1'
+        if (!config.value.serverHost && !isEmbed) {
           if (window.location.pathname !== '/about') {
             window.location.href = '/about'
           }

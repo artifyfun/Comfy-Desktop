@@ -73,6 +73,15 @@ function getConfig() {
   }
 }
 
+/** 供 comfyInject 等主进程模块读取 express API 真实 origin（server 未起返回 null） */
+export function getArtifyLabServerOrigin(): string | null {
+  try {
+    return getConfig().server_origin
+  } catch {
+    return null
+  }
+}
+
 function setAppWindow(window: any) {
   appWindow = window
 }
