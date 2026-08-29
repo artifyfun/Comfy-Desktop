@@ -108,10 +108,10 @@
           @show-env="showEnvDialog"
         />
 
-        <!-- 中：会话区（embed 模式占满 iframe 高度） -->
+        <!-- 中：会话区（embed 模式占满 iframe 高度；顶部还有感知条 mt-2+行高≈36px） -->
         <section
           class="flex-1 min-w-0 flex flex-col"
-          :class="isEmbed ? 'h-[calc(100vh-12px)]' : 'h-[calc(100vh-96px)]'"
+          :class="isEmbed ? 'h-[calc(100vh-52px)]' : 'h-[calc(100vh-96px)]'"
           style="border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-card)"
         >
           <!-- 会话头 -->
@@ -127,21 +127,24 @@
             >
               <i class="fas fa-bars-staggered text-sm"></i>
             </button>
-            <!-- 预设 chip：点击切换（dsh preset 模式） -->
+            <!-- 预设 chip：点击切换（dsh preset 模式）；窄容器(embed)缩为纯图标省横向空间 -->
             <a-dropdown :trigger="['click']">
               <button
-                class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs transition"
-                style="border: 1px solid var(--wb-stroke-strong)"
-                :class="
+                class="flex items-center rounded-full text-xs transition"
+                :class="[
+                  isEmbed ? 'w-7 h-7 justify-center' : 'gap-1.5 px-2.5 py-1',
                   sessionPreset
                     ? 'preset-chip-on text-[var(--wb-accent)]'
-                    : 'text-[var(--wb-text-2)]'
-                "
-                :title="t('workbenchPresetSwitch')"
+                    : 'text-[var(--wb-text-2)]',
+                ]"
+                style="border: 1px solid var(--wb-stroke-strong)"
+                :title="sessionPreset ? presetName(sessionPreset) : t('workbenchPresetSwitch')"
               >
                 <i :class="sessionPreset ? presetIcon(sessionPreset) : 'fas fa-bolt'"></i>
-                {{ sessionPreset ? presetName(sessionPreset) : t('workbenchPresetPick') }}
-                <i class="fas fa-chevron-down text-[9px] opacity-60"></i>
+                <template v-if="!isEmbed">
+                  {{ sessionPreset ? presetName(sessionPreset) : t('workbenchPresetPick') }}
+                  <i class="fas fa-chevron-down text-[9px] opacity-60"></i>
+                </template>
               </button>
               <template #overlay>
                 <a-menu @click="onPresetMenu">
@@ -163,9 +166,13 @@
                 </a-menu>
               </template>
             </a-dropdown>
-            <div class="flex-1 text-white text-sm truncate font-medium">
+            <div
+              class="flex-1 text-white text-sm truncate font-medium"
+              :class="isEmbed ? 'hidden' : ''"
+            >
               {{ currentSession?.title || t('workbench') }}
             </div>
+            <div v-if="isEmbed" class="flex-1"></div>
             <!-- 高级参数（节点级覆盖）：粘贴 nodeOverrides JSON → 预检/执行 -->
             <a-button
               size="small"
@@ -810,10 +817,11 @@ const router = useRouter()
 
 // API origin：electron 走配置 serverHost；embed（画布 sidebar iframe，无
 // electronAPI 桥）走 URL 上的 server_origin 参数（注入脚本拼好）；普通
-// browser 兜底同源。
+// browser 兜底同源。route.query 响应式优先，location 快照兜底（同 isEmbed）。
 const origin = computed(
   () =>
     appStore.config?.serverHost ||
+    route.query.server_origin ||
     new URLSearchParams(window.location.search).get('server_origin') ||
     window.location.origin,
 )
@@ -948,7 +956,9 @@ async function selectSession(s) {
   execProgressIndex.clear() // 执行占位下标同样 per-render，切会话清
   recoverCount.value = 0 // 恢复计数是会话级的，切会话清零
   recovering.value = false
-  router.replace({ query: { session: s.id } })
+  // 只替换 session 字段并保留其余 query——embed 模式的 embed=1/server_origin
+  // 一旦被抹掉，isEmbed 判定失效，页面会按桌面布局渲染（会话栏挤爆窄侧栏）
+  router.replace({ query: { ...route.query, session: s.id } })
   const res = await fetch(`${origin.value}/api/workbench/session/${s.id}`)
   const json = await res.json()
   if (!res.ok || !json?.success) return
@@ -1875,7 +1885,11 @@ function viewUrl(f) {
 // ?embed=1：收起 AppHeader/会话侧栏/产物右栏，只留对话区；同时开通
 // 「产物 → 画布陈列卡片」上墙（postMessage 给父窗口的注入脚本）与
 // 「卡片 → 工作台」回填接收。
-const isEmbed = computed(() => new URLSearchParams(window.location.search).get('embed') === '1')
+// 以响应式 route.query 为准（router.replace 改写 URL 后仍正确），
+// window.location 一次性快照兜底（初始导航前的极早调用）。
+const isEmbed = computed(
+  () => route.query.embed === '1' || new URLSearchParams(window.location.search).get('embed') === '1'
+)
 
 /** 把产物文件引用发给注入脚本（父窗口），由它铺成画布陈列卡片 */
 function pushCardsToCanvas(files) {

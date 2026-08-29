@@ -8,7 +8,10 @@
     <a-app class="ant-app">
       <div class="app-container">
         <router-view />
+        <!-- 全局浮钮组（搜索/回首页）在 embed iframe（ComfyUI 侧栏工作台）里
+             与底部 Composer 工具条重叠且语义重复（宿主有自己的导航），隐藏 -->
         <a-float-button-group
+          v-if="!isEmbedRoute"
           shape="square"
           :style="{
             right: '24px',
@@ -64,7 +67,7 @@
 </template>
 
 <script setup>
-import { reactive, provide, watch, defineAsyncComponent, onMounted } from 'vue'
+import { reactive, provide, watch, computed, defineAsyncComponent, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { SettingOutlined, HomeOutlined } from '@ant-design/icons-vue'
 import { useAppStore } from '@/stores/appStore'
@@ -83,6 +86,8 @@ import 'dayjs/locale/zh-cn'
 import 'dayjs/locale/en'
 
 const router = useRouter()
+// embed 模式（ComfyUI 侧栏工作台 iframe）：隐藏全局浮钮组
+const isEmbedRoute = computed(() => router.currentRoute.value.query.embed === '1')
 
 const appStore = useAppStore()
 
