@@ -71,7 +71,8 @@
           v-for="b in tools"
           :key="b.icon"
           :title="b.title"
-          class="w-9 h-9 rounded-lg bg-[var(--wb-surface)] border border-[var(--wb-stroke)] text-[var(--wb-text-1)] hover:border-[var(--wb-accent)] transition flex items-center justify-center"
+          :disabled="b.disabled"
+          class="w-9 h-9 rounded-lg bg-[var(--wb-surface)] border border-[var(--wb-stroke)] text-[var(--wb-text-1)] hover:border-[var(--wb-accent)] transition flex items-center justify-center disabled:opacity-40 disabled:pointer-events-none"
           @click="b.action"
         >
           <i :class="b.icon"></i>
@@ -131,7 +132,8 @@
 import { ref, computed, reactive, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from '@/utils/i18n'
 import { useAppStore } from '@/stores/appStore'
-import { drainFiles } from '@/utils/canvasBridge'
+import { drainFiles, pushAttachments } from '@/utils/canvasBridge'
+import { message } from 'ant-design-vue'
 import AppHeader from '../apps/components/AppHeader.vue'
 import {
   makeViewport,
@@ -370,8 +372,39 @@ const tools = computed(() => [
   { icon: 'fas fa-plus', title: t('canvasAddNote'), action: addNote },
   { icon: 'fas fa-crosshairs', title: t('canvasFitAll'), action: fitAll },
   { icon: 'fas fa-expand', title: t('canvasResetView'), action: resetView },
+  {
+    icon: 'fas fa-paper-plane',
+    title: t('canvasSendToWorkbench'),
+    action: sendSelectionToWorkbench,
+    disabled: !selection.value.some((id) => refOf(id)),
+  },
   { icon: 'fas fa-trash', title: t('canvasDeleteSelected'), action: deleteSelected },
 ])
+
+// 选中物件 → 工作台参考图附件（仅 image 物件可反解出 /view 引用）
+function refOf(id) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || o.type !== 'image' || !o.src) return null
+  try {
+    const u = new URL(o.src)
+    if (!u.pathname.endsWith('/view')) return null
+    return {
+      filename: u.searchParams.get('filename') || '',
+      subfolder: u.searchParams.get('subfolder') || '',
+      type: u.searchParams.get('type') || 'output',
+    }
+  } catch {
+    return null // blob:/data: 等（拖入/粘贴图），无 /view 引用
+  }
+}
+function sendSelectionToWorkbench() {
+  const refs = selection.value.map(refOf).filter(Boolean)
+  if (!refs.length) return
+  const n = pushAttachments(refs)
+  message.success(t('workbenchCardAttached').replace('{n}', String(n)))
+  selection.value = []
+}
+
 
 function addNote() {
   const c = screenToWorld(viewport.value, size.w / 2, size.h / 2)

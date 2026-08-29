@@ -814,7 +814,7 @@ import Composer from './components/Composer.vue'
 import NewSessionDialog from './components/NewSessionDialog.vue'
 import PresetManager from './components/PresetManager.vue'
 import { canApplyFix } from './diagnosis'
-import { pushFiles } from '@/utils/canvasBridge'
+import { pushFiles, drainAttachments } from '@/utils/canvasBridge'
 
 const { t, getCurrentLanguage } = useI18n()
 const appStore = useAppStore()
@@ -2550,6 +2550,25 @@ watch(showArchived, () => {
 onMounted(() => {
   loadArchiveCount()
   loadOutputDir()
+  // A 画布「发送到工作台」的排队参考图（SPA 内跨路由；embed 模式走 card-attach postMessage，不经此）
+  if (!isEmbed.value) {
+    const files = drainAttachments()
+    for (const f of files) {
+      draftAttachments.value.push({
+        kind: /\.(mp4|webm|mov|gif)$/i.test(f.filename || '') ? 'video' : 'image',
+        filename: f.filename,
+        subfolder: f.subfolder ?? '',
+        type: f.type ?? 'output',
+        mime: '',
+        uploading: false,
+        fromCanvas: true,
+      })
+    }
+    if (files.length) {
+      canvasAttachNotice.value = t('workbenchCardAttached').replace('{n}', String(files.length))
+      setTimeout(() => (canvasAttachNotice.value = ''), 4000)
+    }
+  }
 })
 </script>
 
