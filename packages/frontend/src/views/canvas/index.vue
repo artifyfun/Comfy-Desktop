@@ -130,6 +130,8 @@
  */
 import { ref, computed, reactive, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from '@/utils/i18n'
+import { useAppStore } from '@/stores/appStore'
+import { drainFiles } from '@/utils/canvasBridge'
 import AppHeader from '../apps/components/AppHeader.vue'
 import {
   makeViewport,
@@ -145,6 +147,7 @@ import {
 } from './engine'
 
 const { t } = useI18n()
+const appStore = useAppStore()
 
 const STORAGE_KEY = 'artify.canvas.doc.v1'
 const MIN_SCALE = 0.1
@@ -551,6 +554,45 @@ function onPaste(e) {
   filesToObjects(files, w)
 }
 
+// —— 工作台产物「贴到画布」：取 canvasBridge 队列落布 —— 
+// 文件引用是 ComfyUI /view 参数（filename/subfolder/type），URL 直出常驻。
+function drainPinned() {
+  const files = drainFiles()
+  if (!files.length) return
+  const origin = appStore.config?.comfyHost || 'http://127.0.0.1:8188'
+  let cursorX = viewportCursor().x
+  const at = viewportCursor().y
+  let failed = 0
+  for (const f of files) {
+    const url = `${origin}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? '')}&type=${encodeURIComponent(f.type ?? 'output')}`
+    const probe = new Image()
+    probe.onload = () => {
+      const scale = Math.min(1, 260 / probe.naturalWidth)
+      objects.value.push({
+        id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+        type: 'image',
+        x: cursorX,
+        y: at,
+        width: Math.round(probe.naturalWidth * scale),
+        height: Math.round(probe.naturalHeight * scale),
+        src: url,
+      })
+      cursorX += Math.round(probe.naturalWidth * scale) + 16
+      saveSoon()
+    }
+    probe.onerror = () => {
+      // 产物已被清理/实例换目录：跳过，不落破图
+      failed++
+    }
+    probe.src = url
+  }
+}
+function viewportCursor() {
+  const st = stageEl.value?.getStage?.()
+  const p = st?.getPointerPosition() || { x: size.w / 2, y: size.h / 2 }
+  return screenToWorld(viewport.value, p.x, p.y)
+}
+
 let ro = null
 // vue-konva 3.4 的 template @事件 绑定在小组件初始化时序下不稳（监听偶发丢失）
 // ——所有 Konva 节点事件统一在这里手动绑定，可靠：
@@ -568,6 +610,8 @@ function bindNodeEvents() {
 }
 onMounted(() => {
   loadNow()
+  // 工作台「贴到画布」的排队产物落布（SPA 内跨路由）
+  nextTick(drainPinned)
   const el = wrapEl.value
   const measure = () => {
     size.w = el.clientWidth

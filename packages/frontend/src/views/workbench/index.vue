@@ -495,7 +495,7 @@
                             ><i class="fas fa-star w-4"></i>{{ t('workbenchFavorite') }}</span
                           >
                         </a-menu-item>
-                        <a-menu-item key="pin" v-if="isEmbed">
+                        <a-menu-item key="pin">
                           <span class="flex items-center gap-2"
                             ><i class="fas fa-thumbtack w-4"></i>{{ t('workbenchPinToCanvas') }}</span
                           >
@@ -814,6 +814,7 @@ import Composer from './components/Composer.vue'
 import NewSessionDialog from './components/NewSessionDialog.vue'
 import PresetManager from './components/PresetManager.vue'
 import { canApplyFix } from './diagnosis'
+import { pushFiles } from '@/utils/canvasBridge'
 
 const { t, getCurrentLanguage } = useI18n()
 const appStore = useAppStore()
@@ -1907,9 +1908,15 @@ const isEmbed = computed(
   () => route.query.embed === '1' || new URLSearchParams(window.location.search).get('embed') === '1'
 )
 
-/** 把产物文件引用发给注入脚本（父窗口），由它铺成画布陈列卡片 */
+/** 把产物文件引用发给注入脚本（父窗口），由它铺成画布陈列卡片；
+ *  非 embed（A 界面 SPA）则入 canvasBridge 队列，A 画布页 mounted 时取走落布 */
 function pushCardsToCanvas(files) {
-  if (!isEmbed.value || !files?.length) return
+  if (!files?.length) return
+  if (!isEmbed.value) {
+    const n = pushFiles(files)
+    message.success(t('workbenchPinnedToCanvas').replace('{n}', String(n)))
+    return
+  }
   try {
     window.parent.postMessage(
       JSON.stringify({ type: 'artify:display-card', files }),
