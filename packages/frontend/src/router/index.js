@@ -29,6 +29,10 @@ export const constantRoutes = [
     component: () => import('@/views/workbench/index.vue'),
   },
   {
+    path: '/canvas',
+    component: () => import('@/views/canvas/index.vue'),
+  },
+  {
     path: '/gallery',
     component: () => import('@/views/gallery/index.vue'),
   },

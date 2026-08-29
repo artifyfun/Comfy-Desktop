@@ -31,6 +31,14 @@
             {{ firstNavLabel || t('appCenter') }}
           </router-link>
           <router-link
+            to="/canvas"
+            class="nav-tab"
+            :class="{ 'nav-tab-on': $route.path === '/canvas' }"
+          >
+            <i class="mr-2 fas fa-shapes"></i>
+            {{ t('canvas') }}
+          </router-link>
+          <router-link
             to="/gallery"
             class="nav-tab"
             :class="{ 'nav-tab-on': $route.path === '/gallery' }"
