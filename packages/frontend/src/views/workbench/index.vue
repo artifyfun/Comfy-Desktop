@@ -2,7 +2,7 @@
   <div class="page-container" style="background: var(--wb-bg-base)">
     <div id="app" class="pb-4 min-h-screen flex flex-col">
       <AppHeader
-        v-if="!isEmbed"
+        v-if="isStandalone"
         :first-nav-to="'/'"
         :first-nav-label="t('appCenter')"
         first-nav-icon="mr-2 fas fa-home"
@@ -17,7 +17,7 @@
 
       <!-- embed 画布感知条（M1：实时感知宿主 ComfyUI 画布） -->
       <div
-        v-if="isEmbed && canvasState"
+        v-if="isNarrow && canvasState"
         class="mx-2 mt-2 px-3 py-1.5 flex items-center gap-3 text-[11px] rounded-lg shrink-0 overflow-hidden"
         style="border: 1px solid var(--wb-stroke); background: var(--wb-surface-deep); color: var(--wb-text-2)"
         :title="t('workbenchCanvasSense')"
@@ -42,7 +42,7 @@
 
       <!-- embed 写回 diff 确认卡（M2：LLM ops → 人审 → 下发注入桥） -->
       <div
-        v-if="isEmbed && pendingOps"
+        v-if="isNarrow && pendingOps"
         class="mx-2 mt-2 px-3 py-2 rounded-lg shrink-0 text-[11px]"
         style="border: 1px solid var(--wb-accent); background: var(--wb-surface-deep)"
       >
@@ -86,11 +86,11 @@
 
       <div
         class="flex flex-1 min-h-0 mx-auto mt-2 gap-4 w-full"
-        :class="isEmbed ? 'px-2' : 'px-4 max-w-[1600px] sm:px-6 lg:px-8'"
+        :class="isNarrow ? 'px-2' : 'px-4 max-w-[1600px] sm:px-6 lg:px-8'"
       >
         <!-- 左：会话侧栏（embed 模式收起：宿主画布旁空间有限） -->
         <SessionSidebar
-          v-if="!isEmbed"
+          v-if="!isNarrow"
           :sessions="sidebarSessions"
           :current-id="sessionId"
           :collapsed="sidebarCollapsed"
@@ -111,7 +111,7 @@
         <!-- 中：会话区（embed 模式占满 iframe 高度；顶部还有感知条 mt-2+行高≈36px） -->
         <section
           class="flex-1 min-w-0 flex flex-col"
-          :class="isEmbed ? 'h-[calc(100vh-52px)]' : 'h-[calc(100vh-96px)]'"
+          :class="isNarrow ? 'h-[calc(100vh-52px)]' : 'h-[calc(100vh-96px)]'"
           style="border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-card)"
         >
           <!-- 会话头 -->
@@ -132,7 +132,7 @@
               <button
                 class="flex items-center rounded-full text-xs transition"
                 :class="[
-                  isEmbed ? 'w-7 h-7 justify-center' : 'gap-1.5 px-2.5 py-1',
+                  isNarrow ? 'w-7 h-7 justify-center' : 'gap-1.5 px-2.5 py-1',
                   sessionPreset
                     ? 'preset-chip-on text-[var(--wb-accent)]'
                     : 'text-[var(--wb-text-2)]',
@@ -141,7 +141,7 @@
                 :title="sessionPreset ? presetName(sessionPreset) : t('workbenchPresetSwitch')"
               >
                 <i :class="sessionPreset ? presetIcon(sessionPreset) : 'fas fa-bolt'"></i>
-                <template v-if="!isEmbed">
+                <template v-if="!isNarrow">
                   {{ sessionPreset ? presetName(sessionPreset) : t('workbenchPresetPick') }}
                   <i class="fas fa-chevron-down text-[9px] opacity-60"></i>
                 </template>
@@ -168,11 +168,11 @@
             </a-dropdown>
             <div
               class="flex-1 text-white text-sm truncate font-medium"
-              :class="isEmbed ? 'hidden' : ''"
+              :class="isNarrow ? 'hidden' : ''"
             >
               {{ currentSession?.title || t('workbench') }}
             </div>
-            <div v-if="isEmbed" class="flex-1"></div>
+            <div v-if="isNarrow" class="flex-1"></div>
             <!-- 高级参数（节点级覆盖）：粘贴 nodeOverrides JSON → 预检/执行 -->
             <a-button
               size="small"
@@ -394,7 +394,7 @@
 
         <!-- 右：产物面板（可折叠；embed 模式产物自动上墙，右栏收起） -->
         <section
-          v-if="panelOpen && !isEmbed"
+          v-if="panelOpen && !isNarrow"
           class="w-72 shrink-0 flex flex-col h-[calc(100vh-96px)]"
           style="border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-card)"
         >
@@ -552,7 +552,7 @@
                 </div>
                 <div class="opacity-90 mb-1.5">{{ diagnosisOf(a).suggestion.text }}</div>
                 <button
-                  v-if="diagnosisOf(a).suggestion.fixOps && isEmbed"
+                  v-if="diagnosisOf(a).suggestion.fixOps && isNarrow"
                   class="text-[11px] px-2 py-0.5 rounded hover:opacity-80"
                   style="background: var(--wb-accent); color: #04121c"
                   @click="applyDiagnosisFix(a)"
@@ -814,9 +814,12 @@ import Composer from './components/Composer.vue'
 import NewSessionDialog from './components/NewSessionDialog.vue'
 import PresetManager from './components/PresetManager.vue'
 import { canApplyFix } from './diagnosis'
-import { pushFiles, drainAttachments } from '@/utils/canvasBridge'
+import { pushFiles, drainAttachments, drainFiles } from '@/utils/canvasBridge'
+import { useCanvasMode } from '@/utils/canvasMode'
 
 const { t, getCurrentLanguage } = useI18n()
+const { onResult, emitResult, onAttachments } = useCanvasMode()
+// 画布侧栏模式：store 模式由画布页设置；这里只需把产物经 emitResult 推给宿主
 const appStore = useAppStore()
 const route = useRoute()
 const router = useRouter()
@@ -1908,10 +1911,23 @@ const isEmbed = computed(
   () => route.query.embed === '1' || new URLSearchParams(window.location.search).get('embed') === '1'
 )
 
+// 画布页右侧栏嵌入模式：画布页以组件形式渲染本视图并传 prop
+// （此时 route.query 是 /canvas 的，不能靠 query 识别）
+const props = defineProps({ canvasEmbedded: { type: Boolean, default: false } })
+const isCanvasEmbedded = computed(() => props.canvasEmbedded || route.query.canvas === '1')
+// 窄栏布局：C 宿主 iframe 与画布侧边栏共用（收会话侧栏/产物右栏、紧凑高度）
+const isNarrow = computed(() => isEmbed.value || isCanvasEmbedded.value)
+const isStandalone = computed(() => !isNarrow.value)
+
 /** 把产物文件引用发给注入脚本（父窗口），由它铺成画布陈列卡片；
- *  非 embed（A 界面 SPA）则入 canvasBridge 队列，A 画布页 mounted 时取走落布 */
+ *  画布侧栏模式直接经 canvasMode 推给宿主画布自动落布；
+ *  独立页则入 canvasBridge 队列，画布页 mounted 时取走落布 */
 function pushCardsToCanvas(files) {
   if (!files?.length) return
+  if (isCanvasEmbedded.value) {
+    emitResult(files)
+    return
+  }
   if (!isEmbed.value) {
     const n = pushFiles(files)
     message.success(t('workbenchPinnedToCanvas').replace('{n}', String(n)))
@@ -1974,6 +1990,25 @@ function onWindowMessage(event) {
   }
 }
 if (isEmbed.value) window.addEventListener('message', onWindowMessage)
+
+// 画布侧栏模式：接收宿主画布选区「发送到工作台」的活通道（侧栏常驻，mounted-drain 只覆盖跨路由场景）
+function pushCanvasAttachments(files) {
+  if (!Array.isArray(files) || !files.length) return
+  canvasAttachNotice.value = t('workbenchCardAttached').replace('{n}', String(files.length))
+  setTimeout(() => (canvasAttachNotice.value = ''), 4000)
+  for (const f of files) {
+    draftAttachments.value.push({
+      kind: /\.(mp4|webm|mov|gif)$/i.test(f.filename || '') ? 'video' : 'image',
+      filename: f.filename,
+      subfolder: f.subfolder ?? '',
+      type: f.type ?? 'output',
+      mime: '',
+      uploading: false,
+      fromCanvas: true,
+    })
+  }
+}
+if (isCanvasEmbedded.value) onAttachments(pushCanvasAttachments)
 // embed 首屏：主动要一份当前画布摘要（注入桥可能早于 iframe 就绪推过）
 if (isEmbed.value) {
   setTimeout(() => {
@@ -2550,24 +2585,10 @@ watch(showArchived, () => {
 onMounted(() => {
   loadArchiveCount()
   loadOutputDir()
-  // A 画布「发送到工作台」的排队参考图（SPA 内跨路由；embed 模式走 card-attach postMessage，不经此）
+  // A 画布「发送到工作台」的排队参考图（SPA 内跨路由；C 宿主 embed 走 card-attach postMessage，不经此）
   if (!isEmbed.value) {
     const files = drainAttachments()
-    for (const f of files) {
-      draftAttachments.value.push({
-        kind: /\.(mp4|webm|mov|gif)$/i.test(f.filename || '') ? 'video' : 'image',
-        filename: f.filename,
-        subfolder: f.subfolder ?? '',
-        type: f.type ?? 'output',
-        mime: '',
-        uploading: false,
-        fromCanvas: true,
-      })
-    }
-    if (files.length) {
-      canvasAttachNotice.value = t('workbenchCardAttached').replace('{n}', String(files.length))
-      setTimeout(() => (canvasAttachNotice.value = ''), 4000)
-    }
+    pushCanvasAttachments(files)
   }
 })
 </script>

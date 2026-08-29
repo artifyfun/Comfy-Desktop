@@ -5,14 +5,16 @@
       :first-nav-label="t('market')"
       first-nav-icon="mr-2 fas fa-store"
     />
-    <div
-      ref="wrapEl"
-      class="relative h-[calc(100vh-120px)] overflow-hidden rounded-xl mx-4 mt-2 border border-[var(--wb-stroke)]"
-      :class="dragOver ? 'ring-2 ring-[var(--wb-accent)]' : ''"
-      @dragover.prevent="dragOver = true"
-      @dragleave.prevent="dragOver = false"
-      @drop.prevent="onDrop"
-    >
+    <!-- 画布 + 右侧工作台 侧边栏布局 -->
+    <div class="flex mx-4 mt-2 h-[calc(100vh-120px)] gap-2">
+      <div
+        ref="wrapEl"
+        class="relative flex-1 min-w-0 overflow-hidden rounded-xl border border-[var(--wb-stroke)]"
+        :class="dragOver ? 'ring-2 ring-[var(--wb-accent)]' : ''"
+        @dragover.prevent="dragOver = true"
+        @dragleave.prevent="dragOver = false"
+        @drop.prevent="onDrop"
+      >
       <!-- 网格背景（随视口平移/缩放，纯 CSS） -->
       <div class="absolute inset-0 pointer-events-none" :style="gridStyle"></div>
       <v-stage
@@ -120,7 +122,26 @@
         <i class="fas fa-image text-4xl text-[var(--wb-accent)] opacity-70"></i>
         <p class="text-sm text-[var(--wb-accent)]">{{ t('canvasDropImage') }}</p>
       </div>
+      </div>
+
+      <!-- 右侧工作台侧边栏（可收起） -->
+      <aside
+        v-if="wbOpen"
+        class="w-[400px] shrink-0 rounded-xl border border-[var(--wb-stroke)] overflow-hidden bg-[var(--wb-bg-base)]"
+      >
+        <Workbench :canvas-embedded="true" />
+      </aside>
     </div>
+
+    <!-- 工作台开合按钮（画布区右上角外沿） -->
+    <button
+      class="fixed z-40 top-[76px] w-7 h-9 rounded-l-md bg-[var(--wb-surface)] border border-[var(--wb-stroke)] border-r-0 text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] transition flex items-center justify-center"
+      :style="wbOpen ? 'right: 416px' : 'right: 16px'"
+      :title="wbOpen ? t('canvasCloseWb') : t('canvasOpenWb')"
+      @click="wbOpen = !wbOpen"
+    >
+      <i class="fas text-xs" :class="wbOpen ? 'fa-chevron-right' : 'fa-chevron-left'"></i>
+    </button>
   </div>
 </template>
 
@@ -133,7 +154,9 @@ import { ref, computed, reactive, nextTick, onMounted, onBeforeUnmount, watch } 
 import { useI18n } from '@/utils/i18n'
 import { useAppStore } from '@/stores/appStore'
 import { drainFiles, pushAttachments } from '@/utils/canvasBridge'
+import { useCanvasMode } from '@/utils/canvasMode'
 import { message } from 'ant-design-vue'
+import Workbench from '../workbench/index.vue'
 import AppHeader from '../apps/components/AppHeader.vue'
 import {
   makeViewport,
@@ -150,6 +173,8 @@ import {
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { onResult, emitAttachments } = useCanvasMode()
+const wbOpen = ref(true) // 右侧工作台侧边栏开合
 
 const STORAGE_KEY = 'artify.canvas.doc.v1'
 const MIN_SCALE = 0.1
@@ -400,8 +425,15 @@ function refOf(id) {
 function sendSelectionToWorkbench() {
   const refs = selection.value.map(refOf).filter(Boolean)
   if (!refs.length) return
-  const n = pushAttachments(refs)
-  message.success(t('workbenchCardAttached').replace('{n}', String(n)))
+  if (wbOpen.value) {
+    // 侧边栏工作台常驻：走活通道，附件立即可见
+    emitAttachments(refs)
+    message.success(t('workbenchCardAttached').replace('{n}', String(refs.length)))
+  } else {
+    // 侧栏收起：入跨路由队列，下次工作台挂载时取走
+    pushAttachments(refs)
+    message.success(t('workbenchCardAttached').replace('{n}', String(refs.length)))
+  }
   selection.value = []
 }
 
@@ -587,15 +619,15 @@ function onPaste(e) {
   filesToObjects(files, w)
 }
 
-// —— 工作台产物「贴到画布」：取 canvasBridge 队列落布 —— 
+// —— 工作台产物落画布（公共通道）——
 // 文件引用是 ComfyUI /view 参数（filename/subfolder/type），URL 直出常驻。
-function drainPinned() {
-  const files = drainFiles()
-  if (!files.length) return
+// 起点 = 当前视野中心，横向往右排布；加载失败的文件跳过不落破图。
+function placeFiles(files) {
+  if (!files?.length) return
   const origin = appStore.config?.comfyHost || 'http://127.0.0.1:8188'
-  let cursorX = viewportCursor().x
-  const at = viewportCursor().y
-  let failed = 0
+  const c = viewportCenterWorld()
+  let cursorX = c.x - 130
+  const at = c.y
   for (const f of files) {
     const url = `${origin}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? '')}&type=${encodeURIComponent(f.type ?? 'output')}`
     const probe = new Image()
@@ -615,15 +647,15 @@ function drainPinned() {
     }
     probe.onerror = () => {
       // 产物已被清理/实例换目录：跳过，不落破图
-      failed++
     }
     probe.src = url
   }
 }
-function viewportCursor() {
-  const st = stageEl.value?.getStage?.()
-  const p = st?.getPointerPosition() || { x: size.w / 2, y: size.h / 2 }
-  return screenToWorld(viewport.value, p.x, p.y)
+function viewportCenterWorld() {
+  return screenToWorld(viewport.value, size.w / 2, size.h / 2)
+}
+function drainPinned() {
+  placeFiles(drainFiles())
 }
 
 let ro = null
@@ -657,6 +689,11 @@ onMounted(() => {
   window.addEventListener('paste', onPaste)
   // stage 初始变换
   requestAnimationFrame(applyViewport)
+  // 侧边栏工作台：产物生成 → 自动落画布（window 总线，见 canvasMode.js）
+  const offResult = onResult(placeFiles)
+  onBeforeUnmount(() => {
+    offResult()
+  })
 })
 watch(
   () => objects.value.map((o) => o.id).join(','),
