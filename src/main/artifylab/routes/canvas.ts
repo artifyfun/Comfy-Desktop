@@ -24,6 +24,12 @@ import express, { type Router, type Request, type Response } from 'express'
 import { HTTP_STATUS } from '../config/constants'
 import { createErrorResponse, createSuccessResponse } from '../utils/errorHandler'
 import { classifyExecutionError } from '../services/errorClassifier'
+import { executePrompt } from '../mcp/executor'
+import type { ComfyPrompt } from '../appStore'
+import { startBatch, type BatchInputNode } from '../services/batchRunner'
+import { workbenchService } from '../workbench/service'
+import appStoreManager from '../appStore'
+import { logger } from '../utils/logger'
 
 /** 画布摘要投影（注入桥 buildCanvasDigest 的产物） */
 export interface CanvasDigest {
@@ -34,6 +40,8 @@ export interface CanvasDigest {
   keyParams: Record<string, unknown>
   queue: { running: number; pending: number }
   ts: number
+  /** 节点清单（id/type/标题，前 N 个；供服务端 PLAN 注入 agent 决策上下文） */
+  nodes?: Array<{ id: number | string; type: string; title?: string }>
 }
 
 /** 进程内最新快照存储（单用户桌面应用，无需持久化；重启即失，桥会重报） */
@@ -123,7 +131,20 @@ export function createCanvasRouter(
         running: Number(body.queue?.running) || 0,
         pending: Number(body.queue?.pending) || 0
       },
-      ts: Number(body.ts) || Date.now()
+      ts: Number(body.ts) || Date.now(),
+      nodes: Array.isArray(body.nodes)
+        ? body.nodes
+            .slice(0, 40)
+            .filter(
+              (n: unknown): n is { id: number | string; type: string; title?: string } =>
+                !!n && typeof n === 'object' && 'type' in n
+            )
+            .map((n) => ({
+              id: n.id as number | string,
+              type: String(n.type),
+              title: typeof n.title === 'string' ? n.title : undefined
+            }))
+        : undefined
     }
     res.json(createSuccessResponse({ seq: store.latest.seq }))
   })
@@ -277,6 +298,93 @@ export function createCanvasRouter(
       }
     }
     res.json(createSuccessResponse(classified))
+  })
+
+  // ---- 画布当前工作流执行（M5：感知-执行闭环） --------------------------
+  // 注入桥 graphToPrompt（画布当前激活 tab 的 API 格式 prompt）→ 这里提交队列。
+  // 单次：POST /api/canvas/execute {prompt, nodeOverrides?, name?, sessionId?} → {promptId}
+  // 批量：POST /api/canvas/batch {prompt, inputsMapping, items, name?} → {jobId}
+  // sessionId 可选：存在时把 execution 记入 workbench 会话（重进会话可见产物）。
+
+  router.post('/api/canvas/execute', async (req: Request, res: Response) => {
+    const body = req.body as
+      | {
+          prompt?: unknown
+          nodeOverrides?: unknown
+          name?: unknown
+          sessionId?: unknown
+        }
+      | undefined
+    if (!body || !body.prompt || typeof body.prompt !== 'object' || Array.isArray(body.prompt)) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(createErrorResponse('prompt object required（画布 API 格式）'))
+      return
+    }
+    try {
+      const comfyOrigin = appStoreManager.getConfig().comfyHost
+      const result = await executePrompt(comfyOrigin, body.prompt as ComfyPrompt, {
+        nodeOverrides:
+          body.nodeOverrides && typeof body.nodeOverrides === 'object'
+            ? (body.nodeOverrides as Record<string, { widgetOverrides?: Record<string, unknown> }>)
+            : undefined,
+        workflowKey: typeof body.name === 'string' ? body.name : 'canvas:current'
+      })
+      // 会话记录（可选）：canvas-run 链路经前端带 sessionId，重进会话可见产物
+      if (typeof body.sessionId === 'string') {
+        try {
+          workbenchService.recordCanvasExecution(
+            body.sessionId,
+            result.prompt_id,
+            typeof body.name === 'string' ? body.name : undefined
+          )
+        } catch (e) {
+          logger.warn('record canvas execution failed', e)
+        }
+      }
+      res.json(createSuccessResponse({ promptId: result.prompt_id }))
+    } catch (e) {
+      res
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .json(createErrorResponse(String((e as Error).message ?? e).slice(0, 500)))
+    }
+  })
+
+  router.post('/api/canvas/batch', async (req: Request, res: Response) => {
+    const body = req.body as
+      | {
+          prompt?: unknown
+          inputsMapping?: unknown
+          items?: unknown
+          name?: unknown
+        }
+      | undefined
+    if (
+      !body ||
+      !body.prompt ||
+      typeof body.prompt !== 'object' ||
+      !Array.isArray(body.inputsMapping) ||
+      !Array.isArray(body.items) ||
+      body.items.length < 2
+    ) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(createErrorResponse('prompt + inputsMapping + items(≥2) required'))
+      return
+    }
+    try {
+      const { job } = await startBatch({
+        prompt: body.prompt as ComfyPrompt,
+        inputsMapping: body.inputsMapping as BatchInputNode[],
+        items: body.items as Array<Record<string, unknown>>,
+        appName: typeof body.name === 'string' ? body.name : '画布批量'
+      })
+      res.json(createSuccessResponse({ jobId: job.id }))
+    } catch (e) {
+      res
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .json(createErrorResponse(String((e as Error).message ?? e).slice(0, 500)))
+    }
   })
 
   return router

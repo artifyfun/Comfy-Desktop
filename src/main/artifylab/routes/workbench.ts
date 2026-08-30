@@ -565,6 +565,48 @@ export function createWorkbenchRouter(): express.Router {
         finish()
         return
       }
+      if (plan.intent === 'workflow') {
+        // 同步模板工作流到宿主画布：UI graph（{nodes,links}）经 SSE sync 事件下发给
+        // 工作台 iframe，前端走注入桥 artify:canvas-ops loadWorkflow 整图加载。
+        const tpl = local.template
+        const wf = tpl?.workflow
+        if (!wf || !Array.isArray((wf as { nodes?: unknown }).nodes)) {
+          const msg = `模板「${tpl?.name ?? plan.templateId}」没有保存画布布局（workflow），无法同步到画布。可在 A 界面从画布固化该工作流后再试。`
+          workbenchService.appendMessage(sessionId, { role: 'agent', kind: 'chat', text: msg })
+          send('reply', { intent: 'workflow', reply: msg })
+          finish()
+          return
+        }
+        send('sync', { templateId: tpl!.id, name: tpl!.name, workflow: wf })
+        const okMsg = `已把「${tpl!.name}」同步到右侧画布。`
+        workbenchService.appendMessage(sessionId, { role: 'agent', kind: 'chat', text: okMsg })
+        send('reply', { intent: 'workflow', reply: okMsg })
+        finish()
+        return
+      }
+      if (plan.intent === 'canvas-run') {
+        // 执行画布当前工作流：图在宿主（ComfyUI）JS 里，服务端拿不到——下发
+        // canvas-exec 事件，前端经注入桥 graphToPrompt → /api/canvas/execute（或
+        // /api/canvas/batch）→ promptId/jobId 回前端轮询，结果由前端补气泡。
+        const canvasExec = {
+          requestId: `canvas-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          nodeOverrides: plan.nodeOverrides ?? undefined,
+          name: undefined as string | undefined,
+          sessionId,
+          batch: plan.batch
+            ? { items: plan.batch.items, sharedParams: plan.batch.sharedParams }
+            : undefined
+        }
+        send('canvas-exec', canvasExec)
+        // 占位进度：前端桥回执期间避免"无反馈"
+        workbenchService.appendMessage(sessionId, {
+          role: 'agent',
+          kind: 'progress',
+          text: plan.batch ? '画布批量执行中…' : '正在执行画布当前工作流…'
+        })
+        finish()
+        return
+      }
       // 编排去重：codex 在 decide 轮内经 wb_execute_template 真实执行过时，
       // 最终 PLAN 只是"编排总结的载体"——产物/卡片已由工具链路落会话，跳过重复执行。
       if (workbenchService.consumeOrchestratedFlag(sessionId)) {

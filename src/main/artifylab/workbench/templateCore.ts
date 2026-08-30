@@ -13,6 +13,8 @@ export interface WorkflowTemplate {
   descriptionEn?: string
   mediaType: WorkbenchMediaType
   prompt: ComfyPrompt
+  /** UI graph 格式（{nodes,links}）：画布同步（intent=workflow）需要；无则提示先固化 */
+  workflow?: unknown
   paramsNodes: ParamNode[]
   requiredModels?: string[]
   knowledge?: string
@@ -63,6 +65,7 @@ export function templateFromApp(app: App): WorkflowTemplate | null {
     description: app.description || `${app.name}（${mediaType}）`,
     mediaType,
     prompt,
+    workflow: app.template?.workflow ?? undefined,
     paramsNodes,
     requiredModels: extractRequiredModels(prompt),
     chainable:
@@ -84,6 +87,6 @@ export function toPseudoApp(t: WorkflowTemplate): App {
     description: t.description,
     createdAt: 0,
     updatedAt: 0,
-    template: { prompt: t.prompt, paramsNodes: t.paramsNodes, workflow: undefined }
+    template: { prompt: t.prompt, paramsNodes: t.paramsNodes, workflow: t.workflow }
   }
 }

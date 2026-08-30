@@ -55,13 +55,22 @@ export async function buildCanvasDigest() {
   } catch (_e) {
     /* 队列获取失败按 0 处理 */
   }
+  // 节点清单（供服务端 PLAN 注入 agent 决策上下文：nodeOverrides/batch 变体的 id 来源）
+  // 注意 nodeCount 取全量，nodes 截断前 40（防 digest 体积膨胀）
+  const allNodes = nodes
+  const nodesBrief = allNodes.slice(0, 40).map((n) => ({
+    id: n.id,
+    type: String(n.type || ''),
+    title: typeof n.title === 'string' && n.title ? n.title : undefined,
+  }))
   return {
     seq: ++CANVAS_BRIDGE.digestSeq,
     workflowName: getWorkflowName(),
-    nodeCount: nodes.length,
+    nodeCount: allNodes.length,
     models,
     keyParams,
     queue,
+    nodes: nodesBrief,
     ts: Date.now(),
   }
 }

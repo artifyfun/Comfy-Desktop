@@ -1027,13 +1027,20 @@
       }
     } catch (_e) {
     }
+    const allNodes = nodes;
+    const nodesBrief = allNodes.slice(0, 40).map((n) => ({
+      id: n.id,
+      type: String(n.type || ""),
+      title: typeof n.title === "string" && n.title ? n.title : void 0
+    }));
     return {
       seq: ++CANVAS_BRIDGE.digestSeq,
       workflowName: getWorkflowName(),
-      nodeCount: nodes.length,
+      nodeCount: allNodes.length,
       models,
       keyParams,
       queue,
+      nodes: nodesBrief,
       ts: Date.now()
     };
   }
@@ -1314,6 +1321,70 @@
           requestId: data.requestId,
           ok: false,
           error: String(e).slice(0, 120)
+        });
+      }
+    }
+    if (data.type === "artify:canvas-execute") {
+      const ackType = "artify:canvas-execute-result";
+      try {
+        const app = window.app;
+        if (!app || typeof app.graphToPrompt !== "function")
+          throw new Error("graphToPrompt unavailable\uFF08\u753B\u5E03\u672A\u5C31\u7EEA\uFF09");
+        const p = await app.graphToPrompt();
+        const prompt = p && p.output ? p.output : p;
+        const api = window.__ARTIFY_LAB_API__ || window.location.origin;
+        if (data.batch) {
+          const rowKeys = /* @__PURE__ */ new Set();
+          for (const it of data.batch.items || []) {
+            if (!it || typeof it !== "object") continue;
+            for (const k of Object.keys(it)) rowKeys.add(k);
+          }
+          for (const k of Object.keys(data.batch.sharedParams || {})) rowKeys.add(k);
+          const inputsMapping = [...rowKeys].map((k) => {
+            const m = /^(\d+)[./](.+)$/.exec(k);
+            return m ? { id: m[1], key: m[2], valueMap: { key: k } } : null;
+          }).filter(Boolean);
+          const items = (data.batch.items || []).map((it) => ({
+            ...data.batch.sharedParams || {},
+            ...it
+          }));
+          if (inputsMapping.length === 0 || items.length < 2)
+            throw new Error("batch \u884C\u952E\u9700\u4E3A\u300C\u8282\u70B9id.widget\u540D\u300D\u683C\u5F0F\u4E14\u81F3\u5C11 2 \u884C");
+          const r = await fetch(`${api}/api/canvas/batch`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              prompt,
+              inputsMapping,
+              items,
+              name: data.name,
+              sessionId: data.sessionId
+            })
+          });
+          const j = await r.json().catch(() => null);
+          if (!r.ok || !j || !j.success) throw new Error(j && j.message || `HTTP ${r.status}`);
+          postToEmbed({ type: ackType, requestId: data.requestId, ok: true, jobId: j.data.jobId, batch: true });
+        } else {
+          const r = await fetch(`${api}/api/canvas/execute`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              prompt,
+              nodeOverrides: data.nodeOverrides,
+              name: data.name,
+              sessionId: data.sessionId
+            })
+          });
+          const j = await r.json().catch(() => null);
+          if (!r.ok || !j || !j.success) throw new Error(j && j.message || `HTTP ${r.status}`);
+          postToEmbed({ type: ackType, requestId: data.requestId, ok: true, promptId: j.data.promptId });
+        }
+      } catch (e) {
+        postToEmbed({
+          type: ackType,
+          requestId: data.requestId,
+          ok: false,
+          error: String(e).slice(0, 200)
         });
       }
     }

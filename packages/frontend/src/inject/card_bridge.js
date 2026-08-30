@@ -130,6 +130,75 @@ export async function handleArtifyMessage(data) {
       })
     }
   }
+  if (data.type === 'artify:canvas-execute') {
+    // M5 执行画布当前工作流：graphToPrompt（当前激活 tab）→ 服务端提交 →
+    // ack promptId（单次）或 jobId（批量）。回执走同一 iframe postMessage。
+    const ackType = 'artify:canvas-execute-result'
+    try {
+      const app = window.app
+      if (!app || typeof app.graphToPrompt !== 'function')
+        throw new Error('graphToPrompt unavailable（画布未就绪）')
+      const p = await app.graphToPrompt()
+      const prompt = p && p.output ? p.output : p
+      const api = window.__ARTIFY_LAB_API__ || window.location.origin
+      if (data.batch) {
+        // 批量：行键「节点id.widget名」→ inputsMapping + items（sharedParams 合并进每行）
+        const rowKeys = new Set()
+        for (const it of data.batch.items || []) {
+          if (!it || typeof it !== 'object') continue
+          for (const k of Object.keys(it)) rowKeys.add(k)
+        }
+        for (const k of Object.keys(data.batch.sharedParams || {})) rowKeys.add(k)
+        const inputsMapping = [...rowKeys]
+          .map((k) => {
+            const m = /^(\d+)[./](.+)$/.exec(k)
+            return m ? { id: m[1], key: m[2], valueMap: { key: k } } : null
+          })
+          .filter(Boolean)
+        const items = (data.batch.items || []).map((it) => ({
+          ...(data.batch.sharedParams || {}),
+          ...it,
+        }))
+        if (inputsMapping.length === 0 || items.length < 2)
+          throw new Error('batch 行键需为「节点id.widget名」格式且至少 2 行')
+        const r = await fetch(`${api}/api/canvas/batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt,
+            inputsMapping,
+            items,
+            name: data.name,
+            sessionId: data.sessionId,
+          }),
+        })
+        const j = await r.json().catch(() => null)
+        if (!r.ok || !j || !j.success) throw new Error((j && j.message) || `HTTP ${r.status}`)
+        postToEmbed({ type: ackType, requestId: data.requestId, ok: true, jobId: j.data.jobId, batch: true })
+      } else {
+        const r = await fetch(`${api}/api/canvas/execute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt,
+            nodeOverrides: data.nodeOverrides,
+            name: data.name,
+            sessionId: data.sessionId,
+          }),
+        })
+        const j = await r.json().catch(() => null)
+        if (!r.ok || !j || !j.success) throw new Error((j && j.message) || `HTTP ${r.status}`)
+        postToEmbed({ type: ackType, requestId: data.requestId, ok: true, promptId: j.data.promptId })
+      }
+    } catch (e) {
+      postToEmbed({
+        type: ackType,
+        requestId: data.requestId,
+        ok: false,
+        error: String(e).slice(0, 200),
+      })
+    }
+  }
 }
 
 /** 向工作台 iframe 回传（iframe 未打开时静默丢弃——写通道只在 embed 打开时可用） */

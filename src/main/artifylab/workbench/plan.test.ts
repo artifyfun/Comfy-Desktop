@@ -73,6 +73,42 @@ describe('validatePlanLocal', () => {
     expect(badId.issues[0]!.message).toContain('模板不存在')
   })
 
+  it('workflow 意图必须指定存在的模板', () => {
+    const ok = validatePlanLocal({ intent: 'workflow', templateId: 'app:t1' }, [makeTemplate()])
+    expect(ok.ok).toBe(true)
+    expect(ok.template?.id).toBe('app:t1')
+
+    const noId = validatePlanLocal({ intent: 'workflow' } as WorkbenchPlan, [makeTemplate()])
+    expect(noId.ok).toBe(false)
+    expect(noId.issues[0]!.field).toBe('templateId')
+
+    const badId = validatePlanLocal({ intent: 'workflow', templateId: 'app:nope' }, [
+      makeTemplate()
+    ])
+    expect(badId.ok).toBe(false)
+    expect(badId.issues[0]!.message).toContain('模板不存在')
+  })
+
+  it('canvas-run 不校验模板，nodeOverrides 宽松放行', () => {
+    const ok = validatePlanLocal(
+      { intent: 'canvas-run', nodeOverrides: { '16': { widgetOverrides: { steps: 40 } } } },
+      []
+    )
+    expect(ok.ok).toBe(true)
+  })
+
+  it('canvas-run 批量：items ≥2 且为数组', () => {
+    const ok = validatePlanLocal(
+      { intent: 'canvas-run', batch: { items: [{ '16.steps': 20 }, { '16.steps': 40 }] } },
+      []
+    )
+    expect(ok.ok).toBe(true)
+
+    const tooFew = validatePlanLocal({ intent: 'canvas-run', batch: { items: [{}] } }, [])
+    expect(tooFew.ok).toBe(false)
+    expect(tooFew.issues[0]!.field).toBe('batch')
+  })
+
   it('数字超范围被拒', () => {
     const r = validatePlanLocal({ intent: 'image', templateId: 'app:t1', params: { steps: 999 } }, [
       makeTemplate()

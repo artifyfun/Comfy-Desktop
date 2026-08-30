@@ -35,3 +35,12 @@ description: Artify 工作台多步编排与工作流创作指南。当需求需
 4. 效果好的可 `wb_publish_workflow(name, workflow)` 固化为新模板，供后续复用。
 
 API 格式：`{"节点id": {"class_type": "节点类名", "inputs": {"参数名": 值 或 ["上游id", 端口号]}}}`；链接字段值为 `["上游节点id", 输出端口下标]`。
+
+## 画布协同（C 界面 AI 侧边栏）
+
+主场景：感知画布当前 tab 工作流 → 修改 → 执行 → 批量。agent 决策时「画布当前状态」段已注入当前激活 tab 的节点清单/模型/关键参数，节点 id 以清单里 `#id` 为准：
+
+1. **同步模板到画布**：用户说「把工作流同步到画布 / 打开某模板布局」→ PLAN `intent=workflow` + `templateId`（模板库 id）。
+2. **执行画布当前工作流**：用户说「执行画布上的 / 跑当前图 / 按画布参数生成」→ PLAN `intent=canvas-run`（不指定 templateId）。需要改参数再跑 → 加 `nodeOverrides`（键=节点 id，值=widgetOverrides，同「节点级控制」格式）。
+3. **画布批量执行**：对当前画布多变体 → `intent=canvas-run` + `batch`。行键用「节点id.widget名」格式（如 `"16.steps": 40`、`"9.text": "新提示词"`）；共有的固定变体放 `sharedParams`（同格式）。系统按行逐条执行画布当前工作流，产物逐个回卡。
+4. 画布未就绪/图太小时（如空画布），用 chat 说明并建议先在画布打开工作流。

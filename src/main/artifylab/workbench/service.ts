@@ -50,6 +50,30 @@ import {
 } from './presetCore'
 import { renderEnvSnapshot, SELF_KNOWLEDGE_TEXT, type WorkbenchEnvSnapshot } from './selfKnowledge'
 import { extractDocText, isDocumentAttachment, renderDocContext } from './docContext'
+
+/** 画布当前状态快照（/api/canvas/state 的 digest 投影，供 spec 注入） */
+interface CanvasStateSnapshot {
+  workflowName: string
+  nodeCount: number
+  models?: string[]
+  keyParams?: Record<string, unknown>
+  queue?: { running?: number; pending?: number }
+  nodes?: Array<{ id: number | string; type: string; title?: string }>
+}
+
+/** 关键参数 → 一行摘要（seed/steps/cfg/sampler/提示词前 40 字） */
+function renderKeyParams(kp?: Record<string, unknown>): string {
+  if (!kp || Object.keys(kp).length === 0) return '（无）'
+  const parts: string[] = []
+  if (kp.seed !== undefined) parts.push(`seed=${String(kp.seed)}`)
+  if (kp.steps !== undefined) parts.push(`steps=${String(kp.steps)}`)
+  if (kp.cfg !== undefined) parts.push(`cfg=${String(kp.cfg)}`)
+  if (kp.sampler !== undefined) parts.push(`sampler=${String(kp.sampler)}`)
+  if (Array.isArray(kp.prompts))
+    parts.push(`prompt=${String((kp.prompts as string[])[0] ?? '').slice(0, 40)}…`)
+  if (parts.length === 0) parts.push(JSON.stringify(kp).slice(0, 100))
+  return parts.join(' · ')
+}
 import { get as getSetting } from '../../settings'
 import { getOrCreateMcpToken } from '../mcp/auth'
 import { beginWorkbenchToolContext, endWorkbenchToolContext } from '../mcp/workbenchTools'
@@ -791,6 +815,23 @@ class WorkbenchService {
     return session.executions[session.executions.length - 1]!
   }
 
+  /** 画布当前状态（C 界面注入桥最近一次 digest 上报；供 M5 感知注入 agent 决策） */
+  private async fetchCanvasState(): Promise<CanvasStateSnapshot | null> {
+    try {
+      const host = appStoreManager.getConfig().serverHost
+      if (!host) return null
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 1200)
+      const res = await fetch(`${host}/api/canvas/state`, { signal: ctrl.signal })
+      clearTimeout(timer)
+      if (!res.ok) return null
+      const json = (await res.json()) as { data?: { state?: CanvasStateSnapshot | null } }
+      return json?.data?.state ?? null
+    } catch {
+      return null
+    }
+  }
+
   /** codex 决策提示词：模板清单 + 会话近史 + 用户输入 + 预设/附件/快捷方式 */
   /**
    * 环境快照（自我认知层）：聚合已固化技能 / 本地模型 / 显存 / 自定义节点。
@@ -942,14 +983,39 @@ class WorkbenchService {
     } catch (e) {
       logger.debug('workbench env snapshot render failed', e)
     }
-    return `${SELF_KNOWLEDGE_TEXT}${envSection}
+    // 画布当前状态（M5 感知注入）：C 界面注入桥最近一次上报的 digest（含节点清单）。
+    // agent 据此知道画布当前 tab 是什么工作流、有哪些节点，才能产出可执行的
+    // nodeOverrides / batch 变体（键=节点id.widget名）。
+    let canvasSection = ''
+    try {
+      const canvasState = await this.fetchCanvasState()
+      if (canvasState) {
+        const nodesLine = (canvasState.nodes ?? [])
+          .slice(0, 25)
+          .map((n) => `#${n.id} ${n.type}${n.title ? `（${n.title}）` : ''}`)
+          .join('、')
+        canvasSection = `\n## 画布当前状态（C 界面当前激活 tab；无则忽略）
+工作流：${canvasState.workflowName} · 节点 ${canvasState.nodeCount} 个
+模型：${(canvasState.models ?? []).join('、') || '（无）'}
+关键参数：${renderKeyParams(canvasState.keyParams)}
+队列：running ${canvasState.queue?.running ?? 0} / pending ${canvasState.queue?.pending ?? 0}
+节点清单：${nodesLine || '（空画布）'}
+`
+      }
+    } catch (e) {
+      logger.debug('workbench canvas state render failed', e)
+    }
+    return `${SELF_KNOWLEDGE_TEXT}${envSection}${canvasSection}
 根据用户需求从模板库选择模板并填参数，输出**只含一个 JSON 对象**（无 markdown 代码块、无解释文字）：
-{"intent":"image|video|audio|text|chat|memory","templateId":"...","params":{...},"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text/memory 时直接给用户的回复","memory":{"action":"remember|forget","key":"...","value":"remember 时必填"},"title":"仅首条消息时提供"}
+{"intent":"image|video|audio|text|chat|memory|workflow|canvas-run","templateId":"...","params":{...},"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text/memory 时直接给用户的回复","memory":{"action":"remember|forget","key":"...","value":"remember 时必填"},"title":"仅首条消息时提供"}
 
 规则：
 1. **简单需求**（能直接映射到某个模板的参数面）→ 直接输出 PLAN JSON：intent=image/video/audio 选 templateId，params 数值遵守 min/max，枚举必须完全匹配可选值。模板给不出用户要的效果时，按 5.2 变通，不要硬凑模板参数。
 2. intent=text 走纯文本生成（文案/起名/总结等），把生成结果放 reply。
 3. intent=chat 用于追问澄清或闲聊，回复放 reply。
+3.1 **把工作流同步到右侧画布**（用户说「把工作流同步到画布 / 加载工作流 / 打开某模板的画布布局」）→ intent=workflow + templateId 选目标模板（模板库清单里的 id）。画布会整图替换为该模板保存的布局；该模板未保存布局时系统会明确报错。
+3.2 **执行画布当前工作流**（用户说「执行画布上的工作流 / 跑一下当前图 / 按画布参数生成 / 用当前画布出图」）→ intent=canvas-run（**不指定 templateId**；可带 nodeOverrides 按节点 id 覆盖 widget，如 {"16":{"widgetOverrides":{"steps":40}}}）。
+3.3 **画布批量执行**（对当前画布多变体/多参数组合批量出图）→ intent=canvas-run + batch.items（每行=一组变体）。行内键用「节点id.widget名」格式（如 "16.steps":40、"9.text":"新提示词"），值=该 widget 新值；共有的固定变体放 sharedParams（同格式）。系统按行逐条执行画布当前工作流。
 4. 模板库为空或不匹配时选 chat 并说明。可跨会话保留的偏好/事实用 intent=memory（见「长期记忆」段）。
 5. 用户上传了素材时，倾向选择带媒体输入参数的模板（图生图/视频驱动），参数值填素材文件名（已上传）。
 5.1 **参数类型**：模板参数里的 rc（renderComponent）为 *-uploader 的是**素材文件槽**——只能传已上传素材的文件名或 data:/http(s): URL，不能传提示词文本（会导致 ComfyUI 报 No such file or directory）。只有 rc=textarea/select/slider/number（或无 rc 的文本型）参数才收提示词/数值。
@@ -1293,6 +1359,27 @@ ${userInput}`
       })
     }
     return execution
+  }
+
+  /** 画布当前工作流执行记录（canvas-run 链路）：execution 落会话，重进会话可见产物 */
+  recordCanvasExecution(sessionId: string, promptId: string, name?: string): void {
+    const session = this.getSession(sessionId)
+    if (!session) return
+    session.executions.push({
+      promptId,
+      templateId: name ?? 'canvas:current',
+      params: {},
+      outputs: [],
+      status: 'queued',
+      startedAt: Date.now()
+    })
+    this.appendMessage(sessionId, {
+      role: 'agent',
+      kind: 'card',
+      text: `执行画布工作流${name ? `（${name}）` : ''}`,
+      promptId
+    })
+    this.flush()
   }
 
   /**

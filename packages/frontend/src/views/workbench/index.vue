@@ -31,6 +31,12 @@
           <span class="max-w-[140px] truncate inline-block">{{ canvasState.workflowName }}</span>
         </span>
         <span class="shrink-0">{{ t('workbenchCanvasNodes').replace('{n}', String(canvasState.nodeCount)) }}</span>
+        <!-- 无限画布侧栏：物件计数（图片/便签/连线）——与 C 宿主 digest 的 counts 同构 -->
+        <span v-if="canvasState.counts" class="shrink-0" style="color: var(--wb-text-2)">
+          <i class="fas fa-image mr-1"></i>{{ canvasState.counts.images }}
+          <i class="fas fa-sticky-note mx-1"></i>{{ canvasState.counts.notes }}
+          <i class="fas fa-link mx-1"></i>{{ canvasState.counts.links }}
+        </span>
         <span v-if="canvasState.selection?.length" class="truncate" style="color: var(--wb-accent)">
           <i class="fas fa-vector-square mr-1"></i>{{ canvasState.selection.join(' · ') }}
         </span>
@@ -211,8 +217,11 @@
               {{ currentSession?.title || t('workbench') }}
             </div>
             <div v-if="isNarrow" class="flex-1"></div>
-            <!-- 高级参数（节点级覆盖）：粘贴 nodeOverrides JSON → 预检/执行 -->
+            <!-- 高级参数（节点级覆盖）：粘贴 nodeOverrides JSON → 预检/执行。
+                 窄容器（C 侧边栏/画布侧栏）隐藏——画布执行由 agent 驱动 nodeOverrides，
+                 手填是 A 工作台（模板工厂）职责 -->
             <a-button
+              v-if="!isNarrow"
               size="small"
               :title="t('workbenchAdvParams')"
               :disabled="!sessionId || busy"
@@ -220,8 +229,9 @@
             >
               <i class="fas fa-sliders"></i>
             </a-button>
-            <!-- 复制调试信息：spec 提示词 + 模型原始输出(含思考) + PLAN + 校验 + 执行 -->
+            <!-- 导入工作流执行：A 工作台专属（窄容器是画布协同形态，职责外） -->
             <a-button
+              v-if="!isNarrow"
               size="small"
               :title="t('workbenchImportWorkflow')"
               :disabled="!sessionId || busy"
@@ -229,6 +239,7 @@
             >
               <i class="fas fa-file-import"></i>
             </a-button>
+            <!-- 复制调试信息：spec 提示词 + 模型原始输出(含思考) + PLAN + 校验 + 执行（三形态可用） -->
             <a-button
               size="small"
               :title="t('workbenchCopyDebug')"
@@ -1533,6 +1544,75 @@ function handleSse(chunk) {
       text: data.reply || '',
       createdAt: Date.now(),
     })
+  } else if (event === 'sync') {
+    // 模板工作流 → 宿主画布（注入桥 loadWorkflow 整图替换；失败补错误气泡）
+    syncWorkflowToCanvas(data).catch((e) => {
+      pushMsg({
+        role: 'agent',
+        kind: 'error',
+        text: t('workbenchSyncFailed') + ': ' + (e?.message || String(e)),
+        createdAt: Date.now(),
+      })
+    })
+  } else if (event === 'canvas-exec') {
+    // 执行画布当前工作流：前端 → 注入桥 graphToPrompt → 服务端提交 → ack
+    runCanvasOnHost(data)
+      .then((r) => {
+        dismissDecidingProgress()
+        if (r.batch) {
+          artifacts.value.unshift({
+            promptId: r.jobId,
+            templateId: '画布批量',
+            templateName: '画布批量',
+            status: 'running',
+            error: '',
+            outputs: [],
+            files: [],
+          })
+          startBatchPoll(r.jobId)
+          pushMsg({
+            role: 'agent',
+            kind: 'chat',
+            text: t('workbenchCanvasBatchQueued'),
+            createdAt: Date.now(),
+          })
+        } else {
+          artifacts.value.unshift({
+            promptId: r.promptId,
+            templateId: '画布当前工作流',
+            templateName: '画布当前工作流',
+            status: 'running',
+            error: '',
+            outputs: [],
+            files: [],
+          })
+          const msg = pushMsg({
+            role: 'agent',
+            kind: 'progress',
+            text: t('workbenchExecuting'),
+            createdAt: Date.now(),
+          })
+          execProgressIndex.set(r.promptId, msg._key)
+          executingCount.value++
+          startPoll(r.promptId)
+          pushMsg({
+            role: 'agent',
+            kind: 'chat',
+            text: t('workbenchCanvasRunQueued'),
+            createdAt: Date.now(),
+          })
+        }
+        scrollToBottom()
+      })
+      .catch((e) => {
+        dismissDecidingProgress()
+        pushMsg({
+          role: 'agent',
+          kind: 'error',
+          text: t('workbenchCanvasRunFailed') + ': ' + (e?.message || String(e)),
+          createdAt: Date.now(),
+        })
+      })
   } else if (event === 'plan') {
     // 纯 chat 意图（无 batch/无模板/无参数）不产计划卡——内容与随后的 reply
     // 重复，窄容器里还多出一块视觉噪音；直接降级为不渲染
@@ -2252,8 +2332,106 @@ async function confirmApplyOps() {
   }
 }
 
+/**
+ * 模板工作流 → 宿主画布：走注入桥 artify:canvas-ops loadWorkflow 整图替换
+ * （与 diff 确认卡同通道）。返回 Promise，成功/失败由调用方提示。
+ */
+function syncWorkflowToCanvas({ templateId, name, workflow }) {
+  if (!isEmbed.value) return Promise.reject(new Error(t('workbenchSyncNotEmbed')))
+  if (!workflow || !Array.isArray(workflow.nodes))
+    return Promise.reject(new Error(t('workbenchSyncNoWorkflow')))
+  return new Promise((resolve, reject) => {
+    const requestId = `sync-${Date.now()}-${++opsRequestSeq}`
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', onAck)
+      reject(new Error('bridge timeout'))
+    }, 8000)
+    function onAck(event) {
+      let data = event.data
+      if (typeof data === 'string') {
+        try {
+          data = JSON.parse(data)
+        } catch {
+          return
+        }
+      }
+      if (data && data.type === 'artify:canvas-ops-result' && data.requestId === requestId) {
+        window.removeEventListener('message', onAck)
+        clearTimeout(timer)
+        if (data.ok) resolve(data)
+        else reject(new Error(data.error || 'unknown'))
+      }
+    }
+    window.addEventListener('message', onAck)
+    try {
+      window.parent.postMessage(
+        JSON.stringify({
+          type: 'artify:canvas-ops',
+          ops: [{ type: 'loadWorkflow', workflow }],
+          requestId,
+          reason: 'workbench-sync-template',
+        }),
+        '*'
+      )
+    } catch (e) {
+      window.removeEventListener('message', onAck)
+      clearTimeout(timer)
+      reject(e)
+    }
+  })
+}
+
 function isVideoFile(f) {
   return /\.(mp4|webm|mov|gif)$/i.test(f?.filename ?? '')
+}
+
+/**
+ * 执行画布当前工作流：通知注入桥 graphToPrompt → POST /api/canvas/execute
+ * （或 /batch）→ ack 返回 promptId/jobId。与 sync 同通道但动作不同
+ * （执行不改画布，只提交队列）。
+ */
+function runCanvasOnHost({ requestId, nodeOverrides, name, sessionId, batch }) {
+  if (!isEmbed.value) return Promise.reject(new Error(t('workbenchSyncNotEmbed')))
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', onAck)
+      reject(new Error('bridge timeout'))
+    }, 10000)
+    function onAck(event) {
+      let data = event.data
+      if (typeof data === 'string') {
+        try {
+          data = JSON.parse(data)
+        } catch {
+          return
+        }
+      }
+      if (data && data.type === 'artify:canvas-execute-result' && data.requestId === requestId) {
+        window.removeEventListener('message', onAck)
+        clearTimeout(timer)
+        if (data.ok) resolve(data)
+        else reject(new Error(data.error || 'unknown'))
+      }
+    }
+    window.addEventListener('message', onAck)
+    try {
+      window.parent.postMessage(
+        JSON.stringify({
+          type: 'artify:canvas-execute',
+          requestId,
+          nodeOverrides,
+          name,
+          sessionId,
+          batch,
+        }),
+        '*'
+      )
+    } catch (e) {
+      window.removeEventListener('message', onAck)
+      clearTimeout(timer)
+      reject(e)
+    }
+  })
 }
 
 // ---------- 固化 ----------

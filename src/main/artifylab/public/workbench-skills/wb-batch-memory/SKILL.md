@@ -17,6 +17,18 @@ description: Artify 工作台批量编排与长期记忆指南。当用户需要
 - 行内值覆盖 `sharedParams`，`sharedParams` 覆盖模板默认值；未提到的参数用模板默认
 - 例：「这两个提示词各出一张图」→ `items:[{"prompt":"A"},{"prompt":"B"}]`
 
+## 画布批量（canvas-run + batch）
+
+对**画布当前工作流**批量出图（C 界面侧边栏）时，行键用「节点id.widget名」格式（节点 id 取「画布当前状态」清单里的 `#id`）：
+
+```json
+{"intent":"canvas-run","batch":{"items":[{"16.steps":40},{"16.steps":60}],"sharedParams":{"9.text":"夜景氛围"}}}
+```
+
+- 键=「节点id.widget名」（如 `16.steps`、`9.text`），值=该 widget 新值
+- `sharedParams` 为全批共享的固定变体（同格式），行内值优先
+- 系统按行逐条执行画布当前工作流；不确定节点/widget 名时先看「画布当前状态」节点清单
+
 ## 长期记忆（intent=memory）
 
 用户表达**可跨会话保留**的偏好/事实时：

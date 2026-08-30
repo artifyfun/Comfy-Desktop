@@ -12,7 +12,7 @@ import { logger } from '../utils/logger'
 
 /** codex 决策输出的结构化执行计划 */
 export interface WorkbenchPlan {
-  intent: 'image' | 'video' | 'audio' | 'text' | 'chat' | 'memory'
+  intent: 'image' | 'video' | 'audio' | 'text' | 'chat' | 'memory' | 'workflow' | 'canvas-run'
   /** intent=chat/text/memory 时直接回复用户；执行意图必须带模板与参数 */
   reply?: string
   /**
@@ -359,6 +359,32 @@ export function validatePlanLocal(
   if (plan.intent === 'text') {
     // 文本意图走 ai.ts，无需模板
     if (!plan.reply) issues.push({ field: 'reply', message: 'text 意图暂以 reply 承载文本结果' })
+    return { ok: issues.length === 0, issues }
+  }
+  if (plan.intent === 'workflow') {
+    // 同步工作流到画布：必须指定模板（取其 UI graph workflow）
+    if (!plan.templateId) {
+      issues.push({ field: 'templateId', message: 'workflow 意图必须指定 templateId' })
+      return { ok: false, issues }
+    }
+    const template = templates.find((t) => t.id === plan.templateId)
+    if (!template) {
+      issues.push({ field: 'templateId', message: `模板不存在: ${plan.templateId}` })
+      return { ok: false, issues }
+    }
+    return { ok: true, issues, template }
+  }
+  if (plan.intent === 'canvas-run') {
+    // 执行画布当前工作流：图在宿主（ComfyUI），服务端拿不到——不校验模板；
+    // nodeOverrides（按节点 id 覆盖 widget）与 batch 都是对画布图的变体，
+    // 无法离线校验（无画布 prompt），宽松放行，执行端给真实错误。
+    if (plan.batch) {
+      const n = plan.batch.items?.length ?? 0
+      if (n < 2) issues.push({ field: 'batch', message: 'batch.items 至少 2 行' })
+      if (n > 200) issues.push({ field: 'batch', message: 'batch.items 上限 200 行' })
+      if (!Array.isArray(plan.batch.items))
+        issues.push({ field: 'batch', message: 'batch.items 必须是数组' })
+    }
     return { ok: issues.length === 0, issues }
   }
   // image/video/audio：必须有模板
