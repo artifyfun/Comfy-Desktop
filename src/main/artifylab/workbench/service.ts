@@ -119,6 +119,8 @@ export interface WorkbenchMessage {
   role: 'user' | 'agent' | 'system'
   kind: WorkbenchMessageKind
   text: string
+  /** 回合分组 id：同一轮 decide（用户消息→agent 回复）的消息共享；前端据此合并气泡 */
+  turnId?: number
   /** 分支树(dsh 同款):父消息在 messages[] 中的下标;-1 表示根(旧数据/首个用户消息) */
   parentId?: number
   /** 子分支下标列表(按创建序);单子时省略不存,节省存储 */
@@ -205,6 +207,8 @@ export interface WorkbenchSession {
   titleLocked?: boolean
   /** 调试日志（每轮 decide 的完整上下文；cap 10 条防会话文件膨胀） */
   debugLogs?: WorkbenchDebugLog[]
+  /** 回合序号（用户消息推进；agent 消息继承当前值，前端据此合并气泡） */
+  turnSeq?: number
 }
 
 /**
@@ -683,9 +687,20 @@ class WorkbenchService {
     const msgs = session.messages
     // 分支树(dsh 同款):新消息挂在当前 activeLeaf 链末端;无 activeLeaf 时挂最后一条
     const parentIdx = session.activeLeaf !== undefined ? session.activeLeaf : msgs.length - 1
+    // 回合分组：用户消息推进 turnSeq（新回合开始），agent 消息继承当前回合。
+    // 前端据此把一轮 decide 的过程条目/计划卡/回复/产物合并为一个视觉气泡。
+    if (msg.role === 'user') {
+      session.turnSeq = (session.turnSeq ?? 0) + 1
+    }
     const node: WorkbenchMessage = {
       ...msg,
       createdAt: Date.now(),
+      turnId:
+        msg.turnId !== undefined
+          ? msg.turnId
+          : msg.role === 'user'
+            ? session.turnSeq
+            : (session.turnSeq ?? 0),
       parentId: msgs.length > 0 ? parentIdx : -1
     }
     if (msgs.length > 0) {

@@ -267,7 +267,13 @@
                   {{ dateDividerLabel(m.createdAt) }}
                 </span>
               </div>
-              <div class="flex" :class="m.role === 'user' ? 'justify-end' : 'justify-start'">
+              <div
+                class="flex"
+                :class="[
+                  m.role === 'user' ? 'justify-end' : 'justify-start',
+                  turnGapClass(i),
+                ]"
+              >
                 <div class="max-w-[85%] space-y-1 group/msg">
                   <!-- 附件缩略图（用户消息） -->
                   <div v-if="m.attachments?.length" class="flex gap-1.5 flex-wrap justify-end">
@@ -299,9 +305,10 @@
                     </div>
                   </div>
                   <div
-                    class="rounded-lg px-3 py-2 text-sm break-words"
+                    class="px-3 py-2 text-sm break-words"
                     :class="[
                       messageClass(m),
+                      bubbleRadius(m, i),
                       m.kind === 'chat' || m.kind === 'error' ? '' : 'whitespace-pre-wrap',
                     ]"
                   >
@@ -324,9 +331,68 @@
                       <a-spin size="small" />
                       <span class="ml-2">{{ m.text }}</span>
                     </template>
-                    <!-- codex 工具条目折叠行（执行中 spinner，完成后可展开详情） -->
-                    <template v-else-if="m.kind === 'tool_item' && m.toolItem">
-                      <div class="flex items-center gap-2 min-w-0" @click.stop="toggleToolItem(m)">
+                    <!-- codex 工具条目：同 turn 相邻条目聚合为一行「过程（N 步）」，点击展开；
+                         单条目/旧数据保持原标题行（processGroupAt 返回 null 时） -->
+                    <template
+                      v-else-if="m.kind === 'tool_item' && m.toolItem && !processGroupSkipped(i)"
+                    >
+                      <template v-if="processGroupAt(i)">
+                        <div
+                          class="flex items-center gap-2 min-w-0 cursor-pointer"
+                          @click.stop="toggleProcessGroup(i)"
+                        >
+                          <a-spin v-if="processGroupRunning(processGroupAt(i))" size="small" />
+                          <i
+                            v-else
+                            class="fas fa-sliders text-tech-cyan"
+                          ></i>
+                          <span class="font-mono text-xs truncate flex-1">{{
+                            t('workbenchProcessSteps').replace(
+                              '{n}',
+                              String(processGroupAt(i).count),
+                            )
+                          }}</span>
+                          <i
+                            :class="`fas fa-chevron-${expandedProcessGroups.has(i) ? 'down' : 'right'} text-[10px] opacity-60`"
+                          ></i>
+                        </div>
+                        <template v-if="expandedProcessGroups.has(i)">
+                          <div
+                            v-for="tm in processGroupItems(processGroupAt(i))"
+                            :key="tm._key"
+                            class="mt-1"
+                          >
+                            <div
+                              class="flex items-center gap-2 min-w-0"
+                              @click.stop="toggleToolItem(tm)"
+                            >
+                              <a-spin v-if="toolItemRunning(tm.toolItem)" size="small" />
+                              <i
+                                v-else
+                                :class="`fas ${toolItemSummary(tm.toolItem).icon} text-tech-cyan`"
+                              ></i>
+                              <span class="font-mono text-xs truncate flex-1">{{
+                                toolItemSummary(tm.toolItem).label
+                              }}</span>
+                              <i
+                                v-if="toolItemDetail(tm.toolItem)"
+                                :class="`fas fa-chevron-${expandedToolIds.has(tm.toolItem.id) ? 'down' : 'right'} text-[10px] opacity-60`"
+                              ></i>
+                            </div>
+                            <pre
+                              v-if="expandedToolIds.has(tm.toolItem.id) && toolItemDetail(tm.toolItem)"
+                              class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-black/40 border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
+                              >{{ toolItemDetail(tm.toolItem) }}</pre
+                            >
+                          </div>
+                        </template>
+                      </template>
+                      <!-- 单条目/旧数据：原标题行 -->
+                      <div
+                        v-else
+                        class="flex items-center gap-2 min-w-0"
+                        @click.stop="toggleToolItem(m)"
+                      >
                         <a-spin v-if="toolItemRunning(m.toolItem)" size="small" />
                         <i
                           v-else
@@ -914,13 +980,22 @@ function nextMsgKey() {
   return `k${++msgKeySeq}`
 }
 
+// 回合分组：一轮 decide（用户消息→agent 过程/计划/回复/产物）共享 turnId，
+// 前端据此把多个气泡合并为一个 AI 回复块（服务端持久化消息也带 turnId）。
+let turnSeq = 0
+function nextTurn() {
+  return ++turnSeq
+}
+
 /**
  * 统一推消息入口：自动注入稳定 _key。原位更新（tool_item / 执行占位气泡）
  * 按 _key 寻址而不是数组下标——splice 删除占位气泡后下标会整体前移，
- * 下标寻址会更新到错误的行。
+ * 下标寻址会更新到错误的行。agent 消息自动继承当前回合 turnId（用户消息
+ * 由 runChat 显式 nextTurn 开新回合）。
  */
 function pushMsg(m) {
   const msg = { ...m, _key: nextMsgKey() }
+  if (msg.role === 'agent' && msg.turnId === undefined) msg.turnId = turnSeq
   messages.value.push(msg)
   return msg
 }
@@ -1030,6 +1105,8 @@ async function selectSession(s) {
   curSession.value = session
   // 服务端消息补稳定 key（存储序下标作 key 种子，切会话重载时保持稳定）
   messages.value = (session.messages ?? []).map((m, i) => ({ ...m, _key: m._key ?? `s${i}` }))
+  // 回合序号对齐历史最大 turnId：新回合编号继续递增，避免与旧消息误合并
+  turnSeq = messages.value.reduce((mx, m) => Math.max(mx, m.turnId ?? 0), 0)
   artifacts.value = [...(session.executions ?? [])].reverse().map((e) => ({
     promptId: e.promptId,
     templateId: e.templateId,
@@ -1226,11 +1303,13 @@ async function runChat(inputText, attachments, opts = {}) {
   busy.value = true
   pendingIssues.value = []
   if (opts.userBubble != null) {
+    const tid = nextTurn() // 用户消息开新回合，本轮 agent 消息自动继承
     pushMsg({
       role: 'user',
       kind: 'chat',
       text: opts.userBubble,
       attachments: attachments.length ? attachments : undefined,
+      turnId: tid,
       createdAt: Date.now(),
     })
   }
@@ -1426,6 +1505,65 @@ function toggleToolItem(m) {
   if (!id || !toolItemDetail(m.toolItem)) return
   if (expandedToolIds.has(id)) expandedToolIds.delete(id)
   else expandedToolIds.add(id)
+}
+
+// 回合级过程折叠：同 turn 相邻 tool_item 消息聚合为一行「过程（N 步）」。
+// 仅组首 index 有映射；组内非首条由组首统一渲染，不单独占行。
+const processGroups = computed(() => {
+  const map = new Map()
+  const msgs = messages.value
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i]
+    if (!m || m.kind !== 'tool_item' || !m.toolItem) continue
+    const prev = msgs[i - 1]
+    if (prev && prev.kind === 'tool_item' && prev.turnId != null && prev.turnId === m.turnId)
+      continue
+    let j = i
+    while (j < msgs.length && msgs[j] && msgs[j].kind === 'tool_item') {
+      if (j > i && msgs[j].turnId !== m.turnId) break
+      j++
+    }
+    map.set(i, { start: i, end: j - 1, count: j - i })
+  }
+  return map
+})
+const expandedProcessGroups = reactive(new Set())
+
+function processGroupAt(i) {
+  const g = processGroups.value.get(i)
+  // 单条目不聚合（保持原标题行）；旧数据（无 turnId）天然 count=1 走原样
+  return g && g.count > 1 ? g : null
+}
+
+/** 组内非首条：由组首聚合渲染，跳过占行 */
+function processGroupSkipped(i) {
+  const m = messages.value[i]
+  const prev = messages.value[i - 1]
+  return !!(
+    m &&
+    prev &&
+    m.kind === 'tool_item' &&
+    prev.kind === 'tool_item' &&
+    m.turnId != null &&
+    prev.turnId === m.turnId
+  )
+}
+
+function processGroupItems(g) {
+  return messages.value.slice(g.start, g.end + 1)
+}
+
+function processGroupRunning(g) {
+  return messages.value
+    .slice(g.start, g.end + 1)
+    .some((x) => x.toolItem && toolItemRunning(x.toolItem))
+}
+
+function toggleProcessGroup(i) {
+  const g = processGroupAt(i)
+  if (!g) return
+  if (expandedProcessGroups.has(i)) expandedProcessGroups.delete(i)
+  else expandedProcessGroups.add(i)
 }
 
 function toolItemRunning(item) {
@@ -2705,6 +2843,41 @@ function messageClass(m) {
   if (m.kind === 'card')
     return 'bg-[var(--wb-surface-deep)] text-slate-200 border border-[var(--wb-stroke-strong)]'
   return 'bg-[var(--wb-surface-deep)] text-slate-200 border-l-[3px] border-l-[var(--wb-stroke-strong)]'
+}
+
+// 回合合并：同 turn 相邻 agent 消息间距抵消（外层 space-y-6 → 组内紧凑）
+function turnGapClass(i) {
+  const m = messages.value[i]
+  const prev = messages.value[i - 1]
+  if (
+    m &&
+    prev &&
+    m.role === 'agent' &&
+    prev.role === 'agent' &&
+    m.turnId != null &&
+    m.turnId === prev.turnId
+  )
+    return '-mt-5' // 组内保留 ~4px 缝隙
+  return ''
+}
+
+// 回合合并：圆角只留组头/组尾，组内直角拼接，视觉上是一个回复块
+function bubbleRadius(m, i) {
+  const prev = messages.value[i - 1]
+  const next = messages.value[i + 1]
+  const same = (a, b) =>
+    !!a &&
+    !!b &&
+    a.role === 'agent' &&
+    b.role === 'agent' &&
+    a.turnId != null &&
+    a.turnId === b.turnId
+  const withPrev = same(prev, m)
+  const withNext = same(m, next)
+  if (withPrev && withNext) return 'rounded-t-md rounded-b-md'
+  if (withPrev) return 'rounded-t-md rounded-b-lg'
+  if (withNext) return 'rounded-t-lg rounded-b-md'
+  return 'rounded-lg'
 }
 
 // ---------- token 用量展示 ----------
