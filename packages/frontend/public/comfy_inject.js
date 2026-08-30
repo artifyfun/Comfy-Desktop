@@ -1977,6 +1977,51 @@
         true,
       )
     }
+
+    /**
+     * 右下浮动画布工具条避让（.p-buttongroup, z-1200, fixed 视口右下）：
+     * 侧栏拉宽时它会悬在侧栏 iframe 的输入框上方——视觉遮挡且截胡点击。
+     * 规则：与侧栏几何重叠 ⇒ 右移到画布剩余区域（left = sideRight + 12）；
+     * 不重叠 ⇒ 还原。仅动 left（动画过渡），不改宿主其他行为。
+     */
+    if (!window.__artifyFabAvoid) {
+      window.__artifyFabAvoid = true
+      const FAB_SEL = '.p-buttongroup'
+      let rafPending = false
+      const avoid = () => {
+        rafPending = false
+        const fab = document.querySelector(FAB_SEL)
+        const side = document.querySelector('.p-splitterpanel.side-bar-panel')
+        if (!fab || !side) return
+        const f = fab.getBoundingClientRect()
+        const s = side.getBoundingClientRect()
+        const overlaps = f.left < s.right && f.right > s.left && f.top < s.bottom && f.bottom > s.top
+        if (overlaps) {
+          const target = Math.round(s.right + 12)
+          if (fab.style.left !== target + 'px') {
+            fab.style.left = target + 'px'
+            fab.style.right = 'auto'
+          }
+        } else if (fab.style.left) {
+          fab.style.left = ''
+          fab.style.right = ''
+        }
+      }
+      const schedule = () => {
+        if (!rafPending) {
+          rafPending = true
+          requestAnimationFrame(avoid)
+        }
+      }
+      // 侧栏拖拽/窗口缩放/布局变化时重算
+      window.addEventListener('resize', schedule, true)
+      document.addEventListener('mousemove', schedule, true)
+      if (typeof ResizeObserver === 'function') {
+        const ro = new ResizeObserver(schedule)
+        ro.observe(document.querySelector('.p-splitter') || document.body)
+      }
+      avoid()
+    }
   }
 
   /**
