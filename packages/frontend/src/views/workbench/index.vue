@@ -259,7 +259,7 @@
               <i class="fas fa-wand-magic-sparkles text-4xl mb-3 opacity-40"></i>
               <p>{{ t('workbenchIntro') }}</p>
             </div>
-            <template v-for="(m, i) in messages" :key="m._key ?? i">
+            <template v-for="(m, i) in msgsWithTurn" :key="m._key ?? i">
               <div v-if="showDateDivider(i)" class="w-full pt-1 pb-2 text-center shrink-0">
                 <span
                   class="text-[11px] text-[var(--wb-text-3)] bg-[var(--wb-bg-base)] rounded-full px-3 py-1"
@@ -267,7 +267,180 @@
                   {{ dateDividerLabel(m.createdAt) }}
                 </span>
               </div>
+              <!-- 回合卡片：agent 同 turn 组首——过程(推理/工具)折叠 + 计划 + 正文 markdown + 产物图 -->
+              <div v-if="m.__turnFirst" class="flex justify-start">
+                <div class="max-w-[85%] w-full space-y-1 group/msg">
+                  <div
+                    class="rounded-lg px-3 py-2 text-sm break-words bg-[var(--wb-surface-deep)] text-slate-200 border border-[var(--wb-stroke-strong)]"
+                  >
+                    <template
+                      v-for="({ m: tm, i: tmi }, ti) in turnGroupItems(i)"
+                      :key="tm._key ?? tmi"
+                    >
+                      <!-- 产物缩略图（file part） -->
+                      <div
+                        v-if="tm.kind === 'artifact' && tm.outputFiles?.length"
+                        class="flex gap-2 flex-wrap pt-1 pb-1"
+                      >
+                        <div
+                          v-for="(f, fj) in tm.outputFiles"
+                          :key="fj"
+                          class="w-24 h-24 rounded-lg overflow-hidden bg-black/30 border border-[var(--wb-stroke)] cursor-zoom-in hover:border-[var(--wb-accent)] transition flex items-center justify-center"
+                          @click="lightboxFile = f"
+                        >
+                          <img
+                            :src="viewUrl(f)"
+                            class="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        </div>
+                      </div>
+                      <!-- 过程（reasoning/tool part）：同 turn tool_item 聚合折叠 -->
+                      <div
+                        v-if="tm.kind === 'tool_item' && tm.toolItem && !processGroupSkipped(tmi)"
+                        class="py-0.5"
+                      >
+                        <template v-if="processGroupAt(tmi)">
+                          <div
+                            class="flex items-center gap-2 min-w-0 cursor-pointer"
+                            @click.stop="toggleProcessGroup(tmi)"
+                          >
+                            <a-spin v-if="processGroupRunning(processGroupAt(tmi))" size="small" />
+                            <i v-else class="fas fa-sliders text-tech-cyan"></i>
+                            <span class="font-mono text-xs truncate flex-1">{{
+                              t('workbenchProcessSteps').replace(
+                                '{n}',
+                                String(processGroupAt(tmi).count),
+                              )
+                            }}</span>
+                            <i
+                              :class="`fas fa-chevron-${expandedProcessGroups.has(tmi) ? 'down' : 'right'} text-[10px] opacity-60`"
+                            ></i>
+                          </div>
+                          <div v-if="expandedProcessGroups.has(tmi)" class="mt-1 space-y-0.5">
+                            <div
+                              v-for="tm2 in processGroupItems(processGroupAt(tmi))"
+                              :key="tm2._key"
+                              class="flex items-center gap-2 min-w-0"
+                              @click.stop="toggleToolItem(tm2)"
+                            >
+                              <a-spin v-if="toolItemRunning(tm2.toolItem)" size="small" />
+                              <i
+                                v-else
+                                :class="`fas ${toolItemSummary(tm2.toolItem).icon} text-tech-cyan`"
+                              ></i>
+                              <span class="font-mono text-xs truncate flex-1">{{
+                                toolItemSummary(tm2.toolItem).label
+                              }}</span>
+                              <i
+                                v-if="toolItemDetail(tm2.toolItem)"
+                                :class="`fas fa-chevron-${expandedToolIds.has(tm2.toolItem.id) ? 'down' : 'right'} text-[10px] opacity-60`"
+                              ></i>
+                            </div>
+                            <pre
+                              v-for="tm2 in processGroupItems(processGroupAt(tmi)).filter(
+                                (x) =>
+                                  expandedToolIds.has(x.toolItem?.id) &&
+                                  toolItemDetail(x.toolItem),
+                              )"
+                              :key="'d' + tm2._key"
+                              class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-black/40 border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
+                              >{{ toolItemDetail(tm2.toolItem) }}</pre
+                            >
+                          </div>
+                        </template>
+                        <!-- 单条目/旧数据：原标题行 -->
+                        <template v-else>
+                          <div
+                            class="flex items-center gap-2 min-w-0"
+                            @click.stop="toggleToolItem(tm)"
+                          >
+                            <a-spin v-if="toolItemRunning(tm.toolItem)" size="small" />
+                            <i
+                              v-else
+                              :class="`fas ${toolItemSummary(tm.toolItem).icon} text-tech-cyan`"
+                            ></i>
+                            <span class="font-mono text-xs truncate flex-1">{{
+                              toolItemSummary(tm.toolItem).label
+                            }}</span>
+                            <i
+                              v-if="toolItemDetail(tm.toolItem)"
+                              :class="`fas fa-chevron-${expandedToolIds.has(tm.toolItem.id) ? 'down' : 'right'} text-[10px] opacity-60`"
+                            ></i>
+                          </div>
+                          <pre
+                            v-if="expandedToolIds.has(tm.toolItem.id) && toolItemDetail(tm.toolItem)"
+                            class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-black/40 border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
+                            >{{ toolItemDetail(tm.toolItem) }}</pre
+                          >
+                        </template>
+                      </div>
+                      <!-- 计划摘要（plan part） -->
+                      <div
+                        v-if="tm.kind === 'card' && tm.plan"
+                        class="my-1 py-1 border-l-[3px] border-l-[var(--wb-accent)] pl-2"
+                      >
+                        <div class="font-semibold mb-0.5 text-xs">
+                          <i class="fas fa-diagram-project mr-1"></i>{{ t('workbenchPlan') }}
+                        </div>
+                        <div class="text-xs opacity-80">{{ tm.plan.reason }}</div>
+                        <div
+                          v-if="batchSummaryText(tm.plan)"
+                          class="text-xs"
+                          style="color: var(--wb-accent)"
+                        >
+                          <i class="fas fa-layer-group mr-1"></i>{{ batchSummaryText(tm.plan) }}
+                        </div>
+                        <div class="text-xs">{{ cardText(tm.plan) }}</div>
+                      </div>
+                      <!-- 决策/执行占位（progress part） -->
+                      <div v-if="tm.kind === 'progress'" class="py-0.5">
+                        <a-spin size="small" />
+                        <span class="ml-2 text-xs">{{ tm.text }}</span>
+                      </div>
+                      <!-- 正文（text part）：markdown 渲染；error 红显 -->
+                      <div
+                        v-if="(tm.kind === 'chat' || tm.kind === 'error') && tm.role === 'agent'"
+                        class="pt-0.5"
+                        :class="tm.kind === 'error' ? 'text-red-300' : ''"
+                      >
+                        <WbMarkdown :source="tm.text" />
+                      </div>
+                    </template>
+                  </div>
+                  <!-- 回合卡片操作行：组尾时间/token + 复制正文 -->
+                  <div
+                    class="flex items-center gap-3 text-[11px] text-[var(--wb-text-3)] h-5 opacity-0 group-hover/msg:opacity-100 transition pl-1"
+                  >
+                    <button
+                      v-if="turnCopyText(i)"
+                      class="hover:text-slate-200 flex items-center gap-1"
+                      :title="t('workbenchCopyMessage')"
+                      @click="copyMessage(turnTailInfo(i).m, i)"
+                    >
+                      <i
+                        :class="copiedIdx === i ? 'fas fa-check text-green-400' : 'far fa-copy'"
+                      ></i>
+                    </button>
+                    <span class="text-slate-600">{{
+                      timeLabel(turnTailInfo(i).m?.createdAt)
+                    }}</span>
+                    <span
+                      v-if="usageFor(turnTailInfo(i).m)"
+                      class="text-slate-600 tabular-nums"
+                      :title="usageTitle(usageFor(turnTailInfo(i).m))"
+                    >
+                      <i class="fas fa-arrow-up text-[9px]"></i
+                      >{{ fmtTokens(usageFor(turnTailInfo(i).m).inputTokens) }}
+                      <i class="fas fa-arrow-down text-[9px] ml-1"></i
+                      >{{ fmtTokens(usageFor(turnTailInfo(i).m).outputTokens) }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <!-- 单消息：用户 / 独立 agent（原样渲染） -->
               <div
+                v-else-if="!m.__inTurn"
                 class="flex"
                 :class="[
                   m.role === 'user' ? 'justify-end' : 'justify-start',
@@ -2859,6 +3032,52 @@ function turnGapClass(i) {
   )
     return '-mt-5' // 组内保留 ~4px 缝隙
   return ''
+}
+
+/**
+ * 回合分组渲染（协议对齐：parts 语义的消费层）：
+ * agent 同 turn 的连续消息聚合为一个「AI 回复卡片」——过程(推理/工具)折叠区 +
+ * 计划摘要 + markdown 正文 + 产物图。用户消息与无 turn 的独立 agent 消息原样渲染。
+ * 组首消息挂 __turnFirst，组内非首挂 __inTurn（跳过占行）。
+ */
+const msgsWithTurn = computed(() => {
+  const msgs = messages.value
+  return msgs.map((m, i) => {
+    if (m.role !== 'agent' || m.turnId == null) return { ...m, __inTurn: false }
+    const prev = msgs[i - 1]
+    const samePrev = prev && prev.role === 'agent' && prev.turnId === m.turnId
+    return { ...m, __inTurn: true, __turnFirst: !samePrev }
+  })
+})
+
+/** 返回组首 index 起同 turn 的全部消息（带真实 index，供 processGroupAt 复用） */
+function turnGroupItems(i) {
+  const base = messages.value[i]
+  if (!base || base.turnId == null) return [{ m: base, i }]
+  const out = []
+  let j = i
+  while (j < messages.value.length) {
+    const x = messages.value[j]
+    if (j > i && (x.role !== 'agent' || x.turnId !== base.turnId)) break
+    out.push({ m: x, i: j })
+    j++
+  }
+  return out
+}
+
+/** 回合卡片操作行数据：取组尾消息（时间/token 归属） */
+function turnTailInfo(i) {
+  const items = turnGroupItems(i)
+  const tail = items[items.length - 1]
+  return tail ? { m: tail.m, i: tail.i } : { m: null, i }
+}
+
+/** 回合正文（组内全部 chat 文本拼接，供复制） */
+function turnCopyText(i) {
+  return turnGroupItems(i)
+    .map(({ m }) => (m.kind === 'chat' || m.kind === 'error') && m.role === 'agent' ? m.text : '')
+    .filter(Boolean)
+    .join('\n')
 }
 
 // 回合合并：圆角只留组头/组尾，组内直角拼接，视觉上是一个回复块
