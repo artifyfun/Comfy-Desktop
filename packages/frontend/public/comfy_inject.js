@@ -1570,6 +1570,14 @@
         type: "custom",
         render: (container) => {
           container.style.height = "100%";
+          const prev = document.getElementById("artify-workbench-embed");
+          if (prev && prev.contentWindow && !prev.contentWindow.closed) {
+            container.innerHTML = "";
+            container.appendChild(prev);
+            setEmbedWindow(prev.contentWindow);
+            pushCanvasDigest(true);
+            return;
+          }
           container.innerHTML = "";
           const iframe = document.createElement("iframe");
           iframe.id = "artify-workbench-embed";

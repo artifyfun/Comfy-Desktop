@@ -67,6 +67,17 @@ export function ensureArtifySidebarTab() {
         // iframe 嵌 A UI 工作台 embed 模式；src 取主进程注入的引导变量
         // （__ARTIFY_LAB_URL__），兜底相对路径（同源部署形态）。
         container.style.height = '100%'
+        // 宿主（ComfyUI sidebar tab）可能在 toggle 面板等操作时重建容器并
+        // 再次调用 render——复用已有 iframe（DOM move 不触发重载），否则
+        // 会话被重新加载、用户看到的输入中内容直接清空。
+        const prev = document.getElementById('artify-workbench-embed')
+        if (prev && prev.contentWindow && !prev.contentWindow.closed) {
+          container.innerHTML = ''
+          container.appendChild(prev)
+          setEmbedWindow(prev.contentWindow)
+          pushCanvasDigest(true)
+          return
+        }
         container.innerHTML = ''
         const iframe = document.createElement('iframe')
         iframe.id = 'artify-workbench-embed'

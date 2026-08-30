@@ -92,10 +92,10 @@
       </div>
 
       <div
-        class="flex flex-1 min-h-0 mx-auto mt-2 gap-4 w-full"
+        class="flex flex-1 min-h-0 mx-auto mt-2 gap-4 w-full relative"
         :class="isNarrow ? 'px-2' : 'px-4 max-w-[1600px] sm:px-6 lg:px-8'"
       >
-        <!-- 左：会话侧栏（embed 模式收起：宿主画布旁空间有限） -->
+        <!-- 左：会话侧栏（桌面常驻列） -->
         <SessionSidebar
           v-if="!isNarrow"
           :sessions="sidebarSessions"
@@ -114,6 +114,37 @@
           @manage-presets="presetMgrOpen = true"
           @show-env="showEnvDialog"
         />
+
+        <!-- 窄容器（embed 画布侧栏）会话历史浮层：会话头「展开」按钮唤出，覆盖对话区左上 -->
+        <div
+          v-if="isNarrow"
+          class="absolute inset-y-0 left-0 z-30 transition-all"
+          :class="sidebarCollapsed ? 'w-0 overflow-hidden pointer-events-none' : 'w-64'"
+        >
+          <div
+            v-if="!sidebarCollapsed"
+            class="absolute inset-0 -z-10 bg-black/30"
+            @click="sidebarCollapsed = true"
+          ></div>
+          <SessionSidebar
+            :sessions="sidebarSessions"
+            :current-id="sessionId"
+            :collapsed="sidebarCollapsed"
+            :show-archived="showArchived"
+            :archived-count="archivedCount"
+            float
+            @select="selectSession"
+            @new-session="newDialogOpen = true"
+            @collapse="sidebarCollapsed = !sidebarCollapsed"
+            @rename="onRename"
+            @archive="(s) => setArchived(s, true)"
+            @unarchive="(s) => setArchived(s, false)"
+            @delete="onDelete"
+            @update:show-archived="(v) => (showArchived = v)"
+            @manage-presets="presetMgrOpen = true"
+            @show-env="showEnvDialog"
+          />
+        </div>
 
         <!-- 中：会话区（embed 模式占满 iframe 高度；顶部还有感知条 mt-2+行高≈36px） -->
         <section
@@ -843,6 +874,9 @@ const origin = computed(
 const lang = computed(() => (getCurrentLanguage?.() === 'en' ? 'en' : 'zh'))
 
 // ---------- 会话状态 ----------
+// embed 模式下宿主（ComfyUI sidebar tab）重建 iframe 会丢 route.query.session，
+// 用 localStorage 记住最近会话 id，重载后自动恢复而不是新建空会话
+const LAST_SESSION_KEY = 'wb:lastSessionId'
 const sessions = ref([])
 const sessionId = ref('')
 const messages = ref([])
@@ -911,8 +945,11 @@ const sidebarSessions = computed(() =>
 
 // ---------- 初始化 ----------
 onMounted(async () => {
+  // 窄容器（embed 画布侧栏）会话栏默认收起，点会话头「展开」按钮唤出浮层
+  if (isNarrow.value) sidebarCollapsed.value = true
   await Promise.all([loadSessions(), loadPresets(), loadSkills(), loadAdvTemplates()])
-  const sid = route.query.session
+  // 恢复优先级：URL 显式 session > 上次会话（embed iframe 重建后 URL 丢失，靠它找回）
+  const sid = route.query.session || localStorage.getItem(LAST_SESSION_KEY)
   if (sid && sessions.value.some((s) => s.id === sid)) {
     await selectSession({ id: sid })
   } else {
@@ -967,6 +1004,7 @@ async function loadAdvTemplates() {
 
 async function selectSession(s) {
   sessionId.value = s.id
+  localStorage.setItem(LAST_SESSION_KEY, s.id)
   toolItemIndex.clear() // 条目索引是 per-render 的，切会话必须清（防 upsert 错位）
   execProgressIndex.clear() // 执行占位下标同样 per-render，切会话清
   recoverCount.value = 0 // 恢复计数是会话级的，切会话清零

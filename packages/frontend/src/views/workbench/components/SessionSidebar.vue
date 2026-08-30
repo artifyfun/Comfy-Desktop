@@ -1,7 +1,13 @@
 <template>
   <aside
     class="session-sidebar flex flex-col bg-[var(--wb-bg-base)] border-r border-[var(--wb-stroke)] transition-all duration-300 shrink-0"
-    :class="collapsed ? 'w-0 overflow-hidden border-r-0' : 'w-60 h-[calc(100vh-160px)]'"
+    :class="
+      collapsed
+        ? 'w-0 overflow-hidden border-r-0'
+        : float
+          ? 'w-64 h-full'
+          : 'w-60 h-[calc(100vh-160px)]'
+    "
   >
     <!-- 品牌行 + 折叠 -->
     <div class="flex items-center justify-between px-2 h-12 border-b border-[var(--wb-stroke)]">
@@ -177,6 +183,8 @@ const props = defineProps({
   collapsed: { type: Boolean, default: false },
   showArchived: { type: Boolean, default: false },
   archivedCount: { type: Number, default: 0 },
+  // 浮层形态（embed 画布侧栏）：展开时 h-full 撑满浮层容器，宽度取容器 w-64
+  float: { type: Boolean, default: false },
 })
 const emit = defineEmits([
   'select',
