@@ -439,6 +439,10 @@ export function createWorkbenchRouter(): express.Router {
     chatSettled = new Promise((r) => {
       settleChat = r
     })
+    // 本轮起点：decide 返回后据此找「决策期间工具执行（wb_run_workflow /
+    // wb_execute_template wait=true 轮询）已完成」的执行，补发产物事件——
+    // pollExecution 落盘 artifact 消息但不推 SSE，前端实时收不到图。
+    const chatStartTs = Date.now()
     const ac = chatAbort
     // 自组/导入工作流（wb_run_workflow）执行 → 画布新 tab：executeWorkflow 成功后
     // 回调此 handler，API workflow 转 UI graph 经 sync 事件下发（ensure-tab 语义，
@@ -534,6 +538,25 @@ export function createWorkbenchRouter(): express.Router {
         send('error', { message: 'codex 未输出可解析的 PLAN', raw: raw.slice(0, 2000) })
         finish()
         return
+      }
+      // 补发决策期间工具执行的产物（wb_run_workflow / wb_execute_template wait=true
+      // 在 decide 内阻塞轮询完成，pollExecution 落盘 artifact 消息但不推 SSE——
+      // 前端实时看不到图）。有产物才发；模板执行（intent=image）走前端 startPoll
+      // 原位升级，不受影响（execution 尚未创建，chatStartTs 过滤不命中）。
+      const execSession = workbenchService.getSession(sessionId)
+      for (const e of execSession?.executions ?? []) {
+        if (!(e.startedAt >= chatStartTs && e.status === 'success' && e.outputs.length > 0))
+          continue
+        // 旧数据 outputs 可能是纯 filename 字符串，归一为完整文件引用
+        const files = e.outputs.map((f) =>
+          typeof f === 'string' ? { filename: f, subfolder: '', type: 'output' } : f
+        )
+        send('artifact', {
+          promptId: e.promptId,
+          name: e.templateId,
+          outputs: files.map((f) => f.filename),
+          outputFiles: files
+        })
       }
       send('plan', { plan, localIssues: issues })
 

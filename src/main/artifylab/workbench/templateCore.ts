@@ -154,31 +154,119 @@ export function toPseudoApp(t: WorkflowTemplate): App {
 /**
  * API 格式 prompt → UI graph（{nodes, links}）兜底转换。
  * 模板未保存画布布局（workflow 缺失，如手动建 App 只填 prompt）时，
- * 仍能把节点加载到画布（可编辑，布局后续可拖动整理）：
- * - 节点：id/type 保留，pos 网格排布，widgets_values 尽力取 inputs 标量
- * - links：跳过——API 链接引用 ["id", slot] 缺 target_slot 语义，盲连会错位
+ * 仍能把节点加载到画布（可编辑、可执行）：
+ * - nodes：id/type 保留，widgets_values 取 inputs 标量；inputs/outputs 槽定义
+ *   由引用边推导（links 要真正连上必须有槽），输出槽数 = 被引用最大 slot+1
+ * - links：由 API 引用边 ["上游id", 输出slot] 生成——origin_slot 即引用里的
+ *   slot；dest_slot 按目标节点链接输入键序编号（UI graph 的 inputs 数组只含
+ *   链接输入，键序与 prompt 一致即可对上）
+ * - 布局：拓扑分层（source-aligned，无上游=层 0，下游 = max(上游)+1），
+ *   按层分列、层内排行——列间距 340 / 行间距 150，避免节点堆叠
  */
 export function promptToWorkflowGraph(prompt: ComfyPrompt): { nodes: unknown[]; links: unknown[] } {
   const entries = Object.entries(prompt)
-  const nodes = entries.map(([id, n], i) => {
-    const widgetsValues: unknown[] = []
-    for (const v of Object.values(n.inputs)) {
-      if (v === null || typeof v === 'object') continue // 链接引用/复杂值不填
-      widgetsValues.push(v)
+  const ids = entries.map(([id]) => Number(id))
+
+  // 1) 链接边收集：API 引用 ["上游id", 输出slot]；destSlot 按目标节点链接输入键序编号
+  interface Edge {
+    from: number
+    to: number
+    fromSlot: number
+    toSlot: number
+  }
+  const edges: Edge[] = []
+  for (const [id, node] of entries) {
+    const nid = Number(id)
+    let linkIdx = 0
+    for (const v of Object.values(node.inputs)) {
+      if (Array.isArray(v) && Number.isFinite(Number(v[0])) && Number.isFinite(Number(v[1]))) {
+        edges.push({ from: Number(v[0]), to: nid, fromSlot: Number(v[1]), toSlot: linkIdx })
+        linkIdx++
+      }
     }
+  }
+
+  // 2) 拓扑分层：无上游=0，其余 = max(上游层)+1（环/孤立兜底 0）
+  const inDegree = new Map<number, number>()
+  for (const e of edges) inDegree.set(e.to, (inDegree.get(e.to) ?? 0) + 1)
+  const depth = new Map<number, number>()
+  const queue: number[] = []
+  for (const id of ids) {
+    if (!inDegree.has(id)) {
+      depth.set(id, 0)
+      queue.push(id)
+    }
+  }
+  for (let qi = 0; qi < queue.length; qi++) {
+    const id = queue[qi]!
+    const d = depth.get(id) ?? 0
+    for (const e of edges) {
+      if (e.from !== id) continue
+      const nd = d + 1
+      if (nd > (depth.get(e.to) ?? -1)) depth.set(e.to, nd)
+      queue.push(e.to)
+    }
+  }
+  for (const id of ids) if (!depth.has(id)) depth.set(id, 0)
+
+  // 3) 排布：按深度分列，层内按 id 序排行
+  const COL_GAP = 340
+  const ROW_GAP = 150
+  const pos = new Map<number, [number, number]>()
+  const byDepth = new Map<number, number[]>()
+  for (const id of ids) {
+    const d = depth.get(id) ?? 0
+    const arr = byDepth.get(d) ?? []
+    arr.push(id)
+    byDepth.set(d, arr)
+  }
+  for (const [d, list] of byDepth) {
+    list.sort((a, b) => a - b)
+    list.forEach((id, row) => pos.set(id, [80 + d * COL_GAP, 80 + row * ROW_GAP]))
+  }
+
+  // 4) 节点/连线构造
+  const maxOutSlot = new Map<number, number>()
+  for (const e of edges) maxOutSlot.set(e.from, Math.max(maxOutSlot.get(e.from) ?? -1, e.fromSlot))
+
+  const nodes = entries.map(([id, n], i) => {
+    const nid = Number(id)
+    const widgetsValues: unknown[] = []
+    const inputSlots: Array<{ name: string; type: string }> = []
+    for (const [key, v] of Object.entries(n.inputs)) {
+      if (Array.isArray(v) && Number.isFinite(Number(v[0]))) {
+        inputSlots.push({ name: key, type: 'default' }) // 链接输入 → 输入槽
+      } else if (v === null || typeof v === 'object') {
+        continue // 复杂值不填
+      } else {
+        widgetsValues.push(v)
+      }
+    }
+    const outCount = (maxOutSlot.get(nid) ?? -1) + 1
+    const outputSlots = Array.from({ length: outCount }, (_, k) => ({
+      name: `out${k}`,
+      type: 'default'
+    }))
+    const [x, y] = pos.get(nid) ?? [80, 80]
     return {
-      id: Number(id),
+      id: nid,
       type: n.class_type,
-      pos: [80 + (i % 6) * 40, 80 + Math.floor(i / 6) * 60],
+      pos: [x, y],
       size: [280, 90],
       flags: {},
       order: i,
       mode: 0,
-      inputs: [],
-      outputs: [],
+      inputs: inputSlots,
+      outputs: outputSlots,
       properties: { 'Node name for S&R': n.class_type },
       widgets_values: widgetsValues
     }
   })
-  return { nodes, links: [] }
+  const links = edges.map((e, i) => ({
+    id: i + 1,
+    origin: [e.from, e.fromSlot],
+    target: [e.to, e.toSlot],
+    type: 'default'
+  }))
+  return { nodes, links }
 }

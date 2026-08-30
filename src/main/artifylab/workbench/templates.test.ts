@@ -140,7 +140,7 @@ describe('WorkflowTemplate 类型契约', () => {
 })
 
 describe('promptToWorkflowGraph（画布布局兜底转换）', () => {
-  it('prompt 节点 → graph nodes（id/type 保留，widgets 取标量，链接跳过）', () => {
+  it('prompt 节点 → graph nodes（id/type/widgets/输入输出槽）+ links（引用边）+ 拓扑分层布局', () => {
     const prompt: ComfyPrompt = {
       '1': { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: 'flux1-dev.safetensors' } },
       '2': { class_type: 'CLIPTextEncode', inputs: { text: 'a cat', clip: ['1', 1] } },
@@ -148,11 +148,13 @@ describe('promptToWorkflowGraph（画布布局兜底转换）', () => {
     }
     const g = promptToWorkflowGraph(prompt)
     expect(g.nodes).toHaveLength(3)
-    expect(g.links).toEqual([])
     const nodes = g.nodes as Array<{
       id: number
       type: string
       widgets_values: unknown[]
+      inputs: Array<{ name: string }>
+      outputs: Array<{ name: string }>
+      pos: [number, number]
     }>
     const n1 = nodes[0]!
     const n2 = nodes[1]!
@@ -163,6 +165,56 @@ describe('promptToWorkflowGraph（画布布局兜底转换）', () => {
     // 链接引用（数组）不落入 widgets_values
     expect(n2.widgets_values).toEqual(['a cat'])
     expect(n3.widgets_values).toEqual(['out'])
+    // 槽定义：被引用节点有输出槽（node2 引用 node1 的 slot 1 → node1 有 2 个槽）
+    expect(n1.outputs).toHaveLength(2)
+    // 输入槽按链接输入键序（node2 只链接 clip → 1 个输入槽）
+    expect(n2.inputs.map((s) => s.name)).toEqual(['clip'])
+    // 连线：API 引用边 → link（origin=[上游,slot]，target=[下游,destSlot]）；
+    // node2 引 node1(clip,slot1)、node3 引 node4(images,slot0)
+    expect(g.links).toEqual([
+      { id: 1, origin: [1, 1], target: [2, 0], type: 'default' },
+      { id: 2, origin: [4, 0], target: [3, 0], type: 'default' }
+    ])
+    // 拓扑分层：node3 引用了 node4（不存在→孤立 0 层）；node2 引用 node1 → node2 层 1
+    const layer2 = nodes.find((n) => n.id === 2)!
+    expect(layer2.pos[0]).toBeGreaterThan(n1.pos[0]) // node2 在 node1 右侧（更深层）
+    // 层内不重叠：同层节点 y 错开
+    expect(n3.pos[1]).not.toBe(n1.pos[1])
+  })
+
+  it('多节点链式 prompt 生成完整 links（destSlot 按键序编号）', () => {
+    const prompt: ComfyPrompt = {
+      '1': {
+        class_type: 'UNETLoader',
+        inputs: { unet_name: 'anima.safetensors', weight_dtype: 'default' }
+      },
+      '2': { class_type: 'CLIPLoader', inputs: { clip_name: 'qwen.safetensors', type: 'lumina2' } },
+      '3': {
+        class_type: 'KSampler',
+        inputs: {
+          seed: 42,
+          steps: 28,
+          cfg: 7,
+          model: ['1', 0],
+          positive: ['2', 0],
+          latent_image: ['5', 0]
+        }
+      }
+    }
+    const g = promptToWorkflowGraph(prompt)
+    // KSampler 3 个链接输入 → 3 条 link，destSlot 0/1/2 按键序
+    expect(g.links).toHaveLength(3)
+    const links = g.links as Array<{ origin: number[]; target: number[] }>
+    expect(links.map((l) => l.target[1])).toEqual([0, 1, 2])
+    expect(links.map((l) => l.origin)).toEqual([
+      [1, 0],
+      [2, 0],
+      [5, 0]
+    ])
+    // 被引用节点输出槽数 = 最大被引 slot + 1
+    const nodes = g.nodes as Array<{ id: number; outputs: unknown[] }>
+    expect(nodes.find((n) => n.id === 1)!.outputs).toHaveLength(1)
+    expect(nodes.find((n) => n.id === 2)!.outputs).toHaveLength(1)
   })
 })
 

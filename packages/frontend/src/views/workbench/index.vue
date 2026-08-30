@@ -1860,6 +1860,22 @@ function handleSse(chunk) {
       text: data.reply || '',
       createdAt: Date.now(),
     })
+  } else if (event === 'artifact') {
+    // 工具执行（自组工作流 wb_run_workflow / wb_execute_template wait=true）产物补推：
+    // pollExecution 落盘 artifact 消息但不推 SSE，前端实时无图。去重：已有同
+    // promptId 的 artifact 消息则跳过（模板/画布执行的前端轮询已原位升级显示）。
+    const files = data.outputFiles || []
+    if (!files.length) return
+    if (messages.value.some((m) => m.kind === 'artifact' && m.promptId === data.promptId)) return
+    pushMsg({
+      role: 'agent',
+      kind: 'artifact',
+      text: `产物 ${files.length} 个文件`,
+      outputs: files.map((f) => f.filename),
+      outputFiles: files,
+      promptId: data.promptId,
+      createdAt: Date.now(),
+    })
   } else if (event === 'sync') {
     // 模板工作流 → 宿主画布。ensureTab（执行前自动加载）失败只降级不打断
     // 生成流程；显式同步失败仍补错误气泡。
