@@ -167,8 +167,12 @@ export async function applyOneOp(g, op) {
       const wf = op.workflow
       if (!wf || typeof wf !== 'object' || !wf.nodes)
         return { ok: false, error: 'workflow.nodes required' }
+      // newTab=true：执行工作流前的画布 tab 保证——目标工作流已在当前 tab 则复用
+      // （不新建），否则开新 tab 加载（官方 createTemporary + openWorkflow 链路）；
+      // 无 tab API（老版/漂移）时回退整图替换当前 tab。
+      if (op.newTab) return await loadWorkflowToTab(wf, op.name)
       await window.app.loadGraphData(wf)
-      return { ok: true }
+      return { ok: true, mode: 'replace' }
     }
     case 'align': {
       // 画布节点对齐（参考 ComfyUI-AlignLayout 的 Align Panel 语义）：
@@ -296,6 +300,124 @@ function resolveCanvasTargets(g, ids) {
   const sel = window.app?.canvas?.selected_nodes
   if (sel && Object.keys(sel).length) return Object.values(sel)
   return (g._nodes || []).slice()
+}
+
+// ==========================================================================
+// 执行前画布 tab 保证（ensure-tab）：模板执行前把目标工作流加载到画布——
+// 当前 tab 已是该工作流（同名 + 节点 type 签名一致）则复用，否则开新 tab。
+//
+// 官方多 tab 链路（ComfyUI 0.3x，pinia workflow store）：
+//   store.createTemporary(filename, graphData) → 临时 Workflow 实例（不落盘）
+//   store.openWorkflow(instance)               → 加入 tab 列表 + 加载 + 激活
+// store 挂在 window.app.extensionManager.workflow 上（activeWorkflow 同源）；
+// 防御探测多路径，找不到时回退 app.loadGraphData 整图替换当前 tab。
+// ==========================================================================
+
+/** 防御探测 workflow store（多路径；形状随版本漂移，逐层兜底） */
+export function getWorkflowTabStore() {
+  const app = window.app
+  if (!app) return null
+  const cands = [
+    app.extensionManager?.workflow,
+    app.extensionManager?.workflowStore,
+    app.ui?.workflow,
+    app.workflowStore,
+  ]
+  for (const c of cands) {
+    if (
+      c &&
+      typeof c.openWorkflow === 'function' &&
+      typeof c.createTemporary === 'function'
+    )
+      return c
+  }
+  return null
+}
+
+/** 节点 type 签名：type 排序拼接（忽略 id/坐标/widgets——同一布局改参数仍是同一工作流） */
+function nodeTypeSignature(graph) {
+  const nodes = graph && Array.isArray(graph.nodes) ? graph.nodes : []
+  return nodes
+    .map((n) => String(n && n.type || ''))
+    .filter(Boolean)
+    .sort()
+    .join('|')
+}
+
+/** 从 activeWorkflow 取当前 graph（activeState 是 UI graph JSON；content 兜底） */
+function activeWorkflowGraph(active) {
+  if (!active) return null
+  if (active.activeState && Array.isArray(active.activeState.nodes))
+    return active.activeState
+  if (typeof active.content === 'string') {
+    try {
+      const parsed = JSON.parse(active.content)
+      if (parsed && Array.isArray(parsed.nodes)) return parsed
+    } catch (_e) {
+      /* 容忍 */
+    }
+  }
+  return null
+}
+
+/** 当前激活 tab 是否已是目标工作流（同名 + 节点 type 签名一致） */
+function isTabMatchingActive(store, targetGraph, targetName) {
+  const active = store.activeWorkflow
+  if (!active) return false
+  const activeGraph = activeWorkflowGraph(active)
+  if (!activeGraph) return false
+  if (nodeTypeSignature(targetGraph) !== nodeTypeSignature(activeGraph)) return false
+  if (!targetName) return true
+  // 名字匹配（容忍 .json 后缀/displayName 差异）：改名后视为不同工作流
+  const names = [
+    active.name,
+    active.displayName,
+    active.filename,
+    active.fullFilename,
+  ]
+    .filter(Boolean)
+    .map((s) => String(s).replace(/\.json$/i, ''))
+  const t = String(targetName).replace(/\.json$/i, '')
+  return names.some((n) => n === t || n.endsWith('/' + t))
+}
+
+/**
+ * 把工作流加载到画布 tab（ensure 语义）：
+ * - 当前 tab 已是目标 → {mode:'already-active'}（复用，不新建）
+ * - 有 store → 开新 tab → {mode:'new-tab'}
+ * - 无 store（版本漂移）→ 整图替换当前 tab → {mode:'replace'}
+ */
+async function loadWorkflowToTab(wf, name) {
+  const store = getWorkflowTabStore()
+  if (store) {
+    if (isTabMatchingActive(store, wf, name)) {
+      return { ok: true, mode: 'already-active', tab: activeTabName(store) }
+    }
+    try {
+      const temp = store.createTemporary(
+        String(name || 'Unsaved Workflow') + '.json',
+        wf
+      )
+      await store.openWorkflow(temp)
+      return { ok: true, mode: 'new-tab', tab: String(name || 'Unsaved Workflow') }
+    } catch (e) {
+      // 官方链路失败（如 graph 数据形状不被接受）→ 回退整图替换
+      console.warn('[ArtifyInject] createTemporary/openWorkflow failed, fallback replace:', e)
+    }
+  }
+  await window.app.loadGraphData(wf)
+  return { ok: true, mode: 'replace' }
+}
+
+/** 当前激活 tab 显示名（ack 回执用，失败返回 null） */
+function activeTabName(store) {
+  try {
+    const a = store.activeWorkflow
+    const n = a?.displayName || a?.name || a?.filename || ''
+    return String(n).replace(/\.json$/i, '') || null
+  } catch (_e) {
+    return null
+  }
 }
 
 /**

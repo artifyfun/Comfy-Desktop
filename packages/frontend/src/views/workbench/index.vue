@@ -448,16 +448,18 @@
                 ]"
               >
                 <div class="max-w-[85%] space-y-1 group/msg">
-                  <!-- 附件缩略图（用户消息） -->
+                  <!-- 附件缩略图（用户消息）：上传完成附件走 /view 直出；本地预览
+                       仅 draft 期存在，发送后 revoke 失效 → 用 viewUrl 兜底 -->
                   <div v-if="m.attachments?.length" class="flex gap-1.5 flex-wrap justify-end">
                     <div
                       v-for="(a, j) in m.attachments"
                       :key="j"
-                      class="w-12 h-12 rounded bg-[var(--wb-surface-deep)] border border-[var(--wb-stroke-strong)] flex items-center justify-center overflow-hidden"
+                      class="w-12 h-12 rounded bg-[var(--wb-surface-deep)] border border-[var(--wb-stroke-strong)] flex items-center justify-center overflow-hidden cursor-zoom-in"
+                      @click.stop="a.kind === 'image' && (lightboxFile = a)"
                     >
                       <img
-                        v-if="a.kind === 'image' && a._preview"
-                        :src="a._preview"
+                        v-if="a.kind === 'image'"
+                        :src="a._preview || viewUrl(a)"
                         class="w-full h-full object-cover"
                       />
                       <i v-else :class="kindIcon(a.kind)" class="text-[var(--wb-text-2)]"></i>
@@ -1856,8 +1858,13 @@ function handleSse(chunk) {
       createdAt: Date.now(),
     })
   } else if (event === 'sync') {
-    // 模板工作流 → 宿主画布（注入桥 loadWorkflow 整图替换；失败补错误气泡）
+    // 模板工作流 → 宿主画布。ensureTab（执行前自动加载）失败只降级不打断
+    // 生成流程；显式同步失败仍补错误气泡。
     syncWorkflowToCanvas(data).catch((e) => {
+      if (data.ensureTab) {
+        console.warn('[workbench] ensure-tab skipped:', e)
+        return
+      }
       pushMsg({
         role: 'agent',
         kind: 'error',
@@ -2044,15 +2051,24 @@ function startBatchPoll(promptId) {
       }
       if (['completed', 'stopped', 'failed'].includes(job.status)) {
         artifact.status = job.status === 'completed' ? 'success' : 'error'
-        pushMsg({
-          role: 'agent',
-          kind: job.status === 'completed' ? 'chat' : 'error',
-          text:
-            job.status === 'completed'
-              ? t('workbenchBatchDone', { total: job.total, success: job.success })
-              : `${t('workbenchFailed')}: 批量任务 ${job.status}`,
-          createdAt: Date.now(),
-        })
+        // 批量终态：completed 推 artifact 消息（产物图进回合卡片，窄容器也可见）
+        pushMsg(
+          job.status === 'completed'
+            ? {
+                role: 'agent',
+                kind: 'artifact',
+                text: t('workbenchBatchDone', { total: job.total, success: job.success }),
+                outputs: doneFiles.map((f) => f.filename),
+                outputFiles: doneFiles,
+                createdAt: Date.now(),
+              }
+            : {
+                role: 'agent',
+                kind: 'error',
+                text: `${t('workbenchFailed')}: 批量任务 ${job.status}`,
+                createdAt: Date.now(),
+              },
+        )
         scrollToBottom()
         stopBatchPoll(promptId)
       }
@@ -2081,6 +2097,7 @@ function startPoll(promptId) {
       const json = await res.json()
       const r = json?.data
       if (!r) return
+      let doneFiles = []
       const artifact = artifacts.value.find((a) => a.promptId === promptId)
       if (artifact) {
         artifact.status = r.status
@@ -2090,10 +2107,11 @@ function startPoll(promptId) {
           void diagnoseArtifact(artifact)
         }
         if (r.status === 'success' && r.outputs) {
-          artifact.outputs = extractFiles(r.outputs).map((f) => f.filename)
-          artifact.files = extractFiles(r.outputs)
+          doneFiles = extractFiles(r.outputs)
+          artifact.outputs = doneFiles.map((f) => f.filename)
+          artifact.files = doneFiles
           // embed 模式：执行成功自动把产物铺上画布（用户也可手动补贴）
-          pushCardsToCanvas(artifact.files)
+          pushCardsToCanvas(doneFiles)
         }
       }
       if (r.status === 'success' || r.status === 'error') {
@@ -2105,24 +2123,40 @@ function startPoll(promptId) {
         const execIdx =
           execKey !== undefined ? messages.value.findIndex((m) => m._key === execKey) : -1
         if (execIdx !== -1) {
+          // 成功：占位气泡原位升级为 artifact 消息——产物图直接进回合卡片
+          // （file part 渲染）；失败：原地转错误文本。
           messages.value[execIdx] =
             r.status === 'success'
-              ? { ...messages.value[execIdx], kind: 'chat', text: t('workbenchDone') }
+              ? {
+                  ...messages.value[execIdx],
+                  kind: 'artifact',
+                  text: doneFiles.length ? `${t('workbenchDone')}（${doneFiles.length} 个文件）` : t('workbenchDone'),
+                  outputs: doneFiles.map((f) => f.filename),
+                  outputFiles: doneFiles,
+                }
               : {
                   ...messages.value[execIdx],
                   kind: 'error',
                   text: `${t('workbenchFailed')}: ${(r.error || '').slice(0, 300)}`,
                 }
         } else {
-          pushMsg({
-            role: 'agent',
-            kind: r.status === 'success' ? 'chat' : 'error',
-            text:
-              r.status === 'success'
-                ? t('workbenchDone')
-                : `${t('workbenchFailed')}: ${(r.error || '').slice(0, 300)}`,
-            createdAt: Date.now(),
-          })
+          pushMsg(
+            r.status === 'success'
+              ? {
+                  role: 'agent',
+                  kind: 'artifact',
+                  text: doneFiles.length ? `${t('workbenchDone')}（${doneFiles.length} 个文件）` : t('workbenchDone'),
+                  outputs: doneFiles.map((f) => f.filename),
+                  outputFiles: doneFiles,
+                  createdAt: Date.now(),
+                }
+              : {
+                  role: 'agent',
+                  kind: 'error',
+                  text: `${t('workbenchFailed')}: ${(r.error || '').slice(0, 300)}`,
+                  createdAt: Date.now(),
+                },
+          )
         }
         scrollToBottom()
         stopPoll(promptId)
@@ -2654,8 +2688,13 @@ async function confirmApplyOps() {
  * 模板工作流 → 宿主画布：走注入桥 artify:canvas-ops loadWorkflow 整图替换
  * （与 diff 确认卡同通道）。返回 Promise，成功/失败由调用方提示。
  */
-function syncWorkflowToCanvas({ templateId, name, workflow }) {
-  if (!isEmbed.value) return Promise.reject(new Error(t('workbenchSyncNotEmbed')))
+function syncWorkflowToCanvas({ templateId, name, workflow, ensureTab }) {
+  // ensure-tab（执行前自动加载画布）在非 embed（A 工作台/画布侧栏，无画布宿主）
+  // 下静默跳过——模板执行照常进行；显式同步（非 ensureTab）仍报错提示。
+  if (!isEmbed.value) {
+    if (ensureTab) return Promise.resolve({ ok: true, mode: 'skipped' })
+    return Promise.reject(new Error(t('workbenchSyncNotEmbed')))
+  }
   if (!workflow || !Array.isArray(workflow.nodes))
     return Promise.reject(new Error(t('workbenchSyncNoWorkflow')))
   return new Promise((resolve, reject) => {
@@ -2685,7 +2724,8 @@ function syncWorkflowToCanvas({ templateId, name, workflow }) {
       window.parent.postMessage(
         JSON.stringify({
           type: 'artify:canvas-ops',
-          ops: [{ type: 'loadWorkflow', workflow }],
+          // ensureTab：桥按「当前 tab 已是目标则复用、否则开新 tab」处理
+          ops: [{ type: 'loadWorkflow', workflow, newTab: ensureTab || undefined, name }],
           requestId,
           reason: 'workbench-sync-template',
         }),

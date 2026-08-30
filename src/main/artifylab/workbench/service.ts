@@ -1028,8 +1028,8 @@ class WorkbenchService {
 1. **简单需求**（能直接映射到某个模板的参数面）→ 直接输出 PLAN JSON：intent=image/video/audio 选 templateId，params 数值遵守 min/max，枚举必须完全匹配可选值。模板给不出用户要的效果时，按 5.2 变通，不要硬凑模板参数。
 2. intent=text 走纯文本生成（文案/起名/总结等），把生成结果放 reply。
 3. intent=chat 用于追问澄清或闲聊，回复放 reply。
-3.1 **把工作流同步到右侧画布**（用户说「把工作流同步到画布 / 加载工作流 / 打开某模板的画布布局」）→ intent=workflow + templateId 选目标模板（模板库清单里的 id）。画布会整图替换为该模板的布局；模板未保存布局时系统会从模板参数自动生成节点布局（无连线，可手动整理）。
-3.1b **生成 + 加载画布同时做**（用户说「用 XX 模板生成图片，工作流加载到画布中 / 生成并加载到画布」）→ intent=image/video/audio + templateId + "syncCanvasBeforeExec":true——系统先加载该模板布局到画布，再执行模板生成。
+3.1 **把工作流加载到画布**（用户说「把工作流同步到画布 / 加载工作流 / 打开某模板的画布布局」）→ intent=workflow + templateId 选目标模板（模板库清单里的 id）。画布会自动开新 tab 加载该模板的布局（当前 tab 已是同一工作流时复用，不重复开）；模板未保存布局时系统会从模板参数自动生成节点布局（无连线，可手动整理）。
+3.1b **模板执行自动加载画布**：intent=image/video/audio 执行模板时，系统**自动**先把该模板工作流加载到画布（新 tab；当前 tab 已是同一工作流则复用）再执行——无需额外字段。（兼容：显式带 "syncCanvasBeforeExec":true 同样生效。）
 3.2 **执行画布当前工作流**（用户说「执行画布上的工作流 / 跑一下当前图 / 按画布参数生成 / 用当前画布出图」）→ intent=canvas-run（**不指定 templateId**；可带 nodeOverrides 按节点 id 覆盖 widget，如 {"16":{"widgetOverrides":{"steps":40}}}）。
 3.3 **画布批量执行**（对当前画布多变体/多参数组合批量出图）→ intent=canvas-run + batch.items（每行=一组变体）。行内键用「节点id.widget名」格式（如 "16.steps":40、"9.text":"新提示词"），值=该 widget 新值；共有的固定变体放 sharedParams（同格式）。系统按行逐条执行画布当前工作流。
 4. 模板库为空或不匹配时选 chat 并说明。可跨会话保留的偏好/事实用 intent=memory（见「长期记忆」段）。

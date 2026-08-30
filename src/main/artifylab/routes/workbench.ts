@@ -584,8 +584,8 @@ export function createWorkbenchRouter(): express.Router {
           finish()
           return
         }
-        send('sync', { templateId: tpl!.id, name: tpl!.name, workflow: wf })
-        const okMsg = `已把「${tpl!.name}」同步到右侧画布。`
+        send('sync', { templateId: tpl!.id, name: tpl!.name, workflow: wf, ensureTab: true })
+        const okMsg = `已把「${tpl!.name}」加载到画布。`
         workbenchService.appendMessage(sessionId, { role: 'agent', kind: 'chat', text: okMsg })
         send('reply', { intent: 'workflow', reply: okMsg })
         finish()
@@ -639,15 +639,17 @@ export function createWorkbenchRouter(): express.Router {
         finish()
         return
       }
-      // 复合意图：生成 + 加载画布（syncCanvasBeforeExec）——先发 sync 事件让前端
-      // 把模板布局加载到画布，再继续执行生成（两者并行，互不阻塞）。
-      if (plan.syncCanvasBeforeExec && local.template) {
+      // 执行前画布 tab 保证（ensure-tab）：C 界面每次执行模板都先把目标工作流
+      // 加载到画布——桥判定当前 tab 已是该工作流则复用（不新建），否则开新 tab
+      // 加载；非 embed（A 工作台）前端静默跳过，模板生成不受影响。
+      // （syncCanvasBeforeExec 兼容保留：agent 显式要求时同样走此路径。）
+      if (local.template) {
         const tpl = local.template
         const wf =
           tpl.workflow && Array.isArray((tpl.workflow as { nodes?: unknown }).nodes)
             ? tpl.workflow
             : promptToWorkflowGraph(tpl.prompt)
-        send('sync', { templateId: tpl.id, name: tpl.name, workflow: wf })
+        send('sync', { templateId: tpl.id, name: tpl.name, workflow: wf, ensureTab: true })
       }
       // 执行（batch 编排 vs 单次）
       if (plan.batch) {

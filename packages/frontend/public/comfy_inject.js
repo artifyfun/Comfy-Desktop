@@ -1117,8 +1117,9 @@
         const wf = op.workflow;
         if (!wf || typeof wf !== "object" || !wf.nodes)
           return { ok: false, error: "workflow.nodes required" };
+        if (op.newTab) return await loadWorkflowToTab(wf, op.name);
         await window.app.loadGraphData(wf);
-        return { ok: true };
+        return { ok: true, mode: "replace" };
       }
       case "align": {
         const target = resolveCanvasTargets(g, op.nodes);
@@ -1239,6 +1240,83 @@
     const sel = window.app?.canvas?.selected_nodes;
     if (sel && Object.keys(sel).length) return Object.values(sel);
     return (g._nodes || []).slice();
+  }
+  function getWorkflowTabStore() {
+    const app = window.app;
+    if (!app) return null;
+    const cands = [
+      app.extensionManager?.workflow,
+      app.extensionManager?.workflowStore,
+      app.ui?.workflow,
+      app.workflowStore
+    ];
+    for (const c of cands) {
+      if (c && typeof c.openWorkflow === "function" && typeof c.createTemporary === "function")
+        return c;
+    }
+    return null;
+  }
+  function nodeTypeSignature(graph) {
+    const nodes = graph && Array.isArray(graph.nodes) ? graph.nodes : [];
+    return nodes.map((n) => String(n && n.type || "")).filter(Boolean).sort().join("|");
+  }
+  function activeWorkflowGraph(active) {
+    if (!active) return null;
+    if (active.activeState && Array.isArray(active.activeState.nodes))
+      return active.activeState;
+    if (typeof active.content === "string") {
+      try {
+        const parsed = JSON.parse(active.content);
+        if (parsed && Array.isArray(parsed.nodes)) return parsed;
+      } catch (_e) {
+      }
+    }
+    return null;
+  }
+  function isTabMatchingActive(store, targetGraph, targetName) {
+    const active = store.activeWorkflow;
+    if (!active) return false;
+    const activeGraph = activeWorkflowGraph(active);
+    if (!activeGraph) return false;
+    if (nodeTypeSignature(targetGraph) !== nodeTypeSignature(activeGraph)) return false;
+    if (!targetName) return true;
+    const names = [
+      active.name,
+      active.displayName,
+      active.filename,
+      active.fullFilename
+    ].filter(Boolean).map((s) => String(s).replace(/\.json$/i, ""));
+    const t = String(targetName).replace(/\.json$/i, "");
+    return names.some((n) => n === t || n.endsWith("/" + t));
+  }
+  async function loadWorkflowToTab(wf, name) {
+    const store = getWorkflowTabStore();
+    if (store) {
+      if (isTabMatchingActive(store, wf, name)) {
+        return { ok: true, mode: "already-active", tab: activeTabName(store) };
+      }
+      try {
+        const temp = store.createTemporary(
+          String(name || "Unsaved Workflow") + ".json",
+          wf
+        );
+        await store.openWorkflow(temp);
+        return { ok: true, mode: "new-tab", tab: String(name || "Unsaved Workflow") };
+      } catch (e) {
+        console.warn("[ArtifyInject] createTemporary/openWorkflow failed, fallback replace:", e);
+      }
+    }
+    await window.app.loadGraphData(wf);
+    return { ok: true, mode: "replace" };
+  }
+  function activeTabName(store) {
+    try {
+      const a = store.activeWorkflow;
+      const n = a?.displayName || a?.name || a?.filename || "";
+      return String(n).replace(/\.json$/i, "") || null;
+    } catch (_e) {
+      return null;
+    }
   }
   async function applyCanvasOps(ops) {
     const app = getComfyUIApp().app || window.app;
