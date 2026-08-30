@@ -1,7 +1,6 @@
 import { app, dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import { useDesktopConfig } from './store/desktopConfig'
 import artifyUtils from '.'
 import { fetchWithRetry } from './utils/fetch'
 import { get as getSetting } from '../settings'
@@ -16,6 +15,125 @@ function settingsOutputInputRoots(): string[] {
     if (typeof inp === 'string' && inp) roots.push(inp)
   } catch {}
   return roots
+}
+
+/**
+ * 解析「活动 install」的 ComfyUI 子目录（custom_nodes 等快捷操作的目标）。
+ * 优先级：正在运行的 install → 最近一次 surface 记录 → 安装目录下第一个
+ * 已落盘的 install。解析失败返回 null（调用方转为用户可见错误）。
+ */
+async function resolveActiveComfyuiSubdir(sub: string | undefined): Promise<string | null> {
+  try {
+    const installations = await import('../installations')
+    const { getLastActiveSurface } = await import('../lib/lastSession')
+
+    let installId: string | null = null
+    // 1) 正在运行的 install（设置面板通常服务于它）
+    try {
+      const { _runningSessions } = await import('../lib/ipc/shared')
+      installId = _runningSessions.keys().next().value ?? null
+    } catch {}
+    // 2) 最近一次 surface 记录（上次活跃的 install）
+    if (!installId) {
+      try {
+        const last = getLastActiveSurface()
+        installId = last?.kind === 'instance' ? last.installationId : null
+      } catch {}
+    }
+    // 3) 安装目录下第一个存在的 install
+    if (!installId) {
+      const installDir = getSetting('installDir')
+      if (installDir && fs.existsSync(installDir)) {
+        const entries = fs
+          .readdirSync(installDir, { withFileTypes: true })
+          .filter((e) => e.isDirectory())
+        if (entries[0]) installId = entries[0].name
+      }
+    }
+    if (!installId) return null
+
+    const inst = await installations.get(installId)
+    if (inst?.installPath && fs.existsSync(inst.installPath)) {
+      const comfyuiDir = path.join(inst.installPath, 'ComfyUI')
+      if (!fs.existsSync(comfyuiDir)) {
+        console.warn('[openRootFolder] comfyui dir missing:', comfyuiDir)
+        return null
+      }
+      const target = sub ? path.join(comfyuiDir, sub) : comfyuiDir
+      if (!fs.existsSync(target)) {
+        console.warn('[openRootFolder] target missing:', target)
+        return null
+      }
+      return target
+    }
+    // 会话 key 可能是安装名（部分启动路径）而非 inst-id，get() 拿不到或拿到的
+    // 记录没有 installPath —— 退化为遍历本地 install，按名字/存在性匹配。
+    const all = await installations.list()
+    const wanted = String(installId)
+    const local =
+      all.find((i) => i.installPath && i.name === wanted) ??
+      all.find((i) => i.installPath && fs.existsSync(path.join(i.installPath, 'ComfyUI')))
+    if (!local?.installPath) {
+      console.warn('[openRootFolder] no local install with installPath for key:', wanted)
+      return null
+    }
+    const comfyuiDir = path.join(local.installPath, 'ComfyUI')
+    if (!fs.existsSync(comfyuiDir)) return null
+    const target = sub ? path.join(comfyuiDir, sub) : comfyuiDir
+    return fs.existsSync(target) ? target : null
+  } catch (err) {
+    console.warn('[openRootFolder] resolveActiveComfyuiSubdir failed:', err)
+    return null
+  }
+}
+
+/** outputDir 等设置值的父目录（共享根）。取不到时返回 null。 */
+function parentOfSettingDir(key: 'outputDir' | 'inputDir'): string | undefined {
+  try {
+    const dir = getSetting(key)
+    if (typeof dir === 'string' && dir) return path.dirname(dir)
+  } catch {}
+  return undefined
+}
+
+/** 活动 install 的 venv python（managed: ComfyUI/.venv，adopted: 记录路径）。 */
+async function getActiveInstallPythonPath(): Promise<string | null> {
+  try {
+    const [{ getActivePythonPath }, installations, { _runningSessions }, { getLastActiveSurface }] =
+      await Promise.all([
+        import('../lib/pythonEnv'),
+        import('../installations'),
+        import('../lib/ipc/shared'),
+        import('../lib/lastSession')
+      ])
+
+    let installId: string | null = _runningSessions.keys().next().value ?? null
+    if (!installId) {
+      const last = getLastActiveSurface()
+      installId = last?.kind === 'instance' ? last.installationId : null
+    }
+    if (!installId) {
+      const all = await installations.list()
+      const local = all.find((i) => i.installPath && fs.existsSync(i.installPath))
+      installId = local?.id ?? null
+    }
+    if (!installId) return null
+    let inst = await installations.get(installId)
+    // 会话 key 可能是安装名（部分启动路径）——按名字兜底，再退化为
+    // 第一个本地已落盘的 install（与 resolveActiveComfyuiSubdir 一致）。
+    if (!inst?.installPath) {
+      const all = await installations.list()
+      const wanted = String(installId)
+      inst =
+        all.find((i) => i.installPath && i.name === wanted) ??
+        all.find((i) => i.installPath && fs.existsSync(path.join(i.installPath, 'ComfyUI'))) ??
+        null
+    }
+    if (!inst) return null
+    return getActivePythonPath(inst)
+  } catch {
+    return null
+  }
 }
 
 export function registerArtifyHandlers() {
@@ -243,28 +361,40 @@ export function registerArtifyHandlers() {
    */
   ipcMain.handle('artify-openRootFolder', async (_event, folderName: string) => {
     try {
-      const basePath = useDesktopConfig().get('basePath')
-      if (!basePath) {
-        throw new Error('Base path not configured')
-      }
-
-      const targetPath = path.join(basePath, folderName)
-
-      // 检查指定的文件夹是否存在
-      if (fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory()) {
-        // 如果指定文件夹存在，直接打开
-        await shell.openPath(targetPath)
-        return { success: true, path: targetPath, openedFolder: folderName }
+      // 目录按语义映射到真实运行时位置。`basePath` 是上游 Electron 模板的
+      // 孤儿键——全工程没有任何写入点，原实现永远抛 'Base path not
+      // configured'，设置面板「快捷操作」tab 全部按钮失效。映射：
+      //   input        → settings inputDir
+      //   output       → settings outputDir（与 artify-openOutputFolder 一致）
+      //   models       → settings modelsDirs[0]（共享模型库）
+      //   custom_nodes → 当前活动 install 的 ComfyUI/custom_nodes
+      //   ''（根）     → 共享根（output/input/models 的上一级）
+      const folder = String(folderName ?? '')
+      let targetPath: string | undefined
+      if (folder === 'input') {
+        targetPath = getSetting('inputDir')
+      } else if (folder === 'output') {
+        targetPath = getSetting('outputDir')
+      } else if (folder === 'models') {
+        const dirs = getSetting('modelsDirs')
+        targetPath = Array.isArray(dirs) ? dirs[0] : undefined
+      } else if (folder === 'custom_nodes') {
+        targetPath = (await resolveActiveComfyuiSubdir('custom_nodes')) ?? undefined
       } else {
-        // 如果指定文件夹不存在，只打开根目录
-        await shell.openPath(basePath)
-        return {
-          success: true,
-          path: basePath,
-          openedFolder: 'root',
-          message: `Folder '${folderName}' not found, opened root directory instead`
-        }
+        targetPath = parentOfSettingDir('outputDir')
       }
+
+      if (!targetPath) {
+        throw new Error('Target folder not available')
+      }
+
+      // 共享目录约定由启动流程落盘；这里兜底创建，避免 openPath 静默失败
+      if (!fs.existsSync(targetPath)) {
+        fs.mkdirSync(targetPath, { recursive: true })
+      }
+
+      await shell.openPath(targetPath)
+      return { success: true, path: targetPath, openedFolder: folder || 'root' }
     } catch (error) {
       console.error('Error opening root folder:', error)
       return { success: false, error: (error as Error).message }
@@ -279,17 +409,14 @@ export function registerArtifyHandlers() {
    */
   ipcMain.handle('artify-openCMD', async (_event, type: string) => {
     try {
-      const basePath = useDesktopConfig().get('basePath')
-      if (!basePath) {
-        throw new Error('Base path not configured')
-      }
       if (type === 'python') {
-        const venvPath = path.join(basePath, '.venv')
-        const pythonInterpreterPath =
-          process.platform === 'win32'
-            ? path.join(venvPath, 'Scripts', 'python.exe')
-            : path.join(venvPath, 'bin', 'python')
-
+        // 用当前活动 install 的 venv python（managed: <install>/ComfyUI/.venv，
+        // adopted: 记录的 adoptedPythonPath）。原实现依赖从未写入的 basePath
+        // 孤儿键拼 '<basePath>/.venv'，永远返回 'Base path not configured'。
+        const pythonInterpreterPath = await getActiveInstallPythonPath()
+        if (!pythonInterpreterPath) {
+          throw new Error('No active ComfyUI installation found')
+        }
         return {
           success: true,
           cmd: pythonInterpreterPath
