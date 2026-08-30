@@ -1915,7 +1915,12 @@ function viewUrl(f) {
 // 以响应式 route.query 为准（router.replace 改写 URL 后仍正确），
 // window.location 一次性快照兜底（初始导航前的极早调用）。
 const isEmbed = computed(
-  () => route.query.embed === '1' || new URLSearchParams(window.location.search).get('embed') === '1'
+  () =>
+    route.query.embed === '1' ||
+    new URLSearchParams(window.location.search).get('embed') === '1' ||
+    // 兜底：宿主 iframe 内运行即视为 embed——URL 参被外部改写/重定向抹掉时，
+    // 窄栏不可塌回桌面布局（502px 侧栏里渲染 AppHeader+会话侧栏 = 头部换行且不可用）
+    (typeof window !== 'undefined' && window.parent && window.parent !== window)
 )
 
 // 画布页右侧栏嵌入模式：画布页以组件形式渲染本视图并传 prop
