@@ -90,3 +90,35 @@ export function toPseudoApp(t: WorkflowTemplate): App {
     template: { prompt: t.prompt, paramsNodes: t.paramsNodes, workflow: t.workflow }
   }
 }
+
+/**
+ * API 格式 prompt → UI graph（{nodes, links}）兜底转换。
+ * 模板未保存画布布局（workflow 缺失，如手动建 App 只填 prompt）时，
+ * 仍能把节点加载到画布（可编辑，布局后续可拖动整理）：
+ * - 节点：id/type 保留，pos 网格排布，widgets_values 尽力取 inputs 标量
+ * - links：跳过——API 链接引用 ["id", slot] 缺 target_slot 语义，盲连会错位
+ */
+export function promptToWorkflowGraph(prompt: ComfyPrompt): { nodes: unknown[]; links: unknown[] } {
+  const entries = Object.entries(prompt)
+  const nodes = entries.map(([id, n], i) => {
+    const widgetsValues: unknown[] = []
+    for (const v of Object.values(n.inputs)) {
+      if (v === null || typeof v === 'object') continue // 链接引用/复杂值不填
+      widgetsValues.push(v)
+    }
+    return {
+      id: Number(id),
+      type: n.class_type,
+      pos: [80 + (i % 6) * 40, 80 + Math.floor(i / 6) * 60],
+      size: [280, 90],
+      flags: {},
+      order: i,
+      mode: 0,
+      inputs: [],
+      outputs: [],
+      properties: { 'Node name for S&R': n.class_type },
+      widgets_values: widgetsValues
+    }
+  })
+  return { nodes, links: [] }
+}

@@ -29,6 +29,12 @@ export interface WorkbenchPlan {
   templateId?: string
   params?: Record<string, unknown>
   /**
+   * 复合意图（生成 + 画布加载）：intent=image/video/audio 时置 true，
+   * 系统先加载模板布局到画布（有 workflow 直接用，无则 prompt 兜底转换），
+   * 再执行模板生成。对应「用 XX 模板生成图片，工作流加载到画布中」。
+   */
+  syncCanvasBeforeExec?: boolean
+  /**
    * 节点级参数覆盖（P1 能力）：按 prompt 节点 id 覆盖任意节点的 widget 值
    * （如 KSampler 的 steps/cfg），不限于 paramsNodes 声明的 input。
    * class_type 用于防串号；widgetOverrides 只接受"直接值"字段，链接引用

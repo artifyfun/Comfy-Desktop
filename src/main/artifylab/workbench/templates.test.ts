@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { templateFromApp, toPseudoApp, type WorkflowTemplate } from './templateCore'
+import {
+  templateFromApp,
+  toPseudoApp,
+  promptToWorkflowGraph,
+  type WorkflowTemplate
+} from './templateCore'
 import type { App, ComfyPrompt } from '../appStore'
 
 function makeApp(overrides: Partial<App> = {}): App {
@@ -130,5 +135,32 @@ describe('WorkflowTemplate 类型契约', () => {
       source: 'builtin'
     }
     expect(t.id.startsWith('builtin:')).toBe(true)
+  })
+})
+
+describe('promptToWorkflowGraph（画布布局兜底转换）', () => {
+  it('prompt 节点 → graph nodes（id/type 保留，widgets 取标量，链接跳过）', () => {
+    const prompt: ComfyPrompt = {
+      '1': { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: 'flux1-dev.safetensors' } },
+      '2': { class_type: 'CLIPTextEncode', inputs: { text: 'a cat', clip: ['1', 1] } },
+      '3': { class_type: 'SaveImage', inputs: { filename_prefix: 'out', images: ['4', 0] } }
+    }
+    const g = promptToWorkflowGraph(prompt)
+    expect(g.nodes).toHaveLength(3)
+    expect(g.links).toEqual([])
+    const nodes = g.nodes as Array<{
+      id: number
+      type: string
+      widgets_values: unknown[]
+    }>
+    const n1 = nodes[0]!
+    const n2 = nodes[1]!
+    const n3 = nodes[2]!
+    expect(n1.id).toBe(1)
+    expect(n1.type).toBe('CheckpointLoaderSimple')
+    expect(n1.widgets_values).toEqual(['flux1-dev.safetensors'])
+    // 链接引用（数组）不落入 widgets_values
+    expect(n2.widgets_values).toEqual(['a cat'])
+    expect(n3.widgets_values).toEqual(['out'])
   })
 })

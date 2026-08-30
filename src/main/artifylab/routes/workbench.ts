@@ -28,6 +28,7 @@ import { createErrorResponse, createSuccessResponse } from '../utils/errorHandle
 import { templateLibrary } from '../workbench/templates'
 import { workbenchService } from '../workbench/service'
 import { validatePlanLocal, validateNodeOverridesLocal } from '../workbench/plan'
+import { promptToWorkflowGraph } from '../workbench/templateCore'
 import { stopExecution } from '../mcp/executor'
 import type { AttachmentMeta } from '../workbench/presetCore'
 import type { ComfyPrompt } from '../appStore'
@@ -568,10 +569,16 @@ export function createWorkbenchRouter(): express.Router {
       if (plan.intent === 'workflow') {
         // 同步模板工作流到宿主画布：UI graph（{nodes,links}）经 SSE sync 事件下发给
         // 工作台 iframe，前端走注入桥 artify:canvas-ops loadWorkflow 整图加载。
+        // 模板未保存布局（workflow 缺失）时用 prompt 兜底转换，保证节点能上画布。
         const tpl = local.template
-        const wf = tpl?.workflow
-        if (!wf || !Array.isArray((wf as { nodes?: unknown }).nodes)) {
-          const msg = `模板「${tpl?.name ?? plan.templateId}」没有保存画布布局（workflow），无法同步到画布。可在 A 界面从画布固化该工作流后再试。`
+        const wf =
+          tpl?.workflow && Array.isArray((tpl.workflow as { nodes?: unknown }).nodes)
+            ? tpl.workflow
+            : tpl
+              ? promptToWorkflowGraph(tpl.prompt)
+              : null
+        if (!wf) {
+          const msg = `模板「${tpl?.name ?? plan.templateId}」无可用布局，无法同步。`
           workbenchService.appendMessage(sessionId, { role: 'agent', kind: 'chat', text: msg })
           send('reply', { intent: 'workflow', reply: msg })
           finish()
@@ -631,6 +638,16 @@ export function createWorkbenchRouter(): express.Router {
         send('invalid', { issues: blocking })
         finish()
         return
+      }
+      // 复合意图：生成 + 加载画布（syncCanvasBeforeExec）——先发 sync 事件让前端
+      // 把模板布局加载到画布，再继续执行生成（两者并行，互不阻塞）。
+      if (plan.syncCanvasBeforeExec && local.template) {
+        const tpl = local.template
+        const wf =
+          tpl.workflow && Array.isArray((tpl.workflow as { nodes?: unknown }).nodes)
+            ? tpl.workflow
+            : promptToWorkflowGraph(tpl.prompt)
+        send('sync', { templateId: tpl.id, name: tpl.name, workflow: wf })
       }
       // 执行（batch 编排 vs 单次）
       if (plan.batch) {
