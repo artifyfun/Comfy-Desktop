@@ -1139,6 +1139,9 @@ const busy = ref(false)
 const stopping = ref(false)
 /** 当前 chat 轮的 reader：stopChat() 时 cancel 掉 SSE 流（后端 res close 会 abort 决策） */
 let chatReader = null
+/** 当前 chat 轮是否收到过 done 事件：服务端每条收尾路径（含超时/错误）都会发
+ *  done；流读完后仍为 false = 流被异常掐断，runChat finally 据此补错误提示 */
+let chatDone = false
 const uploading = ref(false)
 // 执行失败自动恢复：单会话最多自动重试 N 次（防死循环烧 token），切会话清零
 const recoverCount = ref(0)
@@ -1479,6 +1482,7 @@ function kindIcon(kind) {
  */
 async function runChat(inputText, attachments, opts = {}) {
   busy.value = true
+  chatDone = false
   pendingIssues.value = []
   if (opts.userBubble != null) {
     const tid = nextTurn() // 用户消息开新回合，本轮 agent 消息自动继承
@@ -1531,6 +1535,18 @@ async function runChat(inputText, attachments, opts = {}) {
       })
     }
   } finally {
+    // 流读完但没收到 done（网络/网关掐断等未覆盖路径）：收掉占位气泡并补提示，
+    // 否则「AI 正在决策…」残留或静默结束，观感是任务跑完却没结果。用户主动
+    // 停止由 stopChat 负责收尾，这里跳过避免双气泡。
+    if (!chatDone && !stopping.value) {
+      dismissDecidingProgress()
+      pushMsg({
+        role: 'agent',
+        kind: 'error',
+        text: t('workbenchStreamInterrupted'),
+        createdAt: Date.now(),
+      })
+    }
     chatReader = null
     busy.value = false
     scrollToBottom()
@@ -2021,6 +2037,7 @@ function handleSse(chunk) {
       createdAt: Date.now(),
     })
   } else if (event === 'done') {
+    chatDone = true
     // 会话摘要 → 侧栏刷新（标题可能被自动生成更新）
     if (data.session) {
       const s = sessions.value.find((x) => x.id === data.session.id)

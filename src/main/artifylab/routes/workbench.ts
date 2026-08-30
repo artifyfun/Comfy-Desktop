@@ -36,8 +36,12 @@ import { buildAppCode } from '../agentDriver'
 import appStoreManager from '../appStore'
 import { get as getSetting } from '../../settings'
 
-/** chat SSE 总超时：决策 + 校验 + 提交（轮询产物由前端持续 poll，不占此窗口） */
-const CHAT_TIMEOUT_MS = 5 * 60 * 1000
+/** chat SSE 总超时：决策 + 校验 + 提交（轮询产物由前端持续 poll，不占此窗口）。
+ * 必须大于 wb_* 工具 wait=true 的阻塞预算（pollUntilDone 10min，workbenchTools.ts）：
+ * 编排轮把「等 ComfyUI 生成」算在本窗口内，预算小于工具等待时编排轮必然被腰斩
+ * ——decide abort → 无 PLAN → 无 reply/产物/画布同步，观感是「跑完但啥都没渲染」
+ * （真实事故：glm 多轮工具调用 + Krea2 生成 > 5min）。 */
+const CHAT_TIMEOUT_MS = 15 * 60 * 1000
 /** 并发锁：同一时刻一个决策会话（codex 子进程开销大） */
 let chatInFlight = false
 /** 当前 chat 轮的取消柄：POST /stop 时 abort（decide 的 AbortSignal 沿链路生效） */
@@ -430,7 +434,10 @@ export function createWorkbenchRouter(): express.Router {
     res.flushHeaders()
 
     const send = (event: string, data: unknown): void => {
-      if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+      // destroyed：连接被客户端/网络提前掐断时 writableEnded 仍为 false，
+      // 继续 write 会在部分 Node 版本触发未消费的 stream 错误
+      if (!res.writableEnded && !res.destroyed)
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     }
 
     chatInFlight = true
@@ -439,30 +446,63 @@ export function createWorkbenchRouter(): express.Router {
     chatSettled = new Promise((r) => {
       settleChat = r
     })
-    // 本轮起点：decide 返回后据此找「决策期间工具执行（wb_run_workflow /
+    // 本轮起点：finish() 据此找「决策期间工具执行（wb_run_workflow /
     // wb_execute_template wait=true 轮询）已完成」的执行，补发产物事件——
     // pollExecution 落盘 artifact 消息但不推 SSE，前端实时收不到图。
     const chatStartTs = Date.now()
     const ac = chatAbort
-    // 自组/导入工作流（wb_run_workflow）执行 → 画布新 tab：executeWorkflow 成功后
-    // 回调此 handler，API workflow 转 UI graph 经 sync 事件下发（ensure-tab 语义，
-    // 桥判定当前 tab 已是同一工作流则复用）。finally 清理。
-    workbenchService.setCanvasSyncHandler((workflow, name) => {
+    // 超时标记：abort 有三个来源（超时/停止/SSE close），catch 里据此区分，
+    // 给超时轮可读反馈而不是静默收尾（此前静默 → 前端观感「跑完但没结果」）
+    let chatTimedOut = false
+    // 自组/导入工作流（wb_run_workflow）与编排模板（wb_execute_template 经
+    // service.syncTemplateToCanvas）执行 → 画布新 tab：成功提交后回调此 handler，
+    // API workflow 转 UI graph 经 sync 事件下发（ensure-tab 语义，桥判定当前 tab
+    // 已是同一工作流则复用）。finally 清理。
+    workbenchService.setCanvasSyncHandler((sync) => {
       try {
         send('sync', {
-          templateId: `session:${name ?? 'workflow'}`,
-          name: name ?? '自建工作流',
-          workflow: promptToWorkflowGraph(workflow),
+          templateId: sync.templateId ?? `session:${sync.name ?? 'workflow'}`,
+          name: sync.name ?? '自建工作流',
+          workflow: promptToWorkflowGraph(sync.workflow),
           ensureTab: true
         })
       } catch (e) {
         logger.warn('workbench canvasSync send failed', e)
       }
     })
-    const timeout = setTimeout(() => ac.abort(), CHAT_TIMEOUT_MS)
+    const timeout = setTimeout(() => {
+      chatTimedOut = true
+      ac.abort()
+    }, CHAT_TIMEOUT_MS)
     res.on('close', () => ac.abort())
-    // SSE 收尾：附会话摘要供侧栏刷新（不引入 WS）
+    // SSE 收尾：补发决策期间已完成的编排产物 → 附会话摘要供侧栏刷新（不引入 WS）
+    /**
+     * 补发「决策期间工具执行（wb_run_workflow / wb_execute_template wait=true
+     * 阻塞轮询）已完成」的产物事件。pollExecution 落盘 artifact 消息但不推 SSE，
+     * 前端实时收不到图。补偿逻辑原先只在 decide 正常返回后执行——decide 被
+     * 超时/断连 abort 时永远跳过（真实事故：编排已出图，聊天窗零反馈）。挪进
+     * finish()：每条收尾路径（含 abort/异常）恰好执行一次，且都在流关闭前。
+     * 快路径模板执行不受影响：提交时 status 还是 queued，不会在此重复补发。
+     */
+    const flushOrchestratedArtifacts = (): void => {
+      const execSession = workbenchService.getSession(sessionId)
+      for (const e of execSession?.executions ?? []) {
+        if (!(e.startedAt >= chatStartTs && e.status === 'success' && e.outputs.length > 0))
+          continue
+        // 旧数据 outputs 可能是纯 filename 字符串，归一为完整文件引用
+        const files = e.outputs.map((f) =>
+          typeof f === 'string' ? { filename: f, subfolder: '', type: 'output' } : f
+        )
+        send('artifact', {
+          promptId: e.promptId,
+          name: e.templateId,
+          outputs: files.map((f) => f.filename),
+          outputFiles: files
+        })
+      }
+    }
     const finish = (): void => {
+      flushOrchestratedArtifacts()
       const session = workbenchService.getSession(sessionId)
       send('done', {
         session: session
@@ -539,25 +579,7 @@ export function createWorkbenchRouter(): express.Router {
         finish()
         return
       }
-      // 补发决策期间工具执行的产物（wb_run_workflow / wb_execute_template wait=true
-      // 在 decide 内阻塞轮询完成，pollExecution 落盘 artifact 消息但不推 SSE——
-      // 前端实时看不到图）。有产物才发；模板执行（intent=image）走前端 startPoll
-      // 原位升级，不受影响（execution 尚未创建，chatStartTs 过滤不命中）。
-      const execSession = workbenchService.getSession(sessionId)
-      for (const e of execSession?.executions ?? []) {
-        if (!(e.startedAt >= chatStartTs && e.status === 'success' && e.outputs.length > 0))
-          continue
-        // 旧数据 outputs 可能是纯 filename 字符串，归一为完整文件引用
-        const files = e.outputs.map((f) =>
-          typeof f === 'string' ? { filename: f, subfolder: '', type: 'output' } : f
-        )
-        send('artifact', {
-          promptId: e.promptId,
-          name: e.templateId,
-          outputs: files.map((f) => f.filename),
-          outputFiles: files
-        })
-      }
+      // （决策期间工具执行的产物补偿已挪进 finish()：abort/异常路径同样补发）
       send('plan', { plan, localIssues: issues })
 
       // 预设意图约束是硬校验：codex 违反预设（如 text-to-image 预设下输出 text）
@@ -760,14 +782,29 @@ export function createWorkbenchRouter(): express.Router {
           kind: 'chat',
           text: '已停止'
         })
-      }
-      // 用户主动取消（SSE close / 停止 / 超时 abort）：不落错误气泡
-      if (!stopped && !ac.signal.aborted) {
+      } else if (chatTimedOut) {
+        // 超时中断（CHAT_TIMEOUT_MS 预算耗尽，多为编排轮等待生成）：此前与用户
+        // 停止/断连一起静默收尾 → 前端只看到占位气泡消失，观感「跑完但没结果」
+        // （真实事故：decide 中途 abort，PLAN 未产出，无 reply/产物/画布同步）。
+        // 必须落盘 + 回发可读错误；若工具已提交过执行，finish() 还会补发产物。
+        const message = `决策超时（${Math.round(CHAT_TIMEOUT_MS / 60000)} 分钟），本轮未完成。编排中已提交的生成任务可能仍在后台执行，可稍后重进会话查看产物。`
+        logger.warn('workbench chat timed out', error)
+        workbenchService.appendMessage(sessionId, { role: 'agent', kind: 'error', text: message })
+        send('error', { message })
+      } else if (!ac.signal.aborted) {
         const message = error instanceof Error ? error.message : String(error)
         logger.error('workbench chat failed', error)
         // 错误落盘:重进会话仍可见（此前仅前端内存,刷新/切会话即丢）
         workbenchService.appendMessage(sessionId, { role: 'agent', kind: 'error', text: message })
         send('error', { message })
+      } else {
+        // SSE 连接被客户端/网络提前断开（res close → abort）：落盘轻提示，
+        // 不再向已断开的流写事件（send 已挡 destroyed，双保险）
+        workbenchService.appendMessage(sessionId, {
+          role: 'agent',
+          kind: 'error',
+          text: '连接中断，本轮决策未完成'
+        })
       }
       finish()
     } finally {

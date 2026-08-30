@@ -458,6 +458,7 @@ const translations = {
     workbenchFailed: '执行失败',
     workbenchStop: '停止执行',
     workbenchStopped: '已停止',
+    workbenchStreamInterrupted: '对话流中断，本轮未收到完成信号',
     workbenchImportWorkflow: '导入工作流',
     workbenchImportNamePlaceholder: '工作流名称（可选）',
     workbenchImportJsonPlaceholder:
@@ -1375,6 +1376,7 @@ const translations = {
     workbenchFailed: 'Execution failed',
     workbenchStop: 'Stop',
     workbenchStopped: 'Stopped',
+    workbenchStreamInterrupted: 'Stream interrupted — round did not complete',
     workbenchImportWorkflow: 'Import workflow',
     workbenchImportNamePlaceholder: 'Workflow name (optional)',
     workbenchImportJsonPlaceholder:

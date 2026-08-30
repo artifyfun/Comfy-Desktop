@@ -1459,11 +1459,11 @@ ${userInput}`
       })
     }
     // 自组/导入工作流执行 → 同步到画布（新 tab；chat 决策期间由路由层注册
-    // handler 转 SSE sync 事件 → 前端注入桥 loadWorkflow）。模板执行不走这里
-    // （路由层已单独发 ensure-tab sync）。
+    // handler 转 SSE sync 事件 → 前端注入桥 loadWorkflow）。模板编排执行
+    // （wb_execute_template）在提交前经 syncTemplateToCanvas 走同通道。
     if (this.canvasSyncHandler) {
       try {
-        this.canvasSyncHandler(workflow, opts.name)
+        this.canvasSyncHandler({ workflow, name: opts.name })
       } catch (e) {
         logger.debug('workbench canvasSyncHandler failed', e)
       }
@@ -1472,10 +1472,38 @@ ${userInput}`
   }
 
   /** chat 决策期间注册的画布同步回调（路由层注册/清理；执行即上画布） */
-  private canvasSyncHandler: ((workflow: ComfyPrompt, name?: string) => void) | null = null
+  private canvasSyncHandler:
+    | ((sync: { workflow: ComfyPrompt; name?: string; templateId?: string }) => void)
+    | null = null
 
-  setCanvasSyncHandler(h: ((workflow: ComfyPrompt, name?: string) => void) | null): void {
+  setCanvasSyncHandler(
+    h: ((sync: { workflow: ComfyPrompt; name?: string; templateId?: string }) => void) | null
+  ): void {
     this.canvasSyncHandler = h
+  }
+
+  /**
+   * 模板编排执行前的画布同步（wb_execute_template 路径）：把目标模板的工作流
+   * （有保存布局用布局，否则 prompt 兜底转换）经 canvasSyncHandler 下发（ensure-tab，
+   * 桥判定当前 tab 已是同一工作流则复用）。与路由层快路径「执行前 sync」行为
+   * 一致——spec 承诺 intent=image/video/audio 执行模板自动加载画布，此前编排
+   * 路径缺这一步（真实事故：C 界面侧边栏跑完任务，画布不加载工作流）。
+   * handler 未注册（非 chat 链路，如 /execute 直连）时静默跳过，不阻断执行。
+   */
+  syncTemplateToCanvas(template: WorkflowTemplate): void {
+    if (!this.canvasSyncHandler) return
+    // template.prompt 即 ComfyPrompt（API prompt 格式），与 executeWorkflow 旧路径一致：
+    // 统一交给路由层 promptToWorkflowGraph 转 UI graph 下发（含 ensure-tab 与拓扑布局），
+    // 不在此区分 workflow 真实布局（routes 写死走转换，传 UI graph 反而类型不符）。
+    try {
+      this.canvasSyncHandler({
+        workflow: template.prompt,
+        name: template.name,
+        templateId: template.id
+      })
+    } catch (e) {
+      logger.debug('workbench syncTemplateToCanvas failed', e)
+    }
   }
 
   /** 画布当前工作流执行记录（canvas-run 链路）：execution 落会话，重进会话可见产物 */

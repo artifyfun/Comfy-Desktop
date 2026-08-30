@@ -243,6 +243,12 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
         return text({ ok: false, stage: 'validation', issues: validation.issues })
       }
       workbenchService.markOrchestrated(sessionId)
+      // ensure-tab（与路由层快路径一致）：模板执行前先把工作流同步到宿主画布
+      // （新 tab；当前 tab 已是同一工作流则复用）。此前编排路径缺这一步，
+      // spec 承诺的「执行模板自动加载画布」对 wb_execute_template 不成立
+      // （真实事故：C 界面侧边栏跑完任务画布不动）。非 chat 链路
+      // （handler 未注册）时内部静默跳过，不阻断执行。
+      workbenchService.syncTemplateToCanvas(validation.template)
       // 批量编排：走 batchRunner 队列（串行、可暂停/取消），进度经
       // /api/batch 通道。行级失败不互相阻塞，终态汇总返回。
       if (plan.batch) {
