@@ -82,6 +82,7 @@ import {
   executeApp,
   executePrompt,
   getExecutionStatus,
+  getHistory,
   inferOutputParamNodes,
   uploadMediaBuffer,
   type ExecutionResult
@@ -867,7 +868,21 @@ class WorkbenchService {
     try {
       const dirs = (getSetting('modelsDirs') as string[] | undefined) ?? []
       for (const base of dirs) {
-        for (const type of ['checkpoints', 'loras', 'vae', 'upscale_models', 'controlnet']) {
+        for (const type of [
+          'checkpoints',
+          'loras',
+          'vae',
+          'upscale_models',
+          'controlnet',
+          // 加载器分离型模型（UNETLoader/CLIPLoader/VAELoader 组合）——
+          // 自组工作流选模型必须能看到：Krea2=unet/Qwen-Image-Flash，
+          // Anima=diffusion_models/Anima-2.9B + text_encoders 编码器
+          'unet',
+          'diffusion_models',
+          'text_encoders',
+          'clip',
+          'clip_vision'
+        ]) {
           const typeDir = join(base, type)
           if (!existsSync(typeDir)) continue
           const names = (modelsByType[type] ??= [])
@@ -1039,7 +1054,20 @@ class WorkbenchService {
 {"intent":"image|video|audio|text|chat|memory|workflow|canvas-run","templateId":"...","params":{...},"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text/memory 时直接给用户的回复","memory":{"action":"remember|forget","key":"...","value":"remember 时必填"},"title":"仅首条消息时提供"}
 
 规则：
-1. **简单需求**（能直接映射到某个模板的参数面）→ 直接输出 PLAN JSON：intent=image/video/audio 选 templateId，params 数值遵守 min/max，枚举必须完全匹配可选值。模板给不出用户要的效果时，按 5.2 变通，不要硬凑模板参数。
+1. **模板严格匹配才执行**：intent=image/video/audio 前先评估模板库——模板的能力/风格/模型与需求**真正匹配**（需求「写实小猫」→ 模板必须能产出写实图且用得上本机对应模型）才选 templateId。**名称像但能力不符的模板（如动漫槽位替换模板做写实需求）不得硬套**——套了只会出错的图或执行失败。模板库无真正匹配 → 按 1.1 自组工作流。
+1.1 **自组工作流（模板不匹配时的正解，不是变通）**：根据需求 + 本机模型/节点自建一个最小可执行工作流：
+   - 查节点：wb_list_nodes()（不带 template_id）看全量节点类型与输入 schema；
+   - 选模型：从「环境快照」模型清单挑——注意本机 checkpoints 目录可能没有
+     标准底模，文生图用加载器分离组合：UNETLoader（unet/ 或 diffusion_models/
+     里的 Anima-2.9B、Qwen-Image-Flash）+ CLIPLoader（text_encoders/clip/ 里的
+     Qwen3 编码器）+ VAELoader（vae/）；风格用 loras/。可先 wb_list_nodes
+     查 Krea2/Anima 模板的加载器结构作参考（它们本机可跑）；
+   - 组图骨架（API 格式）：文生图 = UNETLoader/CheckpointLoader → CLIPTextEncode
+     (正向/负向) → KSampler → VAEDecode → SaveImage；图生图 = 前面加
+     LoadImage → VAEEncode；放大/ControlNet/多模型按需追加；
+   - 校验执行：wb_validate_workflow → wb_run_workflow(workflow, wait=true)；产物自动落会话；
+   - 效果好可 wb_publish_workflow 固化供复用。
+   自组才是「根据需求建工作流」，宁可多调几次工具，也别为了省事硬套不合适的固化模板。
 2. intent=text 走纯文本生成（文案/起名/总结等），把生成结果放 reply。
 3. intent=chat 用于追问澄清或闲聊，回复放 reply。
 3.1 **把工作流加载到画布**（用户说「把工作流同步到画布 / 加载工作流 / 打开某模板的画布布局」）→ intent=workflow + templateId 选目标模板（模板库清单里的 id）。画布会自动开新 tab 加载该模板的布局（当前 tab 已是同一工作流时复用，不重复开）；模板未保存布局时系统会从模板参数自动生成节点布局（无连线，可手动整理）。
@@ -1125,29 +1153,49 @@ ${userInput}`
       attachments,
       templateShortcut
     })
-    const { events } = await agent.thread.runStreamed(spec, { signal: opts.signal })
     // codex exec 的 JSONL 原始行（string 形态）——parsePlanFromCodex 容错解析用
     const rawLines: string[] = []
-    for await (const event of events) {
-      if (typeof event === 'string') {
-        rawLines.push(event)
+    try {
+      const { events } = await agent.thread.runStreamed(spec, { signal: opts.signal })
+      for await (const event of events) {
+        if (typeof event === 'string') {
+          rawLines.push(event)
+          onProgress({ type: 'log', text: 'deciding' })
+          continue
+        }
+        // 结构化 ThreadEvent：透传给路由层（SSE item 流，前端实时渲染
+        // 工具调用/文件改动/web 搜索/reasoning，抄 codex app-server 条目驱动模型）
+        onProgress({ type: 'thread_event', event })
+        try {
+          rawLines.push(JSON.stringify(event))
+        } catch {
+          /* ignore */
+        }
+        // 轮级 usage 累计（预算监控：每会话 token 总量）
+        if (event.type === 'turn.completed' && event.usage) {
+          agent.totalTokens +=
+            Number(event.usage.input_tokens ?? 0) + Number(event.usage.output_tokens ?? 0)
+        }
         onProgress({ type: 'log', text: 'deciding' })
-        continue
       }
-      // 结构化 ThreadEvent：透传给路由层（SSE item 流，前端实时渲染
-      // 工具调用/文件改动/web 搜索/reasoning，抄 codex app-server 条目驱动模型）
-      onProgress({ type: 'thread_event', event })
-      try {
-        rawLines.push(JSON.stringify(event))
-      } catch {
-        /* ignore */
+    } catch (e) {
+      // 中断/异常也留调试日志（用户停止后「复制 debug」仍有内容可看）；
+      // 仅 abort 场景记录（其他异常由上层统一处理）
+      const aborted =
+        !!opts.signal?.aborted || (e instanceof Error && /abort|cancel/i.test(e.message))
+      if (aborted) {
+        this.recordDebug(sessionId, {
+          effectiveInput,
+          presetId,
+          templateShortcut,
+          spec,
+          rawOutput: rawLines.join('\n'),
+          plan: null,
+          issues: [{ field: 'abort', message: '用户中断（未产出 PLAN）' }],
+          model: appStoreManager.getConfig().buildModel
+        })
       }
-      // 轮级 usage 累计（预算监控：每会话 token 总量）
-      if (event.type === 'turn.completed' && event.usage) {
-        agent.totalTokens +=
-          Number(event.usage.input_tokens ?? 0) + Number(event.usage.output_tokens ?? 0)
-      }
-      onProgress({ type: 'log', text: 'deciding' })
+      throw e
     }
     const raw = rawLines.join('\n')
     // harness：会话保持（不关代理/不删 tempHome/不失效工具上下文）——
@@ -1402,7 +1450,24 @@ ${userInput}`
         promptId: execution.promptId
       })
     }
+    // 自组/导入工作流执行 → 同步到画布（新 tab；chat 决策期间由路由层注册
+    // handler 转 SSE sync 事件 → 前端注入桥 loadWorkflow）。模板执行不走这里
+    // （路由层已单独发 ensure-tab sync）。
+    if (this.canvasSyncHandler) {
+      try {
+        this.canvasSyncHandler(workflow, opts.name)
+      } catch (e) {
+        logger.debug('workbench canvasSyncHandler failed', e)
+      }
+    }
     return execution
+  }
+
+  /** chat 决策期间注册的画布同步回调（路由层注册/清理；执行即上画布） */
+  private canvasSyncHandler: ((workflow: ComfyPrompt, name?: string) => void) | null = null
+
+  setCanvasSyncHandler(h: ((workflow: ComfyPrompt, name?: string) => void) | null): void {
+    this.canvasSyncHandler = h
   }
 
   /** 画布当前工作流执行记录（canvas-run 链路）：execution 落会话，重进会话可见产物 */
@@ -1456,20 +1521,31 @@ ${userInput}`
       // 回填会话
       const session = this.getSession(sessionId)
       const exec = session?.executions.find((e) => e.promptId === promptId)
-      if (exec && result.outputs) {
+      if (exec) {
         exec.status = 'success'
         const files: WorkbenchOutputFile[] = []
-        for (const v of Object.values(result.outputs as Record<string, unknown>)) {
-          const o = v as {
-            images?: Array<{ filename?: string; subfolder?: string; type?: string }>
-            gifs?: Array<{ filename?: string; subfolder?: string; type?: string }>
-          }
-          for (const key of ['images', 'gifs'] as const) {
-            for (const it of o[key] ?? []) {
-              if (it.filename)
-                files.push({ filename: it.filename, subfolder: it.subfolder, type: it.type })
+        // 产物提取：直接扫 ComfyUI 原始 history outputs 的所有节点 images/gifs——
+        // getExecutionStatus 的 extractOutputs 只挑 paramsNodes 声明的 output 节点，
+        // 而模板固化时常未声明输出（Anima+槽位替换A 等只声明输入参数 prompt）→
+        // 提取永远为空 → 前端「无产物文件」（真实事故：ComfyUI 已输出 2 张图，
+        // 会话产物却是 0）。
+        try {
+          const history = await getHistory(comfyOrigin, promptId)
+          const rawOutputs = (history?.outputs as Record<string, unknown>) ?? {}
+          for (const v of Object.values(rawOutputs)) {
+            const o = v as {
+              images?: Array<{ filename?: string; subfolder?: string; type?: string }>
+              gifs?: Array<{ filename?: string; subfolder?: string; type?: string }>
+            }
+            for (const key of ['images', 'gifs'] as const) {
+              for (const it of o[key] ?? []) {
+                if (it.filename)
+                  files.push({ filename: it.filename, subfolder: it.subfolder, type: it.type })
+              }
             }
           }
+        } catch {
+          /* history 读取失败按无产物处理（不阻断轮询返回） */
         }
         exec.outputs = files
         this.appendMessage(sessionId, {

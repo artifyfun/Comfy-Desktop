@@ -27,14 +27,21 @@ description: Artify 工作台多步编排与工作流创作指南。当需求需
 
 ## 工作流创作
 
-现有模板无法表达需求时（要自定义节点连线/组合）：
+现有模板**不匹配需求**（不是"有点像"就硬套——能力/风格/模型不符直接自组）时：
 
-1. `wb_list_templates` 确认没有可用的；`wb_list_nodes()`（不传 template_id）可看 ComfyUI 全量节点类型清单。
-2. `wb_validate_workflow(workflow)` 先校验你的 API 格式 workflow JSON（节点类型/链接完整性，可迭代修正）。
-3. `wb_run_workflow(workflow, wait=true)` 直接运行；seed/node_overrides/use_previous_output 可传。产物自动落会话。
-4. 效果好的可 `wb_publish_workflow(name, workflow)` 固化为新模板，供后续复用。
+1. `wb_list_templates` 确认没有真正可用的；`wb_list_nodes()`（不传 template_id）看 ComfyUI 全量节点类型与输入 schema（object_info）。
+2. 从「环境快照」模型清单选底模：文生图用 checkpoints 或 UNETLoader 可加载的模型 + VAE；风格化需求叠加对应 LoRA（名字含风格的优先）。
+3. `wb_validate_workflow(workflow)` 先校验 API 格式 workflow JSON（节点类型/链接完整性，可迭代修正）。
+4. `wb_run_workflow(workflow, wait=true)` 直接运行；seed/node_overrides/use_previous_output 可传。产物自动落会话。
+5. 效果好的可 `wb_publish_workflow(name, workflow)` 固化为新模板，供后续复用。
 
 API 格式：`{"节点id": {"class_type": "节点类名", "inputs": {"参数名": 值 或 ["上游id", 端口号]}}}`；链接字段值为 `["上游节点id", 输出端口下标]`。
+
+最小骨架（按需求删减/追加）：
+
+- **文生图**：`{"1":{"class_type":"CheckpointLoaderSimple","inputs":{"ckpt_name":"<底模>"}},"2":{"class_type":"CLIPTextEncode","inputs":{"text":"<正向提示词>","clip":["1",1]}},"3":{"class_type":"CLIPTextEncode","inputs":{"text":"<负向>","clip":["1",1]}},"4":{"class_type":"EmptyLatentImage","inputs":{"width":1024,"height":1024,"batch_size":1}},"5":{"class_type":"KSampler","inputs":{"seed":42,"steps":28,"cfg":7,"sampler_name":"euler","scheduler":"normal","denoise":1,"model":["1",0],"positive":["2",0],"negative":["3",0],"latent_image":["4",0]}},"6":{"class_type":"VAEDecode","inputs":{"samples":["5",0],"vae":["1",2]}},"7":{"class_type":"SaveImage","inputs":{"filename_prefix":"artify","images":["6",0]}}}`
+- **图生图**：文生图基础上把 EmptyLatentImage 换成 `{"class_type":"LoadImage","inputs":{"image":"<已上传文件名>"}}` → `{"class_type":"VAEEncode","inputs":{"pixels":["LoadImage",0],"vae":["1",2]}}` 接 KSampler（denoise 0.5~0.8）；或直接 `LoadImage → VAEEncode → KSampler`。
+- 节点类名不存在的先用 `wb_list_nodes()` 确认（如 CheckpointLoaderSimple 不在时用 UNETLoader + CLIPLoader + VAELoader 组合）。**本机 checkpoints 目录无标准底模**：文生图参考 Krea2/Anima 模板的加载器结构（UNETLoader 加载 unet/Qwen-Image-Flash 或 diffusion_models/Anima-2.9B + CLIPLoader 加载 text_encoders 的 Qwen3 编码器 + VAELoader 加载 vae 对应文件），模型名以「环境快照」模型清单为准。
 
 ## 画布协同（C 界面 AI 侧边栏）
 

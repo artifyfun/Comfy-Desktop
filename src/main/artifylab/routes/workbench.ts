@@ -44,6 +44,10 @@ let chatInFlight = false
 let chatAbort: AbortController | null = null
 /** /stop 中断的会话：chat 轮收尾时据此落「已停止」而非错误（防止 ErrorException 冒泡） */
 let chatStopRequested = false
+/** chat 路由收尾 promise：stop 路由 await 它，确保锁释放后才响应——前端
+ *  stopReq 完成后即可立即发起下一轮（否则撞 chatInFlight 409） */
+let chatSettled: Promise<void> = Promise.resolve()
+let settleChat: (() => void) | null = null
 /** 附件上传 multer（内存态，直接透传 ComfyUI；大小限制交给 executor 的 MAX_MEDIA_BYTES） */
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 512 * 1024 * 1024 } })
 
@@ -432,7 +436,25 @@ export function createWorkbenchRouter(): express.Router {
     chatInFlight = true
     chatAbort = new AbortController()
     chatStopRequested = false
+    chatSettled = new Promise((r) => {
+      settleChat = r
+    })
     const ac = chatAbort
+    // 自组/导入工作流（wb_run_workflow）执行 → 画布新 tab：executeWorkflow 成功后
+    // 回调此 handler，API workflow 转 UI graph 经 sync 事件下发（ensure-tab 语义，
+    // 桥判定当前 tab 已是同一工作流则复用）。finally 清理。
+    workbenchService.setCanvasSyncHandler((workflow, name) => {
+      try {
+        send('sync', {
+          templateId: `session:${name ?? 'workflow'}`,
+          name: name ?? '自建工作流',
+          workflow: promptToWorkflowGraph(workflow),
+          ensureTab: true
+        })
+      } catch (e) {
+        logger.warn('workbench canvasSync send failed', e)
+      }
+    })
     const timeout = setTimeout(() => ac.abort(), CHAT_TIMEOUT_MS)
     res.on('close', () => ac.abort())
     // SSE 收尾：附会话摘要供侧栏刷新（不引入 WS）
@@ -729,6 +751,11 @@ export function createWorkbenchRouter(): express.Router {
       clearTimeout(timeout)
       chatInFlight = false
       chatAbort = null
+      workbenchService.setCanvasSyncHandler(null)
+      if (settleChat) {
+        settleChat()
+        settleChat = null
+      }
       if (!res.writableEnded) res.end()
     }
   })
@@ -739,6 +766,10 @@ export function createWorkbenchRouter(): express.Router {
     if (hadChat) {
       chatStopRequested = true
       chatAbort!.abort()
+      // 等 chat 彻底退出（decide 抛错 → catch → finally 释放锁）再响应——
+      // 前端 await stopReq 完成后立即可发起下一轮，不再撞 chatInFlight 409。
+      // 5s 超时兜底（codex 子进程 kill 极端慢时不让 stop 一直挂着）。
+      await Promise.race([chatSettled, new Promise((r) => setTimeout(r, 5000))])
     }
     // 正在执行的 ComfyUI 任务（chat 已提交到队列/轮询中）同步 interrupt；
     // 失败不阻断停止确认（ComfyUI 可能已离线或无任务在跑）
