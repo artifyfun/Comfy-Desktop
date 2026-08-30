@@ -369,8 +369,11 @@ describe('TitleBarApp', () => {
     // C→A: clicking the A seg routes through setSurface('artify')
     await segs[0].trigger('click')
     expect(bridgeState.setSurfaceCalls).toEqual(['artify'])
-    // main acknowledges the flip; the active side follows the push
+    // main acknowledges the flip; the active side follows the push.
+    // Real main semantics (focus handler): surface→'artify' AND the A UI
+    // becomes the active panel body → panel-changed('chooser').
     bridgeState.surfaceChangedCallbacks.forEach((cb) => cb('artify'))
+    bridgeState.panelChangedCallbacks.forEach((cb) => cb('chooser'))
     await flushPromises()
     expect(segs[0].classes()).toContain('is-active')
     // A→C: now the C seg routes setPanel('comfy') (existing path)
@@ -388,6 +391,41 @@ describe('TitleBarApp', () => {
     firstUseCallbacks.forEach((cb) => cb('consent-lockdown'))
     await flushPromises()
     expect(wrapper.find('.surface-switch').exists()).toBe(false)
+  })
+
+  it('keeps the C segment active while the comfy canvas is the visible body even with a warm A panel (A→C then re-enter A)', async () => {
+    // 真实主进程语义：A→C 切换后 panelSurface 保持 'artify'（A UI 暖面板
+    // 驻留 panelView 仅隐藏），此时 onSurfaceChanged 推的仍是 'artify'，
+    // 但可见体是 comfy 画布。高亮必须跟可见体（C），且两方向点击都可走出死锁。
+    bridgeState = installMockBridge({ surface: 'chooser' })
+    vi.resetModules()
+    const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+    const wrapper = mount(TitleBarApp)
+    await flushPromises()
+    // canvas live → C→A（真实主进程语义：surface='artify' + 面板体='chooser'）
+    bridgeState.bodyModeChangedCallbacks.forEach((cb) => cb('comfy'))
+    bridgeState.surfaceChangedCallbacks.forEach((cb) => cb('artify'))
+    bridgeState.panelChangedCallbacks.forEach((cb) => cb('chooser'))
+    await flushPromises()
+    let segs = wrapper.findAll('.surface-switch-seg')
+    expect(segs[0].classes()).toContain('is-active')
+    // A→C：setPanel('comfy')；主进程此刻推送 panel-changed('comfy')，
+    // 但 surface-changed 不推（panelSurface 仍 'artify'）。
+    bridgeState.panelChangedCallbacks.forEach((cb) => cb('comfy'))
+    await flushPromises()
+    segs = wrapper.findAll('.surface-switch-seg')
+    expect(segs[0].classes()).not.toContain('is-active') // A 不再高亮
+    expect(segs[1].classes()).toContain('is-active') // C 是可见体
+    // 倒挂修复前：点 A 被 surface==='artify' guard 早退（死锁）。
+    // 修复后：点 A 走 setPanel('chooser') 唤醒暖面板。
+    await segs[0].trigger('click')
+    expect(bridgeState.setPanelCalls).toContain('chooser')
+    // main acknowledges: A UI becomes the visible panel body again
+    bridgeState.panelChangedCallbacks.forEach((cb) => cb('chooser'))
+    await flushPromises()
+    // 点 C 再切回 comfy 画布：setPanel('comfy') 照常
+    await segs[1].trigger('click')
+    expect(bridgeState.setPanelCalls).toContain('comfy')
   })
 
   it('does not render any title-bar nav buttons (back/forward chevrons removed with the takeover layout)', async () => {

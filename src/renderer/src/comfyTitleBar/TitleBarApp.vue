@@ -29,7 +29,16 @@ const { syncLocale } = useAppLocale(windowApiLocaleSource())
 // file isn't visible to tsconfig.web (only its .d.ts would be). Kept in
 // sync with the literal union in src/preload/comfyTitleBarPreload.ts and
 // the ComfyPanelKey export in src/main/index.ts.
-type ComfyPanelKey = 'comfy' | 'new-install' | 'track' | 'load-snapshot' | 'quick-install'
+type ComfyPanelKey =
+  | 'comfy'
+  /** Single-window mode: the panel body hosts the A UI / install picker.
+   *  Pushed by main on C→A surface flips and used by the A/C switch to
+   *  re-wake the warm A panel after an A→C flip. */
+  | 'chooser'
+  | 'new-install'
+  | 'track'
+  | 'load-snapshot'
+  | 'quick-install'
 
 /** Position passed to main so the native menu pops below the anchor button.
  *  Coordinates are in title-bar-local pixels — main translates to window
@@ -221,24 +230,40 @@ const activePanel = ref<ComfyPanelKey>('comfy')
  * segmented switch next to the center pill.
  */
 const surface = ref<'artify' | 'chooser'>(bridge?.getSurface() ?? 'chooser')
+/**
+ * 可见表面：A 段高亮要求 A UI 面板真正是当前面板体。A→C 切换后主进程
+ * 故意保留 panelSurface='artify'（A UI 暖面板继续驻留 panelView，仅隐藏，
+ * 见 registry.ts），所以裸 surface 标志在 C 画布可见时仍是 'artify'——
+ * 直接拿它驱动高亮会倒挂（标题栏显示选中 A、实际在 C，且两个方向点击
+ * 都被 guard 拦死：A 点击早退、C 点击 setPanel('comfy') 被 prevPanel
+ * 相等早退吞掉）。可见性 = surface 为 A 且活动面板不是 comfy 画布。
+ */
+const artifyVisible = computed(() => surface.value === 'artify' && activePanel.value !== 'comfy')
 /** Body mode pushed by main: 'comfy' = live ComfyUI canvas fills the body.
  *  Anything else (chooser / comfy-lifecycle) means the canvas isn't up and
  *  the A segment of the A/C switch must stay disabled. */
 const bodyMode = ref<string>('chooser')
 /** A segment may only be clicked once the ComfyUI canvas is live; when the
  *  A UI is already showing the segment is (visibly) the active side. */
-const canSwitchToArtify = computed(() => surface.value === 'artify' || bodyMode.value === 'comfy')
+const canSwitchToArtify = computed(() => artifyVisible.value || bodyMode.value === 'comfy')
 /** A→C: flip the body to the ComfyUI view. Same set-panel path the
  *  existing panel pills take, so chooser/panel semantics are unchanged. */
 const switchToComfy = (): void => {
-  if (surface.value === 'chooser') return
+  if (!artifyVisible.value) return
   bridge?.setPanel('comfy')
 }
-/** C→A: request the Artify surface. Main routes this through the same
- *  focus handler as the float button (single-window flip + window
- *  focus), then pushes the new surface back via onSurfaceChanged. */
+/** C→A: request the Artify surface. Two sub-cases:
+ *  - panelSurface 已是 'artify'（A→C 后暖面板驻留）：setPanel('chooser')
+ *    把活动面板从 comfy 画布切回 A UI 面板体，不触发任何重载；
+ *  - surface 仍是 'chooser'（从未进过 A）：走 setSurface 让主进程做
+ *    单窗口 surface 翻转。两条路都会经 panel-changed 推送回流高亮。 */
 const switchToArtify = (): void => {
-  if (surface.value === 'artify') return
+  if (artifyVisible.value) return
+  if (!canSwitchToArtify.value) return
+  if (surface.value === 'artify') {
+    bridge?.setPanel('chooser')
+    return
+  }
   bridge?.setSurface('artify')
 }
 /**
@@ -796,9 +821,9 @@ onUnmounted(() => {
         <button
           type="button"
           class="surface-switch-seg surface-switch-seg--artify"
-          :class="{ 'is-active': surface === 'artify', 'is-disabled': !canSwitchToArtify }"
+          :class="{ 'is-active': artifyVisible, 'is-disabled': !canSwitchToArtify }"
           role="tab"
-          :aria-selected="surface === 'artify'"
+          :aria-selected="artifyVisible"
           :disabled="!canSwitchToArtify"
           v-bind="tooltipAttrs('Artify 工坊')"
           @click="switchToArtify"
@@ -809,9 +834,9 @@ onUnmounted(() => {
         <button
           type="button"
           class="surface-switch-seg surface-switch-seg--comfy"
-          :class="{ 'is-active': surface !== 'artify' }"
+          :class="{ 'is-active': !artifyVisible }"
           role="tab"
-          :aria-selected="surface !== 'artify'"
+          :aria-selected="!artifyVisible"
           v-bind="tooltipAttrs('ComfyUI')"
           @click="switchToComfy"
         >

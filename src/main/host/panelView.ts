@@ -471,8 +471,20 @@ export function registerPanelViewIpc(): void {
     const found = findEntryByTitleBarSender(event.sender)
     if (!found) return
     if (payload?.surface !== 'artify') return
-    if (found.entry.panelSurface === 'artify') return
     if (computeBodyMode(found.entry) !== 'comfy') return
+    // A→C 后暖面板驻留形态：panelSurface 已是 'artify'，A UI 只是随
+    // activePanel='comfy' 一起被 layoutViews 隐藏。此时不需要 surface
+    // 翻转/重载——把活动面板从 comfy 画布切回 chooser（A UI 面板体）
+    // 即可，setActivePanel 内部完成可见性切换与标题栏推送。
+    if (found.entry.panelSurface === 'artify') {
+      if (found.entry.activePanel !== 'comfy') return
+      setActivePanel(found.id, 'chooser')
+      if (!found.entry.window.isDestroyed()) {
+        found.entry.window.show()
+        found.entry.window.focus()
+      }
+      return
+    }
     void showArtifyLab().catch(() => {})
   })
 

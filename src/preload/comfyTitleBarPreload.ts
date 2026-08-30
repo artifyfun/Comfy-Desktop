@@ -3,7 +3,16 @@ import type { IpcRendererEvent } from 'electron'
 import { buildElectronApi } from './api'
 import { normaliseFirstUseMode, type FirstUseMode } from '../shared/firstUseMode'
 
-export type ComfyPanelKey = 'comfy' | 'new-install' | 'track' | 'load-snapshot' | 'quick-install'
+export type ComfyPanelKey =
+  | 'comfy'
+  /** Single-window mode: the panel body hosts the A UI / install picker
+   *  (main pushes this key on C→A surface flips; the A/C switch sends
+   *  setPanel('chooser') to re-wake the warm A panel after an A→C flip). */
+  | 'chooser'
+  | 'new-install'
+  | 'track'
+  | 'load-snapshot'
+  | 'quick-install'
 
 /** Anchor coordinates for a native title-bar menu — title-bar-local
  *  pixels (x = button left, y = button bottom). The titleBarView sits
