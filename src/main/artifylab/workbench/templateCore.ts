@@ -154,12 +154,17 @@ export function toPseudoApp(t: WorkflowTemplate): App {
 /**
  * API 格式 prompt → UI graph（{nodes, links}）兜底转换。
  * 模板未保存画布布局（workflow 缺失，如手动建 App 只填 prompt）时，
- * 仍能把节点加载到画布（可编辑、可执行）：
- * - nodes：id/type 保留，widgets_values 取 inputs 标量；inputs/outputs 槽定义
- *   由引用边推导（links 要真正连上必须有槽），输出槽数 = 被引用最大 slot+1
- * - links：由 API 引用边 ["上游id", 输出slot] 生成——origin_slot 即引用里的
- *   slot；dest_slot 按目标节点链接输入键序编号（UI graph 的 inputs 数组只含
- *   链接输入，键序与 prompt 一致即可对上）
+ * 仍能把节点加载到画布（可编辑、可执行）。实测 ComfyUI 0.33（Playwright
+ * 逐方案验证）确认：
+ * - LGraph.configure 对大量节点/复杂图会中途中断（真实 62 节点模板只建 10 个，
+ *   与 links 是否传入无关）——注入桥对无 version 元数据的简易图改走
+ *   「手工加载」：createNode + configure + add 逐节点建 + 按输入名反查 slot
+ *   手动 connect（62 节点 87 连线端到端 0 失败）
+ * - links 为**数组元组** [link_id, origin_id, origin_slot, target_id,
+ *   target_slot, type, toKey]，toKey=目标输入键名——手工 connect 靠它定位
+ *   目标槽（节点 inputs 被 class 定义重建后，序号不可靠，名字才可靠）
+ * - 节点 inputs 槽只带 {name,type}（手工 connect 不依赖 link 字段）；
+ *   outputs 槽数 = 被引用最大 slot+1
  * - 布局：拓扑分层（source-aligned，无上游=层 0，下游 = max(上游)+1），
  *   按层分列、层内排行——列间距 340 / 行间距 150，避免节点堆叠
  */
@@ -172,19 +177,29 @@ export function promptToWorkflowGraph(prompt: ComfyPrompt): { nodes: unknown[]; 
     from: number
     to: number
     fromSlot: number
-    toSlot: number
+    key: string
+    linkId: number
+    destSlot: number
   }
   const edges: Edge[] = []
   for (const [id, node] of entries) {
     const nid = Number(id)
     let linkIdx = 0
-    for (const v of Object.values(node.inputs)) {
+    for (const [key, v] of Object.entries(node.inputs)) {
       if (Array.isArray(v) && Number.isFinite(Number(v[0])) && Number.isFinite(Number(v[1]))) {
-        edges.push({ from: Number(v[0]), to: nid, fromSlot: Number(v[1]), toSlot: linkIdx })
+        edges.push({
+          from: Number(v[0]),
+          to: nid,
+          fromSlot: Number(v[1]),
+          key,
+          linkId: 0,
+          destSlot: linkIdx
+        })
         linkIdx++
       }
     }
   }
+  edges.forEach((e, i) => (e.linkId = i + 1))
 
   // 2) 拓扑分层：无上游=0，其余 = max(上游层)+1（环/孤立兜底 0）
   const inDegree = new Map<number, number>()
@@ -225,7 +240,7 @@ export function promptToWorkflowGraph(prompt: ComfyPrompt): { nodes: unknown[]; 
     list.forEach((id, row) => pos.set(id, [80 + d * COL_GAP, 80 + row * ROW_GAP]))
   }
 
-  // 4) 节点/连线构造
+  // 4) 节点/连线构造（links 元组带 toKey；节点槽只带 name/type，手工 connect 用）
   const maxOutSlot = new Map<number, number>()
   for (const e of edges) maxOutSlot.set(e.from, Math.max(maxOutSlot.get(e.from) ?? -1, e.fromSlot))
 
@@ -262,11 +277,7 @@ export function promptToWorkflowGraph(prompt: ComfyPrompt): { nodes: unknown[]; 
       widgets_values: widgetsValues
     }
   })
-  const links = edges.map((e, i) => ({
-    id: i + 1,
-    origin: [e.from, e.fromSlot],
-    target: [e.to, e.toSlot],
-    type: 'default'
-  }))
+  // [link_id, origin_id, origin_slot, target_id, target_slot, type, toKey]
+  const links = edges.map((e) => [e.linkId, e.from, e.fromSlot, e.to, e.destSlot, 'default', e.key])
   return { nodes, links }
 }

@@ -1118,7 +1118,7 @@
         if (!wf || typeof wf !== "object" || !wf.nodes)
           return { ok: false, error: "workflow.nodes required" };
         if (op.newTab) return await loadWorkflowToTab(wf, op.name);
-        await window.app.loadGraphData(wf);
+        await loadWorkflowGraph(wf);
         return { ok: true, mode: "replace" };
       }
       case "align": {
@@ -1301,14 +1301,52 @@
           wf
         );
         await store.openWorkflow(temp);
-        await window.app.loadGraphData(wf);
+        await loadWorkflowGraph(wf);
         return { ok: true, mode: "new-tab", tab: String(name || "Unsaved Workflow") };
       } catch (e) {
         console.warn("[ArtifyInject] createTemporary/openWorkflow failed, fallback replace:", e);
       }
     }
-    await window.app.loadGraphData(wf);
+    await loadWorkflowGraph(wf);
     return { ok: true, mode: "replace" };
+  }
+  function loadWorkflowGraph(wf) {
+    const isOfficial = wf && typeof wf === "object" && (wf.version != null || wf.last_node_id != null);
+    if (isOfficial) return window.app.loadGraphData(wf);
+    return loadGraphManual(wf);
+  }
+  function loadGraphManual(graph) {
+    const app = getComfyUIApp().app || window.app;
+    const g = app.graph;
+    if (!g || !window.LiteGraph) {
+      return window.app.loadGraphData(graph);
+    }
+    g.clear();
+    const nodeMap = /* @__PURE__ */ new Map();
+    for (const ndata of graph.nodes || []) {
+      try {
+        const node = window.LiteGraph.createNode(ndata.type);
+        if (!node) continue;
+        node.configure(ndata);
+        g.add(node);
+        nodeMap.set(String(ndata.id), node);
+      } catch (e) {
+        console.warn("[ArtifyInject] manual load node failed:", ndata?.type, e);
+      }
+    }
+    for (const l of graph.links || []) {
+      const up = nodeMap.get(String(l[1]));
+      const down = nodeMap.get(String(l[3]));
+      if (!up || !down) continue;
+      const inSlot = (down.inputs || []).findIndex((i) => i.name === l[6]);
+      if (inSlot < 0 || !(up.outputs || [])[l[2]]) continue;
+      try {
+        up.connect(l[2], down, inSlot);
+      } catch (_e) {
+      }
+    }
+    if (g.setDirtyCanvas) g.setDirtyCanvas(true, true);
+    return Promise.resolve({ ok: true, mode: "manual" });
   }
   function activeTabName(store) {
     try {

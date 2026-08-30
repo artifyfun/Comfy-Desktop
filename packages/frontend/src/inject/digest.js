@@ -171,7 +171,7 @@ export async function applyOneOp(g, op) {
       // （不新建），否则开新 tab 加载（官方 createTemporary + openWorkflow 链路）；
       // 无 tab API（老版/漂移）时回退整图替换当前 tab。
       if (op.newTab) return await loadWorkflowToTab(wf, op.name)
-      await window.app.loadGraphData(wf)
+      await loadWorkflowGraph(wf)
       return { ok: true, mode: 'replace' }
     }
     case 'align': {
@@ -400,17 +400,74 @@ async function loadWorkflowToTab(wf, name) {
       )
       await store.openWorkflow(temp)
       // 实测（ComfyUI 0.33）：createTemporary 的 data 不会随 openWorkflow 进入
-      // graph——新 tab 建了但画布空白（graph._nodes.length=0）。手动
-      // loadGraphData 把节点加载到激活 tab（direct load 实测 6 节点正常）。
-      await window.app.loadGraphData(wf)
+      // graph——新 tab 建了但画布空白（graph._nodes.length=0）。手动加载到
+      // 激活 tab：官方格式（version/last_node_id 元数据齐全）走 loadGraphData；
+      // 简易格式（promptToWorkflowGraph 产物，无元数据）走手工加载——
+      // loadGraphData 对复杂简易图中途中断（真实 62 节点模板只建 10 个，
+      // 与 links 无关），手工 createNode+connect 端到端 87 连线 0 失败。
+      await loadWorkflowGraph(wf)
       return { ok: true, mode: 'new-tab', tab: String(name || 'Unsaved Workflow') }
     } catch (e) {
       // 官方链路失败（如 graph 数据形状不被接受）→ 回退整图替换
       console.warn('[ArtifyInject] createTemporary/openWorkflow failed, fallback replace:', e)
     }
   }
-  await window.app.loadGraphData(wf)
+  await loadWorkflowGraph(wf)
   return { ok: true, mode: 'replace' }
+}
+
+/**
+ * 加载工作流到激活画布：
+ * - 官方格式（含 version/last_node_id 元数据，模板保存的布局）→ loadGraphData
+ * - 简易格式（promptToWorkflowGraph 产物，无元数据）→ 手工加载——
+ *   LiteGraph.configure 对复杂图中途中断（实测 62 节点只建 10 个），手工
+ *   createNode + configure + add 逐节点建（62/62），再按目标输入名反查槽
+ *   手动 connect（87/87）——名字定位可靠（节点 inputs 被 class 定义重建后
+ *   序号不可靠）
+ */
+function loadWorkflowGraph(wf) {
+  const isOfficial =
+    wf && typeof wf === 'object' && (wf.version != null || wf.last_node_id != null)
+  if (isOfficial) return window.app.loadGraphData(wf)
+  return loadGraphManual(wf)
+}
+
+/** 手工加载简易图（createNode + configure + add + 按输入名 connect） */
+function loadGraphManual(graph) {
+  const app = getComfyUIApp().app || window.app
+  const g = app.graph
+  if (!g || !window.LiteGraph) {
+    // 极端环境兜底：官方加载
+    return window.app.loadGraphData(graph)
+  }
+  g.clear()
+  const nodeMap = new Map()
+  for (const ndata of graph.nodes || []) {
+    try {
+      const node = window.LiteGraph.createNode(ndata.type)
+      if (!node) continue
+      node.configure(ndata)
+      g.add(node)
+      nodeMap.set(String(ndata.id), node)
+    } catch (e) {
+      console.warn('[ArtifyInject] manual load node failed:', ndata?.type, e)
+    }
+  }
+  for (const l of graph.links || []) {
+    const up = nodeMap.get(String(l[1]))
+    const down = nodeMap.get(String(l[3]))
+    if (!up || !down) continue
+    // 目标槽：按输入名反查（links 元组第 7 元素 = 目标输入键名）
+    const inSlot = (down.inputs || []).findIndex((i) => i.name === l[6])
+    if (inSlot < 0 || !(up.outputs || [])[l[2]]) continue
+    try {
+      up.connect(l[2], down, inSlot)
+    } catch (_e) {
+      /* 类型不匹配等忽略，不阻断其余连线 */
+    }
+  }
+  if (g.setDirtyCanvas) g.setDirtyCanvas(true, true)
+  return Promise.resolve({ ok: true, mode: 'manual' })
 }
 
 /** 当前激活 tab 显示名（ack 回执用，失败返回 null） */

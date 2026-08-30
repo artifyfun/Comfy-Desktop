@@ -152,8 +152,8 @@ describe('promptToWorkflowGraph（画布布局兜底转换）', () => {
       id: number
       type: string
       widgets_values: unknown[]
-      inputs: Array<{ name: string }>
-      outputs: Array<{ name: string }>
+      inputs: Array<{ name: string; type: string }>
+      outputs: Array<{ name: string; type: string }>
       pos: [number, number]
     }>
     const n1 = nodes[0]!
@@ -165,15 +165,18 @@ describe('promptToWorkflowGraph（画布布局兜底转换）', () => {
     // 链接引用（数组）不落入 widgets_values
     expect(n2.widgets_values).toEqual(['a cat'])
     expect(n3.widgets_values).toEqual(['out'])
-    // 槽定义：被引用节点有输出槽（node2 引用 node1 的 slot 1 → node1 有 2 个槽）
-    expect(n1.outputs).toHaveLength(2)
-    // 输入槽按链接输入键序（node2 只链接 clip → 1 个输入槽）
-    expect(n2.inputs.map((s) => s.name)).toEqual(['clip'])
-    // 连线：API 引用边 → link（origin=[上游,slot]，target=[下游,destSlot]）；
-    // node2 引 node1(clip,slot1)、node3 引 node4(images,slot0)
+    // 槽定义：node1 被 node2 以 slot 1 引用 → 2 个输出槽（手工 connect 用）
+    expect(n1.outputs).toEqual([
+      { name: 'out0', type: 'default' },
+      { name: 'out1', type: 'default' }
+    ])
+    // 输入槽只带 name/type（手工 connect 按名反查，不依赖 link 字段）
+    expect(n2.inputs).toEqual([{ name: 'clip', type: 'default' }])
+    // 连线：LiteGraph 数组元组 [link_id, origin_id, origin_slot, target_id,
+    // target_slot, type, toKey]——toKey=目标输入键名（手工 connect 定位槽）
     expect(g.links).toEqual([
-      { id: 1, origin: [1, 1], target: [2, 0], type: 'default' },
-      { id: 2, origin: [4, 0], target: [3, 0], type: 'default' }
+      [1, 1, 1, 2, 0, 'default', 'clip'],
+      [2, 4, 0, 3, 0, 'default', 'images']
     ])
     // 拓扑分层：node3 引用了 node4（不存在→孤立 0 层）；node2 引用 node1 → node2 层 1
     const layer2 = nodes.find((n) => n.id === 2)!
@@ -204,17 +207,25 @@ describe('promptToWorkflowGraph（画布布局兜底转换）', () => {
     const g = promptToWorkflowGraph(prompt)
     // KSampler 3 个链接输入 → 3 条 link，destSlot 0/1/2 按键序
     expect(g.links).toHaveLength(3)
-    const links = g.links as Array<{ origin: number[]; target: number[] }>
-    expect(links.map((l) => l.target[1])).toEqual([0, 1, 2])
-    expect(links.map((l) => l.origin)).toEqual([
+    const links = g.links as Array<[number, number, number, number, number, string, string]>
+    expect(links.map((l) => l[4])).toEqual([0, 1, 2]) // target_slot
+    expect(links.map((l) => [l[1], l[2]])).toEqual([
       [1, 0],
       [2, 0],
       [5, 0]
+    ]) // origin
+    expect(links.map((l) => l[6])).toEqual(['model', 'positive', 'latent_image']) // toKey
+    // 被引用节点输出槽 = 最大被引 slot + 1
+    const nodes = g.nodes as Array<{ id: number; outputs: Array<{ name: string }> }>
+    expect(nodes.find((n) => n.id === 1)!.outputs).toEqual([{ name: 'out0', type: 'default' }])
+    expect(nodes.find((n) => n.id === 2)!.outputs).toEqual([{ name: 'out0', type: 'default' }])
+    // KSampler 输入槽按键序（手工 connect 按名反查）
+    const ks = g.nodes as Array<{ id: number; inputs: Array<{ name: string }> }>
+    expect(ks.find((n) => n.id === 3)!.inputs.map((i) => i.name)).toEqual([
+      'model',
+      'positive',
+      'latent_image'
     ])
-    // 被引用节点输出槽数 = 最大被引 slot + 1
-    const nodes = g.nodes as Array<{ id: number; outputs: unknown[] }>
-    expect(nodes.find((n) => n.id === 1)!.outputs).toHaveLength(1)
-    expect(nodes.find((n) => n.id === 2)!.outputs).toHaveLength(1)
   })
 })
 
