@@ -1301,6 +1301,7 @@
           wf
         );
         await store.openWorkflow(temp);
+        await window.app.loadGraphData(wf);
         return { ok: true, mode: "new-tab", tab: String(name || "Unsaved Workflow") };
       } catch (e) {
         console.warn("[ArtifyInject] createTemporary/openWorkflow failed, fallback replace:", e);

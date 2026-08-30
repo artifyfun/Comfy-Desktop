@@ -399,6 +399,10 @@ async function loadWorkflowToTab(wf, name) {
         wf
       )
       await store.openWorkflow(temp)
+      // 实测（ComfyUI 0.33）：createTemporary 的 data 不会随 openWorkflow 进入
+      // graph——新 tab 建了但画布空白（graph._nodes.length=0）。手动
+      // loadGraphData 把节点加载到激活 tab（direct load 实测 6 节点正常）。
+      await window.app.loadGraphData(wf)
       return { ok: true, mode: 'new-tab', tab: String(name || 'Unsaved Workflow') }
     } catch (e) {
       // 官方链路失败（如 graph 数据形状不被接受）→ 回退整图替换

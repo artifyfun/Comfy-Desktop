@@ -940,17 +940,20 @@ class WorkbenchService {
     // （类型/枚举/范围/rc）下沉到 wb_list_templates 工具按需查。
     const templates = templateLibrary.list()
     const catalog = templates
-      .map(
-        (t) =>
-          `- ${t.id}（${t.name}，${t.mediaType}）参数: ${t.paramsNodes
-            .filter((p) => p.category === 'input')
-            .map((p) =>
-              p.renderComponent && /uploader$/i.test(p.renderComponent)
-                ? `${p.name}（${p.description?.slice(0, 20) || '素材路径'}）`
-                : p.name
-            )
-            .join(', ')}`
-      )
+      .map((t) => {
+        const params = t.paramsNodes
+          .filter((p) => p.category === 'input')
+          .map((p) =>
+            p.renderComponent && /uploader$/i.test(p.renderComponent)
+              ? `${p.name}（${p.description?.slice(0, 20) || '素材路径'}）`
+              : p.name
+          )
+          .join(', ')
+        // 模型依赖摘要：agent 据此判断模板能力/风格（anima=动漫、krea2/qwen=自然语言、
+        // redcraft=…）——名字像但模型/参数能力不符的模板不得硬套
+        const models = (t.requiredModels ?? []).slice(0, 3).join('、')
+        return `- ${t.id}（${t.name}，${t.mediaType}）参数: ${params}${models ? `；模型: ${models}` : ''}`
+      })
       .join('\n')
     // 分支树(dsh 同款):decide 历史只走当前激活分支。
     // 注：codex thread 本身跨轮复用（完整工具调用/执行结果都在上下文里），
@@ -1054,7 +1057,12 @@ class WorkbenchService {
 {"intent":"image|video|audio|text|chat|memory|workflow|canvas-run","templateId":"...","params":{...},"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text/memory 时直接给用户的回复","memory":{"action":"remember|forget","key":"...","value":"remember 时必填"},"title":"仅首条消息时提供"}
 
 规则：
-1. **模板严格匹配才执行**：intent=image/video/audio 前先评估模板库——模板的能力/风格/模型与需求**真正匹配**（需求「写实小猫」→ 模板必须能产出写实图且用得上本机对应模型）才选 templateId。**名称像但能力不符的模板（如动漫槽位替换模板做写实需求）不得硬套**——套了只会出错的图或执行失败。模板库无真正匹配 → 按 1.1 自组工作流。
+1. **模板严格匹配才执行**：intent=image/video/audio 前先评估模板库——模板的
+   能力/风格/模型与需求**真正匹配**才选 templateId。判断依据看 catalog 的
+   **模型依赖与参数角色**（不是名字）：模板模型含 anima 系/参数是图片路径槽，
+   是**动漫风格图生图**；需求「写实」却只有动漫模板 → **不匹配**；需求「图生图」
+   但模板是文生图（无素材槽）→ 也不匹配。**名称像但能力不符的模板不得硬套**
+   ——套了只会出错的图或执行失败。模板库无真正匹配 → 按 1.1 自组工作流。
 1.1 **自组工作流（模板不匹配时的正解，不是变通）**：根据需求 + 本机模型/节点自建一个最小可执行工作流：
    - 查节点：wb_list_nodes()（不带 template_id）看全量节点类型与输入 schema；
    - 选模型：从「环境快照」模型清单挑——注意本机 checkpoints 目录可能没有
