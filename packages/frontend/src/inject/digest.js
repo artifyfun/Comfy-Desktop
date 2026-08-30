@@ -170,9 +170,132 @@ export async function applyOneOp(g, op) {
       await window.app.loadGraphData(wf)
       return { ok: true }
     }
+    case 'align': {
+      // 画布节点对齐（参考 ComfyUI-AlignLayout 的 Align Panel 语义）：
+      // 按目标节点的包围盒基准线对齐；hdist/vdist 为均匀分布。
+      const target = resolveCanvasTargets(g, op.nodes)
+      if (!target.length) return { ok: false, error: 'no target nodes' }
+      const mode = String(op.mode || 'left')
+      const boxes = target.map((n) => ({
+        n,
+        x: n.pos[0],
+        y: n.pos[1],
+        w: n.size[0],
+        h: n.size[1],
+        right: n.pos[0] + n.size[0],
+        bottom: n.pos[1] + n.size[1],
+      }))
+      const ref = {
+        left: Math.min(...boxes.map((b) => b.x)),
+        right: Math.max(...boxes.map((b) => b.right)),
+        top: Math.min(...boxes.map((b) => b.y)),
+        bottom: Math.max(...boxes.map((b) => b.bottom)),
+        cx: boxes.reduce((s, b) => s + b.x + b.w / 2, 0) / boxes.length,
+        cy: boxes.reduce((s, b) => s + b.y + b.h / 2, 0) / boxes.length,
+      }
+      if (mode === 'hdist' || mode === 'vdist') {
+        const sorted = [...boxes].sort((a, b) => (mode === 'hdist' ? a.x - b.x : a.y - b.y))
+        const total = mode === 'hdist' ? ref.right - ref.left : ref.bottom - ref.top
+        const used = sorted.reduce((s, b) => s + (mode === 'hdist' ? b.w : b.h), 0)
+        const gap = sorted.length > 1 ? (total - used) / (sorted.length - 1) : 0
+        let cursor = mode === 'hdist' ? ref.left : ref.top
+        for (const b of sorted) {
+          b.n.pos = mode === 'hdist' ? [cursor, b.y] : [b.x, cursor]
+          cursor += (mode === 'hdist' ? b.w : b.h) + gap
+        }
+      } else {
+        for (const b of boxes) {
+          let x = b.x
+          let y = b.y
+          switch (mode) {
+            case 'left':
+              x = ref.left
+              break
+            case 'right':
+              x = ref.right - b.w
+              break
+            case 'hcenter':
+              x = ref.cx - b.w / 2
+              break
+            case 'top':
+              y = ref.top
+              break
+            case 'bottom':
+              y = ref.bottom - b.h
+              break
+            case 'vcenter':
+              y = ref.cy - b.h / 2
+              break
+            default:
+              return { ok: false, error: `unknown align mode ${mode}` }
+          }
+          b.n.pos = [x, y]
+        }
+      }
+      g.change?.()
+      g.setDirtyCanvas?.(true, true)
+      return { ok: true, count: target.length, mode }
+    }
+    case 'autoLayout': {
+      // 画布自动布局（参考 ComfyUI-AlignLayout Auto Layout 的简化版）：
+      // 拓扑分层排布（source-aligned），每列内按原 y 排序，网格间距防重叠。
+      const target = resolveCanvasTargets(g, op.nodes)
+      if (!target.length) return { ok: false, error: 'no target nodes' }
+      const reverse = op.direction === 'reverse'
+      // 拓扑深度：ASAP（正向）从源头推进；reverse 时整体镜像方向
+      const depthMap = new Map(target.map((n) => [n.id, 0]))
+      for (let iter = 0; iter < target.length + 2; iter++) {
+        let changed = false
+        for (const n of target) {
+          for (const inp of n.inputs || []) {
+            if (inp.link == null) continue
+            const link = g.links?.[inp.link]
+            const src = link ? findNodeById(g, link.origin_id) : null
+            if (src && target.includes(src) && depthMap.get(n.id) <= depthMap.get(src.id)) {
+              depthMap.set(n.id, depthMap.get(src.id) + 1)
+              changed = true
+            }
+          }
+        }
+        if (!changed) break
+      }
+      const cols = new Map()
+      for (const n of target) {
+        const d = depthMap.get(n.id) ?? 0
+        if (!cols.has(d)) cols.set(d, [])
+        cols.get(d).push(n)
+      }
+      const sortedDeps = [...cols.keys()].sort((a, b) => (reverse ? b - a : a - b))
+      const gapX = 80
+      const gapY = 60
+      let x = 0
+      for (const d of sortedDeps) {
+        const col = cols.get(d).sort((a, b) => a.pos[1] - b.pos[1])
+        let y = 0
+        let maxW = 0
+        for (const n of col) {
+          n.pos = [x, y]
+          y += n.size[1] + gapY
+          maxW = Math.max(maxW, n.size[0])
+        }
+        x += maxW + gapX
+      }
+      g.change?.()
+      g.setDirtyCanvas?.(true, true)
+      return { ok: true, count: target.length, direction: reverse ? 'reverse' : 'forward' }
+    }
     default:
       return { ok: false, error: `unknown op type ${op.type}` }
   }
+}
+
+/** 目标节点解析：op.nodes 指定 > 画布选中 > 全图（与 AlignLayout 语义一致） */
+function resolveCanvasTargets(g, ids) {
+  if (Array.isArray(ids) && ids.length)
+    return ids.map((id) => findNodeById(g, id)).filter(Boolean)
+  const sel = window.app?.canvas?.selected_nodes
+  if (sel && Object.keys(sel).length) return Object.values(sel)
+  return (g._nodes || []).slice()
 }
 
 /**

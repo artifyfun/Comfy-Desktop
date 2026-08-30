@@ -59,7 +59,7 @@ export interface CanvasCheckpoint {
 
 /** 下发给桥的画布操作（审计粒度，与注入桥 applyOneOp 的 op 一一对应） */
 export interface CanvasOp {
-  type: 'setWidget' | 'addNode' | 'removeNode' | 'relink' | 'loadWorkflow'
+  type: 'setWidget' | 'addNode' | 'removeNode' | 'relink' | 'loadWorkflow' | 'align' | 'autoLayout'
   [k: string]: unknown
 }
 
@@ -90,7 +90,15 @@ export function getLatestCanvasDigest(): CanvasDigest | null {
 }
 
 /** ops 白名单：类型字段串行化，超出白名单的字段不进审计（防注入垃圾） */
-const OP_TYPES = new Set(['setWidget', 'addNode', 'removeNode', 'relink', 'loadWorkflow'])
+const OP_TYPES = new Set([
+  'setWidget',
+  'addNode',
+  'removeNode',
+  'relink',
+  'loadWorkflow',
+  'align',
+  'autoLayout'
+])
 
 function sanitizeOps(raw: unknown): CanvasOp[] | null {
   if (!Array.isArray(raw) || raw.length === 0) return null

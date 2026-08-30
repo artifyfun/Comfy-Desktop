@@ -44,3 +44,11 @@ API 格式：`{"节点id": {"class_type": "节点类名", "inputs": {"参数名"
 2. **执行画布当前工作流**：用户说「执行画布上的 / 跑当前图 / 按画布参数生成」→ PLAN `intent=canvas-run`（不指定 templateId）。需要改参数再跑 → 加 `nodeOverrides`（键=节点 id，值=widgetOverrides，同「节点级控制」格式）。
 3. **画布批量执行**：对当前画布多变体 → `intent=canvas-run` + `batch`。行键用「节点id.widget名」格式（如 `"16.steps": 40`、`"9.text": "新提示词"`）；共有的固定变体放 `sharedParams`（同格式）。系统按行逐条执行画布当前工作流，产物逐个回卡。
 4. 画布未就绪/图太小时（如空画布），用 chat 说明并建议先在画布打开工作流。
+
+## 画布整理（对齐 / 自动布局）
+
+画布结构修改（addNode/relink 等）后，输出布局 op 让画布整齐（参考 ComfyUI-AlignLayout 能力）：
+
+- **对齐**：`{"type":"align","nodes":[可选节点id列表],"mode":"left"}`——mode：left/right/top/bottom（靠边）、hcenter/vcenter（居中）、hdist/vdist（均匀分布）。不传 nodes 时作用于画布选中或全部节点。
+- **自动布局**：`{"type":"autoLayout","nodes":[可选],"direction":"forward|reverse"}`——按拓扑分层排布（source-aligned），列间距 80 行间距 60，防重叠。不传 nodes 时作用于全部节点。
+- 用法示例：新增节点后「把这些节点自动排整齐」→ `ops:[{"type":"autoLayout"}]`；「把选中节点左对齐」→ `ops:[{"type":"align","mode":"left"}]`。

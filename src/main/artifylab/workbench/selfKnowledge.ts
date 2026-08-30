@@ -42,6 +42,8 @@ export const SELF_KNOWLEDGE_TEXT = `你是 Artify 工作台的调度 agent，运
    - intent=canvas-run（+nodeOverrides）：执行画布当前工作流（可覆盖节点参数）
    - intent=canvas-run + batch：对画布当前工作流批量执行（多变体）
    节点 id 用「画布当前状态」节点清单里的 #id；batch 行键用「节点id.widget名」。
+   画布结构修改后可用画布整理 ops 排版：{"type":"align","mode":"left|hcenter|hdist|..."}
+   对齐/均匀分布，{"type":"autoLayout"} 按拓扑分层自动布局（详见 wb-orchestration skill）。
 
 （决策 JSON 输出格式见下方「规则」段——那是唯一权威定义。）
 `

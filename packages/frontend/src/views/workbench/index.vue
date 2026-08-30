@@ -2534,6 +2534,13 @@ const opsDiffLines = computed(() => {
           .replace('{to}', String(op.toNodeId))
       case 'loadWorkflow':
         return t('workbenchOpsLoad')
+      case 'align':
+        return t('workbenchOpsAlign').replace('{mode}', String(op.mode || 'left'))
+      case 'autoLayout':
+        return t('workbenchOpsAutoLayout').replace(
+          '{dir}',
+          op.direction === 'reverse' ? t('workbenchOpsReverse') : t('workbenchOpsForward'),
+        )
       default:
         return `${op.type}`
     }
