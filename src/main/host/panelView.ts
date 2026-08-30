@@ -8,7 +8,8 @@ import { TITLEBAR_HEIGHT, titleBarOverlayForTheme } from '../lib/titleBarOverlay
 import {
   _registerExtraBroadcastTarget,
   _unregisterExtraBroadcastTarget,
-  _activeOperationStatus
+  _activeOperationStatus,
+  sessionLifecycleEvents
 } from '../lib/ipc/shared'
 import {
   comfyWindows,
@@ -420,6 +421,22 @@ function pushBodyModeToTitleBar(entry: ComfyWindowEntry, mode: BodyMode): void {
   entry.titleBarView.webContents.send('comfy-titlebar:body-mode-changed', mode)
 }
 
+// 会话生命周期 → 标题栏 bodyMode 同步：`_addSession`/stop 路径只广播
+// renderer 事件（instance-started），不直接认识 titlebar——若 chooser-pick
+// attach 之后 ComfyUI 才完成启动（或 stop/exit 换生命周期面板），没有任何
+// 调用方补推 body-mode-changed，标题栏的 A 段 gate 会停在旧值（实测：
+// chooser 内启动后永远 disabled，A/C 开关死）。监听 lifecycle 'changed'
+// 把每个 install-backed entry 的当前 bodyMode 重推一遍。
+// `prewarmAttachedPanel` 的显式补推仍保留——它是同一帧内的即时修正，
+// 这里兜住后续全部转换。
+sessionLifecycleEvents.on('changed', () => {
+  for (const entry of comfyWindows.values()) {
+    if (!entry.installationId) continue
+    if (entry.window.isDestroyed() || entry.titleBarView.webContents.isDestroyed()) continue
+    pushBodyModeToTitleBar(entry, computeBodyMode(entry))
+  }
+})
+
 /**
  * Send a payload to a panelView, deferring until `did-finish-load` if the bundle is still
  * loading, so IPC landing during the lazy first-load isn't dropped before the listener wires up.
@@ -476,8 +493,15 @@ export function registerPanelViewIpc(): void {
     // activePanel='comfy' 一起被 layoutViews 隐藏。此时不需要 surface
     // 翻转/重载——把活动面板从 comfy 画布切回 chooser（A UI 面板体）
     // 即可，setActivePanel 内部完成可见性切换与标题栏推送。
+    // A→C 后暖面板驻留形态：panelView 里仍装着 A UI（panelSurface==='artify'，
+    // A→C 切换故意不卸载），只是随 activePanel='comfy' 被 layoutViews 隐藏。
+    // 此时不需要 surface 翻转/重载——把活动面板从 comfy 画布切回 chooser
+    // （A UI 面板体）即可，setActivePanel 内部完成可见性切换与标题栏推送。
+    // 判别器必须是 panelSurface 本身：'从未进过 A 的首次 C→A'（panelSurface
+    // 仍是 'chooser'，画布可见）与暖驻留在 visibleSurface 上同为 'comfy'，
+    // 走这里会把首次翻转错误地切成 chooser 面板（2026-08 债2 重构回归）。
     if (found.entry.panelSurface === 'artify') {
-      if (found.entry.activePanel !== 'comfy') return
+      setActivePanel(found.id, 'chooser')
       setActivePanel(found.id, 'chooser')
       if (!found.entry.window.isDestroyed()) {
         found.entry.window.show()
