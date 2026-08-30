@@ -30,11 +30,31 @@ if (existsSync(outDir)) {
   const clean = spawnSync(
     isWin ? 'cmd' : 'rm',
     isWin ? ['/c', 'rmdir', '/s', '/q', outDir] : ['-rf', outDir],
-    { stdio: 'ignore' },
+    { stdio: 'ignore' }
   )
   if (clean.status !== 0) {
     console.warn('[dev] warning: could not fully clean out/ before build')
   }
+}
+
+// 防静默过期守卫：host iframe 吃的是 build:copy 部署产物（不是 vite dev）。
+// 源码新于产物 → 直接 fail（提示一条命令修复），把"改了没生效"留在启动时刻。
+// 跳过: ARTIFY_SKIP_FRESH_CHECK=1。
+if (!isElectronOnlyRun()) {
+  const check = spawnSync(
+    process.execPath,
+    [resolve(root, 'packages/frontend/scripts/check-fresh-dist.js')],
+    { stdio: 'inherit' }
+  )
+  if (check.status !== 0) {
+    console.error('[dev] 前端部署产物过期，拒绝启动（避免宿主 iframe 跑旧 bundle）。')
+    process.exit(1)
+  }
+}
+
+/** `--electron-only`：只重启 electron 侧（前端产物没动 / 不想重建前端时）。 */
+function isElectronOnlyRun() {
+  return process.argv.includes('--electron-only')
 }
 
 /** @type {import('node:child_process').ChildProcess[]} */
@@ -48,7 +68,7 @@ function run(name, command, args, options = {}) {
     // Use the caller-provided env as-is (it is already a full copy of
     // process.env with modifications). Merging with process.env again here
     // would resurrect variables the caller deliberately deleted.
-    env: options.env ?? process.env,
+    env: options.env ?? process.env
   })
   children.push(child)
   child.on('error', (err) => {
@@ -70,7 +90,7 @@ const electronEnv = { ...process.env, DEV_MODE: 'true' }
 // so the app window actually opens.
 delete electronEnv.ELECTRON_RUN_AS_NODE
 run('electron', process.execPath, [electronViteBin, 'dev'], {
-  env: electronEnv,
+  env: electronEnv
 })
 
 let tearingDown = false

@@ -54,3 +54,6 @@ src/main/artifylab/public/frontend/
 
 # codex 原生二进制（scripts/copy-codex-bin.mjs 从 node_modules 生成，勿入库）
 src/main/artifylab/public/codex-bin/
+
+# 本地运行时数据（模型/输入/输出），不入库
+ComfyUI-Shared/
