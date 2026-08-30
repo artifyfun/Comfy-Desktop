@@ -918,7 +918,10 @@
     const panel = document.querySelector(".p-splitterpanel.side-bar-panel");
     if (panel && !window.__artifySidebarGovObserver) {
       window.__artifySidebarGovObserver = new MutationObserver(clampPanel);
-      window.__artifySidebarGovObserver.observe(panel, { attributes: true, attributeFilter: ["style"] });
+      window.__artifySidebarGovObserver.observe(panel, {
+        attributes: true,
+        attributeFilter: ["style"]
+      });
     }
     if (!window.__artifySidebarGovDbl) {
       window.__artifySidebarGovDbl = true;
@@ -1105,7 +1108,8 @@
       }
       case "loadWorkflow": {
         const wf = op.workflow;
-        if (!wf || typeof wf !== "object" || !wf.nodes) return { ok: false, error: "workflow.nodes required" };
+        if (!wf || typeof wf !== "object" || !wf.nodes)
+          return { ok: false, error: "workflow.nodes required" };
         await window.app.loadGraphData(wf);
         return { ok: true };
       }
@@ -1180,7 +1184,10 @@
       CANVAS_BRIDGE.lastDigestJson = json;
       if (artifyEmbedWindow) {
         try {
-          artifyEmbedWindow.postMessage(JSON.stringify({ type: "artify:canvas-state", state: digest }), "*");
+          artifyEmbedWindow.postMessage(
+            JSON.stringify({ type: "artify:canvas-state", state: digest }),
+            "*"
+          );
         } catch (_e) {
         }
       }
@@ -1221,10 +1228,7 @@
       for (const f of n.properties?.files || []) files.push(f);
     }
     if (!files.length) return;
-    artifyEmbedWindow2.postMessage(
-      JSON.stringify({ type: "artify:card-attach", files }),
-      "*"
-    );
+    artifyEmbedWindow2.postMessage(JSON.stringify({ type: "artify:card-attach", files }), "*");
   }
   function spawnDisplayCards(files) {
     const app = getCardApp();
@@ -1305,7 +1309,12 @@
         const r = await applyCanvasOps(data.ops);
         postToEmbed({ type: ackType, requestId: data.requestId, checkpointId, ...r });
       } catch (e) {
-        postToEmbed({ type: ackType, requestId: data.requestId, ok: false, error: String(e).slice(0, 120) });
+        postToEmbed({
+          type: ackType,
+          requestId: data.requestId,
+          ok: false,
+          error: String(e).slice(0, 120)
+        });
       }
     }
   }
@@ -1468,7 +1477,14 @@
     if (!api || typeof api.addEventListener !== "function" || CANVAS_BRIDGE.apiBound) return;
     CANVAS_BRIDGE.apiBound = true;
     const onExecEvent = () => pushCanvasDigest();
-    for (const ev of ["execution_start", "executing", "execution_error", "execution_success", "execution_cached", "progress"]) {
+    for (const ev of [
+      "execution_start",
+      "executing",
+      "execution_error",
+      "execution_success",
+      "execution_cached",
+      "progress"
+    ]) {
       try {
         api.addEventListener(ev, onExecEvent);
       } catch (_e) {

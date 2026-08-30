@@ -40,10 +40,13 @@ if (!existsSync(deployedIndex)) {
 }
 
 const deployedMtime = statSync(deployedIndex).mtimeMs
+// 扫描范围: 人工编辑的源。public/comfy_inject.js 是 build:inject 的 esbuild 生成物，
+// 每次 build 都会刷新 mtime（且晚于 build:app 的 vite 产物），扫它会固定误报过期；
+// inject 模块源码在 src/inject/，那里才是需要守卫盯的。
 const scanDirs = [
   path.join(frontendRoot, 'src', 'views'),
   path.join(frontendRoot, 'src', 'components'),
-  path.join(frontendRoot, 'public'),
+  path.join(frontendRoot, 'src', 'inject'),
 ]
 const exts = new Set(['.vue', '.js', '.ts', '.css'])
 

@@ -33,9 +33,13 @@ if (missing.length) {
 
 // 明文 inject（dev 消费方 artifylab/index.ts 的 devUrl 走 public/comfy_inject.js，
 // extensions.ts 也会读 public 目录）随产物一并同步——否则 dev 环境注入的仍是旧桥。
-if (!existsSync(path.join(src, 'comfy_inject.js'))) {
+// 注意: build:inject（esbuild）产物落在 public/comfy_inject.js，而 vite 拷贝 public/
+// 发生在 build:app（早于 build:inject），故 dist/frontend 下的明文要么缺失、要么是
+// 旧版（随后还会被 build 链里的 delete-file.js 删掉）。明文来源统一取 public/。
+const plainInject = path.join(frontendRoot, 'public', 'comfy_inject.js')
+if (!existsSync(plainInject)) {
   console.error(
-    '[copy-dist] dist/frontend 缺少 comfy_inject.js（build:inject 产物）——先跑 "npm run build"。',
+    '[copy-dist] public/comfy_inject.js 缺失（build:inject 产物）——先跑 "npm run build"。',
   )
   process.exit(1)
 }
@@ -46,6 +50,8 @@ const srcMtime = statSync(path.join(src, 'index.html')).mtimeMs
 rmSync(path.join(dst, 'assets'), { recursive: true, force: true })
 mkdirSync(dst, { recursive: true })
 cpSync(src, dst, { recursive: true })
+// 明文 inject 从 public 补拷（dist/frontend 只留 min 版，体积小）
+cpSync(plainInject, path.join(dst, 'comfy_inject.js'))
 
 console.log(
   `[copy-dist] ${path.relative(process.cwd(), src)} → ${path.relative(process.cwd(), dst)} (index.html mtime=${Math.round(srcMtime)})`,
