@@ -141,7 +141,8 @@ import {
   openOrFocusChooserHostWindow,
   raiseAllHostWindows,
   setHostFactories,
-  shouldConfirmKillForEntry
+  shouldConfirmKillForEntry,
+  visibleSurface
 } from './host/registry'
 import type { ComfyWindowEntry } from './host/registry'
 import {
@@ -1448,7 +1449,9 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     const toggleEmbeddedDevTools = (focusedWindow?: Electron.BaseWindow | null): void => {
       const entry = focusedWindow ? findEntryByHostWindow(focusedWindow as BrowserWindow) : null
       if (entry) {
-        const comfyVisible = entry.activePanel === 'comfy' && entry.panelSurface !== 'artify'
+        // 单源判定（registry.visibleSurface → shared/visibleSurface）：
+        // 旧局部公式漏了暖面板驻留形态，devtools 会开在隐藏面板上。
+        const comfyVisible = visibleSurface(entry) === 'comfy'
         const comfyWc = entry.comfyView.webContents
         const panelWc = entry.panelView?.webContents
         const target = comfyVisible

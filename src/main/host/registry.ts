@@ -176,6 +176,19 @@ export interface ComfyWindowEntry {
   detachInstall: () => void
 }
 
+import { visibleSurfaceOf } from '../../shared/visibleSurface'
+
+/**
+ * 用户实际看到的表面（'comfy' = C 画布可见，'artify' = panelView 可见）。
+ * 单一判定源（src/shared/visibleSurface.ts）：titlebar 高亮语义、set-surface
+ * backstop、devtools 路由都必须走这里，禁止再手写 `activePanel==='comfy'
+ * && panelSurface!==…` 式的局部公式——2026-08 的 A/C 倒挂死锁正是公式
+ * 分裂的产物。
+ */
+export function visibleSurface(entry: ComfyWindowEntry): 'artify' | 'comfy' | 'chooser' {
+  return visibleSurfaceOf({ panelSurface: entry.panelSurface, activePanel: entry.activePanel })
+}
+
 /** All host windows, keyed by numeric `windowKey`. Install-id lookups go
  *  through `getEntryByInstallationId(id)` (the secondary index below). */
 export const comfyWindows = new Map<number, ComfyWindowEntry>()

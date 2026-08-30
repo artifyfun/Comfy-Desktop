@@ -20,6 +20,7 @@ import { useUpdatePills } from './useUpdatePills'
 import { useTitleBarHoverGate } from './useTitleBarHoverGate'
 import { useCentralPillCoachmark } from './useCentralPillCoachmark'
 import { useAppLocale, windowApiLocaleSource } from '../lib/useAppLocale'
+import { visibleSurfaceOf } from '../../../shared/visibleSurface'
 import ComfyCLogo from '../components/icons/ComfyCLogo.vue'
 
 const { t, locale } = useI18n()
@@ -236,9 +237,13 @@ const surface = ref<'artify' | 'chooser'>(bridge?.getSurface() ?? 'chooser')
  * 见 registry.ts），所以裸 surface 标志在 C 画布可见时仍是 'artify'——
  * 直接拿它驱动高亮会倒挂（标题栏显示选中 A、实际在 C，且两个方向点击
  * 都被 guard 拦死：A 点击早退、C 点击 setPanel('comfy') 被 prevPanel
- * 相等早退吞掉）。可见性 = surface 为 A 且活动面板不是 comfy 画布。
+ * 相等早退吞掉）。可见性公式 = src/shared/visibleSurface.ts 单源（与主进程
+ * backstop / devtools 路由共用），此处不再手写第二份。
  */
-const artifyVisible = computed(() => surface.value === 'artify' && activePanel.value !== 'comfy')
+const artifyVisible = computed(
+  () =>
+    visibleSurfaceOf({ panelSurface: surface.value, activePanel: activePanel.value }) === 'artify'
+)
 /** Body mode pushed by main: 'comfy' = live ComfyUI canvas fills the body.
  *  Anything else (chooser / comfy-lifecycle) means the canvas isn't up and
  *  the A segment of the A/C switch must stay disabled. */
