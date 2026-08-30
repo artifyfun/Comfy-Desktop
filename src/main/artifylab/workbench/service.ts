@@ -198,6 +198,8 @@ export interface WorkbenchSession {
   /** 每轮 token 用量(轮次序 append;与激活分支无关,会话级累计) */
   turnUsages?: TurnUsage[]
   executions: WorkbenchExecution[]
+  /** 本会话已上传素材（跨轮决策注入用——恢复轮/后续轮 agent 仍能看到文件名） */
+  attachments?: AttachmentMeta[]
   /** 创建时选定，会话期锁定（dsh agent-preset 语义） */
   presetId?: string
   modelOverride?: SessionModelOverride
@@ -927,7 +929,11 @@ class WorkbenchService {
         (t) =>
           `- ${t.id}（${t.name}，${t.mediaType}）参数: ${t.paramsNodes
             .filter((p) => p.category === 'input')
-            .map((p) => p.name)
+            .map((p) =>
+              p.renderComponent && /uploader$/i.test(p.renderComponent)
+                ? `${p.name}（${p.description?.slice(0, 20) || '素材路径'}）`
+                : p.name
+            )
             .join(', ')}`
       )
       .join('\n')
@@ -953,8 +959,16 @@ class WorkbenchService {
       opts.preset && presetConstraintText(opts.preset)
         ? `\n## 会话预设约束（必须遵守）\n${presetConstraintText(opts.preset)}`
         : ''
-    const attachmentHint = opts.attachments?.length
-      ? `\n## 用户上传素材（已上传，可作媒体输入）\n${attachmentSummary(opts.attachments)}`
+    // 本会话已上传素材（跨轮保留）：恢复轮/后续轮决策 agent 仍能看到文件名，
+    // 避免「附件只在本轮传入、下一轮丢失 → 素材槽没值可传」的传参错乱。
+    const knownMedia = [...(opts.attachments ?? [])]
+    for (const a of session.attachments ?? []) {
+      if (a.kind === 'file') continue
+      if (!knownMedia.some((x) => x.filename === a.filename && x.subfolder === a.subfolder))
+        knownMedia.push(a)
+    }
+    const attachmentHint = knownMedia.length
+      ? `\n## 用户上传素材（已上传，可作媒体输入；素材槽参数值填下面某个文件名或 http(s)/data URL）\n${attachmentSummary(knownMedia.slice(-6))}`
       : ''
     // 文档类附件的正文内容:大模型在决策时直接阅读(pdf/txt/md/json 等)
     const docHint = opts.attachments?.length ? renderDocContext(opts.attachments) : ''
@@ -1034,7 +1048,7 @@ class WorkbenchService {
 3.3 **画布批量执行**（对当前画布多变体/多参数组合批量出图）→ intent=canvas-run + batch.items（每行=一组变体）。行内键用「节点id.widget名」格式（如 "16.steps":40、"9.text":"新提示词"），值=该 widget 新值；共有的固定变体放 sharedParams（同格式）。系统按行逐条执行画布当前工作流。
 4. 模板库为空或不匹配时选 chat 并说明。可跨会话保留的偏好/事实用 intent=memory（见「长期记忆」段）。
 5. 用户上传了素材时，倾向选择带媒体输入参数的模板（图生图/视频驱动），参数值填素材文件名（已上传）。
-5.1 **参数类型**：模板参数里的 rc（renderComponent）为 *-uploader 的是**素材文件槽**——只能传已上传素材的文件名或 data:/http(s): URL，不能传提示词文本（会导致 ComfyUI 报 No such file or directory）。只有 rc=textarea/select/slider/number（或无 rc 的文本型）参数才收提示词/数值。
+5.1 **参数类型**：模板参数里的 rc（renderComponent）为 *-uploader 的是**素材文件槽**——只能传已上传素材的文件名或 data:/http(s): URL，不能传提示词文本（会导致 ComfyUI 报 No such file or directory）。参数名带「路径/文件/图片」描述或参数说明里标注了「路径」的同样视为素材槽。只有 rc=textarea/select/slider/number（或无 rc 的文本型）参数才收提示词/数值。catalog 里素材槽会显示为「参数名（素材路径）」。
 5.2 **模板不合适就变通，不要盲目重试**：关键参数全是素材槽而用户要文生图时，先复盘本会话此前的工具调用与执行结果（基于事实修正而非凭空重试），然后读 wb-media-params skill（可用时）按变通路径处理：node_overrides 改节点参数 → wb_run_workflow 自组工作流 → wb_clone_template 派生变体。重试同参数只会重复同样的失败。
 6. 存在「会话预设约束」段落时，其 intent 限制是**硬性规则**，违反的输出会被系统直接拒绝——你必须输出该 intent。7. 有「多步编排」段时优先按它执行；单步需求仍直接出 PLAN JSON。
 8. 填 params 前若不确定某参数的类型/可选值，wb_list_templates 查完整 schema（枚举必须完全匹配可选值）。${chainHint}${constraint}${attachmentHint}${docHint}${batchRule}${shortcutHint}${titleRule}${memoryRule}${orchestrationRule}
@@ -1242,6 +1256,20 @@ ${userInput}`
         slot: { param: n.name ?? '', accept: acceptKindsFor(n.renderComponent ?? '') },
         node: n
       }))
+    // 素材槽值形态预检：值必须是已上传文件名或 URL——拦截「提示词文本误填路径槽」
+    // （真实事故：Anima+槽位替换A 参数 prompt 收到整段提示词 → LoadImageFromPath
+    // 报 No such file or directory）。长句 + 多空格/句号 = 疑似提示词。
+    const suspectMedia = mediaSlots.find((m) => {
+      const v = args[m.slot.param]
+      if (v == null || typeof v !== 'string') return false
+      if (/^(data:|https?:)/i.test(v)) return false
+      return v.length > 80 && /\s{2,}|[.?!]\s/.test(v)
+    })
+    if (suspectMedia) {
+      throw new Error(
+        `参数「${suspectMedia.slot.param}」是素材路径槽，收到「${String(args[suspectMedia.slot.param]).slice(0, 50)}…」不是有效文件。请传已上传素材的文件名或 http(s)/data URL（见会话素材清单）。`
+      )
+    }
     // 链式：把上次产物作为第一个媒体输入参数（图→视频典型）
     if (plan.usePreviousOutput) {
       const last = this.lastExecution(sessionId)
@@ -1560,6 +1588,18 @@ ${userInput}`
         slot: { param: n.name ?? '', accept: acceptKindsFor(n.renderComponent ?? '') },
         node: n
       }))
+    // 素材槽值形态预检（与单次 execute 一致）：拦截提示词文本误填路径槽
+    const suspectMedia = mediaSlots.find((m) => {
+      const v = shared[m.slot.param]
+      if (v == null || typeof v !== 'string') return false
+      if (/^(data:|https?:)/i.test(v)) return false
+      return v.length > 80 && /\s{2,}|[.?!]\s/.test(v)
+    })
+    if (suspectMedia) {
+      throw new Error(
+        `参数「${suspectMedia.slot.param}」是素材路径槽，收到「${String(shared[suspectMedia.slot.param]).slice(0, 50)}…」不是有效文件。请传已上传素材的文件名或 http(s)/data URL（见会话素材清单）。`
+      )
+    }
     if (plan.usePreviousOutput) {
       const last = this.lastExecution(sessionId)
       if (last && last.outputs.length > 0 && mediaSlots[0]) {
@@ -1809,6 +1849,17 @@ ${userInput}`
   private resolveAttachmentRef(a: AttachmentMeta): string {
     if (a.localPath && existsSync(a.localPath)) return a.localPath
     return a.name
+  }
+
+  /** 记录本会话已上传素材（跨轮决策注入用；上限 20 防膨胀） */
+  recordSessionAttachment(sessionId: string, meta: AttachmentMeta): void {
+    const session = this.getSession(sessionId)
+    if (!session || !meta?.filename) return
+    const list = session.attachments ?? (session.attachments = [])
+    if (list.some((a) => a.filename === meta.filename && a.subfolder === meta.subfolder)) return
+    list.push(meta)
+    if (list.length > 20) list.splice(0, list.length - 20)
+    this.flush()
   }
 
   async uploadAttachment(buffer: Buffer, filename: string, mime?: string): Promise<AttachmentMeta> {

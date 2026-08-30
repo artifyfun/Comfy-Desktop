@@ -89,9 +89,13 @@ export function ensureArtifySidebarTab() {
         // dev 下前端(vite:5000)与 API(express:3008) 分离，iframe 里没有
         // electronAPI 桥，workbench 的 API 请求全靠这个参数直连 express
         const api = window.__ARTIFY_LAB_API__ || base
+        // comfy_origin 传宿主（ComfyUI 页面）自身 origin：workbench 的
+        // comfyHost 据此直出 /view（上传图 input / 产物图 output）。
+        // 不传则 iframe 内拿不到 ComfyUI 地址 → viewUrl 拼错 → 图片加载失败。
+        const comfy = window.location.origin || getQueryParam('server_origin') || ''
         iframe.src = base
-          ? `${base}/workbench?embed=1&server_origin=${encodeURIComponent(api)}`
-          : `/workbench?embed=1`
+          ? `${base}/workbench?embed=1&server_origin=${encodeURIComponent(api)}&comfy_origin=${encodeURIComponent(comfy)}`
+          : `/workbench?embed=1&comfy_origin=${encodeURIComponent(comfy)}`
         // 直接捕获回填目标：不依赖 iframe 先说话（工作台 embed 页不会
         // 主动 postMessage，双击/右键回填时 artifyEmbedWindow 必须已就绪）
         setEmbedWindow(iframe.contentWindow)

@@ -384,6 +384,9 @@ export function createWorkbenchRouter(): express.Router {
         file.originalname,
         file.mimetype
       )
+      // 记录到会话（跨轮决策注入素材清单用）；无 sessionId 时跳过不阻断
+      const sid = String(req.query.sessionId ?? '')
+      if (sid) workbenchService.recordSessionAttachment(sid, meta)
       res.status(HTTP_STATUS.CREATED).json(createSuccessResponse(meta))
     } catch (e) {
       const raw = e instanceof Error ? e.message : 'upload failed'

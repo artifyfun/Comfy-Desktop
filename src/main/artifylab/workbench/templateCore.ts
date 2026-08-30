@@ -53,11 +53,71 @@ export function extractRequiredModels(prompt: ComfyPrompt): string[] {
   return [...new Set(models)]
 }
 
+/**
+ * 参数角色推断：沿 prompt 数据流（输入引用边）追踪参数节点的输出是否最终流入
+ * 「文件加载类节点」（LoadImage/LoadVideo/LoadAudio/LoadImageFromPath/VHS 等）的输入。
+ * 是 → 该参数是素材路径槽：强制 rc 为 uploader 语义、description 标注「路径」——
+ * 防止「图片路径槽被命名成 prompt 且 rc=textarea」时 agent 按文本参数误传提示词
+ * （真实事故：Anima+槽位替换A 参数 prompt 经 JavascriptExecutor 去引号后喂给
+ * LoadImageFromPath，agent 传了整段提示词 → No such file or directory）。
+ * 数据流沿「inputs 值为 [上游id, slot]」的消费边 BFS，JS 透传链自然覆盖。
+ */
+const FILE_LOADER_RE =
+  /Load(Image|Video|Audio|ImageFromPath|Mask|Latent|ImageURL|ImageMask)|VHS_Load|ImageLoader|LoadImageFrom|LoadMask/i
+
+export function inferParamRoles(prompt: ComfyPrompt, paramsNodes: ParamNode[]): ParamNode[] {
+  if (!paramsNodes.length) return paramsNodes
+  const byId = new Map(Object.keys(prompt).map((id) => [Number(id), prompt[id]!]))
+
+  /** 参数节点 id 的数据流是否触达文件加载节点（BFS 消费边） */
+  const flowsIntoFileLoader = (startId: number): boolean => {
+    if (!Number.isFinite(startId) || !byId.has(startId)) return false
+    const visited = new Set<number>()
+    const queue = [startId]
+    while (queue.length) {
+      const id = queue.shift()!
+      if (visited.has(id)) continue
+      visited.add(id)
+      const node = byId.get(id)
+      if (!node) continue
+      if (FILE_LOADER_RE.test(node.class_type)) return true
+      // 找消费当前节点输出的下游：任意节点 inputs 值含 [id, slot]
+      for (const [downId, down] of byId) {
+        if (visited.has(downId)) continue
+        const consumes = Object.values(down.inputs).some(
+          (v) => Array.isArray(v) && Number(v[0]) === id
+        )
+        if (consumes) {
+          // JS 透传链继续追踪；文件加载链已在顶部命中；其他消费者也继续（防改道）
+          queue.push(downId)
+        }
+      }
+    }
+    return false
+  }
+
+  return paramsNodes.map((p) => {
+    if (p.category !== 'input') return p
+    if (/uploader$/i.test(p.renderComponent ?? '')) return p // 已是素材槽，不动
+    if (!flowsIntoFileLoader(Number(p.id))) return p
+    const kind = /video/i.test(String(p.type ?? '') + ' ' + String(p.description ?? ''))
+      ? 'video'
+      : /audio/i.test(String(p.type ?? '') + ' ' + String(p.description ?? ''))
+        ? 'audio'
+        : 'image'
+    return {
+      ...p,
+      renderComponent: `${kind}-uploader`,
+      description: `${p.description ? `${p.description}；` : ''}${kind === 'image' ? '图片' : kind}路径（填已上传文件名或 http(s)/data URL）`
+    }
+  })
+}
+
 /** app → 模板（无 template.prompt 不可执行，null） */
 export function templateFromApp(app: App): WorkflowTemplate | null {
   const prompt = app.template?.prompt
   if (!prompt || Object.keys(prompt).length === 0) return null
-  const paramsNodes = app.template?.paramsNodes ?? []
+  const paramsNodes = inferParamRoles(prompt, app.template?.paramsNodes ?? [])
   const mediaType = inferMediaType(app)
   return {
     id: `app:${app.id}`,

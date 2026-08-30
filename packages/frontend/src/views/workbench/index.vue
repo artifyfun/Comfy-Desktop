@@ -1409,10 +1409,13 @@ async function uploadFiles(files, { silent = false } = {}) {
     try {
       const form = new FormData()
       form.append('file', f)
-      const res = await fetch(`${origin.value}/api/workbench/upload`, {
-        method: 'POST',
-        body: form,
-      })
+      const res = await fetch(
+        `${origin.value}/api/workbench/upload?sessionId=${encodeURIComponent(sessionId.value)}`,
+        {
+          method: 'POST',
+          body: form,
+        },
+      )
       const json = await res.json()
       if (!res.ok || !json?.success) throw new Error(json?.message || 'upload failed')
       Object.assign(draftAttachments.value[idx], json.data, { uploading: false })
@@ -2368,7 +2371,10 @@ async function loadOutputDir() {
 }
 
 function viewUrl(f) {
-  return `${comfyOrigin.value}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? '')}&type=${encodeURIComponent(f.type ?? 'output')}`
+  // ComfyUI /view 拒绝浏览器跨源请求（带 Origin 头 → 403，图加载失败）。
+  // 改走 express 同源代理（服务端 fetch 转发，无 Origin 头 → 200）——
+  // 与画布圈选裁剪共用同一代理通道（routes/proxy.ts GET /view）。
+  return `${origin.value}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? '')}&type=${encodeURIComponent(f.type ?? 'output')}`
 }
 
 // ---------- 画布 embed 模式（ComfyUI sidebar tab iframe） ----------

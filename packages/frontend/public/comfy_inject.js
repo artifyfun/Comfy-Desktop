@@ -1850,7 +1850,8 @@
           iframe.setAttribute("allow", "clipboard-write");
           const base = window.__ARTIFY_LAB_URL__ || getQueryParam("artify_lab_url") || "";
           const api = window.__ARTIFY_LAB_API__ || base;
-          iframe.src = base ? `${base}/workbench?embed=1&server_origin=${encodeURIComponent(api)}` : `/workbench?embed=1`;
+          const comfy = window.location.origin || getQueryParam("server_origin") || "";
+          iframe.src = base ? `${base}/workbench?embed=1&server_origin=${encodeURIComponent(api)}&comfy_origin=${encodeURIComponent(comfy)}` : `/workbench?embed=1&comfy_origin=${encodeURIComponent(comfy)}`;
           setEmbedWindow(iframe.contentWindow);
           container.appendChild(iframe);
           iframe.addEventListener("load", () => {

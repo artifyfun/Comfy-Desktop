@@ -3,6 +3,7 @@ import {
   templateFromApp,
   toPseudoApp,
   promptToWorkflowGraph,
+  inferParamRoles,
   type WorkflowTemplate
 } from './templateCore'
 import type { App, ComfyPrompt } from '../appStore'
@@ -162,5 +163,74 @@ describe('promptToWorkflowGraph（画布布局兜底转换）', () => {
     // 链接引用（数组）不落入 widgets_values
     expect(n2.widgets_values).toEqual(['a cat'])
     expect(n3.widgets_values).toEqual(['out'])
+  })
+})
+
+describe('inferParamRoles（参数角色推断：防提示词误填路径槽）', () => {
+  it('参数 → JS 透传 → LoadImageFromPath：重写为 image-uploader 并标注路径', () => {
+    const prompt: ComfyPrompt = {
+      '165': { class_type: 'CR Prompt Text', inputs: { prompt: '"D:\\a.jpg"' } },
+      '126': {
+        class_type: 'JavascriptExecutor',
+        inputs: {
+          enable: 'On',
+          javascript_code: "return input1.replace(/\"/g, '');",
+          input1: ['165', 0]
+        }
+      },
+      '123': { class_type: 'LoadImageFromPath', inputs: { image: ['126', 0] } },
+      '192': { class_type: 'PreviewImage', inputs: { images: ['123', 0] } }
+    }
+    const paramsNodes = [
+      {
+        id: 165,
+        category: 'input' as const,
+        type: 'CR Prompt Text',
+        name: 'prompt',
+        selectedWidget: { name: 'prompt', type: 'customtext' },
+        description: '图片路径',
+        renderComponent: 'textarea'
+      }
+    ]
+    const out = inferParamRoles(prompt, paramsNodes)
+    expect(out[0]!.renderComponent).toBe('image-uploader')
+    expect(out[0]!.description).toContain('路径')
+  })
+
+  it('下游只有文本/输出节点：保持原 rc 不变', () => {
+    const prompt: ComfyPrompt = {
+      '2': { class_type: 'CLIPTextEncode', inputs: { text: 'a cat', clip: ['1', 0] } },
+      '3': { class_type: 'SaveImage', inputs: { filename_prefix: 'out', images: ['4', 0] } }
+    }
+    const paramsNodes = [
+      {
+        id: 2,
+        category: 'input' as const,
+        type: 'text',
+        name: 'prompt',
+        selectedWidget: { name: 'text', type: 'text' },
+        renderComponent: 'textarea'
+      }
+    ]
+    const out = inferParamRoles(prompt, paramsNodes)
+    expect(out[0]!.renderComponent).toBe('textarea')
+  })
+
+  it('已标注 uploader 的素材槽不重复改写', () => {
+    const prompt: ComfyPrompt = {
+      '9': { class_type: 'LoadImage', inputs: { image: 'x.png' } }
+    }
+    const paramsNodes = [
+      {
+        id: 9,
+        category: 'input' as const,
+        type: 'image',
+        name: '参考图',
+        renderComponent: 'image-uploader'
+      }
+    ]
+    const out = inferParamRoles(prompt, paramsNodes)
+    expect(out[0]!.renderComponent).toBe('image-uploader')
+    expect(out[0]!.description).toBeUndefined()
   })
 })
