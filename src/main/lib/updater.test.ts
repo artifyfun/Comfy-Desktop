@@ -804,7 +804,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     readyVersion = '1.0.1'
     const updater = await bootUpdater()
     expect(await updater.applyPendingUpdateOnStartup()).toBe(false)
-    expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+    expect(fakeUpdater.quitAndInstall).not.toHaveBeenCalled()
     const skipped = findEmitCalls('comfy.desktop.app_update.startup_install_skipped')
     expect(skipped).toHaveLength(1)
     // source: 'sidecar' is the field signal that the settings marker was
@@ -823,7 +823,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     sidecarPersists = false
     const updater = await bootUpdater()
     expect(await updater.applyPendingUpdateOnStartup()).toBe(false)
-    expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+    expect(fakeUpdater.quitAndInstall).not.toHaveBeenCalled()
     // No marker may be written on the fail-closed path: a lone settings marker
     // would trip the loop-breaker forever instead of retrying next launch.
     expect(settingsStore['lastStartupUpdateAttemptVersion']).toBeUndefined()
@@ -846,7 +846,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     const updater = await bootUpdater()
     expect(updater.hasPendingStartupUpdate()).toBe(false)
     expect(await updater.applyPendingUpdateOnStartup()).toBe(false)
-    expect(fakeUpdater.restartAndInstall).not.toHaveBeenCalled()
+    expect(fakeUpdater.quitAndInstall).not.toHaveBeenCalled()
     const skipped = findEmitCalls('comfy.desktop.app_update.startup_install_skipped')
     expect(skipped).toHaveLength(1)
     expect(skipped[0]?.[1]).toMatchObject({ reason: 'marker_unavailable', version: '1.0.1' })
@@ -862,7 +862,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     readyVersion = '1.0.2'
     const updater = await bootUpdater()
     expect(await updater.applyPendingUpdateOnStartup()).toBe(true)
-    expect(fakeUpdater.restartAndInstall).toHaveBeenCalledTimes(1)
+    expect(fakeUpdater.quitAndInstall).toHaveBeenCalledTimes(1)
     expect(settingsStore['lastStartupUpdateAttemptVersion']).toBe('1.0.2')
     expect(sidecarMarker?.version).toBe('1.0.2')
   })
@@ -875,7 +875,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     sidecarMarker = { version: '1.0.1', attemptedAt: new Date().toISOString() }
     const updater = await bootUpdater()
     updater.installUpdate()
-    expect(fakeUpdater.restartAndInstall).toHaveBeenCalledTimes(1)
+    expect(fakeUpdater.quitAndInstall).toHaveBeenCalledTimes(1)
   })
 
   it('records the sidecar marker alongside the settings marker when installing', async () => {
@@ -883,7 +883,7 @@ describe('startup update install + session-end guard (issue #1065)', () => {
     readyVersion = '1.0.1'
     const updater = await bootUpdater()
     expect(await updater.applyPendingUpdateOnStartup()).toBe(true)
-    expect(fakeUpdater.restartAndInstall).toHaveBeenCalledTimes(1)
+    expect(fakeUpdater.quitAndInstall).toHaveBeenCalledTimes(1)
     expect(settingsStore['lastStartupUpdateAttemptVersion']).toBe('1.0.1')
     expect(sidecarMarker?.version).toBe('1.0.1')
   })
