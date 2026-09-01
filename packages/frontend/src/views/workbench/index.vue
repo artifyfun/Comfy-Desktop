@@ -393,6 +393,14 @@
                         </div>
                         <div class="text-xs">{{ cardText(tm.plan) }}</div>
                       </div>
+                      <!-- HITL 审批卡（C15，灰度 ng=1）：pending 三操作 → 桥转发 interaction-response -->
+                      <div v-if="tm.kind === 'approval'" class="py-1">
+                        <InteractionApprovalCard
+                          :approval="tm.approval"
+                          :status="tm.approvalStatus || 'pending'"
+                          @respond="(p) => onApprovalRespond(tm, p)"
+                        />
+                      </div>
                       <!-- 决策/执行占位（progress part） -->
                       <div v-if="tm.kind === 'progress'" class="py-0.5">
                         <a-spin size="small" />
@@ -404,7 +412,7 @@
                         class="pt-0.5"
                         :class="tm.kind === 'error' ? 'text-red-300' : ''"
                       >
-                        <WbMarkdown :source="tm.text" />
+                        <WbMarkdown :source="tm.text" :streaming="busy && tm._streaming" />
                       </div>
                     </template>
                   </div>
@@ -591,7 +599,16 @@
                     <WbMarkdown
                       v-else-if="(m.kind === 'chat' || m.kind === 'error') && m.role === 'agent'"
                       :source="m.text"
+                      :streaming="busy && m._streaming"
                     />
+                    <!-- HITL 审批卡（C15，灰度 ng=1,非 turn-first 分支） -->
+                    <div v-else-if="m.kind === 'approval'" class="py-1">
+                      <InteractionApprovalCard
+                        :approval="m.approval"
+                        :status="m.approvalStatus || 'pending'"
+                        @respond="(p) => onApprovalRespond(m, p)"
+                      />
+                    </div>
                     <template v-else>{{ m.text }}</template>
                   </div>
                   <!-- dsh 式操作行:hover 浮出,贴气泡下方 -->
@@ -1100,12 +1117,14 @@ import { useAppStore } from '@/stores/appStore'
 import AppHeader from '@/views/apps/components/AppHeader.vue'
 import SessionSidebar from './components/SessionSidebar.vue'
 import WbMarkdown from './components/WbMarkdown.vue'
+import InteractionApprovalCard from './components/InteractionApprovalCard.vue'
 import Composer from './components/Composer.vue'
 import NewSessionDialog from './components/NewSessionDialog.vue'
 import PresetManager from './components/PresetManager.vue'
 import { canApplyFix } from './diagnosis'
 import { pushFiles, drainAttachments, drainFiles } from '@/utils/canvasBridge'
 import { useCanvasMode } from '@/utils/canvasMode'
+import { createAguiBridge } from './aguiBridge'
 const { t, getCurrentLanguage } = useI18n()
 const { onResult, emitResult, onAttachments, onCanvasState, onPrompt } = useCanvasMode()
 // 画布侧栏模式：store 模式由画布页设置；这里只需把产物经 emitResult 推给宿主
@@ -1137,12 +1156,32 @@ const pendingIssues = ref([])
 const input = ref('')
 const busy = ref(false)
 const stopping = ref(false)
-/** 当前 chat 轮的 reader：stopChat() 时 cancel 掉 SSE 流（后端 res close 会 abort 决策） */
-let chatReader = null
-/** 当前 chat 轮是否收到过 done 事件：服务端每条收尾路径（含超时/错误）都会发
- *  done；流读完后仍为 false = 流被异常掐断，runChat finally 据此补错误提示 */
-let chatDone = false
 const uploading = ref(false)
+// AG-UI 唯一管线:send/stop/history 全部走桥;桥通过页面适配器回调
+// pushMsg/nextTurn/messages 等把结构化事件映射进现有消息模型(本文件改动仅此)
+// curSession 必须在 createAguiBridge 之前声明——桥注入直接引用该 ref,
+// 声明滞后会踩 TDZ(setup 抛 ReferenceError → 整页白屏,2026-08 实测)。
+const curSession = ref(null)
+const aguiBridge = createAguiBridge({
+  origin,
+  t,
+  messages,
+  pushMsg,
+  nextTurn,
+  scrollToBottom,
+  busy,
+  stopping,
+  isStopCancelled,
+  getThreadId: () => sessionId.value,
+  curSession, // STATE_DELTA /tokenUsage 兜底同步进会话用量(aguiBridge.applyTokenUsage)
+  // 执行类副作用(审查修复 C1):wb_artifact/wb_sync/wb_canvas_exec/wb_invalid
+  // 四类 CUSTOM 走同一分派,产物卡/画布同步/执行轮询/pendingIssues 语义完整
+  applyExecutionSideEffect,
+})
+/** HITL 审批应答转发（C15）：卡片 emit → 桥 POST interaction-response */
+function onApprovalRespond(msg, payload) {
+  aguiBridge.respondApproval(msg, payload)
+}
 // 执行失败自动恢复：单会话最多自动重试 N 次（防死循环烧 token），切会话清零
 const recoverCount = ref(0)
 const recovering = ref(false)
@@ -1269,7 +1308,6 @@ async function loadAdvTemplates() {
 async function selectSession(s) {
   sessionId.value = s.id
   localStorage.setItem(LAST_SESSION_KEY, s.id)
-  toolItemIndex.clear() // 条目索引是 per-render 的，切会话必须清（防 upsert 错位）
   execProgressIndex.clear() // 执行占位下标同样 per-render，切会话清
   recoverCount.value = 0 // 恢复计数是会话级的，切会话清零
   recovering.value = false
@@ -1283,6 +1321,9 @@ async function selectSession(s) {
   curSession.value = session
   // 服务端消息补稳定 key（存储序下标作 key 种子，切会话重载时保持稳定）
   messages.value = (session.messages ?? []).map((m, i) => ({ ...m, _key: m._key ?? `s${i}` }))
+  // AG-UI 回放：该会话有管线记录则回放覆盖（session.messages 清空），记录为
+  // 空/回放失败时静默降级到 session.messages 历史展示
+  await aguiBridge.loadHistoryIntoPage(sessionId.value)
   // 回合序号对齐历史最大 turnId：新回合编号继续递增，避免与旧消息误合并
   turnSeq = messages.value.reduce((mx, m) => Math.max(mx, m.turnId ?? 0), 0)
   artifacts.value = [...(session.executions ?? [])].reverse().map((e) => ({
@@ -1481,76 +1522,9 @@ function kindIcon(kind) {
  * @param opts.progressText deciding 占位气泡文案
  */
 async function runChat(inputText, attachments, opts = {}) {
-  busy.value = true
-  chatDone = false
-  pendingIssues.value = []
-  if (opts.userBubble != null) {
-    const tid = nextTurn() // 用户消息开新回合，本轮 agent 消息自动继承
-    pushMsg({
-      role: 'user',
-      kind: 'chat',
-      text: opts.userBubble,
-      attachments: attachments.length ? attachments : undefined,
-      turnId: tid,
-      createdAt: Date.now(),
-    })
-  }
-  pushMsg({
-    role: 'agent',
-    kind: 'progress',
-    text: opts.progressText ?? t('workbenchDeciding'),
-    createdAt: Date.now(),
-  })
-  scrollToBottom()
-  try {
-    const res = await fetch(`${origin.value}/api/workbench/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: sessionId.value, input: inputText, attachments }),
-    })
-    if (!res.ok) {
-      const j = await res.json().catch(() => null)
-      throw new Error(j?.message || `HTTP ${res.status}`)
-    }
-    const reader = res.body.getReader()
-    chatReader = reader
-    const decoder = new TextDecoder()
-    let buf = ''
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      const parts = buf.split('\n\n')
-      buf = parts.pop()
-      for (const part of parts) handleSse(part)
-    }
-  } catch (e) {
-    if (!isStopCancelled(e)) {
-      dismissDecidingProgress()
-      pushMsg({
-        role: 'agent',
-        kind: 'error',
-        text: e.message,
-        createdAt: Date.now(),
-      })
-    }
-  } finally {
-    // 流读完但没收到 done（网络/网关掐断等未覆盖路径）：收掉占位气泡并补提示，
-    // 否则「AI 正在决策…」残留或静默结束，观感是任务跑完却没结果。用户主动
-    // 停止由 stopChat 负责收尾，这里跳过避免双气泡。
-    if (!chatDone && !stopping.value) {
-      dismissDecidingProgress()
-      pushMsg({
-        role: 'agent',
-        kind: 'error',
-        text: t('workbenchStreamInterrupted'),
-        createdAt: Date.now(),
-      })
-    }
-    chatReader = null
-    busy.value = false
-    scrollToBottom()
-  }
+  // AG-UI 唯一管线(legacy /api/workbench/chat SSE 已删除):整轮走桥。
+  // 附件下行与错误收尾语义由桥内实现。
+  return aguiBridge.runAgentTurn(inputText, attachments, opts)
 }
 
 /** 用户停止导致的流中断：reader.cancel() 的 TypeError / fetch 的 AbortError 都不算错误 */
@@ -1562,49 +1536,11 @@ function isStopCancelled(e) {
 }
 
 /**
- * 停止当前轮：先发 /stop（后端置停止标记 → 中断决策流 + ComfyUI /interrupt），
- * 再 cancel 本地 SSE reader（连接断开也会触发后端 abort）。轮询中的执行一并
- * 停掉：清定时器、产物卡标 stopped、占位气泡收尾为「已停止」。
+ * 停止当前轮：桥内发 /agent/cancel（中断决策流 + ComfyUI /interrupt）并
+ * abort 本地流，收尾（进度气泡/已停止气泡）由桥完成。
  */
 async function stopChat() {
-  if (stopping.value || (!busy.value && executingCount.value === 0)) return
-  stopping.value = true
-  try {
-    // 先发出 /stop 再断流：后端 chatStopRequested 置位后，chat 轮的 catch
-    // 才会以「已停止」落盘而不是静默/报错
-    const stopReq = fetch(`${origin.value}/api/workbench/stop`, { method: 'POST' }).catch(() => {})
-    const reader = chatReader
-    chatReader = null
-    if (reader) {
-      try {
-        await reader.cancel()
-      } catch {
-        /* 流已结束：忽略 */
-      }
-    }
-    dismissDecidingProgress()
-    for (const promptId of [...execProgressIndex.keys()]) {
-      stopPoll(promptId)
-      execProgressIndex.delete(promptId)
-      const a = artifacts.value.find((x) => x.promptId === promptId)
-      if (a && (a.status === 'running' || a.status === 'queued')) a.status = 'stopped'
-    }
-    const lp = messages.value[messages.value.length - 1]
-    if (lp && lp.kind === 'progress') messages.value.pop()
-    pushMsg({
-      role: 'agent',
-      kind: 'chat',
-      text: t('workbenchStopped'),
-      createdAt: Date.now(),
-    })
-    await stopReq
-    scrollToBottom()
-  } finally {
-    // 让 runChat 的 finally（busy=false）先落地，避免误判「停止引发的取消」
-    setTimeout(() => {
-      stopping.value = false
-    }, 0)
-  }
+  return aguiBridge.stopAgentRun()
 }
 
 /**
@@ -1666,8 +1602,6 @@ async function send() {
 
 // ---------- codex 条目流转写（抄 codex app-server/dsh transcript：
 // item.id → 消息行索引，started 占行，updated/completed 原位 upsert） ----------
-const toolItemIndex = new Map()
-
 function toolItemSummary(item) {
   switch (item.type) {
     case 'command_execution':
@@ -1788,51 +1722,6 @@ function toolItemDetail(item) {
 }
 
 /**
- * codex 内部噪音条目：网络重连 / 元数据降级 / /v1/responses 路由探测失败等。
- * 这些只是 SDK 的自我修复过程，对用户没有信息量，不占对话行（完整原始输出
- * 仍在「复制调试信息」里）。避免一次对话出现 5-8 条红色报错行，观感像断线。
- */
-function isNoisyItem(item) {
-  if (item?.type !== 'error') return false
-  const m = item.message || ''
-  return (
-    /reconnecting/i.test(m) ||
-    /falling back from websockets/i.test(m) ||
-    /model metadata for/i.test(m) ||
-    /no route for (GET|POST) \/v1\/responses/i.test(m)
-  )
-}
-
-function handleThreadItem(evt) {
-  if (!evt || typeof evt !== 'object') return
-  const phase = evt.type // started | updated | completed
-  const item = evt.item
-  if (!item || !item.id) return
-  // PLAN 原文（agent_message）由 plan 事件渲染为执行计划卡，不重复占行
-  if (item.type === 'agent_message') return
-  // codex 内部重连/降级噪音不占行
-  if (isNoisyItem(item)) return
-  // 按 item.id 登记 _key；原位更新按 _key 查找（下标会被 splice 位移，key 不会）
-  let key = toolItemIndex.get(item.id)
-  if (key === undefined) {
-    // started 或错过 started（如重连）都走这里：占一行
-    const msg = pushMsg({
-      role: 'agent',
-      kind: 'tool_item',
-      text: '',
-      toolItem: item,
-      createdAt: Date.now(),
-    })
-    toolItemIndex.set(item.id, msg._key)
-    return
-  }
-  const idx = messages.value.findIndex((m) => m._key === key)
-  if (idx === -1) return
-  // 原位更新（Vue3 响应式数组元素替换）
-  messages.value[idx] = { ...messages.value[idx], toolItem: item }
-}
-
-/**
  * 移除 AI 占位进度气泡（「AI 正在决策…」/「执行失败，AI 正在分析…」）。
  * 不能只 pop 尾部：decide 阶段的过程条目（tool_item）追加在占位之后，占位
  * 可能已不在数组末尾，尾部 pop 会漏掉它，导致 loading 气泡残留/错位。
@@ -1847,36 +1736,14 @@ function dismissDecidingProgress() {
   }
 }
 
-function handleSse(chunk) {
-  let event = 'message'
-  let data = null
-  for (const line of chunk.split('\n')) {
-    if (line.startsWith('event: ')) event = line.slice(7).trim()
-    else if (line.startsWith('data: ')) {
-      try {
-        data = JSON.parse(line.slice(6))
-      } catch {
-        data = { raw: line.slice(6) }
-      }
-    }
-  }
-  if (event === 'item') {
-    // 过程条目（reasoning / command / file_change 等）只是 decide 的实时过程，
-    // 不打断「AI 正在决策…」loading——否则条目一出现 loading 就消失，而 decide
-    // 可能还要几十秒才出结论，观感像断了。条目行追加在 loading 气泡之后。
-    handleThreadItem(data.event)
-    return
-  }
-  // 决定性/阶段事件（plan/reply/stage/submitted/error/invalid/done）才替换占位。
-  dismissDecidingProgress()
-  if (event === 'reply') {
-    pushMsg({
-      role: 'agent',
-      kind: 'chat',
-      text: data.reply || '',
-      createdAt: Date.now(),
-    })
-  } else if (event === 'artifact') {
+/**
+ * 执行类副作用统一分派(legacy SSE artifact/sync/canvas-exec/invalid 与
+ * AG-UI 桥 CUSTOM wb_artifact/wb_sync/wb_canvas_exec/wb_invalid 共用同一实现,
+ * 消息模型与行为逐字节对齐——两条管线只差事件来源,不差功能)。
+ * kind:'artifact'|'sync'|'canvas-exec'|'invalid'
+ */
+function applyExecutionSideEffect(kind, data) {
+  if (kind === 'artifact') {
     // 工具执行（自组工作流 wb_run_workflow / wb_execute_template wait=true）产物补推：
     // pollExecution 落盘 artifact 消息但不推 SSE，前端实时无图。去重：已有同
     // promptId 的 artifact 消息则跳过（模板/画布执行的前端轮询已原位升级显示）。
@@ -1892,7 +1759,9 @@ function handleSse(chunk) {
       promptId: data.promptId,
       createdAt: Date.now(),
     })
-  } else if (event === 'sync') {
+    return
+  }
+  if (kind === 'sync') {
     // 模板工作流 → 宿主画布。ensureTab（执行前自动加载）失败只降级不打断
     // 生成流程；显式同步失败仍补错误气泡。
     syncWorkflowToCanvas(data).catch((e) => {
@@ -1907,7 +1776,9 @@ function handleSse(chunk) {
         createdAt: Date.now(),
       })
     })
-  } else if (event === 'canvas-exec') {
+    return
+  }
+  if (kind === 'canvas-exec') {
     // 执行画布当前工作流：前端 → 注入桥 graphToPrompt → 服务端提交 → ack
     runCanvasOnHost(data)
       .then((r) => {
@@ -1966,62 +1837,9 @@ function handleSse(chunk) {
           createdAt: Date.now(),
         })
       })
-  } else if (event === 'plan') {
-    // 纯 chat 意图（无 batch/无模板/无参数）不产计划卡——内容与随后的 reply
-    // 重复，窄容器里还多出一块视觉噪音；直接降级为不渲染
-    const p = data.plan
-    const trivial =
-      p &&
-      p.intent === 'chat' &&
-      !p.batch &&
-      !p.templateId &&
-      Object.keys(p.params ?? {}).length === 0
-    if (!trivial) {
-      pushMsg({
-        role: 'agent',
-        kind: 'card',
-        text: '',
-        plan: p,
-        createdAt: Date.now(),
-      })
-    }
-  } else if (event === 'stage') {
-    pushMsg({
-      role: 'agent',
-      kind: 'progress',
-      text: stageText(data.stage),
-      createdAt: Date.now(),
-    })
-  } else if (event === 'submitted') {
-    // 收掉「校验中/提交中」等 stage 进度
-    const lp = messages.value[messages.value.length - 1]
-    if (lp && lp.kind === 'progress') messages.value.pop()
-    artifacts.value.unshift({
-      promptId: data.promptId,
-      templateId: data.templateId,
-      templateName: data.templateId,
-      status: 'running',
-      error: '',
-      outputs: [],
-      files: [],
-    })
-    if (data.batch?.jobId) {
-      // 批量：不额外占气泡，入队文案由服务端 reply 事件带出（产物卡有进度条）
-      startBatchPoll(data.batch.jobId)
-    } else {
-      // 单次执行：一个「执行中」占位气泡，poll 终态按 _key 原位更新成结果，
-      // 避免「已提交到队列」「生成完成」「执行失败」各占一个气泡
-      const msg = pushMsg({
-        role: 'agent',
-        kind: 'progress',
-        text: t('workbenchExecuting'),
-        createdAt: Date.now(),
-      })
-      execProgressIndex.set(data.promptId, msg._key)
-      executingCount.value++
-      startPoll(data.promptId)
-    }
-  } else if (event === 'invalid') {
+    return
+  }
+  if (kind === 'invalid') {
     pendingIssues.value = data.issues ?? []
     pushMsg({
       role: 'agent',
@@ -2029,35 +1847,7 @@ function handleSse(chunk) {
       text: t('workbenchPlanInvalid') + ': ' + (data.issues ?? []).map((i) => i.message).join('；'),
       createdAt: Date.now(),
     })
-  } else if (event === 'error') {
-    pushMsg({
-      role: 'agent',
-      kind: 'error',
-      text: data.message || 'error',
-      createdAt: Date.now(),
-    })
-  } else if (event === 'done') {
-    chatDone = true
-    // 会话摘要 → 侧栏刷新（标题可能被自动生成更新）
-    if (data.session) {
-      const s = sessions.value.find((x) => x.id === data.session.id)
-      if (s) {
-        s.title = data.session.title
-        s.updatedAt = data.session.updatedAt
-      } else {
-        loadSessions()
-      }
-    }
   }
-}
-
-function stageText(stage) {
-  const map = {
-    deciding: t('workbenchDeciding'),
-    validating: t('workbenchValidating'),
-    executing: t('workbenchExecuting'),
-  }
-  return map[stage] ?? stage
 }
 
 // 批量任务轮询:进度/产物经 batch API 汇入产物卡(同一张卡,进度条展示)
@@ -3186,7 +2976,7 @@ function bubbleRadius(m, i) {
 }
 
 // ---------- token 用量展示 ----------
-const curSession = ref(null)
+// （curSession 已在 aguiBridge 注入处声明——TDZ 约束）
 
 function usageFor(m) {
   if (m.kind !== 'chat' || m.role !== 'agent') return null
