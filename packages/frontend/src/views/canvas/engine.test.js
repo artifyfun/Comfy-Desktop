@@ -13,7 +13,7 @@ import {
   serializeDoc,
   parseDoc,
   linkEndpoints,
-  linkMidpoint,
+  bezierLinkPath,
   distToSegment,
   cropRectFor,
   createHistory,
@@ -180,22 +180,25 @@ describe('canvas engine: links', () => {
     { id: 'a', type: 'image', x: 0, y: 0, width: 100, height: 80 },
     { id: 'b', type: 'image', x: 300, y: 200, width: 60, height: 60 },
   ]
-  it('linkEndpoints 取两边中心为端点', () => {
+  it('linkEndpoints 取左右边缘中点为端点（参考 infinite-canvas）', () => {
     const segs = linkEndpoints([{ id: 'L1', from: 'a', to: 'b' }], objs)
     expect(segs).toHaveLength(1)
-    expect(segs[0].x1).toBe(50) // 0+100/2
+    expect(segs[0].x1).toBe(100) // 0+100 from 右边缘
     expect(segs[0].y1).toBe(40) // 0+80/2
-    expect(segs[0].x2).toBe(330) // 300+60/2
+    expect(segs[0].x2).toBe(300) // to 左边缘
     expect(segs[0].y2).toBe(230) // 200+60/2
   })
   it('悬空连线返回 null（渲染层跳过）', () => {
     const segs = linkEndpoints([{ id: 'L', from: 'a', to: 'ghost' }], objs)
     expect(segs[0]).toBeNull()
   })
-  it('linkMidpoint 中点', () => {
-    const m = linkMidpoint({ x1: 50, y1: 40, x2: 330, y2: 230 })
-    expect(m.x).toBe(190)
-    expect(m.y).toBe(135)
+  it('bezierLinkPath 水平曲率 min(dx*0.5,50 兜底)', () => {
+    // dx=200 → curvature=100
+    expect(bezierLinkPath(100, 40, 300, 230)).toBe('M 100 40 C 200 40, 200 230, 300 230')
+    // dx=20 → curvature 兜底 50
+    expect(bezierLinkPath(0, 0, 20, 0)).toBe('M 0 0 C 50 0, -30 0, 20 0')
+    // 反向（to 在 from 左侧）控制点仍向外伸
+    expect(bezierLinkPath(300, 0, 100, 0)).toBe('M 300 0 C 400 0, 0 0, 100 0')
   })
   it('distToSegment 点到直线的垂直距离', () => {
     // 点 (1,2) 到线 (0,0)-(3,4)：|1*4-2*3|/5 = 2/5 = 0.4
@@ -211,7 +214,15 @@ describe('canvas engine: links', () => {
 })
 
 describe('canvas engine: cropRectFor', () => {
-  const img = { id: 'i', x: 0, y: 0, width: 200, height: 100, naturalWidth: 400, naturalHeight: 200 }
+  const img = {
+    id: 'i',
+    x: 0,
+    y: 0,
+    width: 200,
+    height: 100,
+    naturalWidth: 400,
+    naturalHeight: 200,
+  }
   it('世界矩形换算为源像素区域（2x 素材）', () => {
     const c = cropRectFor(img, 50, 25, 100, 50)
     expect(c.sx).toBe(100)

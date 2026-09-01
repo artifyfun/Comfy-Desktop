@@ -33,6 +33,48 @@
           @mouseup="onMouseUp"
           @wheel="onWheel"
         >
+          <!-- 连线层（参考 infinite-canvas：SVG 层 zIndex 0，位于节点之下；
+               16px 命中层不可压住节点交互） -->
+          <v-layer>
+            <v-group v-for="seg in linkSegs" :key="'lk' + seg.id">
+              <v-path
+                :config="{
+                  id: seg.id,
+                  data: bezierLinkPath(seg.x1, seg.y1, seg.x2, seg.y2),
+                  stroke: 'transparent',
+                  strokeWidth: 16 / viewport.scale,
+                  hitStrokeWidth: 16 / viewport.scale,
+                  cursor: 'pointer',
+                }"
+                @mousedown="onLinkDown"
+                @contextmenu="onLinkContextMenu($event, seg.id)"
+              />
+              <v-path
+                :config="{
+                  data: bezierLinkPath(seg.x1, seg.y1, seg.x2, seg.y2),
+                  stroke: selectedLinkId === seg.id ? '#fafaf9' : 'rgba(214,211,206,0.82)',
+                  strokeWidth: (selectedLinkId === seg.id ? 3 : 2) / viewport.scale,
+                  listening: false,
+                }"
+              />
+            </v-group>
+            <!-- 拖拽建线预览（虚线贝塞尔，参考 ActiveConnectionPath） -->
+            <v-path
+              v-if="connectDrag.seg"
+              :config="{
+                data: bezierLinkPath(
+                  connectDrag.seg.x1,
+                  connectDrag.seg.y1,
+                  connectDrag.seg.x2,
+                  connectDrag.seg.y2,
+                ),
+                stroke: '#fafaf9',
+                strokeWidth: 2 / viewport.scale,
+                dash: [5 / viewport.scale, 5 / viewport.scale],
+                listening: false,
+              }"
+            />
+          </v-layer>
           <v-layer>
             <!-- 对齐参考线 -->
             <v-line v-for="(g, i) in guides.v" :key="'gv' + i" :config="guideConfig(g, 'v')" />
@@ -89,10 +131,13 @@
               <v-text :config="appNodeTitleConfig(o)" />
               <v-text :config="appNodeSubConfig(o)" />
               <v-circle :config="appNodeStatusConfig(o)" />
-              <v-text :config="appNodeRunBtnConfig(o)" @mousedown.prevent.stop="runAppNode(o.id)" />
+              <v-text
+                :config="appNodeRunBtnConfig(o)"
+                @mousedown="runAppNodeFromKonva(o.id, $event)"
+              />
               <v-text
                 :config="appNodeExpandBtnConfig(o)"
-                @mousedown.prevent.stop="openAppNodePanel(o.id)"
+                @mousedown="openAppNodePanelFromKonva(o.id, $event)"
               />
             </v-group>
             <!-- 分镜帧卡（N5：镜号+画面+描述） -->
@@ -106,30 +151,18 @@
               <v-text :config="shotSeqConfig(o)" />
               <v-text :config="shotTextConfig(o)" />
             </v-group>
-            <!-- 连线（箭头指向 to 端；线体不抢物件命中，点中点圆点删线） -->
-            <v-group v-for="seg in linkSegs" :key="'lk' + seg.id">
-              <v-line
-                :config="{
-                  points: [seg.x1, seg.y1, seg.x2, seg.y2],
-                  stroke: 'rgba(56,189,248,0.75)',
-                  strokeWidth: 2 / viewport.scale,
-                  pointerLength: 10 / viewport.scale,
-                  pointerWidth: 8 / viewport.scale,
-                  lineCap: 'round',
-                  listening: false,
-                }"
+            <!-- 连接句柄（参考 infinite-canvas ConnectionHandleDot：悬停/选中/连线中显现，
+                 48px 热区 12px 圆点，hover 放大；左=target 右=source。
+                 Konva 约束：v-if/动态 listening 会导致 hit graph 不刷新，故常驻渲染 +
+                 opacity 控制可见 + hitFunc 动态开闭热区） -->
+            <v-group v-for="o in objects" :key="'hd' + o.id" :config="{ x: o.x, y: o.y }">
+              <v-circle
+                :config="handleConfig(o, 'target')"
+                @mousedown="onConnectStart(o.id, 'target', $event)"
               />
               <v-circle
-                :config="{
-                  id: seg.id,
-                  x: (seg.x1 + seg.x2) / 2,
-                  y: (seg.y1 + seg.y2) / 2,
-                  radius: 7 / viewport.scale,
-                  fill: '#0ea5e9',
-                  opacity: 0.45,
-                  cursor: 'pointer',
-                }"
-                @mousedown="deleteLinkAt"
+                :config="handleConfig(o, 'source')"
+                @mousedown="onConnectStart(o.id, 'source', $event)"
               />
             </v-group>
             <!-- 框选橡皮筋 -->
@@ -194,7 +227,21 @@
           @contextmenu.prevent
           @mousedown.stop
         >
-          <template v-if="ctxMenu.targetIds.length">
+          <template v-if="ctxMenu.kind === 'link'">
+            <button
+              class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+              @click="
+                () => {
+                  ctxMenu = null
+                  deleteSelectedLink()
+                }
+              "
+            >
+              <i class="fas fa-link-slash w-4 text-center text-slate-400"></i
+              >{{ t('canvasMenuDeleteLink') }}
+            </button>
+          </template>
+          <template v-else-if="ctxMenu.targetIds.length">
             <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-500">
               {{ ctxMenu.targetIds.length }} {{ t('canvasMenuItems') }}
             </div>
@@ -468,6 +515,7 @@ import {
   serializeDoc,
   parseDoc,
   linkEndpoints,
+  bezierLinkPath,
   distToSegment,
   cropRectFor,
   createHistory,
@@ -509,6 +557,70 @@ const tool = ref(null)
 const linkDraft = ref(null) // 'link' 模式：已点第一个物件 id
 const spaceDown = ref(false) // 空格按住 = 强制平移
 const cropRect = ref(null) // 'crop' 模式拖出的世界矩形
+// —— 连线（参考 infinite-canvas）：句柄拖拽建线 + 连线点选 ——
+const connectDrag = reactive({
+  active: false,
+  nodeId: null, // 起始物件 id
+  handleType: null, // 'source'（右句柄，from）| 'target'（左句柄，to）
+  seg: null, // 预览贝塞尔端点 {x1,y1,x2,y2}
+  targetId: null, // 悬停吸附的目标物件 id
+})
+const selectedLinkId = ref(null) // 选中的连线 id（参考 selectedConnectionId）
+const hoverNodeId = ref(null) // 悬停物件 id（句柄显现条件，参考 hovered || isSelected || isConnecting）
+/** 物件是否显示连接句柄：悬停/选中/连线拖拽中（起点与悬停目标，参考 isConnecting 全显） */
+function showHandles(o) {
+  return (
+    hoverNodeId.value === o.id ||
+    selection.value.includes(o.id) ||
+    (connectDrag.active && (connectDrag.nodeId === o.id || connectDrag.targetId === o.id))
+  )
+}
+/** 句柄显隐切换后 Konva 不会自动重绘 hit graph（hitFunc 结果变化），手动补绘 */
+function redrawHandleHits() {
+  nextTick(() => {
+    const st = stageEl.value?.getStage?.()
+    st?.getLayers().forEach((l) => l.drawHit())
+  })
+}
+watch(
+  [hoverNodeId, selectedLinkId, () => [connectDrag.active, connectDrag.targetId]],
+  redrawHandleHits,
+  {
+    deep: false,
+  },
+)
+watch(
+  () => selection.value.length,
+  () => redrawHandleHits(),
+)
+/**
+ * 句柄 circle 配置（参考 ConnectionHandleDot：12px 圆点 / 48px 热区 / hover 放大）。
+ * 常驻渲染（opacity 控制可见）避免 Konva v-if 的 hit graph 不刷新问题；
+ * hitFunc 仅在 showHandles 时提供热区，平时不拦截物件交互。
+ */
+function handleConfig(o, side) {
+  const hovered = hoverNodeId.value === o.id
+  return {
+    x: side === 'target' ? 0 : o.width,
+    y: o.height / 2,
+    radius: (hovered ? 7.5 : 6) / viewport.value.scale,
+    fill: '#1f1d1a',
+    stroke: '#d6d3d1',
+    strokeWidth: 2 / viewport.value.scale,
+    opacity: showHandles(o) ? 1 : 0,
+    cursor: 'crosshair',
+    // hitFunc 读实时状态（不闭包 on）：hit graph 重绘时按当下显隐提供热区。
+    // ctx 已变换到 shape 本地坐标系，圆心取 (0,0)；24px 热区半径（参考 size-12 = 48px 热区）
+    hitFunc(ctx, shape) {
+      if (!showHandles(o)) return
+      const r = 24 / viewport.value.scale
+      ctx.beginPath()
+      ctx.arc(0, 0, r, 0, Math.PI * 2, false)
+      ctx.closePath()
+      ctx.fillStrokeShape(shape)
+    },
+  }
+}
 
 // —— 撤销/重做（有界快照栈；快照 = objects+links+groups 序列化） ——
 const history = ref(createHistory(60))
@@ -549,7 +661,15 @@ function applyDoc(snapshot) {
 }
 
 // stage 不整体 draggable——空地平移由容器级 mousedown 自实现（bg 矩形会抢物件命中）
-const stageConfig = computed(() => ({ width: size.w, height: size.h }))
+// 视口直接绑定 stage config（vue-konva 自动同步，避免 rAF 时机竞态导致 reload 视口丢失）
+const stageConfig = computed(() => ({
+  width: size.w,
+  height: size.h,
+  scaleX: viewport.value.scale,
+  scaleY: viewport.value.scale,
+  x: viewport.value.x,
+  y: viewport.value.y,
+}))
 // 网格背景（纯 CSS，绘制在 stage 容器下面，随视口平移）
 const gridStyle = computed(() => {
   const s = 40 * viewport.value.scale
@@ -692,6 +812,7 @@ function onWheel(e) {
 
 function onItemDown(i, e) {
   // 物件按下：记录待拖，交给 Konva 的节点拖拽；框选模式空地按下走 onMouseDown
+  hoverNodeId.value = objects.value[i].id
   if (tool.value === 'link') {
     // 连线模式：点第一个物件记起点，点第二个建连线
     const id = objects.value[i].id
@@ -740,6 +861,72 @@ function onItemDown(i, e) {
   // 组：整组选中高亮（成员各自渲染 stroke）
 }
 
+// —— 连接句柄拖拽建线（参考 infinite-canvas onConnectStart/handleConnectMove）——
+/** Konva 事件对象无 preventDefault/stopPropagation，Vue .prevent/.stop 修饰符会抛错；
+ *  统一在此代理到原生 evt（kev.evt 为浏览器原生事件） */
+function stopKonvaEvent(kev) {
+  kev?.cancelBubble && (kev.cancelBubble = true) // Konva 冒泡阻断
+  kev?.evt?.preventDefault?.()
+  kev?.evt?.stopPropagation?.()
+}
+/** 句柄 mousedown：进入 connect 拖拽（source=右句柄建 from→to；target=左句柄建 to←from） */
+function onConnectStart(nodeId, handleType, kev) {
+  stopKonvaEvent(kev)
+  connectDrag.active = true
+  connectDrag.nodeId = nodeId
+  connectDrag.handleType = handleType
+  connectDrag.targetId = null
+  const o = objects.value.find((x) => x.id === nodeId)
+  if (!o) return
+  // 起点固定在句柄一侧边缘中点
+  connectDrag.seg =
+    handleType === 'source'
+      ? { x1: o.x + o.width, y1: o.y + o.height / 2, x2: o.x + o.width, y2: o.y + o.height / 2 }
+      : { x1: o.x, y1: o.y + o.height / 2, x2: o.x, y2: o.y + o.height / 2 }
+  drag.mode = 'connect' // 占住拖拽态：阻止平移/物件拖动
+}
+/** connect 拖拽中：预览端点跟随鼠标，命中物件则吸附到其边缘（参考 ActiveConnectionPath snapped*） */
+function onConnectMove() {
+  if (!connectDrag.active || !connectDrag.seg) return
+  const st = stageEl.value.getStage()
+  const p = st.getPointerPosition()
+  if (!p) return
+  const w = screenToWorld(viewport.value, p.x, p.y)
+  const start = { x: connectDrag.seg.x1, y: connectDrag.seg.y1 }
+  // 悬停吸附：找指针下物件（非起点、有内容物件），端点贴其近侧边缘中点
+  const hit = hitTest(objects.value, w.x, w.y)
+  const hoverObj = hit >= 0 ? objects.value[hit] : null
+  const target = hoverObj && hoverObj.id !== connectDrag.nodeId ? hoverObj : null
+  connectDrag.targetId = target ? target.id : null
+  const end = target
+    ? connectDrag.handleType === 'source'
+      ? { x: target.x, y: target.y + target.height / 2 }
+      : { x: target.x + target.width, y: target.y + target.height / 2 }
+    : { x: w.x, y: w.y }
+  connectDrag.seg = { ...start, ...end }
+}
+/** connect 松手：落在物件上且非起点/无重复 → 建线（参考 handleConnectEnd） */
+function onConnectEnd() {
+  if (!connectDrag.active) return
+  const { nodeId, handleType, targetId } = connectDrag
+  connectDrag.active = false
+  connectDrag.seg = null
+  connectDrag.targetId = null
+  if (!targetId || targetId === nodeId) return
+  const from = handleType === 'source' ? nodeId : targetId
+  const to = handleType === 'source' ? targetId : nodeId
+  const exists = links.value.some((l) => l.from === from && l.to === to)
+  if (!exists) {
+    beforeChange()
+    links.value.push({
+      id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5),
+      from,
+      to,
+    })
+    saveSoon()
+  }
+}
+
 function onMouseDown(e) {
   // 空地（没点到任何 shape）按下：
   //   普通拖 = 平移画布；Shift/中键 拖 = 框选；crop 工具 = 圈选裁剪
@@ -763,6 +950,7 @@ function onMouseDown(e) {
     drag.mode = 'pan'
     drag.last = { x: p.x, y: p.y }
     if (!spaceDown.value) selection.value = []
+    selectedLinkId.value = null // 空地点击清除连线选中（参考选中互斥）
   }
   if (ctxMenu.value) ctxMenu.value = null
 }
@@ -771,6 +959,17 @@ function onMouseMove(e) {
   const st = stageEl.value.getStage()
   const p = st.getPointerPosition()
   if (!p) return
+  // 悬停追踪（参考 onHoverStart/End）：句柄显现 + 圆点放大
+  if (!drag.mode || drag.mode === 'pan') {
+    const w = screenToWorld(viewport.value, p.x, p.y)
+    const hit = hitTest(objects.value, w.x, w.y)
+    const id = hit >= 0 ? objects.value[hit].id : null
+    if (id !== hoverNodeId.value) hoverNodeId.value = id
+  }
+  if (drag.mode === 'connect') {
+    onConnectMove()
+    return
+  }
   if (drag.mode === 'pan' && drag.last) {
     viewport.value = {
       scale: viewport.value.scale,
@@ -789,6 +988,12 @@ function onMouseMove(e) {
 }
 
 function onMouseUp() {
+  if (drag.mode === 'connect') {
+    onConnectEnd()
+    drag.mode = null
+    drag.last = null
+    return
+  }
   if (drag.mode === 'rubber' && rubber.value) {
     const r = rubber.value
     if (Math.abs(r.w) > 4 || Math.abs(r.h) > 4) {
@@ -1577,11 +1782,35 @@ function groupOf(id) {
   return groups.value.find((g) => g.members.includes(id))
 }
 
-// —— 连线删除：点击箭头本体（渲染层 line 绑定 mousedown）——
-function deleteLinkAt(e) {
+// —— 连线点选/右键（参考 infinite-canvas ConnectionPath onSelect/onContextMenu）——
+function onLinkDown(e) {
   const id = e.target.id()
+  // 仅左键选中；e.evt.button === 2 右键走 contextmenu
+  if (e.evt && e.evt.button !== undefined && e.evt.button !== 0) return
+  selectedLinkId.value = id
+  selection.value = [] // 连线与物件互斥选中（参考 setSelectedConnectionId + setSelectedNodeIds(new Set())）
+}
+function onLinkContextMenu(evt, id) {
+  selectedLinkId.value = id
+  // Konva 事件对象不兼容 Vue .prevent 修饰符，代理到原生 evt
+  const native = evt?.evt || evt
+  native?.preventDefault?.()
+  native?.stopPropagation?.()
+  ctxMenu.value = {
+    kind: 'link',
+    id,
+    x: (native.clientX ?? 0) + 2,
+    y: (native.clientY ?? 0) + 2,
+    wx: 0,
+    wy: 0,
+    targetIds: [],
+  }
+}
+function deleteSelectedLink() {
+  if (!selectedLinkId.value) return
   beforeChange()
-  links.value = links.value.filter((l) => l.id !== id)
+  links.value = links.value.filter((l) => l.id !== selectedLinkId.value)
+  selectedLinkId.value = null
   saveSoon()
 }
 
@@ -1804,6 +2033,16 @@ function openAppNodePanel(id) {
   appPanel.id = id
   // 异步补 app 详情 + 刷新喂养提示
   void ensureAppDetail(node.appId).then(refreshFed)
+}
+/** Konva 卡上 ⚙ 按钮（Konva 事件对象不兼容 Vue .prevent/.stop 修饰符，代理进 handler） */
+function openAppNodePanelFromKonva(id, kev) {
+  stopKonvaEvent(kev)
+  openAppNodePanel(id)
+}
+/** Konva 卡上 ▶ 按钮 */
+function runAppNodeFromKonva(id, kev) {
+  stopKonvaEvent(kev)
+  runAppNode(id)
 }
 function refreshFed() {
   const node = appPanelNode.value
@@ -2032,37 +2271,40 @@ function placeNodeArtifacts(node, files) {
   })
 }
 
-// Konva 卡渲染配置
-const APP_STATUS_COLORS = {
-  idle: '#64748b',
-  running: '#38bdf8',
-  success: '#34d399',
-  error: '#f87171',
+// —— App 节点卡视觉（参考 infinite-canvas canvas-theme dark：stone 色系 + rounded-3xl + 选中近白描边）——
+const APP_CARD = {
+  fill: '#292524', // node.fill
+  stroke: '#44403c', // node.stroke
+  activeStroke: '#fafaf9', // node.activeStroke（选中）
+  text: '#f5f5f4', // node.text
+  muted: '#d6d3d1', // node.muted
+  faint: '#78716c', // node.faint
 }
 function appNodeRectConfig(o) {
   const sel = selection.value.includes(o.id)
   return {
     width: o.width,
     height: o.height,
-    fill: 'rgba(30,41,59,0.85)',
-    stroke: sel ? 'var(--wb-accent)' : APP_STATUS_COLORS[o.status] || '#64748b',
-    strokeWidth: sel ? 2.5 : 1.5,
-    cornerRadius: 10,
-    shadowColor: 'rgba(0,0,0,0.4)',
-    shadowBlur: 10,
-    shadowOffset: { x: 0, y: 4 },
+    fill: APP_CARD.fill,
+    stroke: sel ? APP_CARD.activeStroke : APP_CARD.stroke,
+    strokeWidth: sel ? 2 : 2,
+    cornerRadius: 24, // rounded-3xl
+    shadowColor: sel ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.25)',
+    shadowBlur: sel ? 48 : 18, // 选中态 0 18px 48px（参考 isRelated 投影）
+    shadowOffset: { x: 0, y: sel ? 18 : 6 },
+    shadowOpacity: 0.6,
   }
 }
 function appNodeTitleConfig(o) {
   return {
     text: o.name || o.appId,
-    x: 12,
-    y: 10,
-    width: o.width - 70,
+    x: 16,
+    y: 14,
+    width: o.width - 76,
     height: 24,
     fontSize: 14,
     fontStyle: 'bold',
-    fill: '#e2e8f0',
+    fill: APP_CARD.text,
     wrap: 'none',
     ellipsis: true,
     listening: false,
@@ -2073,12 +2315,13 @@ function appNodeSubConfig(o) {
     o.status === 'running' ? o.statusText || '…' : o.statusText || t('canvasAppNodeSubDefault')
   return {
     text: sub,
-    x: 12,
+    x: 16,
     y: o.height - 30,
-    width: o.width - 24,
+    width: o.width - 32,
     height: 20,
     fontSize: 11,
-    fill: o.status === 'error' ? '#f87171' : o.status === 'success' ? '#34d399' : '#94a3b8',
+    fill:
+      o.status === 'error' ? '#f87171' : o.status === 'success' ? APP_CARD.muted : APP_CARD.faint,
     wrap: 'none',
     ellipsis: true,
     listening: false,
@@ -2090,8 +2333,15 @@ function appNodeStatusConfig(o) {
     x: o.width - 26,
     y: 24,
     radius: running ? 6 : 5,
-    fill: APP_STATUS_COLORS[o.status] || '#64748b',
-    stroke: running ? 'rgba(56,189,248,0.4)' : null,
+    fill:
+      o.status === 'success'
+        ? APP_CARD.muted
+        : o.status === 'running'
+          ? APP_CARD.activeStroke
+          : o.status === 'error'
+            ? '#f87171'
+            : APP_CARD.faint,
+    stroke: running ? 'rgba(250,250,249,0.35)' : null,
     strokeWidth: running ? 8 : 0,
     listening: false,
   }
@@ -2099,20 +2349,20 @@ function appNodeStatusConfig(o) {
 function appNodeRunBtnConfig(o) {
   return {
     text: o.status === 'running' ? '◉' : '▶',
-    x: o.width - 56,
+    x: o.width - 58,
     y: o.height - 36,
     fontSize: 16,
-    fill: o.status === 'running' ? '#38bdf8' : '#34d399',
+    fill: o.status === 'running' ? APP_CARD.activeStroke : APP_CARD.muted,
     listening: true,
   }
 }
 function appNodeExpandBtnConfig(o) {
   return {
     text: '⚙',
-    x: o.width - 30,
+    x: o.width - 32,
     y: o.height - 36,
     fontSize: 15,
-    fill: appPanel.id === o.id ? 'var(--wb-accent)' : '#94a3b8',
+    fill: appPanel.id === o.id ? APP_CARD.activeStroke : APP_CARD.faint,
     listening: true,
   }
 }

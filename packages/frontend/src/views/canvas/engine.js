@@ -94,12 +94,10 @@ export function snapDelta(moving, others, threshold = 8) {
   for (const o of others) {
     const mv = { l: moving.x, c: moving.x + moving.width / 2, r: moving.x + moving.width }
     const ov = { l: o.x, c: o.x + o.width / 2, r: o.x + o.width }
-    for (const k of ['l', 'c', 'r'])
-      for (const k2 of ['l', 'c', 'r']) tryPair(mv[k], ov[k2], 'x')
+    for (const k of ['l', 'c', 'r']) for (const k2 of ['l', 'c', 'r']) tryPair(mv[k], ov[k2], 'x')
     const mh = { t: moving.y, c: moving.y + moving.height / 2, b: moving.y + moving.height }
     const oh = { t: o.y, c: o.y + o.height / 2, b: o.y + o.height }
-    for (const k of ['t', 'c', 'b'])
-      for (const k2 of ['t', 'c', 'b']) tryPair(mh[k], oh[k2], 'y')
+    for (const k of ['t', 'c', 'b']) for (const k2 of ['t', 'c', 'b']) tryPair(mh[k], oh[k2], 'y')
   }
   if (best) {
     if (best.axis === 'x') dx = best.d
@@ -117,14 +115,10 @@ export function snapGuides(moving, others, threshold = 8) {
   for (const o of others) {
     const mvx = [moving.x, moving.x + moving.width / 2, moving.x + moving.width]
     const ovx = [o.x, o.x + o.width / 2, o.x + o.width]
-    for (const a of mvx)
-      for (const b of ovx)
-        if (Math.abs(a - b) <= threshold) v.push(b)
+    for (const a of mvx) for (const b of ovx) if (Math.abs(a - b) <= threshold) v.push(b)
     const mvy = [moving.y, moving.y + moving.height / 2, moving.y + moving.height]
     const ovy = [o.y, o.y + o.height / 2, o.y + o.height]
-    for (const a of mvy)
-      for (const b of ovy)
-        if (Math.abs(a - b) <= threshold) h.push(b)
+    for (const a of mvy) for (const b of ovy) if (Math.abs(a - b) <= threshold) h.push(b)
   }
   return { v: [...new Set(v)], h: [...new Set(h)] }
 }
@@ -146,8 +140,8 @@ export function bboxOf(objects) {
 }
 
 /**
- * 连线端点：物件间连线从边缘中点出发，指向对方中心。
- * links: {id, from, to, kind?}; objects 按 id 索引；返回 Konva 可绘线段端点。
+ * 连线端点（参考 infinite-canvas ConnectionPath）：from 右边缘中点 → to 左边缘中点。
+ * links: {id, from, to, kind?}; objects 按 id 索引；返回贝塞尔曲线端点。
  * 悬空连线（端点物件不存在）返回 null（渲染层跳过）。
  */
 export function linkEndpoints(links, objects) {
@@ -158,17 +152,23 @@ export function linkEndpoints(links, objects) {
     if (!a || !b) return null
     return {
       ...l,
-      x1: a.x + a.width / 2,
+      x1: a.x + a.width,
       y1: a.y + a.height / 2,
-      x2: b.x + b.width / 2,
+      x2: b.x,
       y2: b.y + b.height / 2,
     }
   })
 }
 
-/** 连线中点（箭头/删除热点用） */
-export function linkMidpoint(seg) {
-  return { x: (seg.x1 + seg.x2) / 2, y: (seg.y1 + seg.y2) / 2 }
+/**
+ * 贝塞尔连线几何（参考 infinite-canvas ConnectionPath/ActiveConnectionPath）：
+ * 水平曲率 curvature = max(|dx| * 0.5, 50)，控制点沿水平方向伸出。
+ * 返回 Konva.Path 的 SVG d（可见层与命中层同形）。
+ */
+export function bezierLinkPath(x1, y1, x2, y2) {
+  const dx = Math.abs(x2 - x1)
+  const curvature = Math.max(dx * 0.5, 50)
+  return `M ${x1} ${y1} C ${x1 + curvature} ${y1}, ${x2 - curvature} ${y2}, ${x2} ${y2}`
 }
 
 /**
@@ -268,7 +268,14 @@ export function undo(history, current) {
   if (!history.past.length) return { history, snapshot: null }
   const past = [...history.past]
   const snapshot = past.pop()
-  return { history: { past, future: [current, ...history.future].slice(0, history.limit), limit: history.limit }, snapshot }
+  return {
+    history: {
+      past,
+      future: [current, ...history.future].slice(0, history.limit),
+      limit: history.limit,
+    },
+    snapshot,
+  }
 }
 
 /** 重做：返回 { history, snapshot }；不可重做时 snapshot 为 null */
@@ -276,12 +283,26 @@ export function redo(history, current) {
   if (!history.future.length) return { history, snapshot: null }
   const future = [...history.future]
   const snapshot = future.shift()
-  return { history: { past: [...history.past, current].slice(-history.limit), future, limit: history.limit }, snapshot }
+  return {
+    history: {
+      past: [...history.past, current].slice(-history.limit),
+      future,
+      limit: history.limit,
+    },
+    snapshot,
+  }
 }
 
 /** 反序列化：容忍残缺文档，坏档返回空文档（v1 档无 links/groups 字段 → 空数组） */
 export function parseDoc(json) {
-  const empty = () => ({ version: 2, name: 'Untitled', viewport: makeViewport(), objects: [], links: [], groups: [] })
+  const empty = () => ({
+    version: 2,
+    name: 'Untitled',
+    viewport: makeViewport(),
+    objects: [],
+    links: [],
+    groups: [],
+  })
   try {
     const d = JSON.parse(json)
     if (!d || !Array.isArray(d.objects)) return empty()
@@ -291,7 +312,13 @@ export function parseDoc(json) {
       viewport: makeViewport(d.viewport?.scale ?? 1, d.viewport?.x ?? 0, d.viewport?.y ?? 0),
       objects: d.objects.filter((o) => o && typeof o.x === 'number' && typeof o.y === 'number'),
       links: Array.isArray(d.links)
-        ? d.links.filter((l) => l && typeof l.id === 'string' && typeof l.from === 'string' && typeof l.to === 'string')
+        ? d.links.filter(
+            (l) =>
+              l &&
+              typeof l.id === 'string' &&
+              typeof l.from === 'string' &&
+              typeof l.to === 'string',
+          )
         : [],
       groups: Array.isArray(d.groups)
         ? d.groups
@@ -314,7 +341,9 @@ export function objectInFrame(obj, frame) {
   if (!obj || !frame) return false
   const cx = obj.x + (obj.width || 0) / 2
   const cy = obj.y + (obj.height || 0) / 2
-  return cx >= frame.x && cx <= frame.x + frame.width && cy >= frame.y && cy <= frame.y + frame.height
+  return (
+    cx >= frame.x && cx <= frame.x + frame.width && cy >= frame.y && cy <= frame.y + frame.height
+  )
 }
 
 /**
