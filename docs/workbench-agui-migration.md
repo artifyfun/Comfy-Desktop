@@ -444,6 +444,31 @@ initialize 先行、-c provider 注入),codex 小版本升级就可能悄悄破�
 
 ---
 
+## C7 双会话并行端到端验证(2026-09-01 第八轮,迁移收官)
+
+路线图最后一项:多会话并行(C7)的 GUI/协议级端到端实测。
+
+**验证方法**:dev server + 双 tab + 页面内并发 fetch(`/agent/run` SSE,
+逐帧计数)。注:browser-harness 的 `goto_url` 对多 tab 存在目标竞态
+(激活 tab 与导航指令可能落到不同 target),GUI 输入框路径受此干扰——
+协议层验证改在单 tab 页面内并发驱动两个会话,锁语义与隔离结论不受影响。
+
+**结果(全过)**:
+
+| 验证点 | 证据 |
+|---|---|
+| 并行不阻塞 | A 起跑 1.8s 后 B 发起:B 首帧 +1785ms(即发即收,**零 409**);两会话各 13 帧完整 RUN_FINISHED |
+| 会话内容隔离 | A 会话落「深海鲸 500 字散文」全文;B 会话落「UDP 10 字」应答;**零串号零泄漏**(交叉 grep 双向验证) |
+| 停止隔离(定向 cancel) | A 长任务跑动中 cancel(A):A 静默收尾(RUN_STARTED 后无 RUN_ERROR/RUN_FINISHED,正确的取消语义);并行中的 B 探针**完整 11 帧跑完不受影响** |
+| cancel 响应契约 | `{ok:true, cancelled:true, interrupted:false}`(ComfyUI 无任务时 interrupted=false,符合语义) |
+
+C7 验收三判据(并发不 409/同会话仍 409/工具上下文不串号)至此:
+单测层(workbenchTools.parallel + agui.test 409 用例)+ 协议层(本轮)
+双重覆盖。**AG-UI 迁移路线图(C1-C16 + M1-M4 + legacy 删除 + 升级跑板)
+全部完成。**
+
+---
+
 ## 里程碑与交付顺序
 
 | 里程碑 | 内容 | 出口判据 |
