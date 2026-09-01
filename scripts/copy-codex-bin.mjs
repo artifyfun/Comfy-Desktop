@@ -8,7 +8,7 @@
 // 用法：
 //   node scripts/copy-codex-bin.mjs            # 拷贝当前平台
 //   CODEX_TARGET_TRIPLE=x86_64-pc-windows-msvc node scripts/copy-codex-bin.mjs  # 指定目标平台（跨平台打包）
-import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { arch, platform } from 'node:os'
@@ -69,6 +69,12 @@ function resolveVendorRoot(triple) {
   }
 }
 
+/** 依赖里 @openai/codex 的版本（app-server 协议契约测试按此版本跑板） */
+function resolveCodexVersion() {
+  const pkgJsonPath = require.resolve('@openai/codex/package.json')
+  return JSON.parse(readFileSync(pkgJsonPath, 'utf8')).version
+}
+
 function main() {
   const triple = detectTriple()
   const src = resolveVendorRoot(triple)
@@ -82,6 +88,20 @@ function main() {
     process.exit(1)
   }
   const dst = join(ROOT, 'src/main/artifylab/public/codex-bin', triple)
+  // 版本门禁：app-server 协议是 experimental（0.149.x 实测有多个无文档形状约定），
+  // 升级必须显式确认——防止依赖浮动后 assets 被静默换成未验证的协议版本。
+  const version = resolveCodexVersion()
+  const versionFile = join(dst, 'VERSION')
+  const prevVersion = existsSync(versionFile) ? readFileSync(versionFile, 'utf8').trim() : null
+  if (prevVersion && prevVersion !== version && process.env.ALLOW_CODEX_UPGRADE !== '1') {
+    console.error(
+      `[copy-codex-bin] codex 版本变化 ${prevVersion} → ${version}，app-server 协议为 experimental，` +
+        `升级前须跑协议契约测试：\n` +
+        `  CODEX_PROTOCOL_CONTRACT=1 npx vitest run src/main/artifylab/agui/appServerProtocol.contract.test.ts\n` +
+        `  通过后带 ALLOW_CODEX_UPGRADE=1 重跑本脚本，并按 docs/workbench-agui-migration.md「codex 升级流程」记录形状变化`
+    )
+    process.exit(1)
+  }
   mkdirSync(dirname(dst), { recursive: true })
   cpSync(src, dst, { recursive: true })
   const copied = existsSync(join(dst, 'bin', binName))
@@ -90,8 +110,9 @@ function main() {
     console.error(`[copy-codex-bin] 拷贝失败: ${src} -> ${dst}`)
     process.exit(1)
   }
+  writeFileSync(versionFile, version)
   console.log(
-    `[copy-codex-bin] OK: ${triple} -> ${dst} (${(size / 1024 / 1024).toFixed(1)} MB, ${binName})`
+    `[copy-codex-bin] OK: codex ${version} ${triple} -> ${dst} (${(size / 1024 / 1024).toFixed(1)} MB, ${binName})`
   )
 }
 

@@ -407,6 +407,43 @@ L2 快路径端点与 chat 管线无关,保留。
 
 ---
 
+## codex 升级流程(版本 pin + 协议契约跑板,2026-09-01 第七轮)
+
+app-server 协议标 **experimental**——`appServerRun`/`appServerTranslator` 按
+0.149.x 形状写死(平铺 turn/start、嵌套 thread/start、text_elements 必填、
+initialize 先行、-c provider 注入),codex 小版本升级就可能悄悄破坏。
+本轮落地三件套:
+
+1. **版本 pin**:`package.json` `@openai/codex` `^0.149.1` → 精确 `0.149.1`
+   (去 caret,install 不再浮动);`scripts/copy-codex-bin.mjs` 写
+   `public/codex-bin/<triple>/VERSION` 标记,版本变化时**拒绝拷贝**并提示
+   先跑契约测试,`ALLOW_CODEX_UPGRADE=1` 显式放行。
+2. **协议契约测试**:`agui/appServerProtocol.contract.test.ts`(真二进制,
+   `CODEX_PROTOCOL_CONTRACT=1` 门控,默认 skip 不进日常回归)——死端口
+   provider(127.0.0.1:9,不烧 token)下验证:
+   - `initialize` → `{userAgent(含版本), codexHome, platformFamily, platformOs}`
+     (**实测无 serverInfo 字段**——文档常见写法与 0.149.x 不符);
+   - `thread/start {params:{}}` → `thread.id`;
+   - `turn/start`(平铺 + text_elements)→ `turn.id`;
+   - 通知流方法名(snake_case 斜杠路径)到达;
+   - `turn/interrupt` 无活动 turn → **JSON-RPC error -32600**(不是成功;
+     生产 `interruptActive` 的 try/catch 正是为此,连接不因协议错误死掉)。
+3. **升级跑板**(版本变更时):
+   ```bash
+   # ① 改 package.json 版本 → pnpm install
+   # ② 跑契约测试(第一道门)
+   CODEX_PROTOCOL_CONTRACT=1 npx vitest run src/main/artifylab/agui/appServerProtocol.contract.test.ts
+   # ③ 过了 → 放行资产拷贝 + 全量回归
+   ALLOW_CODEX_UPGRADE=1 node scripts/copy-codex-bin.mjs
+   npx vitest run src/main/artifylab/agui src/main/artifylab/workbench
+   # ④ 破了 → 把新形状记录回本文件 C16「坑位记录」段,改 translator 后再过 ②
+   ```
+   translator 侧的形状消费点:`appServerRun.ts`(request 形状)与
+   `appServerTranslator.ts`(通知方法名 → ThreadEvent 映射),两处按契约
+   对齐即可。
+
+---
+
 ## 里程碑与交付顺序
 
 | 里程碑 | 内容 | 出口判据 |
