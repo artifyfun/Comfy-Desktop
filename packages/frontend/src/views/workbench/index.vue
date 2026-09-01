@@ -4,7 +4,11 @@
     :class="isCanvasEmbedded ? 'h-full flex flex-col' : ''"
     style="background: var(--wb-bg-base)"
   >
-    <div id="app" class="flex flex-col" :class="isCanvasEmbedded ? 'flex-1 min-h-0' : 'pb-4 min-h-screen'">
+    <div
+      id="app"
+      class="flex flex-col"
+      :class="isCanvasEmbedded ? 'flex-1 min-h-0' : 'pb-4 min-h-screen'"
+    >
       <AppHeader
         v-if="isStandalone"
         :first-nav-to="'/'"
@@ -23,14 +27,20 @@
       <div
         v-if="isNarrow && canvasState"
         class="mx-2 mt-2 px-3 py-1.5 flex items-center gap-3 text-[11px] rounded-lg shrink-0 overflow-hidden"
-        style="border: 1px solid var(--wb-stroke); background: var(--wb-surface-deep); color: var(--wb-text-2)"
+        style="
+          border: 1px solid var(--wb-stroke);
+          background: var(--wb-surface-deep);
+          color: var(--wb-text-2);
+        "
         :title="t('workbenchCanvasSense')"
       >
         <span class="flex items-center gap-1 shrink-0" style="color: var(--wb-accent)">
           <i class="fas fa-circle-nodes"></i>
           <span class="max-w-[140px] truncate inline-block">{{ canvasState.workflowName }}</span>
         </span>
-        <span class="shrink-0">{{ t('workbenchCanvasNodes').replace('{n}', String(canvasState.nodeCount)) }}</span>
+        <span class="shrink-0">{{
+          t('workbenchCanvasNodes').replace('{n}', String(canvasState.nodeCount))
+        }}</span>
         <!-- 无限画布侧栏：物件计数（图片/便签/连线）——与 C 宿主 digest 的 counts 同构 -->
         <span v-if="canvasState.counts" class="shrink-0" style="color: var(--wb-text-2)">
           <i class="fas fa-image mr-1"></i>{{ canvasState.counts.images }}
@@ -46,10 +56,12 @@
         <span
           v-if="canvasState.queue?.running || canvasState.queue?.pending"
           class="ml-auto shrink-0 px-2 py-0.5 rounded-full"
-          style="background: var(--wb-accent)/15; color: var(--wb-accent)"
+          style="background: var(--wb-accent) / 15; color: var(--wb-accent)"
         >
           <i class="fas fa-spinner fa-spin-mr-1"></i>
-          {{ canvasState.queue.running }}/{{ canvasState.queue.running + canvasState.queue.pending }}
+          {{ canvasState.queue.running }}/{{
+            canvasState.queue.running + canvasState.queue.pending
+          }}
         </span>
       </div>
 
@@ -71,7 +83,11 @@
             <span style="color: var(--wb-text-2)">·</span> {{ line }}
           </div>
         </div>
-        <div v-if="opsResultMsg" class="mb-2" :style="{ color: opsResultOk ? 'var(--wb-accent)' : '#f87171' }">
+        <div
+          v-if="opsResultMsg"
+          class="mb-2"
+          :style="{ color: opsResultOk ? 'var(--wb-accent)' : '#f87171' }"
+        >
           {{ opsResultMsg }}
         </div>
         <div class="flex items-center gap-2">
@@ -91,8 +107,14 @@
           >
             {{ t('workbenchOpsDiscard') }}
           </button>
-          <span v-if="canvasState" class="ml-auto truncate" style="color: var(--wb-text-2)" :title="t('workbenchOpsBase')">
-            {{ t('workbenchOpsBase') }}: {{ canvasState.workflowName }} · {{ canvasState.nodeCount }}
+          <span
+            v-if="canvasState"
+            class="ml-auto truncate"
+            style="color: var(--wb-text-2)"
+            :title="t('workbenchOpsBase')"
+          >
+            {{ t('workbenchOpsBase') }}: {{ canvasState.workflowName }} ·
+            {{ canvasState.nodeCount }}
           </span>
         </div>
       </div>
@@ -155,7 +177,13 @@
         <!-- 中：会话区（embed 模式占满 iframe 高度；顶部还有感知条 mt-2+行高≈36px） -->
         <section
           class="flex-1 min-w-0 flex flex-col"
-          :class="isCanvasEmbedded ? 'flex-1 min-h-0' : isEmbed ? 'h-[calc(100vh-52px)]' : 'h-[calc(100vh-96px)]'"
+          :class="
+            isCanvasEmbedded
+              ? 'flex-1 min-h-0'
+              : isEmbed
+                ? 'h-[calc(100vh-52px)]'
+                : 'h-[calc(100vh-96px)]'
+          "
           style="border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-card)"
         >
           <!-- 会话头 -->
@@ -340,8 +368,7 @@
                             <pre
                               v-for="tm2 in processGroupItems(processGroupAt(tmi)).filter(
                                 (x) =>
-                                  expandedToolIds.has(x.toolItem?.id) &&
-                                  toolItemDetail(x.toolItem),
+                                  expandedToolIds.has(x.toolItem?.id) && toolItemDetail(x.toolItem),
                               )"
                               :key="'d' + tm2._key"
                               class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-black/40 border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
@@ -369,7 +396,9 @@
                             ></i>
                           </div>
                           <pre
-                            v-if="expandedToolIds.has(tm.toolItem.id) && toolItemDetail(tm.toolItem)"
+                            v-if="
+                              expandedToolIds.has(tm.toolItem.id) && toolItemDetail(tm.toolItem)
+                            "
                             class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-black/40 border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
                             >{{ toolItemDetail(tm.toolItem) }}</pre
                           >
@@ -450,10 +479,7 @@
               <div
                 v-else-if="!m.__inTurn"
                 class="flex"
-                :class="[
-                  m.role === 'user' ? 'justify-end' : 'justify-start',
-                  turnGapClass(i),
-                ]"
+                :class="[m.role === 'user' ? 'justify-end' : 'justify-start', turnGapClass(i)]"
               >
                 <div class="max-w-[85%] space-y-1 group/msg">
                   <!-- 附件缩略图（用户消息）：上传完成附件走 /view 直出；本地预览
@@ -525,10 +551,7 @@
                           @click.stop="toggleProcessGroup(i)"
                         >
                           <a-spin v-if="processGroupRunning(processGroupAt(i))" size="small" />
-                          <i
-                            v-else
-                            class="fas fa-sliders text-tech-cyan"
-                          ></i>
+                          <i v-else class="fas fa-sliders text-tech-cyan"></i>
                           <span class="font-mono text-xs truncate flex-1">{{
                             t('workbenchProcessSteps').replace(
                               '{n}',
@@ -563,7 +586,9 @@
                               ></i>
                             </div>
                             <pre
-                              v-if="expandedToolIds.has(tm.toolItem.id) && toolItemDetail(tm.toolItem)"
+                              v-if="
+                                expandedToolIds.has(tm.toolItem.id) && toolItemDetail(tm.toolItem)
+                              "
                               class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-black/40 border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
                               >{{ toolItemDetail(tm.toolItem) }}</pre
                             >
@@ -804,7 +829,8 @@
                         </a-menu-item>
                         <a-menu-item key="pin">
                           <span class="flex items-center gap-2"
-                            ><i class="fas fa-thumbtack w-4"></i>{{ t('workbenchPinToCanvas') }}</span
+                            ><i class="fas fa-thumbtack w-4"></i
+                            >{{ t('workbenchPinToCanvas') }}</span
                           >
                         </a-menu-item>
                         <a-menu-item key="publish" v-if="a.status === 'success'">
@@ -850,11 +876,17 @@
                 <div class="flex items-center gap-2 mb-1">
                   <span
                     class="px-1.5 py-0.5 rounded font-mono text-[10px]"
-                    style="background: var(--wb-accent-bg, rgba(56, 189, 248, 0.15)); color: var(--wb-accent)"
+                    style="
+                      background: var(--wb-accent-bg, rgba(56, 189, 248, 0.15));
+                      color: var(--wb-accent);
+                    "
                     >{{ t('workbenchDiagCat_' + diagnosisOf(a).category) }}</span
                   >
                   <span v-if="diagnosisOf(a).nodeType" class="opacity-70 font-mono">
-                    {{ diagnosisOf(a).nodeType }}<template v-if="diagnosisOf(a).nodeId"> #{{ diagnosisOf(a).nodeId }}</template>
+                    {{ diagnosisOf(a).nodeType
+                    }}<template v-if="diagnosisOf(a).nodeId">
+                      #{{ diagnosisOf(a).nodeId }}</template
+                    >
                   </span>
                 </div>
                 <div class="opacity-90 mb-1.5">{{ diagnosisOf(a).suggestion.text }}</div>
@@ -1048,10 +1080,7 @@
       @ok="runImportedWorkflow"
     >
       <div class="space-y-3">
-        <a-input
-          v-model:value="importName"
-          :placeholder="t('workbenchImportNamePlaceholder')"
-        />
+        <a-input v-model:value="importName" :placeholder="t('workbenchImportNamePlaceholder')" />
         <textarea
           v-model="importJson"
           rows="10"
@@ -1063,11 +1092,7 @@
     </a-modal>
 
     <!-- 高级参数：节点级 nodeOverrides 覆盖（模板未暴露的任意直值字段） -->
-    <a-modal
-      v-model:open="advOpen"
-      :title="t('workbenchAdvParams')"
-      :footer="null"
-    >
+    <a-modal v-model:open="advOpen" :title="t('workbenchAdvParams')" :footer="null">
       <div class="space-y-3">
         <a-select
           v-model:value="advTemplateId"
@@ -1081,7 +1106,7 @@
           v-model="advJson"
           rows="8"
           class="w-full wb-tech-input font-mono text-xs"
-          :placeholder='t("workbenchAdvJsonPlaceholder")'
+          :placeholder="t('workbenchAdvJsonPlaceholder')"
         ></textarea>
         <div v-if="advIssues.length" class="space-y-1">
           <div v-for="(issue, i) in advIssues" :key="i" class="text-xs text-red-400">
@@ -1126,7 +1151,7 @@ import { pushFiles, drainAttachments, drainFiles } from '@/utils/canvasBridge'
 import { useCanvasMode } from '@/utils/canvasMode'
 import { createAguiBridge } from './aguiBridge'
 const { t, getCurrentLanguage } = useI18n()
-const { onResult, emitResult, onAttachments, onCanvasState, onPrompt } = useCanvasMode()
+const { onResult, emitResult, onAttachments, onCanvasState, onPrompt, emitOps } = useCanvasMode()
 // 画布侧栏模式：store 模式由画布页设置；这里只需把产物经 emitResult 推给宿主
 const appStore = useAppStore()
 const route = useRoute()
@@ -1530,8 +1555,7 @@ async function runChat(inputText, attachments, opts = {}) {
 /** 用户停止导致的流中断：reader.cancel() 的 TypeError / fetch 的 AbortError 都不算错误 */
 function isStopCancelled(e) {
   return (
-    stopping.value &&
-    (e?.name === 'AbortError' || /cancel|abort/i.test(String(e?.message || e)))
+    stopping.value && (e?.name === 'AbortError' || /cancel|abort/i.test(String(e?.message || e)))
   )
 }
 
@@ -1778,6 +1802,29 @@ function applyExecutionSideEffect(kind, data) {
     })
     return
   }
+  if (kind === 'canvas-ops') {
+    // P3 A 画布 app 节点指令集：canvas-embedded 模式经总线推给宿主画布页
+    // （人审确认卡 → 执行）；embed/独立页无宿主画布，提示不可用
+    const ops = Array.isArray(data?.ops) ? data.ops : []
+    if (!ops.length) return
+    if (isCanvasEmbedded.value) {
+      emitOps(ops)
+      pushMsg({
+        role: 'agent',
+        kind: 'chat',
+        text: t('workbenchCanvasOpsSent').replace('{n}', String(ops.length)),
+        createdAt: Date.now(),
+      })
+    } else {
+      pushMsg({
+        role: 'agent',
+        kind: 'error',
+        text: t('workbenchCanvasOpsNoHost'),
+        createdAt: Date.now(),
+      })
+    }
+    return
+  }
   if (kind === 'canvas-exec') {
     // 执行画布当前工作流：前端 → 注入桥 graphToPrompt → 服务端提交 → ack
     runCanvasOnHost(data)
@@ -1956,7 +2003,9 @@ function startPoll(promptId) {
               ? {
                   ...messages.value[execIdx],
                   kind: 'artifact',
-                  text: doneFiles.length ? `${t('workbenchDone')}（${doneFiles.length} 个文件）` : t('workbenchDone'),
+                  text: doneFiles.length
+                    ? `${t('workbenchDone')}（${doneFiles.length} 个文件）`
+                    : t('workbenchDone'),
                   outputs: doneFiles.map((f) => f.filename),
                   outputFiles: doneFiles,
                 }
@@ -1971,7 +2020,9 @@ function startPoll(promptId) {
               ? {
                   role: 'agent',
                   kind: 'artifact',
-                  text: doneFiles.length ? `${t('workbenchDone')}（${doneFiles.length} 个文件）` : t('workbenchDone'),
+                  text: doneFiles.length
+                    ? `${t('workbenchDone')}（${doneFiles.length} 个文件）`
+                    : t('workbenchDone'),
                   outputs: doneFiles.map((f) => f.filename),
                   outputFiles: doneFiles,
                   createdAt: Date.now(),
@@ -2212,7 +2263,7 @@ const isEmbed = computed(
     new URLSearchParams(window.location.search).get('embed') === '1' ||
     // 兜底：宿主 iframe 内运行即视为 embed——URL 参被外部改写/重定向抹掉时，
     // 窄栏不可塌回桌面布局（502px 侧栏里渲染 AppHeader+会话侧栏 = 头部换行且不可用）
-    (typeof window !== 'undefined' && window.parent && window.parent !== window)
+    (typeof window !== 'undefined' && window.parent && window.parent !== window),
 )
 
 // 画布页右侧栏嵌入模式：画布页以组件形式渲染本视图并传 prop
@@ -2238,10 +2289,7 @@ function pushCardsToCanvas(files) {
     return
   }
   try {
-    window.parent.postMessage(
-      JSON.stringify({ type: 'artify:display-card', files }),
-      '*',
-    )
+    window.parent.postMessage(JSON.stringify({ type: 'artify:display-card', files }), '*')
   } catch (e) {
     console.warn('[workbench] display-card push failed:', e)
   }
@@ -2431,8 +2479,8 @@ async function diagnoseArtifact(artifact) {
         error: artifact.error || '',
         // embed 模式工作台寄生在 ComfyUI 页面内：同源即 comfy origin，
         // 供服务端反查 /object_info 补全被截断的枚举清单
-        comfyOrigin: isEmbed.value ? window.location.origin : undefined
-      })
+        comfyOrigin: isEmbed.value ? window.location.origin : undefined,
+      }),
     })
     if (!res.ok) return
     const json = await res.json()
@@ -2486,7 +2534,10 @@ async function confirmApplyOps() {
       resolve({ ok: false, error: 'bridge timeout' })
     }, 8000)
     try {
-      window.parent.postMessage(JSON.stringify({ type: 'artify:canvas-ops', ops, requestId, reason: 'workbench-confirm' }), '*')
+      window.parent.postMessage(
+        JSON.stringify({ type: 'artify:canvas-ops', ops, requestId, reason: 'workbench-confirm' }),
+        '*',
+      )
     } catch (e) {
       window.removeEventListener('message', onAck)
       resolve({ ok: false, error: String(e).slice(0, 80) })
@@ -2495,7 +2546,9 @@ async function confirmApplyOps() {
   opsApplying.value = false
   opsResultOk.value = !!reply.ok
   const applied = Number(reply.applied) || 0
-  const failed = Array.isArray(reply.results) ? reply.results.filter((r) => r && r.ok === false) : []
+  const failed = Array.isArray(reply.results)
+    ? reply.results.filter((r) => r && r.ok === false)
+    : []
   opsResultMsg.value = reply.ok
     ? t('workbenchOpsDone').replace('{n}', String(applied))
     : t('workbenchOpsFailed') + (reply.error ? `: ${reply.error}` : '')
@@ -2558,7 +2611,7 @@ function syncWorkflowToCanvas({ templateId, name, workflow, ensureTab }) {
           requestId,
           reason: 'workbench-sync-template',
         }),
-        '*'
+        '*',
       )
     } catch (e) {
       window.removeEventListener('message', onAck)
@@ -2611,7 +2664,7 @@ function runCanvasOnHost({ requestId, nodeOverrides, name, sessionId, batch }) {
           sessionId,
           batch,
         }),
-        '*'
+        '*',
       )
     } catch (e) {
       window.removeEventListener('message', onAck)
@@ -2693,7 +2746,7 @@ const advChecking = ref(false)
 const advRunning = ref(false)
 
 const advTemplateOptions = computed(() =>
-  advTemplates.value.map((tpl) => ({ value: tpl.id, label: tpl.name || tpl.id }))
+  advTemplates.value.map((tpl) => ({ value: tpl.id, label: tpl.name || tpl.id })),
 )
 
 const advOk = computed(() => advValidated.value && advIssues.value.length === 0)
@@ -2704,9 +2757,9 @@ function openAdvDrawer() {
   advValidated.value = false
   if (!advJson.value) {
     advJson.value = JSON.stringify(
-      { '6': { class_type: 'KSampler', widgetOverrides: { steps: 40, cfg: 7 } } },
+      { 6: { class_type: 'KSampler', widgetOverrides: { steps: 40, cfg: 7 } } },
       null,
-      2
+      2,
     )
   }
 }
@@ -2768,9 +2821,7 @@ async function runAdvOverrides() {
     })
     const runJson = await runRes.json().catch(() => null)
     if (!runRes.ok || !runJson?.success) {
-      advIssues.value = [
-        { field: 'execute', message: runJson?.message || `HTTP ${runRes.status}` },
-      ]
+      advIssues.value = [{ field: 'execute', message: runJson?.message || `HTTP ${runRes.status}` }]
       return
     }
     advOpen.value = false
@@ -2780,10 +2831,7 @@ async function runAdvOverrides() {
       text: t('workbenchExecuting'),
       createdAt: Date.now(),
     })
-    execProgressIndex.set(
-      runJson.data.promptId,
-      messages.value[messages.value.length - 1]._key,
-    )
+    execProgressIndex.set(runJson.data.promptId, messages.value[messages.value.length - 1]._key)
     executingCount.value++
     startPoll(runJson.data.promptId)
     scrollToBottom()
@@ -2951,7 +2999,7 @@ function turnTailInfo(i) {
 /** 回合正文（组内全部 chat 文本拼接，供复制） */
 function turnCopyText(i) {
   return turnGroupItems(i)
-    .map(({ m }) => (m.kind === 'chat' || m.kind === 'error') && m.role === 'agent' ? m.text : '')
+    .map(({ m }) => ((m.kind === 'chat' || m.kind === 'error') && m.role === 'agent' ? m.text : ''))
     .filter(Boolean)
     .join('\n')
 }
@@ -3093,9 +3141,7 @@ function batchSummaryText(plan) {
   const n = plan?.batch?.items?.length ?? 0
   if (!n) return ''
   const shared = Object.keys(plan.batch?.sharedParams ?? {}).length
-  return t('workbenchBatchPlan')
-    .replace('{n}', String(n))
-    .replace('{shared}', String(shared))
+  return t('workbenchBatchPlan').replace('{n}', String(n)).replace('{shared}', String(shared))
 }
 
 function scrollToBottom() {

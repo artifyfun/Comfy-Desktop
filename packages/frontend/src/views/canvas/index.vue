@@ -23,252 +23,398 @@
         @drop.prevent="onDrop"
         @contextmenu.prevent="onWrapContext"
       >
-      <!-- 网格背景（随视口平移/缩放，纯 CSS） -->
-      <div class="absolute inset-0 pointer-events-none" :style="gridStyle"></div>
-      <v-stage
-        ref="stageEl"
-        :config="stageConfig"
-        @mousedown="onMouseDown"
-        @mousemove="onMouseMove"
-        @mouseup="onMouseUp"
-        @wheel="onWheel"
-      >
-        <v-layer>
-          <!-- 对齐参考线 -->
-          <v-line
-            v-for="(g, i) in guides.v"
-            :key="'gv' + i"
-            :config="guideConfig(g, 'v')"
-          />
-          <v-line
-            v-for="(g, i) in guides.h"
-            :key="'gh' + i"
-            :config="guideConfig(g, 'h')"
-          />
-          <!-- Frame 分区（纯背景容器：不响应鼠标，成员物件自由进出；管理走右键/大纲） -->
-          <v-group v-for="o in frameObjects" :key="o.id" :config="groupConfig(o)" :draggable="false" :listening="false">
-            <v-rect :config="frameConfig(o)" />
-            <v-text :config="frameLabelConfig(o)" />
-          </v-group>
-          <!-- 图片物件（事件统一由 bindNodeEvents 手动绑定，见 onMounted 后 watch） -->
-          <v-group
-            v-for="o in imageObjects"
-            :key="o.id"
-            :config="groupConfig(o)"
-            :draggable="true"
-          >
-            <v-image :config="imageConfig(o)" />
-            <v-text
-              v-if="o.name"
-              :config="{
-                text: o.name,
-                y: o.height + 4,
-                width: o.width,
-                align: 'center',
-                fontSize: 12,
-                fill: '#94a3b8',
-              }"
-            />
-          </v-group>
-          <!-- 便签物件 -->
-          <v-group v-for="o in noteObjects" :key="o.id" :config="groupConfig(o)" :draggable="true">
-            <v-rect :config="noteRectConfig(o)" />
-            <v-text :config="noteTextConfig(o)" />
-          </v-group>
-          <!-- 分镜帧卡（N5：镜号+画面+描述） -->
-          <v-group v-for="o in shotObjects" :key="o.id" :config="groupConfig(o)" :draggable="true">
-            <v-rect :config="shotRectConfig(o)" />
-            <v-text :config="shotSeqConfig(o)" />
-            <v-text :config="shotTextConfig(o)" />
-          </v-group>
-          <!-- 连线（箭头指向 to 端；线体不抢物件命中，点中点圆点删线） -->
-          <v-group v-for="seg in linkSegs" :key="'lk' + seg.id">
-            <v-line
-              :config="{
-                points: [seg.x1, seg.y1, seg.x2, seg.y2],
-                stroke: 'rgba(56,189,248,0.75)',
-                strokeWidth: 2 / viewport.scale,
-                pointerLength: 10 / viewport.scale,
-                pointerWidth: 8 / viewport.scale,
-                lineCap: 'round',
-                listening: false,
-              }"
-            />
-            <v-circle
-              :config="{
-                id: seg.id,
-                x: (seg.x1 + seg.x2) / 2,
-                y: (seg.y1 + seg.y2) / 2,
-                radius: 7 / viewport.scale,
-                fill: '#0ea5e9',
-                opacity: 0.45,
-                cursor: 'pointer',
-              }"
-              @mousedown="deleteLinkAt"
-            />
-          </v-group>
-          <!-- 框选橡皮筋 -->
-          <v-rect v-if="rubber" :config="rubberConfig" />
-          <!-- 圈选裁剪橡皮筋 -->
-          <v-rect v-if="cropRect" :config="cropRectConfig" />
-        </v-layer>
-      </v-stage>
-
-      <!-- 悬浮工具条 -->
-      <div class="absolute top-3 right-3 flex gap-1.5">
-        <button
-          v-for="b in tools"
-          :key="b.icon"
-          :title="b.title"
-          :disabled="b.disabled"
-          class="w-9 h-9 rounded-lg bg-[var(--wb-surface)] border text-[var(--wb-text-1)] transition flex items-center justify-center disabled:opacity-40 disabled:pointer-events-none"
-          :class="b.active ? 'border-[var(--wb-accent)] text-[var(--wb-accent)] bg-[var(--wb-accent)]/10' : 'border-[var(--wb-stroke)] hover:border-[var(--wb-accent)]'"
-          @click="b.action"
+        <!-- 网格背景（随视口平移/缩放，纯 CSS） -->
+        <div class="absolute inset-0 pointer-events-none" :style="gridStyle"></div>
+        <v-stage
+          ref="stageEl"
+          :config="stageConfig"
+          @mousedown="onMouseDown"
+          @mousemove="onMouseMove"
+          @mouseup="onMouseUp"
+          @wheel="onWheel"
         >
-          <i :class="b.icon"></i>
-        </button>
-      </div>
+          <v-layer>
+            <!-- 对齐参考线 -->
+            <v-line v-for="(g, i) in guides.v" :key="'gv' + i" :config="guideConfig(g, 'v')" />
+            <v-line v-for="(g, i) in guides.h" :key="'gh' + i" :config="guideConfig(g, 'h')" />
+            <!-- Frame 分区（纯背景容器：不响应鼠标，成员物件自由进出；管理走右键/大纲） -->
+            <v-group
+              v-for="o in frameObjects"
+              :key="o.id"
+              :config="groupConfig(o)"
+              :draggable="false"
+              :listening="false"
+            >
+              <v-rect :config="frameConfig(o)" />
+              <v-text :config="frameLabelConfig(o)" />
+            </v-group>
+            <!-- 图片物件（事件统一由 bindNodeEvents 手动绑定，见 onMounted 后 watch） -->
+            <v-group
+              v-for="o in imageObjects"
+              :key="o.id"
+              :config="groupConfig(o)"
+              :draggable="true"
+            >
+              <v-image :config="imageConfig(o)" />
+              <v-text
+                v-if="o.name"
+                :config="{
+                  text: o.name,
+                  y: o.height + 4,
+                  width: o.width,
+                  align: 'center',
+                  fontSize: 12,
+                  fill: '#94a3b8',
+                }"
+              />
+            </v-group>
+            <!-- 便签物件 -->
+            <v-group
+              v-for="o in noteObjects"
+              :key="o.id"
+              :config="groupConfig(o)"
+              :draggable="true"
+            >
+              <v-rect :config="noteRectConfig(o)" />
+              <v-text :config="noteTextConfig(o)" />
+            </v-group>
+            <!-- App 节点卡（A 画布应用实例：双击/按钮展开参数面板，▶ 随时运行） -->
+            <v-group
+              v-for="o in appNodeObjects"
+              :key="o.id"
+              :config="groupConfig(o)"
+              :draggable="true"
+            >
+              <v-rect :config="appNodeRectConfig(o)" />
+              <v-text :config="appNodeTitleConfig(o)" />
+              <v-text :config="appNodeSubConfig(o)" />
+              <v-circle :config="appNodeStatusConfig(o)" />
+              <v-text :config="appNodeRunBtnConfig(o)" @mousedown.prevent.stop="runAppNode(o.id)" />
+              <v-text
+                :config="appNodeExpandBtnConfig(o)"
+                @mousedown.prevent.stop="openAppNodePanel(o.id)"
+              />
+            </v-group>
+            <!-- 分镜帧卡（N5：镜号+画面+描述） -->
+            <v-group
+              v-for="o in shotObjects"
+              :key="o.id"
+              :config="groupConfig(o)"
+              :draggable="true"
+            >
+              <v-rect :config="shotRectConfig(o)" />
+              <v-text :config="shotSeqConfig(o)" />
+              <v-text :config="shotTextConfig(o)" />
+            </v-group>
+            <!-- 连线（箭头指向 to 端；线体不抢物件命中，点中点圆点删线） -->
+            <v-group v-for="seg in linkSegs" :key="'lk' + seg.id">
+              <v-line
+                :config="{
+                  points: [seg.x1, seg.y1, seg.x2, seg.y2],
+                  stroke: 'rgba(56,189,248,0.75)',
+                  strokeWidth: 2 / viewport.scale,
+                  pointerLength: 10 / viewport.scale,
+                  pointerWidth: 8 / viewport.scale,
+                  lineCap: 'round',
+                  listening: false,
+                }"
+              />
+              <v-circle
+                :config="{
+                  id: seg.id,
+                  x: (seg.x1 + seg.x2) / 2,
+                  y: (seg.y1 + seg.y2) / 2,
+                  radius: 7 / viewport.scale,
+                  fill: '#0ea5e9',
+                  opacity: 0.45,
+                  cursor: 'pointer',
+                }"
+                @mousedown="deleteLinkAt"
+              />
+            </v-group>
+            <!-- 框选橡皮筋 -->
+            <v-rect v-if="rubber" :config="rubberConfig" />
+            <!-- 圈选裁剪橡皮筋 -->
+            <v-rect v-if="cropRect" :config="cropRectConfig" />
+          </v-layer>
+        </v-stage>
 
-      <!-- 模式提示条（连线/裁剪工具激活时） -->
-      <div
-        v-if="tool"
-        class="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur text-xs text-slate-200 flex items-center gap-2 z-10"
-      >
-        <i class="fas" :class="tool === 'link' ? 'fa-bezier-curve text-sky-400' : 'fa-vector-square text-sky-400'"></i>
-        <span>{{ tool === 'link' ? (linkDraft ? t('canvasLinkPickSecond') : t('canvasLinkPickFirst')) : t('canvasCropHint') }}</span>
-        <button class="text-slate-400 hover:text-white" :title="t('canvasToolCancel')" @click.stop="setTool(null)">
-          <i class="fas fa-times"></i>
-        </button>
-      </div>
-
-      <!-- 右键上下文菜单（物件/空地两态） -->
-      <div
-        v-if="ctxMenu"
-        id="canvas-ctx-menu"
-        class="absolute z-30 min-w-[170px] py-1 rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl text-xs"
-        :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
-        @contextmenu.prevent
-        @mousedown.stop
-      >
-        <template v-if="ctxMenu.targetIds.length">
-          <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-500">
-            {{ ctxMenu.targetIds.length }} {{ t('canvasMenuItems') }}
-          </div>
-          <button v-for="m in ctxItems" :key="m.key" class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2" @click="m.run()">
-            <i class="fas w-4 text-center text-slate-400" :class="m.icon"></i>{{ m.label }}
-          </button>
-        </template>
-        <template v-else>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2" @click="pasteAt(ctxMenu.wx, ctxMenu.wy)">
-            <i class="fas fa-paste w-4 text-center text-slate-400"></i>{{ t('canvasMenuPaste') }}
-          </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2" @click="addNoteAt(ctxMenu.wx, ctxMenu.wy)">
-            <i class="fas fa-sticky-note w-4 text-center text-slate-400"></i>{{ t('canvasMenuNote') }}
-          </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2" @click="addFrameAt(ctxMenu.wx, ctxMenu.wy)">
-            <i class="fas fa-object-ungroup w-4 text-center text-slate-400"></i>{{ t('canvasMenuFrame') }}
-          </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2" @click="fitAll()">
-            <i class="fas fa-expand w-4 text-center text-slate-400"></i>{{ t('canvasMenuFit') }}
-          </button>
-        </template>
-      </div>
-
-      <!-- 选区快捷指令条（A14：框选后浮出，回车/▶ 直接生成） -->
-      <div
-        v-if="selPrompt"
-        id="canvas-sel-prompt"
-        class="absolute z-20 flex items-center gap-2 px-2 py-1.5 rounded-xl border border-[var(--wb-accent)]/50 bg-[var(--wb-surface)] shadow-lg"
-        :style="{ left: selPrompt.x + 'px', top: selPrompt.y + 'px' }"
-        @mousedown.stop
-      >
-        <i class="fas fa-wand-magic-sparkles text-[var(--wb-accent)] text-xs"></i>
-        <input
-          v-model="selPrompt.text"
-          class="w-64 bg-transparent text-xs outline-none text-[var(--wb-text-1)]"
-          :placeholder="t('canvasSelPromptPh')"
-          @keydown.enter.stop="runSelPrompt()"
-          @keydown.esc.stop="selPrompt = null"
-        />
-        <button class="w-7 h-7 rounded-lg bg-[var(--wb-accent)]/20 text-[var(--wb-accent)]" :title="t('canvasSelPromptRun')" @click="runSelPrompt()">
-          <i class="fas fa-paper-plane text-xs"></i>
-        </button>
-        <button class="w-7 h-7 rounded-lg text-slate-400 hover:text-white" :title="t('canvasMenuCompose')" @click="composeSelection()">
-          <i class="fas fa-layer-group text-xs"></i>
-        </button>
-      </div>
-
-      <!-- 生成节点参数弹窗（N3：prompt 卡 → 执行 → 产物落布） -->
-      <div
-        v-if="genNode"
-        class="absolute z-30 w-[320px] rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-2xl p-3 text-xs"
-        :style="{ left: genNode.x + 'px', top: genNode.y + 'px' }"
-        @mousedown.stop
-      >
-        <div class="flex items-center justify-between mb-2">
-          <span class="font-medium text-[var(--wb-text-1)]"><i class="fas fa-wand-magic-sparkles text-[var(--wb-accent)] mr-1"></i>{{ t('canvasGenNode') }}</span>
-          <button class="text-slate-400 hover:text-white" @click="genNode = null"><i class="fas fa-times"></i></button>
-        </div>
-        <textarea
-          v-model="genNode.prompt"
-          rows="3"
-          class="w-full rounded-lg bg-black/20 border border-[var(--wb-stroke)] px-2 py-1.5 outline-none text-[var(--wb-text-1)] resize-none"
-          :placeholder="t('canvasGenPromptPh')"
-        ></textarea>
-        <div class="flex items-center gap-2 mt-2">
-          <span class="text-slate-500">{{ t('canvasGenRefs') }}: {{ genNode.refs.length || '0' }}</span>
+        <!-- 悬浮工具条 -->
+        <div class="absolute top-3 right-3 flex gap-1.5">
           <button
-            class="ml-auto px-3 py-1.5 rounded-lg bg-[var(--wb-accent)] text-white disabled:opacity-40"
-            :disabled="genNode.running || !genNode.prompt.trim()"
-            @click="runGenNode()"
+            v-for="b in tools"
+            :key="b.icon"
+            :title="b.title"
+            :disabled="b.disabled"
+            class="w-9 h-9 rounded-lg bg-[var(--wb-surface)] border text-[var(--wb-text-1)] transition flex items-center justify-center disabled:opacity-40 disabled:pointer-events-none"
+            :class="
+              b.active
+                ? 'border-[var(--wb-accent)] text-[var(--wb-accent)] bg-[var(--wb-accent)]/10'
+                : 'border-[var(--wb-stroke)] hover:border-[var(--wb-accent)]'
+            "
+            @click="b.action"
           >
-            <i class="fas" :class="genNode.running ? 'fa-spinner fa-spin' : 'fa-play'"></i>
-            {{ genNode.running ? t('canvasGenRunning') : t('canvasGenRun') }}
+            <i :class="b.icon"></i>
           </button>
         </div>
-      </div>
 
-      <!-- 缩放指示 -->
-      <div class="absolute bottom-3 left-3 px-2 py-1 rounded bg-black/40 text-xs text-slate-300 font-mono">
-        {{ Math.round(viewport.scale * 100) }}%
-      </div>
-
-      <!-- minimap：全景小窗（点击/拖动跳转视口） -->
-      <div
-        v-if="objects.length"
-        class="absolute bottom-3 right-3 w-[160px] h-[110px] rounded-lg bg-black/50 border border-[var(--wb-stroke)] overflow-hidden cursor-pointer"
-        @pointerdown="miniJump"
-      >
+        <!-- 模式提示条（连线/裁剪工具激活时） -->
         <div
-          v-for="m in miniItems"
-          :key="m.id"
-          class="absolute rounded-sm"
-          :class="m.type === 'image' ? 'bg-sky-400/70' : 'bg-slate-400/70'"
-          :style="{ left: m.x + 'px', top: m.y + 'px', width: m.w + 'px', height: m.h + 'px' }"
-        ></div>
-        <!-- 当前视口框 -->
-        <div
-          class="absolute border border-[var(--wb-accent)] pointer-events-none"
-          :style="{ left: miniView.x + 'px', top: miniView.y + 'px', width: miniView.w + 'px', height: miniView.h + 'px' }"
-        ></div>
-      </div>
+          v-if="tool"
+          class="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur text-xs text-slate-200 flex items-center gap-2 z-10"
+        >
+          <i
+            class="fas"
+            :class="
+              tool === 'link' ? 'fa-bezier-curve text-sky-400' : 'fa-vector-square text-sky-400'
+            "
+          ></i>
+          <span>{{
+            tool === 'link'
+              ? linkDraft
+                ? t('canvasLinkPickSecond')
+                : t('canvasLinkPickFirst')
+              : t('canvasCropHint')
+          }}</span>
+          <button
+            class="text-slate-400 hover:text-white"
+            :title="t('canvasToolCancel')"
+            @click.stop="setTool(null)"
+          >
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
 
-      <!-- 空状态 -->
-      <div
-        v-if="!objects.length && !dragOver"
-        class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-2"
-      >
-        <i class="fas fa-shapes text-4xl opacity-30"></i>
-        <p class="text-sm opacity-50">{{ t('canvasEmptyHint') }}</p>
-      </div>
-      <!-- 拖放提示 -->
-      <div
-        v-if="dragOver"
-        class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-2 bg-[var(--wb-accent)]/5"
-      >
-        <i class="fas fa-image text-4xl text-[var(--wb-accent)] opacity-70"></i>
-        <p class="text-sm text-[var(--wb-accent)]">{{ t('canvasDropImage') }}</p>
-      </div>
+        <!-- 右键上下文菜单（物件/空地两态） -->
+        <div
+          v-if="ctxMenu"
+          id="canvas-ctx-menu"
+          class="absolute z-30 min-w-[170px] py-1 rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl text-xs"
+          :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+          @contextmenu.prevent
+          @mousedown.stop
+        >
+          <template v-if="ctxMenu.targetIds.length">
+            <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-500">
+              {{ ctxMenu.targetIds.length }} {{ t('canvasMenuItems') }}
+            </div>
+            <button
+              v-for="m in ctxItems"
+              :key="m.key"
+              class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+              @click="m.run()"
+            >
+              <i class="fas w-4 text-center text-slate-400" :class="m.icon"></i>{{ m.label }}
+            </button>
+          </template>
+          <template v-else>
+            <button
+              class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+              @click="pasteAt(ctxMenu.wx, ctxMenu.wy)"
+            >
+              <i class="fas fa-paste w-4 text-center text-slate-400"></i>{{ t('canvasMenuPaste') }}
+            </button>
+            <button
+              class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+              @click="addNoteAt(ctxMenu.wx, ctxMenu.wy)"
+            >
+              <i class="fas fa-sticky-note w-4 text-center text-slate-400"></i
+              >{{ t('canvasMenuNote') }}
+            </button>
+            <button
+              class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+              @click="addFrameAt(ctxMenu.wx, ctxMenu.wy)"
+            >
+              <i class="fas fa-object-ungroup w-4 text-center text-slate-400"></i
+              >{{ t('canvasMenuFrame') }}
+            </button>
+            <button
+              class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+              @click="openAppPickerAtCtx()"
+            >
+              <i class="fas fa-cube w-4 text-center text-slate-400"></i>{{ t('canvasMenuAppNode') }}
+            </button>
+            <button
+              class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+              @click="fitAll()"
+            >
+              <i class="fas fa-expand w-4 text-center text-slate-400"></i>{{ t('canvasMenuFit') }}
+            </button>
+          </template>
+        </div>
+
+        <!-- 选区快捷指令条（A14：框选后浮出，回车/▶ 直接生成） -->
+        <div
+          v-if="selPrompt"
+          id="canvas-sel-prompt"
+          class="absolute z-20 flex items-center gap-2 px-2 py-1.5 rounded-xl border border-[var(--wb-accent)]/50 bg-[var(--wb-surface)] shadow-lg"
+          :style="{ left: selPrompt.x + 'px', top: selPrompt.y + 'px' }"
+          @mousedown.stop
+        >
+          <i class="fas fa-wand-magic-sparkles text-[var(--wb-accent)] text-xs"></i>
+          <input
+            v-model="selPrompt.text"
+            class="w-64 bg-transparent text-xs outline-none text-[var(--wb-text-1)]"
+            :placeholder="t('canvasSelPromptPh')"
+            @keydown.enter.stop="runSelPrompt()"
+            @keydown.esc.stop="selPrompt = null"
+          />
+          <button
+            class="w-7 h-7 rounded-lg bg-[var(--wb-accent)]/20 text-[var(--wb-accent)]"
+            :title="t('canvasSelPromptRun')"
+            @click="runSelPrompt()"
+          >
+            <i class="fas fa-paper-plane text-xs"></i>
+          </button>
+          <button
+            class="w-7 h-7 rounded-lg text-slate-400 hover:text-white"
+            :title="t('canvasMenuCompose')"
+            @click="composeSelection()"
+          >
+            <i class="fas fa-layer-group text-xs"></i>
+          </button>
+        </div>
+
+        <!-- 生成节点参数弹窗（N3：prompt 卡 → 执行 → 产物落布） -->
+        <div
+          v-if="genNode"
+          class="absolute z-30 w-[320px] rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-2xl p-3 text-xs"
+          :style="{ left: genNode.x + 'px', top: genNode.y + 'px' }"
+          @mousedown.stop
+        >
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-medium text-[var(--wb-text-1)]"
+              ><i class="fas fa-wand-magic-sparkles text-[var(--wb-accent)] mr-1"></i
+              >{{ t('canvasGenNode') }}</span
+            >
+            <button class="text-slate-400 hover:text-white" @click="genNode = null">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <textarea
+            v-model="genNode.prompt"
+            rows="3"
+            class="w-full rounded-lg bg-black/20 border border-[var(--wb-stroke)] px-2 py-1.5 outline-none text-[var(--wb-text-1)] resize-none"
+            :placeholder="t('canvasGenPromptPh')"
+          ></textarea>
+          <div class="flex items-center gap-2 mt-2">
+            <span class="text-slate-500"
+              >{{ t('canvasGenRefs') }}: {{ genNode.refs.length || '0' }}</span
+            >
+            <button
+              class="ml-auto px-3 py-1.5 rounded-lg bg-[var(--wb-accent)] text-white disabled:opacity-40"
+              :disabled="genNode.running || !genNode.prompt.trim()"
+              @click="runGenNode()"
+            >
+              <i class="fas" :class="genNode.running ? 'fa-spinner fa-spin' : 'fa-play'"></i>
+              {{ genNode.running ? t('canvasGenRunning') : t('canvasGenRun') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- App 节点展开参数面板（HTML overlay，锚定节点屏幕坐标） -->
+        <AppNodeCard
+          v-if="appPanel.node"
+          :node="appPanel.node"
+          :app="appPanelApp"
+          :pos="appPanelPos"
+          :fed-lines="appPanelFed"
+          @close="appPanel.id = null"
+          @run="runAppNode(appPanel.node.id)"
+          @pick-canvas="pickCanvasImageFor"
+          @open-full="openFullApp(appPanel.node)"
+          @update-param="onPanelParamUpdate"
+        />
+
+        <!-- 应用拾取器（新建 App 节点） -->
+        <AppPickerModal v-if="appPicker.open" @close="appPicker.open = false" @pick="onAppPicked" />
+
+        <!-- AI 节点指令确认卡（P3：侧栏工作台 wb_canvas_ops → 人审 → 执行） -->
+        <div v-if="pendingAgentOps" class="agent-ops-card" @mousedown.stop>
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-medium text-[var(--wb-text-1)]">
+              <i class="fas fa-robot text-[var(--wb-accent)] mr-1"></i
+              >{{ t('canvasAgentOpsTitle') }}
+            </span>
+            <button class="text-slate-400 hover:text-white" @click="pendingAgentOps = null">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <div class="ops-lines">
+            <div v-for="(line, i) in agentOpsDiffLines" :key="i" class="ops-line">{{ line }}</div>
+          </div>
+          <div class="flex gap-2 mt-2">
+            <button
+              class="flex-1 py-1.5 rounded-lg bg-[var(--wb-accent)] text-white text-xs"
+              @click="confirmAgentOps"
+            >
+              {{ t('canvasAgentOpsConfirm') }}
+            </button>
+            <button
+              class="flex-1 py-1.5 rounded-lg border border-[var(--wb-stroke)] text-[var(--wb-text-2)] text-xs"
+              @click="pendingAgentOps = null"
+            >
+              {{ t('canvasAgentOpsReject') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 缩放指示 -->
+        <div
+          class="absolute bottom-3 left-3 px-2 py-1 rounded bg-black/40 text-xs text-slate-300 font-mono"
+        >
+          {{ Math.round(viewport.scale * 100) }}%
+        </div>
+
+        <!-- minimap：全景小窗（点击/拖动跳转视口） -->
+        <div
+          v-if="objects.length"
+          class="absolute bottom-3 right-3 w-[160px] h-[110px] rounded-lg bg-black/50 border border-[var(--wb-stroke)] overflow-hidden cursor-pointer"
+          @pointerdown="miniJump"
+        >
+          <div
+            v-for="m in miniItems"
+            :key="m.id"
+            class="absolute rounded-sm"
+            :class="
+              m.type === 'image'
+                ? 'bg-sky-400/70'
+                : m.type === 'app'
+                  ? m.status === 'running'
+                    ? 'bg-cyan-300 animate-pulse'
+                    : 'bg-indigo-400/80'
+                  : 'bg-slate-400/70'
+            "
+            :style="{ left: m.x + 'px', top: m.y + 'px', width: m.w + 'px', height: m.h + 'px' }"
+          ></div>
+          <!-- 当前视口框 -->
+          <div
+            class="absolute border border-[var(--wb-accent)] pointer-events-none"
+            :style="{
+              left: miniView.x + 'px',
+              top: miniView.y + 'px',
+              width: miniView.w + 'px',
+              height: miniView.h + 'px',
+            }"
+          ></div>
+        </div>
+
+        <!-- 空状态 -->
+        <div
+          v-if="!objects.length && !dragOver"
+          class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-2"
+        >
+          <i class="fas fa-shapes text-4xl opacity-30"></i>
+          <p class="text-sm opacity-50">{{ t('canvasEmptyHint') }}</p>
+        </div>
+        <!-- 拖放提示 -->
+        <div
+          v-if="dragOver"
+          class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-2 bg-[var(--wb-accent)]/5"
+        >
+          <i class="fas fa-image text-4xl text-[var(--wb-accent)] opacity-70"></i>
+          <p class="text-sm text-[var(--wb-accent)]">{{ t('canvasDropImage') }}</p>
+        </div>
       </div>
     </div>
 
@@ -290,6 +436,7 @@
  * 引擎逻辑在 engine.js（纯函数）；这里只做事件转发、渲染配置、持久化调度。
  */
 import { ref, computed, reactive, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from '@/utils/i18n'
 import { useAppStore } from '@/stores/appStore'
 import { drainFiles, pushAttachments } from '@/utils/canvasBridge'
@@ -297,6 +444,17 @@ import { useCanvasMode } from '@/utils/canvasMode'
 import { message } from 'ant-design-vue'
 import Workbench from '../workbench/index.vue'
 import AppHeader from '../apps/components/AppHeader.vue'
+import AppNodeCard from './AppNodeCard.vue'
+import AppPickerModal from './AppPickerModal.vue'
+import {
+  makeAppNode,
+  collectUpstream,
+  buildNodeOverrides,
+  paramFieldsFromTemplate,
+  artifactLayout,
+  appNodesDigest,
+  imageObjectRef,
+} from './appNode'
 import {
   makeViewport,
   screenToWorld,
@@ -326,7 +484,8 @@ import {
 
 const { t } = useI18n()
 const appStore = useAppStore()
-const { onResult, emitAttachments, emitCanvasState, emitPrompt } = useCanvasMode()
+const router = useRouter()
+const { onResult, emitAttachments, emitCanvasState, emitPrompt, onOps } = useCanvasMode()
 const wbOpen = ref(true) // 工作台侧边栏开合
 
 const STORAGE_KEY = 'artify.canvas.doc.v1'
@@ -493,12 +652,24 @@ function cropRectConfig() {
 function guideConfig(v, axis) {
   const s = 4000
   return axis === 'v'
-    ? { points: [v, -s / 2, v, s / 2], stroke: '#38bdf8', strokeWidth: 1 / viewport.value.scale, dash: [4, 4], listening: false }
-    : { points: [-s / 2, v, s / 2, v], stroke: '#38bdf8', strokeWidth: 1 / viewport.value.scale, dash: [4, 4], listening: false }
+    ? {
+        points: [v, -s / 2, v, s / 2],
+        stroke: '#38bdf8',
+        strokeWidth: 1 / viewport.value.scale,
+        dash: [4, 4],
+        listening: false,
+      }
+    : {
+        points: [-s / 2, v, s / 2, v],
+        stroke: '#38bdf8',
+        strokeWidth: 1 / viewport.value.scale,
+        dash: [4, 4],
+        listening: false,
+      }
 }
 
 // —— 视口变换：stage 容器上平移由 draggable 提供（Konva 拖 stage 改 x/y），
-// 这里在 stage dragmove 中同步到 viewport —— 
+// 这里在 stage dragmove 中同步到 viewport ——
 function syncFromStage() {
   const st = stageEl.value?.getStage?.()
   if (!st) return
@@ -529,11 +700,17 @@ function onItemDown(i, e) {
       message.info(t('canvasLinkPickSecond'))
     } else if (linkDraft.value !== id) {
       const exists = links.value.some(
-        (l) => (l.from === linkDraft.value && l.to === id) || (l.from === id && l.to === linkDraft.value),
+        (l) =>
+          (l.from === linkDraft.value && l.to === id) ||
+          (l.from === id && l.to === linkDraft.value),
       )
       if (!exists) {
         beforeChange()
-        links.value.push({ id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5), from: linkDraft.value, to: id })
+        links.value.push({
+          id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5),
+          from: linkDraft.value,
+          to: id,
+        })
         saveSoon()
       }
       linkDraft.value = null
@@ -693,11 +870,35 @@ function onNodeDragEnd(e) {
   saveSoon()
 }
 
-// —— 工具条 —— 
+// —— 工具条 ——
 const tools = computed(() => [
-  { icon: 'fas fa-rotate-left', title: t('canvasUndo'), action: undoLast, disabled: !engineCanUndo(history.value) },
-  { icon: 'fas fa-rotate-right', title: t('canvasRedo'), action: redoLast, disabled: !engineCanRedo(history.value) },
+  {
+    icon: 'fas fa-rotate-left',
+    title: t('canvasUndo'),
+    action: undoLast,
+    disabled: !engineCanUndo(history.value),
+  },
+  {
+    icon: 'fas fa-rotate-right',
+    title: t('canvasRedo'),
+    action: redoLast,
+    disabled: !engineCanRedo(history.value),
+  },
   { icon: 'fas fa-plus', title: t('canvasAddNote'), action: addNote },
+  {
+    icon: 'fas fa-cube',
+    title: t('canvasAddAppNode'),
+    action: () => {
+      const c = screenToWorld(viewport.value, size.w / 2, size.h / 2)
+      openAppPicker(c.x, c.y)
+    },
+  },
+  {
+    icon: 'fas fa-play',
+    title: t('canvasRunAppNodes'),
+    action: () => runAppNodes(selection.value),
+    disabled: !selection.value.some((id) => objects.value.find((o) => o.id === id)?.type === 'app'),
+  },
   {
     icon: 'fas fa-border-none',
     title: t('canvasFrameBtn'),
@@ -797,7 +998,6 @@ function sendSelectionToWorkbench() {
   selection.value = []
 }
 
-
 function addNote() {
   const c = screenToWorld(viewport.value, size.w / 2, size.h / 2)
   beforeChange()
@@ -822,32 +1022,184 @@ const ctxItems = computed(() => {
   if (!ctxMenu.value) return []
   const ids = ctxMenu.value.targetIds
   const hasImg = ids.some((id) => (objects.value.find((o) => o.id === id) || {}).type === 'image')
+  const appIds = ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app')
   const items = [
-    { key: 'copy', icon: 'fa-copy', label: t('canvasMenuCopy'), run: () => { copySelection(); closeCtxMenu() } },
+    {
+      key: 'copy',
+      icon: 'fa-copy',
+      label: t('canvasMenuCopy'),
+      run: () => {
+        copySelection()
+        closeCtxMenu()
+      },
+    },
   ]
+  if (appIds.length) {
+    items.push(
+      {
+        key: 'app-run',
+        icon: 'fa-play',
+        label: t('canvasCtxRunApp'),
+        run: () => {
+          runAppNodes(appIds)
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'app-panel',
+        icon: 'fa-gear',
+        label: t('canvasCtxAppPanel'),
+        run: () => {
+          openAppNodePanel(appIds[0])
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'app-full',
+        icon: 'fa-up-right-from-square',
+        label: t('canvasCtxAppFull'),
+        run: () => {
+          openFullApp(objects.value.find((o) => o.id === appIds[0]))
+          closeCtxMenu()
+        },
+      },
+    )
+  }
   if (hasImg) {
     items.push(
-      { key: 'ref', icon: 'fa-paper-plane', label: t('canvasMenuSendWb'), run: () => { sendSelectionToWorkbench(); closeCtxMenu() } },
-      { key: 'gen', icon: 'fa-wand-magic-sparkles', label: t('canvasMenuGen'), run: () => { openGenNode(ids); closeCtxMenu() } },
-      { key: 'crop', icon: 'fa-crop', label: t('canvasCropTool'), run: () => { setTool('crop'); closeCtxMenu() } },
-      { key: 'inpaint', icon: 'fa-paint-brush', label: t('canvasMenuInpaint'), run: () => { startInpaint(ids[0]); closeCtxMenu() } },
-      { key: 'reverse', icon: 'fa-comment-dots', label: t('canvasMenuReverse'), run: () => { reversePrompt(ids[0]); closeCtxMenu() } },
-      { key: 'enhance', icon: 'fa-up-right-and-down-left-from-center', label: t('canvasMenuEnhance'), run: () => { enhanceImage(ids[0]); closeCtxMenu() } },
-      { key: 'outpaint', icon: 'fa-expand-arrows-alt', label: t('canvasMenuOutpaint'), run: () => { startOutpaint(ids[0]); closeCtxMenu() } },
-      { key: 'video', icon: 'fa-film', label: t('canvasMenuVideo'), run: () => { imageToVideo(ids[0]); closeCtxMenu() } },
-      { key: 'char', icon: 'fa-user-tag', label: t('canvasMenuSetChar'), run: () => { setConsistencyAsset(ids[0], 'character'); closeCtxMenu() } },
-      { key: 'style', icon: 'fa-palette', label: t('canvasMenuSetStyle'), run: () => { setConsistencyAsset(ids[0], 'style'); closeCtxMenu() } },
+      {
+        key: 'ref',
+        icon: 'fa-paper-plane',
+        label: t('canvasMenuSendWb'),
+        run: () => {
+          sendSelectionToWorkbench()
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'gen',
+        icon: 'fa-wand-magic-sparkles',
+        label: t('canvasMenuGen'),
+        run: () => {
+          openGenNode(ids)
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'crop',
+        icon: 'fa-crop',
+        label: t('canvasCropTool'),
+        run: () => {
+          setTool('crop')
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'inpaint',
+        icon: 'fa-paint-brush',
+        label: t('canvasMenuInpaint'),
+        run: () => {
+          startInpaint(ids[0])
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'reverse',
+        icon: 'fa-comment-dots',
+        label: t('canvasMenuReverse'),
+        run: () => {
+          reversePrompt(ids[0])
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'enhance',
+        icon: 'fa-up-right-and-down-left-from-center',
+        label: t('canvasMenuEnhance'),
+        run: () => {
+          enhanceImage(ids[0])
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'outpaint',
+        icon: 'fa-expand-arrows-alt',
+        label: t('canvasMenuOutpaint'),
+        run: () => {
+          startOutpaint(ids[0])
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'video',
+        icon: 'fa-film',
+        label: t('canvasMenuVideo'),
+        run: () => {
+          imageToVideo(ids[0])
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'char',
+        icon: 'fa-user-tag',
+        label: t('canvasMenuSetChar'),
+        run: () => {
+          setConsistencyAsset(ids[0], 'character')
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'style',
+        icon: 'fa-palette',
+        label: t('canvasMenuSetStyle'),
+        run: () => {
+          setConsistencyAsset(ids[0], 'style')
+          closeCtxMenu()
+        },
+      },
     )
   }
   if (ids.length >= 2) {
     items.push(
-      { key: 'compose', icon: 'fa-layer-group', label: t('canvasMenuCompose'), run: () => { composeSelection(); closeCtxMenu() } },
-      { key: 'group', icon: 'fa-object-group', label: t('canvasGroupSel'), run: () => { groupSelected(); closeCtxMenu() } },
+      {
+        key: 'compose',
+        icon: 'fa-layer-group',
+        label: t('canvasMenuCompose'),
+        run: () => {
+          composeSelection()
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'group',
+        icon: 'fa-object-group',
+        label: t('canvasGroupSel'),
+        run: () => {
+          groupSelected()
+          closeCtxMenu()
+        },
+      },
     )
   }
   items.push(
-    { key: 'front', icon: 'fa-arrow-up', label: t('canvasMenuFront'), run: () => { bringToFront(ids); closeCtxMenu() } },
-    { key: 'del', icon: 'fa-trash', label: t('canvasMenuDelete'), run: () => { deleteSelected(); closeCtxMenu() } },
+    {
+      key: 'front',
+      icon: 'fa-arrow-up',
+      label: t('canvasMenuFront'),
+      run: () => {
+        bringToFront(ids)
+        closeCtxMenu()
+      },
+    },
+    {
+      key: 'del',
+      icon: 'fa-trash',
+      label: t('canvasMenuDelete'),
+      run: () => {
+        deleteSelected()
+        closeCtxMenu()
+      },
+    },
   )
   return items
 })
@@ -875,7 +1227,11 @@ function pasteAt(wx, wy) {
   selection.value = fresh.map((o) => o.id)
   for (const l of links.value) {
     if (idMap.has(l.from) && idMap.has(l.to)) {
-      links.value.push({ id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5), from: idMap.get(l.from), to: idMap.get(l.to) })
+      links.value.push({
+        id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5),
+        from: idMap.get(l.from),
+        to: idMap.get(l.to),
+      })
     }
   }
   closeCtxMenu()
@@ -883,7 +1239,15 @@ function pasteAt(wx, wy) {
 }
 function addNoteAt(wx, wy) {
   beforeChange()
-  objects.value.push({ id: 'n' + Date.now(), type: 'note', x: wx - 90, y: wy - 60, width: 180, height: 120, text: '' })
+  objects.value.push({
+    id: 'n' + Date.now(),
+    type: 'note',
+    x: wx - 90,
+    y: wy - 60,
+    width: 180,
+    height: 120,
+    text: '',
+  })
   closeCtxMenu()
   saveSoon()
 }
@@ -894,7 +1258,11 @@ function openSelPrompt() {
   if (!selection.value.length) return
   const b = bboxOf(objects.value.filter((o) => selection.value.includes(o.id)))
   const tl = worldToScreen(viewport.value, b.x, b.y)
-  selPrompt.value = { x: clamp(tl.x, 8, size.w - 380), y: clamp(tl.y - 52, 8, size.h - 60), text: '' }
+  selPrompt.value = {
+    x: clamp(tl.x, 8, size.w - 380),
+    y: clamp(tl.y - 52, 8, size.h - 60),
+    text: '',
+  }
 }
 function runSelPrompt() {
   const text = (selPrompt.value?.text || '').trim()
@@ -908,7 +1276,9 @@ function runSelPrompt() {
 
 // —— A3 参考图合成（多选 → 工作台合成指令） ——
 function composeSelection() {
-  const imgs = selection.value.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'image')
+  const imgs = selection.value.filter(
+    (id) => (objects.value.find((o) => o.id === id) || {}).type === 'image',
+  )
   if (imgs.length < 2) return
   const refs = imgs.map(refOf).filter(Boolean)
   lastSourceIds = [...imgs]
@@ -925,7 +1295,13 @@ function openGenNode(ids = []) {
   const refs = imgs.map(refOf).filter(Boolean)
   const c = screenToWorld(viewport.value, size.w / 2, size.h / 2)
   const s = worldToScreen(viewport.value, c.x, c.y)
-  genNode.value = { x: clamp(s.x - 160, 8, size.w - 330), y: clamp(s.y - 90, 8, size.h - 200), prompt: '', refs, running: false }
+  genNode.value = {
+    x: clamp(s.x - 160, 8, size.w - 330),
+    y: clamp(s.y - 90, 8, size.h - 200),
+    prompt: '',
+    refs,
+    running: false,
+  }
 }
 async function runGenNode() {
   const g = genNode.value
@@ -945,29 +1321,44 @@ function startInpaint(objId) {
   const o = objects.value.find((x) => x.id === objId)
   if (!o) return
   lastSourceIds = [objId]
-  emitPrompt(t('canvasInpaintPrompt'), { autoSend: true, attachments: [refOf(objId)].filter(Boolean) })
+  emitPrompt(t('canvasInpaintPrompt'), {
+    autoSend: true,
+    attachments: [refOf(objId)].filter(Boolean),
+  })
   message.info(t('canvasAiQueued'))
 }
 function startOutpaint(objId) {
   lastSourceIds = [objId]
-  emitPrompt(t('canvasOutpaintPrompt'), { autoSend: true, attachments: [refOf(objId)].filter(Boolean) })
+  emitPrompt(t('canvasOutpaintPrompt'), {
+    autoSend: true,
+    attachments: [refOf(objId)].filter(Boolean),
+  })
   message.info(t('canvasAiQueued'))
 }
 async function enhanceImage(objId) {
   const o = objects.value.find((x) => x.id === objId)
   if (!o) return
   lastSourceIds = [objId]
-  emitPrompt(t('canvasEnhancePrompt'), { autoSend: true, attachments: [refOf(objId)].filter(Boolean) })
+  emitPrompt(t('canvasEnhancePrompt'), {
+    autoSend: true,
+    attachments: [refOf(objId)].filter(Boolean),
+  })
   message.info(t('canvasAiQueued'))
 }
 async function reversePrompt(objId) {
   lastSourceIds = [objId]
-  emitPrompt(t('canvasReversePrompt'), { autoSend: true, attachments: [refOf(objId)].filter(Boolean) })
+  emitPrompt(t('canvasReversePrompt'), {
+    autoSend: true,
+    attachments: [refOf(objId)].filter(Boolean),
+  })
   message.info(t('canvasAiQueued'))
 }
 function imageToVideo(objId) {
   lastSourceIds = [objId]
-  emitPrompt(t('canvasVideoPrompt'), { autoSend: true, attachments: [refOf(objId)].filter(Boolean) })
+  emitPrompt(t('canvasVideoPrompt'), {
+    autoSend: true,
+    attachments: [refOf(objId)].filter(Boolean),
+  })
   message.info(t('canvasAiQueued'))
 }
 function setConsistencyAsset(objId, kind) {
@@ -975,7 +1366,12 @@ function setConsistencyAsset(objId, kind) {
   if (!o) return
   o.assetKind = kind // character | style：一致性标记，序列化随 doc 持久化
   saveSoon()
-  message.success((kind === 'character' ? t('canvasCharSet') : t('canvasStyleSet')).replace('{name}', o.name || o.id.slice(-4)))
+  message.success(
+    (kind === 'character' ? t('canvasCharSet') : t('canvasStyleSet')).replace(
+      '{name}',
+      o.name || o.id.slice(-4),
+    ),
+  )
 }
 // 画布右键菜单（容器级 DOM 事件：Konva 层与空白统一在此处理）
 function onWrapContext(e) {
@@ -984,7 +1380,11 @@ function onWrapContext(e) {
   const sy = e.clientY - r.top
   const w = screenToWorld(viewport.value, sx, sy)
   const ids = hitTest(objects.value, w.x, w.y)
-  const targetIds = ids.length ? (selection.value.length && ids.some((id) => selection.value.includes(id)) ? selection.value : [ids[0]]) : []
+  const targetIds = ids.length
+    ? selection.value.length && ids.some((id) => selection.value.includes(id))
+      ? selection.value
+      : [ids[0]]
+    : []
   if (targetIds.length) selection.value = targetIds
   ctxMenu.value = { x: sx + 8, y: sy + 8, wx: w.x, wy: w.y, targetIds }
 }
@@ -1020,7 +1420,15 @@ function frameConfig(o) {
   }
 }
 function frameLabelConfig(o) {
-  return { text: o.name || 'Frame', x: o.x, y: o.y - 20, width: o.width, fontSize: 13, fill: '#818cf8', align: 'left' }
+  return {
+    text: o.name || 'Frame',
+    x: o.x,
+    y: o.y - 20,
+    width: o.width,
+    fontSize: 13,
+    fill: '#818cf8',
+    align: 'left',
+  }
 }
 function shotRectConfig(o) {
   return {
@@ -1035,7 +1443,15 @@ function shotRectConfig(o) {
   }
 }
 function shotSeqConfig(o) {
-  return { text: `#${o.seq || 1}`, x: o.x + 8, y: o.y + 6, fontSize: 12, fontStyle: 'bold', fill: '#2dd4bf', listening: false }
+  return {
+    text: `#${o.seq || 1}`,
+    x: o.x + 8,
+    y: o.y + 6,
+    fontSize: 12,
+    fontStyle: 'bold',
+    fill: '#2dd4bf',
+    listening: false,
+  }
 }
 function shotTextConfig(o) {
   return {
@@ -1070,7 +1486,9 @@ function addShotAt(wx, wy) {
 function shotSeqNext() {
   return objects.value.filter((o) => o.type === 'shot').length + 1
 }
-const shotObjects = computed(() => objects.value.filter((o) => o.type === 'shot').sort((a, b) => (a.seq || 0) - (b.seq || 0)))
+const shotObjects = computed(() =>
+  objects.value.filter((o) => o.type === 'shot').sort((a, b) => (a.seq || 0) - (b.seq || 0)),
+)
 
 // —— A5 分镜批量：把 shot 的 text 逐条发工作台，产物按列网格落布 ——
 function batchShots() {
@@ -1079,7 +1497,8 @@ function batchShots() {
   const seqs = shots.map((s) => s.seq)
   emitPrompt(
     t('canvasBatchShotsPrompt').replace('{n}', String(shots.length)) +
-      '\n' + shots.map((s) => `#${s.seq}: ${s.text.trim()}`).join('\n'),
+      '\n' +
+      shots.map((s) => `#${s.seq}: ${s.text.trim()}`).join('\n'),
     { autoSend: true, attachments: [] },
   )
   message.info(t('canvasBatchShotsQueued').replace('{n}', String(shots.length)))
@@ -1089,7 +1508,11 @@ function fitAll() {
   if (!objects.value.length) return resetView()
   const b = bboxOf(objects.value)
   const pad = 60
-  const scale = clamp(Math.min((size.w - pad * 2) / b.width, (size.h - pad * 2) / b.height), MIN_SCALE, MAX_SCALE)
+  const scale = clamp(
+    Math.min((size.w - pad * 2) / b.width, (size.h - pad * 2) / b.height),
+    MIN_SCALE,
+    MAX_SCALE,
+  )
   viewport.value = {
     scale,
     x: size.w / 2 - (b.x + b.width / 2) * scale,
@@ -1170,7 +1593,8 @@ function copySelection() {
     .map((id) => objects.value.find((o) => o.id === id))
     .filter(Boolean)
     .map((o) => JSON.parse(JSON.stringify(o)))
-  if (clipboard.value.length) message.info(t('canvasCopied').replace('{n}', String(clipboard.value.length)))
+  if (clipboard.value.length)
+    message.info(t('canvasCopied').replace('{n}', String(clipboard.value.length)))
 }
 function pasteClipboard() {
   if (!clipboard.value.length) return
@@ -1186,7 +1610,11 @@ function pasteClipboard() {
   // 物件内部的连线一并复制（两端都在剪贴板内的）
   const innerLinks = links.value.filter((l) => idMap.has(l.from) && idMap.has(l.to))
   for (const l of innerLinks) {
-    links.value.push({ id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5), from: idMap.get(l.from), to: idMap.get(l.to) })
+    links.value.push({
+      id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5),
+      from: idMap.get(l.from),
+      to: idMap.get(l.to),
+    })
   }
   saveSoon()
 }
@@ -1300,28 +1728,528 @@ function clamp(v, a, b) {
   return Math.min(b, Math.max(a, v))
 }
 
+// —— App 节点（P1/P2：画布上的 A 应用实例，可随时运行） ——
+const appNodeObjects = computed(() => objects.value.filter((o) => o.type === 'app'))
+
+// app 详情缓存：appId → 完整 app（含 template；picker 拾取/详情接口回填）
+const appCache = new Map()
+async function ensureAppDetail(appId) {
+  if (appCache.has(appId)) return appCache.get(appId)
+  try {
+    const app = await appStore.getAppById(appId)
+    if (app) appCache.set(appId, app)
+    return app || null
+  } catch {
+    return null
+  }
+}
+
+const appPicker = reactive({ open: false, wx: 0, wy: 0 })
+function openAppPicker(wx, wy) {
+  appPicker.wx = wx
+  appPicker.wy = wy
+  appPicker.open = true
+}
+function onAppPicked(app) {
+  appPicker.open = false
+  if (!app?.id) return
+  beforeChange()
+  const node = makeAppNode(app.id, app.name, appPicker.wx, appPicker.wy)
+  objects.value.push(node)
+  selection.value = [node.id]
+  saveSoon()
+  // 拾取即展开参数面板
+  nextTick(() => openAppNodePanel(node.id))
+}
+
+/** 右键菜单位置开拾取器（点选后关闭菜单） */
+function openAppPickerAtCtx() {
+  openAppPicker(ctxMenu.value?.wx ?? 0, ctxMenu.value?.wy ?? 0)
+  closeCtxMenu()
+}
+
+// 展开面板状态：{ id } —— node/pos/fed 全部由 computed 派生（视口/节点变化自动跟随）
+const appPanel = reactive({ id: null })
+const appPanelNode = computed(() => objects.value.find((o) => o.id === appPanel.id) || null)
+// 兼容旧引用：模板里直接用 appPanel.node（computed 语义）
+Object.defineProperty(appPanel, 'node', {
+  get: () => appPanelNode.value,
+  enumerable: true,
+})
+const appPanelApp = computed(() =>
+  appPanelNode.value ? appCache.get(appPanelNode.value.appId) || null : null,
+)
+const appPanelPos = computed(() => {
+  const n = appPanelNode.value
+  if (!n) return { x: 0, y: 0 }
+  const tl = worldToScreen(viewport.value, n.x + n.width, n.y)
+  return {
+    x: clamp(tl.x + 12, 8, Math.max(8, size.w - 336)),
+    y: clamp(tl.y, 8, Math.max(8, size.h - 120)),
+  }
+})
+const appPanelFed = ref([])
+function openAppNodePanel(id) {
+  const node = objects.value.find((o) => o.id === id)
+  if (!node || node.type !== 'app') return
+  appPanel.id = id
+  // 异步补 app 详情 + 刷新喂养提示
+  void ensureAppDetail(node.appId).then(refreshFed)
+}
+function refreshFed() {
+  const node = appPanelNode.value
+  const app = appPanelApp.value
+  if (!node || !app) {
+    appPanelFed.value = []
+    return
+  }
+  const up = collectUpstream(node.id, objects.value, links.value)
+  const { fedFields } = buildNodeOverrides(node, paramFieldsFromTemplate(app), up)
+  appPanelFed.value = fedFields
+}
+
+// 参数面板打开时：文档/视口/连线变化刷新喂养提示
+watch(
+  () => [
+    appPanel.id,
+    links.value.length,
+    objects.value.length,
+    Math.round(viewport.value.scale * 4),
+  ],
+  () => {
+    if (appPanel.id) refreshFed()
+  },
+)
+
+/** 参数面板写回（AppNodeCard update-param 事件：子组件不改 prop，由宿主落） */
+function onPanelParamUpdate({ nodeId, key, value }) {
+  const node = appPanelNode.value
+  if (!node) return
+  if (!node.params) node.params = {}
+  if (!node.params[nodeId]) node.params[nodeId] = {}
+  node.params[nodeId][key] = value
+  saveSoon()
+}
+
+/** 画布拾取一张图喂给参数槽（pick-canvas 事件：选图片物件或直接手填） */
+function pickCanvasImageFor(field) {
+  const imgs = objects.value.filter((o) => o.type === 'image')
+  if (!imgs.length) {
+    message.info(t('canvasAppNodeNoImages'))
+    return
+  }
+  // 无 UI 树的轻量选择：按离节点最近的一张
+  const node = appPanelNode.value
+  let best = imgs[0]
+  if (node) {
+    let bestD = Infinity
+    for (const img of imgs) {
+      const d = (img.x - node.x) ** 2 + (img.y - node.y) ** 2
+      if (d < bestD) {
+        bestD = d
+        best = img
+      }
+    }
+  }
+  const ref = imageObjectRef(best)
+  if (!ref?.filename) {
+    message.info(t('canvasAppNodeNoViewRef'))
+    return
+  }
+  if (!appPanelNode.value.params) appPanelNode.value.params = {}
+  if (!appPanelNode.value.params[field.nodeId]) appPanelNode.value.params[field.nodeId] = {}
+  appPanelNode.value.params[field.nodeId][field.key] = ref.filename
+  message.success(t('canvasAppNodeFed').replace('{f}', field.label).replace('{n}', ref.filename))
+}
+
+/** 弹窗打开完整应用（genHtml iframe 预览，复杂交互兜底） */
+async function openFullApp(node) {
+  const app = await ensureAppDetail(node.appId)
+  if (!app) {
+    message.warning(t('canvasAppNodeAppMissing'))
+    return
+  }
+  await appStore.updateConfig({ activeAppId: node.appId })
+  router.push({ path: '/web' })
+}
+
+// —— P2 运行链路 ——
+const POLL_INTERVAL = 2500
+const nodePolls = new Map() // nodeId → interval id
+const serverOrigin = computed(() => appStore.config?.serverHost || window.location.origin)
+
+/** 运行一个 app 节点：参数聚合 → POST /api/canvas/execute → 状态机轮询 → 产物落布 */
+async function runAppNode(id) {
+  const node = objects.value.find((o) => o.id === id)
+  if (!node || node.type !== 'app' || node.status === 'running') return
+  const app = await ensureAppDetail(node.appId)
+  if (!app?.template?.prompt || !Object.keys(app.template.prompt).length) {
+    node.status = 'error'
+    node.statusText = t('canvasAppNodeAppMissing')
+    saveSoon()
+    return
+  }
+  const fields = paramFieldsFromTemplate(app)
+  const up = collectUpstream(node.id, objects.value, links.value)
+  const { overrides } = buildNodeOverrides(node, fields, up)
+  // nodeOverrides 形状：{ [nodeId]: { widgetOverrides: {...} } }
+  const nodeOverrides = {}
+  for (const [nid, widgets] of Object.entries(overrides)) {
+    nodeOverrides[nid] = { widgetOverrides: widgets }
+  }
+  node.status = 'running'
+  node.statusText = t('canvasAppNodeQueued')
+  node.lastRunSourceIds = up.srcIds
+  saveSoon()
+  try {
+    const res = await fetch(`${serverOrigin.value}/api/canvas/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: app.template.prompt,
+        nodeOverrides: Object.keys(nodeOverrides).length ? nodeOverrides : undefined,
+        name: node.name || node.appId,
+      }),
+    })
+    const j = await res.json().catch(() => null)
+    if (!res.ok || !j?.success) throw new Error(j?.message || j?.error || `HTTP ${res.status}`)
+    const promptId = j.data.promptId
+    node.lastRun = { promptId, at: Date.now() }
+    node.statusText = t('canvasAppNodeRunningStatus')
+    startNodePoll(node.id, promptId)
+  } catch (e) {
+    node.status = 'error'
+    node.statusText = String(e?.message || e).slice(0, 120)
+    saveSoon()
+  }
+}
+
+/** 批量运行：选中多个 app 节点依次触发（服务端排队天然并行） */
+function runAppNodes(ids) {
+  const targets = ids.filter((id) => {
+    const o = objects.value.find((x) => x.id === id)
+    return o?.type === 'app' && o.status !== 'running'
+  })
+  for (const id of targets) void runAppNode(id)
+  if (targets.length)
+    message.info(t('canvasAppNodeBatchQueued').replace('{n}', String(targets.length)))
+}
+
+function startNodePoll(nodeId, promptId) {
+  stopNodePoll(nodeId)
+  const tick = async () => {
+    const node = objects.value.find((o) => o.id === nodeId)
+    if (!node) return stopNodePoll(nodeId)
+    try {
+      const res = await fetch(
+        `${serverOrigin.value}/api/canvas/execute-status?promptId=${encodeURIComponent(promptId)}`,
+      )
+      const j = await res.json().catch(() => null)
+      const r = j?.data
+      if (!r || r.status === 'running') return
+      stopNodePoll(nodeId)
+      if (r.status === 'success') {
+        node.status = 'success'
+        node.statusText = t('canvasAppNodeDone')
+        placeNodeArtifacts(node, extractStatusFiles(r))
+      } else {
+        node.status = 'error'
+        node.statusText = String(r.error || 'error').slice(0, 120)
+      }
+      saveSoon()
+    } catch {
+      /* 下轮重试 */
+    }
+  }
+  nodePolls.set(nodeId, setInterval(tick, POLL_INTERVAL))
+  void tick()
+}
+function stopNodePoll(nodeId) {
+  const t = nodePolls.get(nodeId)
+  if (t) clearInterval(t)
+  nodePolls.delete(nodeId)
+}
+
+/** 轮询结果 outputs → 文件列表（服务端已全扫为 outputs.files） */
+function extractStatusFiles(r) {
+  const files = Array.isArray(r?.outputs?.files) ? r.outputs.files : []
+  return files
+    .filter((f) => f && f.filename)
+    .map((f) => ({ filename: f.filename, subfolder: f.subfolder || '', type: f.type || 'output' }))
+}
+
+/** 产物落布：节点右侧一列 + 溯源连线（app 节点 → 产物） */
+function placeNodeArtifacts(node, files) {
+  if (!files?.length) return
+  const origin = appStore.config?.comfyHost || 'http://127.0.0.1:8188'
+  // 预取尺寸定布局（artifactLayout 纯函数给列坐标；加载失败不落布）
+  const urls = files.map(
+    (f) =>
+      `${origin}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? '')}&type=${encodeURIComponent(f.type ?? 'output')}`,
+  )
+  Promise.all(
+    urls.map(
+      (u) =>
+        new Promise((resolve) => {
+          const probe = new Image()
+          probe.onload = () => resolve({ w: probe.naturalWidth, h: probe.naturalHeight })
+          probe.onerror = () => resolve(null)
+          probe.src = u
+        }),
+    ),
+  ).then((dims) => {
+    const ok = urls.filter((_, i) => dims[i] && dims[i].w > 0)
+    const sizes = dims.filter((d) => d && d.w > 0)
+    if (!sizes.length) return
+    const scaleOf = (d) => Math.min(1, 260 / d.w)
+    const widths = sizes.map((d) => Math.round(d.w * scaleOf(d)))
+    const heights = sizes.map((d) => Math.round(d.h * scaleOf(d)))
+    const spots = artifactLayout(node, sizes.length, heights)
+    beforeChange()
+    spots.forEach((spot, i) => {
+      const id = 'n' + Date.now() + i + Math.random().toString(36).slice(2, 5)
+      objects.value.push({
+        id,
+        type: 'image',
+        x: spot.x,
+        y: spot.y,
+        width: widths[i],
+        height: heights[i],
+        src: ok[i],
+      })
+      links.value.push({ id: 'l' + Date.now() + i, from: node.id, to: id })
+    })
+    saveSoon()
+  })
+}
+
+// Konva 卡渲染配置
+const APP_STATUS_COLORS = {
+  idle: '#64748b',
+  running: '#38bdf8',
+  success: '#34d399',
+  error: '#f87171',
+}
+function appNodeRectConfig(o) {
+  const sel = selection.value.includes(o.id)
+  return {
+    width: o.width,
+    height: o.height,
+    fill: 'rgba(30,41,59,0.85)',
+    stroke: sel ? 'var(--wb-accent)' : APP_STATUS_COLORS[o.status] || '#64748b',
+    strokeWidth: sel ? 2.5 : 1.5,
+    cornerRadius: 10,
+    shadowColor: 'rgba(0,0,0,0.4)',
+    shadowBlur: 10,
+    shadowOffset: { x: 0, y: 4 },
+  }
+}
+function appNodeTitleConfig(o) {
+  return {
+    text: o.name || o.appId,
+    x: 12,
+    y: 10,
+    width: o.width - 70,
+    height: 24,
+    fontSize: 14,
+    fontStyle: 'bold',
+    fill: '#e2e8f0',
+    wrap: 'none',
+    ellipsis: true,
+    listening: false,
+  }
+}
+function appNodeSubConfig(o) {
+  const sub =
+    o.status === 'running' ? o.statusText || '…' : o.statusText || t('canvasAppNodeSubDefault')
+  return {
+    text: sub,
+    x: 12,
+    y: o.height - 30,
+    width: o.width - 24,
+    height: 20,
+    fontSize: 11,
+    fill: o.status === 'error' ? '#f87171' : o.status === 'success' ? '#34d399' : '#94a3b8',
+    wrap: 'none',
+    ellipsis: true,
+    listening: false,
+  }
+}
+function appNodeStatusConfig(o) {
+  const running = o.status === 'running'
+  return {
+    x: o.width - 26,
+    y: 24,
+    radius: running ? 6 : 5,
+    fill: APP_STATUS_COLORS[o.status] || '#64748b',
+    stroke: running ? 'rgba(56,189,248,0.4)' : null,
+    strokeWidth: running ? 8 : 0,
+    listening: false,
+  }
+}
+function appNodeRunBtnConfig(o) {
+  return {
+    text: o.status === 'running' ? '◉' : '▶',
+    x: o.width - 56,
+    y: o.height - 36,
+    fontSize: 16,
+    fill: o.status === 'running' ? '#38bdf8' : '#34d399',
+    listening: true,
+  }
+}
+function appNodeExpandBtnConfig(o) {
+  return {
+    text: '⚙',
+    x: o.width - 30,
+    y: o.height - 36,
+    fontSize: 15,
+    fill: appPanel.id === o.id ? 'var(--wb-accent)' : '#94a3b8',
+    listening: true,
+  }
+}
+
+// —— P3 AI 侧边栏节点指令（wb_canvas_ops → 人审确认卡 → 执行） ——
+const pendingAgentOps = ref(null) // Array<op> | null
+const agentOpsDiffLines = computed(() =>
+  (pendingAgentOps.value || []).map((op) => {
+    switch (op.type) {
+      case 'run_node': {
+        const n = objects.value.find((o) => o.id === op.nodeId)
+        return t('canvasAgentOpsRun').replace('{n}', n?.name || op.nodeId)
+      }
+      case 'add_app_node':
+        return t('canvasAgentOpsAdd').replace('{app}', op.name || op.appId)
+      case 'update_node':
+        return t('canvasAgentOpsUpdate').replace('{id}', op.id)
+      case 'connect_nodes':
+        return t('canvasAgentOpsConnect').replace('{f}', op.from).replace('{to}', op.to)
+      case 'select_nodes':
+        return t('canvasAgentOpsSelect').replace('{n}', String((op.ids || []).length))
+      default:
+        return String(op.type)
+    }
+  }),
+)
+
+function applyCanvasAgentOps(ops) {
+  if (!Array.isArray(ops)) return
+  beforeChange()
+  for (const op of ops) {
+    try {
+      applyOneAgentOp(op)
+    } catch (e) {
+      console.warn('[canvas] agent op failed:', op, e)
+    }
+  }
+  saveSoon()
+}
+
+function applyOneAgentOp(op) {
+  if (op.type === 'run_node') {
+    const node = objects.value.find((o) => o.id === op.nodeId)
+    if (!node || node.type !== 'app') return
+    // params 覆写：{nodeId:{widget:value}} 直写 node.params
+    if (op.params && typeof op.params === 'object') {
+      node.params = { ...(node.params || {}), ...op.params }
+    }
+    void runAppNode(node.id)
+    return
+  }
+  if (op.type === 'add_app_node') {
+    const wx = typeof op.x === 'number' ? op.x : viewportCenterWorld().x
+    const wy = typeof op.y === 'number' ? op.y : viewportCenterWorld().y
+    const node = makeAppNode(op.appId, op.name || op.appId, wx, wy)
+    if (op.params && typeof op.params === 'object') node.params = { ...op.params }
+    objects.value.push(node)
+    void ensureAppDetail(op.appId)
+    return
+  }
+  if (op.type === 'update_node') {
+    const node = objects.value.find((o) => o.id === op.id)
+    if (!node) return
+    const patch = op.patch || {}
+    if (patch.params && typeof patch.params === 'object')
+      node.params = { ...(node.params || {}), ...patch.params }
+    if (typeof patch.x === 'number') node.x = patch.x
+    if (typeof patch.y === 'number') node.y = patch.y
+    if (typeof patch.name === 'string') node.name = patch.name
+    return
+  }
+  if (op.type === 'connect_nodes') {
+    const a = objects.value.find((o) => o.id === op.from)
+    const b = objects.value.find((o) => o.id === op.to)
+    if (!a || !b) return
+    const exists = links.value.some(
+      (l) => (l.from === op.from && l.to === op.to) || (l.from === op.to && l.to === op.from),
+    )
+    if (!exists)
+      links.value.push({
+        id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5),
+        from: op.from,
+        to: op.to,
+      })
+    return
+  }
+  if (op.type === 'select_nodes') {
+    const ids = (op.ids || []).filter((id) => objects.value.some((o) => o.id === id))
+    if (ids.length) selection.value = ids
+    return
+  }
+}
+
+function confirmAgentOps() {
+  const ops = pendingAgentOps.value
+  if (!ops?.length) return
+  applyCanvasAgentOps(ops)
+  pendingAgentOps.value = null
+  message.success(t('canvasAgentOpsApplied'))
+}
+
+// 侧栏工作台 AI ops → 人审卡（不直接执行）
+const offOps = onOps((ops) => {
+  if (!Array.isArray(ops) || !ops.length) return
+  pendingAgentOps.value = ops
+})
+
 // —— 画布 → 侧栏工作台感知条（选区/物件摘要，与 C 宿主 embed 感知条同构）——
 let canvasSeq = 0
 const canvasDigest = computed(() => {
   const imgs = objects.value.filter((o) => o.type === 'image').length
   const notes = objects.value.filter((o) => o.type === 'note').length
+  const apps = appNodesDigest(objects.value)
   return {
     seq: 0, // 实例序号在 emit 时自增（computed 本身无副作用）
     workflowName: t('canvasDigestName'),
     nodeCount: objects.value.length,
     models: [],
-    selection: selection.value.map((id) => {
-      const o = objects.value.find((x) => x.id === id)
-      if (!o) return null
-      return o.type === 'image' ? `image ${o.width}×${o.height}` : 'note'
-    }).filter(Boolean),
-    counts: { images: imgs, notes, links: links.value.length, groups: groups.value.length },
-    queue: { running: 0, pending: 0 },
+    selection: selection.value
+      .map((id) => {
+        const o = objects.value.find((x) => x.id === id)
+        if (!o) return null
+        if (o.type === 'app') return `app:${o.name || o.appId}(${o.status || 'idle'})`
+        return o.type === 'image' ? `image ${o.width}×${o.height}` : 'note'
+      })
+      .filter(Boolean),
+    counts: {
+      images: imgs,
+      notes,
+      apps: apps.length,
+      links: links.value.length,
+      groups: groups.value.length,
+    },
+    appNodes: apps, // P3：AI 感知画布上的 app 节点（id/名称/状态/参数摘要）
+    queue: { running: apps.filter((a) => a.status === 'running').length, pending: 0 },
     ts: Date.now(),
   }
 })
 watch(
-  () => [selection.value.slice(), objects.value.length, links.value.length, groups.value.length],
+  () => [
+    selection.value.slice(),
+    objects.value.length,
+    links.value.length,
+    groups.value.length,
+    JSON.stringify(appNodesDigest(objects.value)),
+  ],
   () => {
     if (!wbOpen.value) return
     const d = { ...canvasDigest.value, seq: ++canvasSeq }
@@ -1330,20 +2258,25 @@ watch(
   { deep: false },
 )
 
-// —— minimap：全景（物件 bbox ∪ 视口框，等比缩到 160x110 内）—— 
+// —— minimap：全景（物件 bbox ∪ 视口框，等比缩到 160x110 内）——
 const MINI_W = 160
 const MINI_H = 110
 const MINI_PAD = 10
 const mini = computed(() => {
   const b = bboxOf(objects.value)
-  let x0 = b.x, y0 = b.y, x1 = b.x + b.width, y1 = b.y + b.height
+  let x0 = b.x,
+    y0 = b.y,
+    x1 = b.x + b.width,
+    y1 = b.y + b.height
   // 把当前视口也纳入范围
   const vw = size.w / viewport.value.scale
   const vh = size.h / viewport.value.scale
   const vx0 = -viewport.value.x / viewport.value.scale
   const vy0 = -viewport.value.y / viewport.value.scale
-  x0 = Math.min(x0, vx0); y0 = Math.min(y0, vy0)
-  x1 = Math.max(x1, vx0 + vw); y1 = Math.max(y1, vy0 + vh)
+  x0 = Math.min(x0, vx0)
+  y0 = Math.min(y0, vy0)
+  x1 = Math.max(x1, vx0 + vw)
+  y1 = Math.max(y1, vy0 + vh)
   const s = Math.min((MINI_W - MINI_PAD * 2) / (x1 - x0), (MINI_H - MINI_PAD * 2) / (y1 - y0))
   return { x0, y0, s }
 })
@@ -1351,6 +2284,7 @@ const miniItems = computed(() =>
   objects.value.map((o) => ({
     id: o.id,
     type: o.type,
+    status: o.status,
     x: MINI_PAD + (o.x - mini.value.x0) * mini.value.s,
     y: MINI_PAD + (o.y - mini.value.y0) * mini.value.s,
     w: Math.max(4, o.width * mini.value.s),
@@ -1381,7 +2315,7 @@ function miniJump(e) {
   saveSoon()
 }
 
-// —— 持久化（localStorage 防抖 500ms）—— 
+// —— 持久化（localStorage 防抖 500ms）——
 let saveTimer = null
 function saveSoon() {
   clearTimeout(saveTimer)
@@ -1389,7 +2323,10 @@ function saveSoon() {
 }
 function saveNow() {
   try {
-    localStorage.setItem(STORAGE_KEY, serializeDoc(objects.value, viewport.value, 'Untitled', links.value, groups.value))
+    localStorage.setItem(
+      STORAGE_KEY,
+      serializeDoc(objects.value, viewport.value, 'Untitled', links.value, groups.value),
+    )
   } catch {
     /* 容量满时静默，画布仍可用 */
   }
@@ -1514,7 +2451,10 @@ function onDrop(e) {
 }
 function onPaste(e) {
   const items = [...(e.clipboardData?.items || [])]
-  const files = items.filter((it) => it.kind === 'file').map((it) => it.getAsFile()).filter(Boolean)
+  const files = items
+    .filter((it) => it.kind === 'file')
+    .map((it) => it.getAsFile())
+    .filter(Boolean)
   if (!files.length) return
   const st = stageEl.value?.getStage?.()
   const p = st?.getPointerPosition() || { x: size.w / 2, y: size.h / 2 }
@@ -1551,7 +2491,11 @@ function placeFiles(files) {
       })
       // 溯源连线：参考图 → 产物
       for (const srcId of sourceIds) {
-        links.value.push({ id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5), from: srcId, to: id })
+        links.value.push({
+          id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5),
+          from: srcId,
+          to: id,
+        })
       }
       cursorX += Math.round(probe.naturalWidth * scale) + 16
       saveSoon()
@@ -1583,6 +2527,14 @@ function bindNodeEvents() {
     g.on('mousedown.wb', (e) => onItemDown(idx(), e))
     g.on('dragmove.wb', onNodeDrag)
     g.on('dragend.wb', onNodeDragEnd)
+    // App 节点双击 = 展开参数面板
+    g.on('dblclick.wb', (e) => {
+      const o = objects.value.find((x) => x.id === g.id())
+      if (o?.type === 'app') {
+        e.evt?.preventDefault?.()
+        openAppNodePanel(o.id)
+      }
+    })
   })
 }
 onMounted(() => {
@@ -1619,5 +2571,39 @@ onBeforeUnmount(() => {
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('paste', onPaste)
   clearTimeout(saveTimer)
+  // app 节点轮询清场
+  for (const nodeId of [...nodePolls.keys()]) stopNodePoll(nodeId)
+  // AI ops 订阅清场
+  offOps?.()
 })
 </script>
+
+<style scoped>
+.agent-ops-card {
+  position: absolute;
+  z-index: 35;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 360px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--wb-accent);
+  background: var(--wb-surface);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+.ops-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.ops-line {
+  font-size: 11px;
+  color: var(--wb-text-2);
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.2);
+}
+</style>

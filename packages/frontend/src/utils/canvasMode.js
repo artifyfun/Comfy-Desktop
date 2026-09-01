@@ -24,6 +24,7 @@ function bus() {
   // 防御旧实例先建的单例缺新字段（vite 多实例：同一模块可能以不同 URL 加载两份）
   const b = window[BUS_KEY]
   if (!b.promptListeners) b.promptListeners = new Set()
+  if (!b.opsListeners) b.opsListeners = new Set()
   return b
 }
 
@@ -62,11 +63,20 @@ export function useCanvasMode() {
     emitPrompt(text, { autoSend = false, attachments = [] } = {}) {
       b.promptListeners.forEach((cb) => cb({ text, autoSend, attachments }))
     },
+    /** 工作台侧：AI ops 指令 → 画布（P3：wb_canvas_ops 经总线到宿主页人审执行） */
+    onOps(cb) {
+      b.opsListeners.add(cb)
+      return () => b.opsListeners.delete(cb)
+    },
+    emitOps(ops) {
+      b.opsListeners.forEach((cb) => cb(ops))
+    },
     clear() {
       b.resultListeners.clear()
       b.attachmentListeners.clear()
       b.stateListeners.clear()
       b.promptListeners.clear()
+      b.opsListeners.clear()
     },
   }
 }

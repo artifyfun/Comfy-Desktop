@@ -1105,12 +1105,28 @@ class WorkbenchService {
           .slice(0, 25)
           .map((n) => `#${n.id} ${n.type}${n.title ? `（${n.title}）` : ''}`)
           .join('、')
+        // P3 A 画布 app 节点台账（A 画布侧栏模式 digest 才带；C 界面为空）
+        const appNodes =
+          (
+            canvasState as {
+              appNodes?: Array<{ id: string; name: string; status?: string; params?: string }>
+            }
+          ).appNodes ?? []
+        const appNodesLine = appNodes.length
+          ? `App 节点：${appNodes
+              .slice(0, 15)
+              .map(
+                (a) =>
+                  `${a.id}「${a.name}」${a.status ?? 'idle'}${a.params ? `（${a.params}）` : ''}`
+              )
+              .join('、')}`
+          : ''
         canvasSection = `\n## 画布当前状态（C 界面当前激活 tab；无则忽略）
 工作流：${canvasState.workflowName} · 节点 ${canvasState.nodeCount} 个
 模型：${(canvasState.models ?? []).join('、') || '（无）'}
 关键参数：${renderKeyParams(canvasState.keyParams)}
 队列：running ${canvasState.queue?.running ?? 0} / pending ${canvasState.queue?.pending ?? 0}
-节点清单：${nodesLine || '（空画布）'}
+节点清单：${nodesLine || '（空画布）'}${appNodesLine ? `\n${appNodesLine}` : ''}
 `
       }
     } catch (e) {
@@ -1118,7 +1134,7 @@ class WorkbenchService {
     }
     return `${SELF_KNOWLEDGE_TEXT}${envSection}${canvasSection}
 根据用户需求从模板库选择模板并填参数，输出**只含一个 JSON 对象**（无 markdown 代码块、无解释文字）：
-{"intent":"image|video|audio|text|chat|memory|workflow|canvas-run","templateId":"...","params":{...},"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text/memory 时直接给用户的回复","memory":{"action":"remember|forget","key":"...","value":"remember 时必填"},"title":"仅首条消息时提供"}
+{"intent":"image|video|audio|text|chat|memory|workflow|canvas-run|canvas-ops","templateId":"...","params":{...},"canvasOps":[{"type":"run_node","nodeId":"..."}],"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text/memory 时直接给用户的回复","memory":{"action":"remember|forget","key":"...","value":"remember 时必填"},"title":"仅首条消息时提供"}
 
 规则：
 1. **模板严格匹配才执行**：intent=image/video/audio 前先评估模板库——模板的
@@ -1146,6 +1162,13 @@ class WorkbenchService {
 3.1b **模板执行自动加载画布**：intent=image/video/audio 执行模板时，系统**自动**先把该模板工作流加载到画布（新 tab；当前 tab 已是同一工作流则复用）再执行——无需额外字段。（兼容：显式带 "syncCanvasBeforeExec":true 同样生效。）
 3.2 **执行画布当前工作流**（用户说「执行画布上的工作流 / 跑一下当前图 / 按画布参数生成 / 用当前画布出图」）→ intent=canvas-run（**不指定 templateId**；可带 nodeOverrides 按节点 id 覆盖 widget，如 {"16":{"widgetOverrides":{"steps":40}}}）。
 3.3 **画布批量执行**（对当前画布多变体/多参数组合批量出图）→ intent=canvas-run + batch.items（每行=一组变体）。行内键用「节点id.widget名」格式（如 "16.steps":40、"9.text":"新提示词"），值=该 widget 新值；共有的固定变体放 sharedParams（同格式）。系统按行逐条执行画布当前工作流。
+3.4 **A 画布 App 节点操作**（用户在 A 画布侧栏工作台说「跑一下节点 X / 新建一个 XX 应用节点 / 把节点 X 参数改成… / 连一下 A→B」）→ intent=canvas-ops + canvasOps 指令数组：
+  - {"type":"run_node","nodeId":"a17…"} 触发某 App 节点运行（params 可选覆盖 {"节点id":{"widget":值}}）
+  - {"type":"add_app_node","appId":"模板id","name":"…","x":…,"y":…} 在画布新建 App 节点
+  - {"type":"update_node","id":"节点id","patch":{"params":{…}}} 改节点参数/位置
+  - {"type":"connect_nodes","from":"上游物件id","to":"节点id"} 建数据管道（上游产物/便签喂下游）
+  - {"type":"select_nodes","ids":["…"]} 选中若干节点
+  「画布当前状态」段的 appNodes 清单是可用节点台账（id/name/status/params）；指令经用户画布确认卡人审后执行。
 4. 模板库为空或不匹配时选 chat 并说明。可跨会话保留的偏好/事实用 intent=memory（见「长期记忆」段）。
 5. 用户上传了素材时，倾向选择带媒体输入参数的模板（图生图/视频驱动），参数值填素材文件名（已上传）。
 5.1 **参数类型**：模板参数里的 rc（renderComponent）为 *-uploader 的是**素材文件槽**——只能传已上传素材的文件名或 data:/http(s): URL，不能传提示词文本（会导致 ComfyUI 报 No such file or directory）。参数名带「路径/文件/图片」描述或参数说明里标注了「路径」的同样视为素材槽。只有 rc=textarea/select/slider/number（或无 rc 的文本型）参数才收提示词/数值。catalog 里素材槽会显示为「参数名（素材路径）」。

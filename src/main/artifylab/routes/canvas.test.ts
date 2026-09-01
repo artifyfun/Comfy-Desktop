@@ -6,7 +6,11 @@ import express from 'express'
 import { createCanvasRouter } from './canvas'
 
 // execute/batch 接口依赖外部提交链：全部 mock（测试只验证路由契约）
-vi.mock('../mcp/executor', () => ({ executePrompt: vi.fn() }))
+vi.mock('../mcp/executor', () => ({
+  executePrompt: vi.fn(),
+  getHistory: vi.fn(),
+  extractExecutionError: vi.fn(() => null)
+}))
 vi.mock('../services/batchRunner', () => ({ startBatch: vi.fn() }))
 vi.mock('../workbench/service', () => ({
   workbenchService: {
@@ -19,11 +23,12 @@ vi.mock('../appStore', () => ({
   default: { getConfig: vi.fn(() => ({ comfyHost: 'http://127.0.0.1:8188' })) }
 }))
 
-import { executePrompt } from '../mcp/executor'
+import { executePrompt, getHistory } from '../mcp/executor'
 import { startBatch } from '../services/batchRunner'
 
 const mockExecute = executePrompt as unknown as ReturnType<typeof vi.fn>
 const mockStartBatch = startBatch as unknown as ReturnType<typeof vi.fn>
+const mockGetHistory = getHistory as unknown as ReturnType<typeof vi.fn>
 
 /**
  * /api/canvas/snapshot & /api/canvas/state 单测。
@@ -186,5 +191,70 @@ describe('canvas execute & batch（M5 画布执行链路）', () => {
       items: [{}]
     })
     expect(res.status).toBe(400)
+  })
+})
+
+describe('canvas execute-status（app 节点无会话轮询）', () => {
+  let server: http.Server
+  let baseUrl = ''
+
+  beforeAll(async () => {
+    vi.clearAllMocks()
+    const app = express()
+    app.use(express.json())
+    app.use(createCanvasRouter({ latest: null }))
+    server = http.createServer(app)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const addr = server.address() as AddressInfo
+    baseUrl = `http://127.0.0.1:${addr.port}`
+  })
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
+
+  it('缺 promptId → 400', async () => {
+    const res = await fetch(`${baseUrl}/api/canvas/execute-status`)
+    expect(res.status).toBe(400)
+  })
+
+  it('history 未出现 → running', async () => {
+    mockGetHistory.mockResolvedValue(null)
+    const res = await fetch(`${baseUrl}/api/canvas/execute-status?promptId=px`)
+    const body = (await res.json()) as { ok: boolean; data: { status: string } }
+    expect(body.ok).toBe(true)
+    expect(body.data.status).toBe('running')
+  })
+
+  it('success：outputs 全扫 images/gifs → files', async () => {
+    mockGetHistory.mockResolvedValue({
+      status: { status_str: 'success' },
+      outputs: {
+        '9': { images: [{ filename: 'a.png', subfolder: '', type: 'output' }] },
+        '10': { gifs: [{ filename: 'b.gif', subfolder: 's', type: 'output' }] },
+        '11': { nope: [] }
+      }
+    })
+    const res = await fetch(`${baseUrl}/api/canvas/execute-status?promptId=py`)
+    const body = (await res.json()) as {
+      ok: boolean
+      data: { status: string; outputs: { files: Array<{ filename: string }> } }
+    }
+    expect(body.data.status).toBe('success')
+    expect(body.data.outputs.files.map((f) => f.filename)).toEqual(['a.png', 'b.gif'])
+  })
+
+  it('error：status_str=error → error + 消息', async () => {
+    mockGetHistory.mockResolvedValue({
+      status: {
+        status_str: 'error',
+        messages: [['execution_error', { exception_message: 'boom' }]]
+      },
+      outputs: {}
+    })
+    const res = await fetch(`${baseUrl}/api/canvas/execute-status?promptId=pz`)
+    const body = (await res.json()) as { ok: boolean; data: { status: string; error?: string } }
+    expect(body.data.status).toBe('error')
+    expect(body.data.error).toBeTruthy()
   })
 })

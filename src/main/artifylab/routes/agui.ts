@@ -395,6 +395,15 @@ export function createAguiRouter(deps: { store?: EventStore } = {}): express.Rou
               note('progress', progress)
               sendText(progress)
               finishRun()
+            } else if (plan.intent === 'canvas-ops') {
+              // P3 A 画布 app 节点指令集：AI 产出 ops（run_node/add_app_node/
+              // update_node/connect_nodes/select_nodes），前端 canvas-embedded
+              // 模式经总线到宿主画布页人审执行；产物落布/状态灯由画布页闭环
+              emit(custom('wb_canvas_ops', { ops: plan.canvasOps ?? [] }))
+              const n = Array.isArray(plan.canvasOps) ? plan.canvasOps.length : 0
+              note('progress', `画布节点指令 ${n} 条已下发，等待画布确认…`)
+              sendText(plan.reply || `已下发 ${n} 条画布节点指令，请在画布上确认执行。`)
+              finishRun()
             } else if (workbenchService.consumeOrchestratedFlag(threadId)) {
               // 编排去重:codex 在 decide 轮内经 wb_execute_template 真实执行过时,
               // 最终 PLAN 只是「编排总结的载体」——产物/卡片已由工具链路落会话,

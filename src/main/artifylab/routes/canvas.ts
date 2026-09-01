@@ -15,6 +15,8 @@
  *
  * POST /api/canvas/snapshot    上报快照（body 即 digest，缺关键字段 400）
  * GET  /api/canvas/state       读取最近快照（{data:{state|null}}）
+ * GET  /api/canvas/execute-status?promptId=… 节点执行状态（无会话版轮询；
+ *                              A 画布 app 节点运行后前端轮询用，outputs 全扫）
  * POST /api/canvas/checkpoint  落 checkpoint（{reason, workflow} → checkpointId）
  * GET  /api/canvas/checkpoints 近期 checkpoint + 审计队列（新→旧，limit≤50）
  * POST /api/canvas/ops         ops 审计入队（{ops, reason} → {queued}）
@@ -24,7 +26,7 @@ import express, { type Router, type Request, type Response } from 'express'
 import { HTTP_STATUS } from '../config/constants'
 import { createErrorResponse, createSuccessResponse } from '../utils/errorHandler'
 import { classifyExecutionError } from '../services/errorClassifier'
-import { executePrompt } from '../mcp/executor'
+import { executePrompt, getHistory, extractExecutionError } from '../mcp/executor'
 import type { ComfyPrompt } from '../appStore'
 import { startBatch, type BatchInputNode } from '../services/batchRunner'
 import { workbenchService } from '../workbench/service'
@@ -159,6 +161,61 @@ export function createCanvasRouter(
 
   router.get('/api/canvas/state', (_req: Request, res: Response) => {
     res.json(createSuccessResponse({ state: store.latest }))
+  })
+
+  // A 画布 app 节点执行状态轮询（无会话版）：直接读 ComfyUI history，
+  // outputs 全扫 images/gifs（与 pollExecution 的产物提取口径一致——
+  // 模板常未声明 output 节点，依赖声明会漏产物）。
+  router.get('/api/canvas/execute-status', async (req: Request, res: Response) => {
+    const promptId = typeof req.query.promptId === 'string' ? req.query.promptId : ''
+    if (!promptId) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('promptId required'))
+      return
+    }
+    try {
+      const comfyOrigin = appStoreManager.getConfig().comfyHost
+      const entry = await getHistory(comfyOrigin, promptId)
+      if (!entry) {
+        res.json(createSuccessResponse({ promptId, status: 'running', outputs: {} }))
+        return
+      }
+      const status = entry.status as { status_str?: string; messages?: unknown[] } | undefined
+      if (status?.status_str === 'error') {
+        const msgs = status.messages ?? []
+        const readable = extractExecutionError(msgs)
+        res.json(
+          createSuccessResponse({
+            promptId,
+            status: 'error',
+            error: (readable ?? (msgs.length ? JSON.stringify(msgs) : 'execution error')).slice(
+              0,
+              500
+            )
+          })
+        )
+        return
+      }
+      // 产物全扫：任何节点的 images/gifs 都算（节点运行常未声明 output paramsNodes）
+      const files: Array<{ filename: string; subfolder?: string; type?: string }> = []
+      const rawOutputs = (entry.outputs as Record<string, unknown>) ?? {}
+      for (const v of Object.values(rawOutputs)) {
+        const o = v as {
+          images?: Array<{ filename?: string; subfolder?: string; type?: string }>
+          gifs?: Array<{ filename?: string; subfolder?: string; type?: string }>
+        }
+        for (const key of ['images', 'gifs'] as const) {
+          for (const it of o[key] ?? []) {
+            if (it.filename)
+              files.push({ filename: it.filename, subfolder: it.subfolder, type: it.type })
+          }
+        }
+      }
+      res.json(createSuccessResponse({ promptId, status: 'success', outputs: { files } }))
+    } catch (e) {
+      res
+        .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+        .json(createErrorResponse(String((e as Error).message ?? e).slice(0, 500)))
+    }
   })
 
   // ---- M2 写通道 ----------------------------------------------------------

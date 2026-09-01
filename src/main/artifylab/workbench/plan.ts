@@ -12,7 +12,16 @@ import { logger } from '../utils/logger'
 
 /** codex 决策输出的结构化执行计划 */
 export interface WorkbenchPlan {
-  intent: 'image' | 'video' | 'audio' | 'text' | 'chat' | 'memory' | 'workflow' | 'canvas-run'
+  intent:
+    | 'image'
+    | 'video'
+    | 'audio'
+    | 'text'
+    | 'chat'
+    | 'memory'
+    | 'workflow'
+    | 'canvas-run'
+    | 'canvas-ops'
   /** intent=chat/text/memory 时直接回复用户；执行意图必须带模板与参数 */
   reply?: string
   /**
@@ -62,7 +71,27 @@ export interface WorkbenchPlan {
     /** 可选:全批次共享的 prompt 变体（如统一风格词），逐行覆盖 */
     sharedParams?: Record<string, unknown>
   }
+  /**
+   * P3 A 画布 app 节点指令集（intent=canvas-ops）：宿主画布页人审后执行。
+   * run_node 走节点运行链路（产物自动落布）；结构变更走引擎几何/连线。
+   */
+  canvasOps?: Array<CanvasAgentOp>
 }
+
+/** A 画布节点指令（与前端 appNode.js/宿主画布页 applyCanvasAgentOps 对应） */
+export type CanvasAgentOp =
+  | { type: 'run_node'; nodeId: string; params?: Record<string, Record<string, unknown>> }
+  | {
+      type: 'add_app_node'
+      appId: string
+      name?: string
+      x?: number
+      y?: number
+      params?: Record<string, Record<string, unknown>>
+    }
+  | { type: 'update_node'; id: string; patch?: Record<string, unknown> }
+  | { type: 'connect_nodes'; from: string; to: string }
+  | { type: 'select_nodes'; ids: string[] }
 
 export interface PlanValidationIssue {
   field: string
@@ -391,6 +420,38 @@ export function validatePlanLocal(
       if (!Array.isArray(plan.batch.items))
         issues.push({ field: 'batch', message: 'batch.items 必须是数组' })
     }
+    return { ok: issues.length === 0, issues }
+  }
+  if (plan.intent === 'canvas-ops') {
+    // A 画布节点指令集：结构宽松校验（type 合法 + 必填字段在），语义由宿主
+    // 画布页人审兜底（节点不存在等运行期错误由画布反馈）
+    const ops = plan.canvasOps
+    if (!Array.isArray(ops) || ops.length === 0) {
+      issues.push({ field: 'canvasOps', message: 'canvas-ops 意图必须带 canvasOps 数组（≥1 条）' })
+      return { ok: false, issues }
+    }
+    if (ops.length > 50) issues.push({ field: 'canvasOps', message: 'canvasOps 上限 50 条' })
+    const validTypes = new Set([
+      'run_node',
+      'add_app_node',
+      'update_node',
+      'connect_nodes',
+      'select_nodes'
+    ])
+    ops.forEach((op, i) => {
+      if (!op || !validTypes.has(op.type))
+        issues.push({ field: `canvasOps[${i}]`, message: `未知 op.type: ${op?.type}` })
+      if (op?.type === 'run_node' && !op.nodeId)
+        issues.push({ field: `canvasOps[${i}].nodeId`, message: 'run_node 必须带 nodeId' })
+      if (op?.type === 'add_app_node' && !op.appId)
+        issues.push({ field: `canvasOps[${i}].appId`, message: 'add_app_node 必须带 appId' })
+      if (op?.type === 'update_node' && !op.id)
+        issues.push({ field: `canvasOps[${i}].id`, message: 'update_node 必须带 id' })
+      if (op?.type === 'connect_nodes' && (!op.from || !op.to))
+        issues.push({ field: `canvasOps[${i}]`, message: 'connect_nodes 必须带 from+to' })
+      if (op?.type === 'select_nodes' && !Array.isArray(op.ids))
+        issues.push({ field: `canvasOps[${i}].ids`, message: 'select_nodes 必须带 ids 数组' })
+    })
     return { ok: issues.length === 0, issues }
   }
   // image/video/audio：必须有模板

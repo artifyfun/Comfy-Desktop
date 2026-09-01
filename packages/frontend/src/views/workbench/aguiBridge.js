@@ -117,8 +117,7 @@ function upsertChatText(pageApi, state, messageId, delta) {
   }
   rec.text += delta || ''
   const idx = pageApi.messages.value.findIndex((m) => m._key === rec.key)
-  if (idx !== -1)
-    pageApi.messages.value[idx] = { ...pageApi.messages.value[idx], text: rec.text }
+  if (idx !== -1) pageApi.messages.value[idx] = { ...pageApi.messages.value[idx], text: rec.text }
 }
 
 /** text:end(审查修复 M5):清流式标记,该条消息下一帧起走终态全量渲染 */
@@ -217,7 +216,7 @@ function applyCustom(pageApi, state, name, value) {
           m.kind === 'approval' &&
           m.approvalStatus === 'pending' &&
           m.approval &&
-          m.approval.requestId === value.requestId
+          m.approval.requestId === value.requestId,
       )
       if (target) target.approvalStatus = value.approved ? 'approved' : 'rejected'
     }
@@ -273,6 +272,12 @@ function applyCustom(pageApi, state, name, value) {
   if (name === 'wb_canvas_exec') {
     // value:画布执行指令,与 legacy 'canvas-exec' 事件 data 同构
     if (sideEffect) sideEffect('canvas-exec', value)
+    return
+  }
+  if (name === 'wb_canvas_ops') {
+    // value:{ops:[...]}(P3 A 画布 app 节点指令集;canvas-embedded 模式经
+    // canvasMode 总线到宿主画布页,人审确认卡后执行)
+    if (sideEffect) sideEffect('canvas-ops', value)
     return
   }
   if (name === 'wb_invalid') {
