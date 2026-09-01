@@ -23,6 +23,7 @@ import {
 } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import appStoreManager, { type App, type ComfyPrompt, type ParamNode } from '../appStore'
+import { type AppServerRuntime, createAppServerRuntime } from './appServerRun'
 import { logger } from '../utils/logger'
 import { templateLibrary } from './templates'
 import { toPseudoApp, type WorkflowTemplate } from './templateCore'
@@ -76,7 +77,11 @@ function renderKeyParams(kp?: Record<string, unknown>): string {
 }
 import { get as getSetting } from '../../settings'
 import { getOrCreateMcpToken } from '../mcp/auth'
-import { beginWorkbenchToolContext, endWorkbenchToolContext } from '../mcp/workbenchTools'
+import {
+  beginWorkbenchToolContext,
+  endWorkbenchToolContext,
+  peekWorkbenchToolSession
+} from '../mcp/workbenchTools'
 import {
   applyNodeOverrides,
   executeApp,
@@ -92,7 +97,8 @@ import type { Thread } from '../vendor/codex-sdk'
 import { startBatch } from '../services/batchRunner'
 import { deriveAttachmentKind } from './presetCore'
 
-/** decide 过程回调：log=阶段文本；thread_event=codex 结构化事件（透传 SSE） */
+/** decide 过程回调：log=阶段文本；thread_event=codex 结构化事件（透传 SSE）；
+ * stream_delta=C16 token 级增量(appserver 通道,AG-UI TEXT/REASONING CONTENT) */
 export type DecideProgressCallback = (
   p:
     | {
@@ -102,6 +108,10 @@ export type DecideProgressCallback = (
     | {
         type: 'thread_event'
         event: unknown
+      }
+    | {
+        type: 'stream_delta'
+        delta: { kind: 'text' | 'reasoning'; itemId: string; delta: string }
       }
 ) => void
 
@@ -350,6 +360,8 @@ interface AgentSession {
   tempHome: string
   /** 非 deepseek 官方端点时挂的 responses→chat 转换代理（随 session 回收） */
   proxy?: { server: HttpServer; baseUrl: string }
+  /** C16:app-server 通道运行时(transport=appserver 时非空,随 session 回收) */
+  appServer?: AppServerRuntime
   lastActiveAt: number
   /** 本会话累计 agent 轮次（decide/恢复轮各 +1） */
   turns: number
@@ -380,6 +392,27 @@ class WorkbenchService {
   }
 
   // ---------- agent 运行时（harness P1）：会话级 codex+thread 复用 ----------
+
+  /**
+   * C16 传输通道解析:'exec'(默认,零行为变化) | 'appserver'(token 级流)。
+   * 优先级:用户设置 workbenchAgentTransport > appStore 配置 > 'exec'。
+   * 红线:M3 默认 exec——appserver 是 C16 灰度通道,显式开启才生效。
+   */
+  private resolveAgentTransport(): 'exec' | 'appserver' {
+    try {
+      const fromSettings = getSetting('workbenchAgentTransport')
+      if (fromSettings === 'appserver' || fromSettings === 'exec') return fromSettings
+    } catch {
+      /* 设置读取失败走 appStore */
+    }
+    try {
+      const v = appStoreManager.getConfig().workbenchAgentTransport
+      if (v === 'appserver' || v === 'exec') return v
+    } catch {
+      /* 全部失败回 exec */
+    }
+    return 'exec'
+  }
 
   /**
    * 取（或建）会话级 agent 运行时。首次创建：起内嵌代理（非 deepseek 官方端点）、
@@ -419,13 +452,19 @@ class WorkbenchService {
     const serverPort = getServerPort()
     this.mcpAvailable = serverPort != null
     if (serverPort) {
-      const mcpUrl = `http://127.0.0.1:${serverPort}/mcp`
+      // C7 多会话并行：会话身份融入每会话 MCP server 配置——URL query 带
+      // wb_session=<sid>（codex 0.149.x 引擎对每个 [mcp_servers.*] 的
+      // RawMcpServerConfig 支持 http_headers/env_http_headers，二进制 strings
+      // 实测；此处同步双写 X-Workbench-Session，接收侧未来透传 header 时同构生效）。
+      // wb_* 工具按该身份精确路由回本会话，多会话并行 decide 不再串号。
+      const mcpUrl = `http://127.0.0.1:${serverPort}/mcp?wb_session=${encodeURIComponent(sessionId)}`
       writeFileSync(
         join(tempHome, 'config.toml'),
         [
           `[mcp_servers.workbench]`,
           `url = "${mcpUrl}"`,
           `bearer_token_env_var = "WORKBENCH_MCP_TOKEN"`,
+          `http_headers = { "X-Workbench-Session" = "${sessionId}" }`,
           // approve：exec 单轮 approval_policy=never、workspace-write 沙箱下唯一
           // 无条件放行值（codex mcp_tool_call.rs：只有 AppToolApproval::Approve
           // 不看注解直接豁免；auto/writes 对非 read-only 工具仍要弹窗→被拒）。
@@ -452,6 +491,27 @@ class WorkbenchService {
       logger.warn('workbench skill deploy failed', e)
     }
     beginWorkbenchToolContext(sessionId)
+    // C16 传输通道分流:appserver = codex app-server 子进程(JSON-RPC,token 级
+    // delta);默认 exec(零行为变化,红线:M3 默认不切)。两通道共用 tempHome
+    // (MCP 配置/技能同构)与代理(provider base_url 同源)。
+    const transport = this.resolveAgentTransport()
+    let appServer: AgentSession['appServer']
+    if (transport === 'appserver') {
+      appServer = await createAppServerRuntime({
+        binary,
+        env: {
+          ...process.env,
+          CODEX_HOME: tempHome,
+          WORKBENCH_CODEX_API_KEY: cfg.api_key || process.env.CODEX_API_KEY || '',
+          ...(serverPort ? { WORKBENCH_MCP_TOKEN: getOrCreateMcpToken() } : {})
+        },
+        configArgs: [
+          `model="${cfg.buildModel || 'glm-5.3-flash'}"`,
+          'model_provider="openai_http"',
+          `model_providers.openai_http={ name = "Artify Workbench HTTP", base_url = "${resolveCodexBaseUrl({ baseUrl: codexBaseUrl })}", env_key = "WORKBENCH_CODEX_API_KEY", wire_api = "responses", requires_openai_auth = false, supports_websockets = false }`
+        ]
+      })
+    }
     const codex = new Codex({
       codexPathOverride: binary,
       baseUrl: resolveCodexBaseUrl({
@@ -520,6 +580,7 @@ class WorkbenchService {
       thread,
       tempHome,
       proxy,
+      ...(appServer ? { appServer } : {}),
       lastActiveAt: Date.now(),
       turns: 0,
       totalTokens: 0
@@ -545,6 +606,9 @@ class WorkbenchService {
     const agent = this.agentSessions.get(sessionId)
     if (!agent) return
     this.agentSessions.delete(sessionId)
+    if (agent.appServer) {
+      void agent.appServer.dispose().catch(() => {})
+    }
     try {
       agent.proxy?.server.close()
     } catch {
@@ -1164,27 +1228,55 @@ ${userInput}`
     // codex exec 的 JSONL 原始行（string 形态）——parsePlanFromCodex 容错解析用
     const rawLines: string[] = []
     try {
-      const { events } = await agent.thread.runStreamed(spec, { signal: opts.signal })
-      for await (const event of events) {
-        if (typeof event === 'string') {
-          rawLines.push(event)
+      if (agent.appServer) {
+        // C16 appserver 通道:token 级 delta 经 thread_event 旁路 + stream_delta
+        // 上抛(路由层 mapper.feedStreamDelta 映射 AG-UI 增量帧);exec 形态事件
+        // 照常 thread_event 透传,rawLines 收 JSON.stringify(PLAN 解析同构)。
+        const { stream } = await agent.appServer.startTurn(spec, opts.signal)
+        for await (const frame of stream) {
+          for (const d of frame.deltas) {
+            onProgress({ type: 'stream_delta', delta: d })
+          }
+          if (frame.event) {
+            onProgress({ type: 'thread_event', event: frame.event })
+            try {
+              rawLines.push(JSON.stringify(frame.event))
+            } catch {
+              /* ignore */
+            }
+            if (
+              frame.event.type === 'turn.completed' &&
+              (frame.event as { usage?: unknown }).usage
+            ) {
+              const u = (frame.event as unknown as { usage: Record<string, number> }).usage
+              agent.totalTokens += Number(u.input_tokens ?? 0) + Number(u.output_tokens ?? 0)
+            }
+          }
           onProgress({ type: 'log', text: 'deciding' })
-          continue
         }
-        // 结构化 ThreadEvent：透传给路由层（SSE item 流，前端实时渲染
-        // 工具调用/文件改动/web 搜索/reasoning，抄 codex app-server 条目驱动模型）
-        onProgress({ type: 'thread_event', event })
-        try {
-          rawLines.push(JSON.stringify(event))
-        } catch {
-          /* ignore */
+      } else {
+        const { events } = await agent.thread.runStreamed(spec, { signal: opts.signal })
+        for await (const event of events) {
+          if (typeof event === 'string') {
+            rawLines.push(event)
+            onProgress({ type: 'log', text: 'deciding' })
+            continue
+          }
+          // 结构化 ThreadEvent：透传给路由层（SSE item 流，前端实时渲染
+          // 工具调用/文件改动/web 搜索/reasoning，抄 codex app-server 条目驱动模型）
+          onProgress({ type: 'thread_event', event })
+          try {
+            rawLines.push(JSON.stringify(event))
+          } catch {
+            /* ignore */
+          }
+          // 轮级 usage 累计（预算监控：每会话 token 总量）
+          if (event.type === 'turn.completed' && event.usage) {
+            agent.totalTokens +=
+              Number(event.usage.input_tokens ?? 0) + Number(event.usage.output_tokens ?? 0)
+          }
+          onProgress({ type: 'log', text: 'deciding' })
         }
-        // 轮级 usage 累计（预算监控：每会话 token 总量）
-        if (event.type === 'turn.completed' && event.usage) {
-          agent.totalTokens +=
-            Number(event.usage.input_tokens ?? 0) + Number(event.usage.output_tokens ?? 0)
-        }
-        onProgress({ type: 'log', text: 'deciding' })
       }
     } catch (e) {
       // 中断/异常也留调试日志（用户停止后「复制 debug」仍有内容可看）；
@@ -1461,9 +1553,9 @@ ${userInput}`
     // 自组/导入工作流执行 → 同步到画布（新 tab；chat 决策期间由路由层注册
     // handler 转 SSE sync 事件 → 前端注入桥 loadWorkflow）。模板编排执行
     // （wb_execute_template）在提交前经 syncTemplateToCanvas 走同通道。
-    if (this.canvasSyncHandler) {
+    if (this.canvasSyncHandler || this.canvasSyncHandlers.size > 0) {
       try {
-        this.canvasSyncHandler({ workflow, name: opts.name })
+        this.dispatchCanvasSync({ workflow, name: opts.name }, sessionId)
       } catch (e) {
         logger.debug('workbench canvasSyncHandler failed', e)
       }
@@ -1471,15 +1563,56 @@ ${userInput}`
     return execution
   }
 
-  /** chat 决策期间注册的画布同步回调（路由层注册/清理；执行即上画布） */
+  /**
+   * chat 决策期间注册的画布同步回调（路由层注册/清理；执行即上画布）。
+   * C7：按会话隔离——handler 注册时带 sessionId，派发只路由到所属会话；
+   * 未注册该会话时静默跳过（不误投到其他会话的流）。handler 为 null 时
+   * 注销该会话。无 sessionId 的注册走旧全局兜底槽（行为与 C7 前逐字节一致，
+   * 覆盖非 chat 链路的手动注册场景）。
+   */
+  private canvasSyncHandlers = new Map<
+    string,
+    (sync: { workflow: ComfyPrompt; name?: string; templateId?: string }) => void
+  >()
   private canvasSyncHandler:
     | ((sync: { workflow: ComfyPrompt; name?: string; templateId?: string }) => void)
     | null = null
 
   setCanvasSyncHandler(
-    h: ((sync: { workflow: ComfyPrompt; name?: string; templateId?: string }) => void) | null
+    h: ((sync: { workflow: ComfyPrompt; name?: string; templateId?: string }) => void) | null,
+    sessionId?: string
   ): void {
-    this.canvasSyncHandler = h
+    if (!sessionId) {
+      // 旧全局语义（无会话绑定）：null 注销，非 null 覆盖
+      this.canvasSyncHandler = h
+      return
+    }
+    if (h) this.canvasSyncHandlers.set(sessionId, h)
+    else this.canvasSyncHandlers.delete(sessionId)
+  }
+
+  /**
+   * 派发画布同步：优先会话绑定 handler，缺失回退旧全局 handler（兼容语义）。
+   * 审查修复 M-1:显式 sessionId 优先(调用方总是已知——executeWorkflow 首参/
+   * syncTemplateToCanvas 的会话),仅缺省时 peek 兜底。修前恒取全局 peek
+   * (最早 begin 会话),多会话并行 decide 时 B 会话的画布同步会投递给
+   * A 会话注册的 SSE handler(串流)。
+   */
+  private dispatchCanvasSync(
+    sync: {
+      workflow: ComfyPrompt
+      name?: string
+      templateId?: string
+    },
+    explicitSessionId?: string
+  ): void {
+    const sessionId = explicitSessionId ?? peekWorkbenchToolSession()
+    const h = sessionId ? this.canvasSyncHandlers.get(sessionId) : undefined
+    if (h) {
+      h(sync)
+      return
+    }
+    this.canvasSyncHandler?.(sync)
   }
 
   /**
@@ -1490,17 +1623,20 @@ ${userInput}`
    * 路径缺这一步（真实事故：C 界面侧边栏跑完任务，画布不加载工作流）。
    * handler 未注册（非 chat 链路，如 /execute 直连）时静默跳过，不阻断执行。
    */
-  syncTemplateToCanvas(template: WorkflowTemplate): void {
-    if (!this.canvasSyncHandler) return
+  syncTemplateToCanvas(template: WorkflowTemplate, sessionId?: string): void {
+    if (!this.canvasSyncHandler && this.canvasSyncHandlers.size === 0) return
     // template.prompt 即 ComfyPrompt（API prompt 格式），与 executeWorkflow 旧路径一致：
     // 统一交给路由层 promptToWorkflowGraph 转 UI graph 下发（含 ensure-tab 与拓扑布局），
     // 不在此区分 workflow 真实布局（routes 写死走转换，传 UI graph 反而类型不符）。
     try {
-      this.canvasSyncHandler({
-        workflow: template.prompt,
-        name: template.name,
-        templateId: template.id
-      })
+      this.dispatchCanvasSync(
+        {
+          workflow: template.prompt,
+          name: template.name,
+          templateId: template.id
+        },
+        sessionId
+      )
     } catch (e) {
       logger.debug('workbench syncTemplateToCanvas failed', e)
     }

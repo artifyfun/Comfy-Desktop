@@ -85,7 +85,13 @@ export function ensurePanelView(
       // preload/index.js imports the shared window.api chunk; a sandboxed preload can't
       // require() relative chunks, which would break window.api in the panel.
       sandbox: false,
-      preload: path.join(__dirname, '../preload/index.js')
+      preload: path.join(__dirname, '../preload/index.js'),
+      // A UI(workbench)流式渲染依赖 16ms 级 setTimeout 节流(WbMarkdown 增量
+      // flush);Electron 默认对遮挡/后台 webContents 激进节流定时器,单窗口
+      // 模式下 panelView 被 ComfyUI 视图切换遮挡时 token 流会退化成整段
+      // 弹出。关闭 backgroundThrottling 保住流式粒度(实测:Chrome 后台 tab
+      // 同机制下 28 次 watch 仅 1 次 flush)。
+      backgroundThrottling: false
       // Default session (no partition) keeps the panel isolated from ComfyUI's storage.
     }
   })

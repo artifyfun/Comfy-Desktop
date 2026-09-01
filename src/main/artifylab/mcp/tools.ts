@@ -17,11 +17,14 @@ function text(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
 }
 
-export type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>
+export type ToolHandler = (args: Record<string, unknown>, identity?: string) => Promise<unknown>
 
 export interface ToolRegistry {
   list(): Tool[]
-  handle(name: string, args: Record<string, unknown>): Promise<unknown>
+  /** identity:decide 会话身份(C7),可选。门控/增强 registry 沿链透传,
+   *  wb_* 工具据此路由到发起会话;无身份(外部 MCP 客户端)时工具内部
+   *  回退旧单槽语义,行为与身份链引入前一致。 */
+  handle(name: string, args: Record<string, unknown>, identity?: string): Promise<unknown>
   /** 重新读取 appStore 增量同步动态工具（由调用方在 change 后触发并 sendToolListChanged） */
   sync(): void
 }
@@ -134,7 +137,8 @@ export function createToolRegistry(): ToolRegistry {
 
   return {
     list: () => [...handlers.values()].map((h) => h.tool),
-    handle: async (name, args) => {
+    handle: async (name, args, _identity) => {
+      // 底层静态/动态 app 工具不消费身份(仅 wb_* 需要);签名对齐接口的可选第三参
       const h = handlers.get(name)
       if (!h) throw new Error(`Unknown tool: ${name}`)
       return h.fn(args)

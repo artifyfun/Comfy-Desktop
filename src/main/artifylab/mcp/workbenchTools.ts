@@ -8,7 +8,8 @@
  * 安全边界：
  * - execute 前强制 validatePlanLocal（与 decide 快路径同一套白名单校验），
  *   codex 拿不到裸执行权；
- * - 会话归属由 currentDecideSession 限定（工具只在 decide 轮内可用）；
+ * - 会话归属由 decideSessions 注册表限定（工具只在 decide 轮内可用；C7 起按
+ *   请求身份精确路由，多会话并行不串号）；
  * - 记忆工具同 workbench memory intent 语义（key 幂等，≤500 字）。
  */
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
@@ -26,26 +27,96 @@ import { listBatchQueue, type BatchJobSummary } from '../services/batchRunner'
 import { inferFirstMediaSlot } from './executor'
 import type { ComfyPrompt, ParamNode } from '../appStore'
 import appStoreManager from '../appStore'
-import type { ToolHandler, ToolRegistry } from './tools'
+import type { ToolRegistry } from './tools'
 
-/** 当前 decide 会话（工具执行上下文）。decide 开始时置位，结束后清空。 */
-let currentDecideSession: string | null = null
+/**
+ * 当前 decide 会话上下文注册表（C7 多会话并行）。
+ *
+ * 旧实现是模块级单例 currentDecideSession：两个会话并行 decide 时 begin/end
+ * 相互覆盖，wb_* 工具经 HTTP 回环 /mcp 时全部落在最先 begin 的会话上（串号）。
+ * 现改为 Set<sessionId> 注册表：begin/end 签名不变（嵌套保护语义由「end 只删
+ * 自己」继承），工具调用按请求身份精确路由到所属会话。
+ */
+const decideSessions = new Set<string>()
 
-/** decide 入口置位（嵌套保护：外层会话优先，内层不清掉外层） */
+/** decide 入口置位（嵌套保护：各会话独立入册，互不覆盖） */
 export function beginWorkbenchToolContext(sessionId: string): void {
   const session = workbenchService.getSession(sessionId)
   if (!session) throw new Error(`session not found: ${sessionId}`)
-  currentDecideSession = currentDecideSession ?? sessionId
+  decideSessions.add(sessionId)
 }
 
-/** decide 结束清位（only 若仍归属本会话） */
+/** decide 结束清位（只清本会话，其余并行会话不受影响） */
 export function endWorkbenchToolContext(sessionId: string): void {
-  if (currentDecideSession === sessionId) currentDecideSession = null
+  decideSessions.delete(sessionId)
 }
 
-function requireSession(): string {
-  if (!currentDecideSession) throw new Error('workbench tool called outside decide session')
-  return currentDecideSession
+/** 仅测试可见：当前在册 decide 会话数（验证多会话并发注册） */
+export function decideContextSizeForTest(): number {
+  return decideSessions.size
+}
+
+/**
+ * 只读窥探当前工具会话（不解析 URL，供 service 的画布同步派发路由）。
+ * 返回注册表中最早 begin 的会话 id；无活动 decide 时返回 null。
+ */
+export function peekWorkbenchToolSession(): string | null {
+  if (decideSessions.size === 0) return null
+  return decideSessions.values().next().value!
+}
+
+const WORKBENCH_SESSION_HEADER = 'x-workbench-session'
+const WORKBENCH_SESSION_QUERY = 'wb_session'
+
+/**
+ * 从工具请求身份解析 decide 会话（C7）。优先级：X-Workbench-Session header >
+ * URL query（wb_session）。返回 null 表示请求未携带会话身份。
+ *
+ * 这是「接收侧接线面」的纯函数镜像：codex 引擎（0.149.x RawMcpServerConfig
+ * 支持 http_headers）目前把会话身份写进每会话 MCP server 的 URL query；
+ * 若未来 mcp/index.ts（接收侧）接通 header 透传，同一函数直接吃 req.headers。
+ */
+export function resolveWorkbenchSessionFromRequest(
+  headers?: Record<string, unknown>,
+  url?: string
+): string | null {
+  const headerVal = headers?.[WORKBENCH_SESSION_HEADER]
+  const headerSid = Array.isArray(headerVal)
+    ? String(headerVal[0] ?? '')
+    : headerVal != null
+      ? String(headerVal)
+      : ''
+  if (headerSid) return headerSid
+  if (url) {
+    try {
+      // 审查修复 C-1A:express req.originalUrl 是路径相对形式("/mcp?wb_session=x"),
+      // new URL(相对) 无 base 抛 ERR_INVALID_URL 被 catch 静默吞掉 → query 身份
+      // 通道死代码(生产从未生效,仅 header 通道兜住)。补 base 后两通道都活。
+      const q = new URL(url, 'http://localhost').searchParams.get(WORKBENCH_SESSION_QUERY)
+      if (q) return q
+    } catch {
+      /* 非法 URL：按无会话身份处理 */
+    }
+  }
+  return null
+}
+
+/**
+ * 解析本次工具调用归属的 decide 会话。
+ * - 带身份（MCP URL 或会话 id 字面量）：精确路由；会话未在 decide 中 → 拒绝
+ *   （外部客户端带伪造身份调用被同一道门挡下）。
+ * - 无身份：回退旧单槽语义——最外层（最先 begin）的 decide 会话，行为与
+ *   C7 之前逐字节一致。
+ */
+function requireSession(identity?: string): string {
+  if (identity) {
+    const isUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(identity)
+    const sid = isUrl ? resolveWorkbenchSessionFromRequest(undefined, identity) : identity
+    if (sid && decideSessions.has(sid)) return sid
+    throw new Error('workbench tool called outside decide session')
+  }
+  if (decideSessions.size === 0) throw new Error('workbench tool called outside decide session')
+  return decideSessions.values().next().value!
 }
 
 function text(data: unknown) {
@@ -148,7 +219,12 @@ async function pollBatchUntilDone(jobId: string): Promise<BatchJobSummary> {
   }
 }
 
-const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
+/** wb_* 工具函数签名：第二参为「请求身份」（每会话 MCP 配置注入的 URL 或会话
+ * id 字面量），requireSession 据此做会话路由（C7）。tools.ts 的 ToolHandler
+ * 不含身份参（其文件本组件不触碰），故在此独立声明。 */
+type WBToolFn = (args: Record<string, unknown>, identity?: string) => Promise<unknown>
+
+const WB_TOOLS: Array<{ tool: Tool; fn: WBToolFn }> = [
   {
     tool: {
       name: 'wb_list_templates',
@@ -157,8 +233,8 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: true }
     },
-    fn: async () => {
-      const sessionId = requireSession()
+    fn: async (_args, identity) => {
+      const sessionId = requireSession(identity)
       return text(
         workbenchService.listTemplates(sessionId).map((t) => ({
           id: t.id,
@@ -235,8 +311,8 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       },
       annotations: { readOnlyHint: false, destructiveHint: false }
     },
-    fn: async (args) => {
-      const sessionId = requireSession()
+    fn: async (args, identity) => {
+      const sessionId = requireSession(identity)
       const plan = toPlan(args)
       const validation = validatePlanLocal(plan, workbenchService.listTemplates(sessionId))
       if (validation.issues.length > 0 || !validation.template) {
@@ -247,8 +323,9 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       // （新 tab；当前 tab 已是同一工作流则复用）。此前编排路径缺这一步，
       // spec 承诺的「执行模板自动加载画布」对 wb_execute_template 不成立
       // （真实事故：C 界面侧边栏跑完任务画布不动）。非 chat 链路
-      // （handler 未注册）时内部静默跳过，不阻断执行。
-      workbenchService.syncTemplateToCanvas(validation.template)
+      // （handler 未注册）时内部静默跳过，不阻断执行。sessionId 显式传入
+      // (审查修复 M-1):多会话并行时同步事件不再串投最早 begin 的会话。
+      workbenchService.syncTemplateToCanvas(validation.template, sessionId)
       // 批量编排：走 batchRunner 队列（串行、可暂停/取消），进度经
       // /api/batch 通道。行级失败不互相阻塞，终态汇总返回。
       if (plan.batch) {
@@ -300,8 +377,8 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       },
       annotations: { readOnlyHint: true }
     },
-    fn: async (args) => {
-      const sessionId = requireSession()
+    fn: async (args, identity) => {
+      const sessionId = requireSession(identity)
       let info: Record<string, ObjectInfoNode> | null = null
       try {
         const ctrl = new AbortController()
@@ -383,8 +460,8 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       },
       annotations: { readOnlyHint: true }
     },
-    fn: async (args) => {
-      const sessionId = requireSession()
+    fn: async (args, identity) => {
+      const sessionId = requireSession(identity)
       const template = workbenchService.resolveTemplate(sessionId, String(args.template_id))
       if (!template) return text({ ok: false, error: 'template not found' })
       const nodeOverrides = {
@@ -501,8 +578,8 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       },
       annotations: { readOnlyHint: false, destructiveHint: false }
     },
-    fn: async (args) => {
-      const sessionId = requireSession()
+    fn: async (args, identity) => {
+      const sessionId = requireSession(identity)
       const workflow = args.workflow as ComfyPrompt
       if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow))
         return text({ ok: false, error: 'workflow（API prompt 对象）required' })
@@ -555,8 +632,8 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       },
       annotations: { readOnlyHint: false, destructiveHint: false }
     },
-    fn: async (args) => {
-      const sessionId = requireSession()
+    fn: async (args, identity) => {
+      const sessionId = requireSession(identity)
       try {
         const t = workbenchService.cloneTemplate(
           sessionId,
@@ -600,8 +677,8 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       },
       annotations: { readOnlyHint: false, destructiveHint: false }
     },
-    fn: async (args) => {
-      requireSession()
+    fn: async (args, identity) => {
+      requireSession(identity)
       const name = String(args.name ?? '').trim()
       if (!name) return text({ ok: false, error: 'name required' })
       const workflow = args.workflow as ComfyPrompt
@@ -627,8 +704,8 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       },
       annotations: { readOnlyHint: true }
     },
-    fn: async (args) => {
-      const sessionId = requireSession()
+    fn: async (args, identity) => {
+      const sessionId = requireSession(identity)
       const r = await workbenchService.pollExecution(sessionId, String(args.prompt_id))
       return text({ status: r.status, outputs: r.outputs, error: r.error })
     }
@@ -650,8 +727,8 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       },
       annotations: { readOnlyHint: true }
     },
-    fn: async (args) => {
-      const sessionId = requireSession()
+    fn: async (args, identity) => {
+      const sessionId = requireSession(identity)
       const promptId = args.prompt_id ? String(args.prompt_id) : null
       // 指定 prompt_id：直接查该次执行；缺省：会话最近一次执行
       const session = workbenchService.getSession(sessionId)
@@ -693,8 +770,8 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       },
       annotations: { readOnlyHint: false, destructiveHint: false }
     },
-    fn: async (args) => {
-      requireSession()
+    fn: async (args, identity) => {
+      requireSession(identity)
       const key = String(args.key ?? '').trim()
       const value = String(args.value ?? '')
       if (!key) return text({ ok: false, error: 'key required' })
@@ -716,8 +793,8 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
       },
       annotations: { readOnlyHint: false, destructiveHint: true }
     },
-    fn: async (args) => {
-      requireSession()
+    fn: async (args, identity) => {
+      requireSession(identity)
       const key = String(args.key ?? '').trim()
       const ok = key ? workbenchService.forgetMemory(key) : false
       return text({ ok, key })
@@ -729,13 +806,18 @@ const WB_TOOLS: Array<{ tool: Tool; fn: ToolHandler }> = [
  * 组合 registry：现有 MCP registry（外部 app 工具）+ 工作台编排工具（wb_*）。
  * /mcp 端点继续服务外部客户端（无 wb 上下文时 wb_* 返回明确错误）；
  * decide 链路用同一个端点+token，工具调用落在当前 decide 会话上。
+ *
+ * C7：wb_* 工具 fn 增加第二参「请求身份」（每会话 MCP 配置注入的完整 URL 或
+ * 会话 id 字面量），requireSession 按它精确路由到所属会话；未携带身份的调用
+ * 保持单槽回退语义（最外层 decide 会话），与 C7 之前行为一致。
+ * base registry 转发不携带身份（外部工具无 wb 会话语义）。
  */
 export function createWorkbenchAugmentedRegistry(base: ToolRegistry): ToolRegistry {
   return {
     list: () => [...base.list(), ...WB_TOOLS.map((w) => w.tool)],
-    handle: async (name, args) => {
+    handle: async (name, args, identity?: string) => {
       const wb = WB_TOOLS.find((w) => w.tool.name === name)
-      if (wb) return wb.fn(args ?? {})
+      if (wb) return wb.fn(args ?? {}, identity)
       return base.handle(name, args)
     },
     sync: () => base.sync()
