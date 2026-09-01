@@ -170,7 +170,9 @@ export const useAppStore = defineStore('app', () => {
         method: 'post',
       })
       if (response.ok) {
-        apps.value = (response.data || []).filter((app) => (isElectron ? true : !!app.code))
+        // 旧网页模式按 app.code 过滤，但 App 接口已无 code 字段（A 界面
+        // 应用只有 template）——该过滤会把浏览器模式的应用列表清空，移除
+        apps.value = response.data || []
       } else {
         throw new Error(response.message || '应用列表加载失败')
       }

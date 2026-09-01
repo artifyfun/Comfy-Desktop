@@ -1732,12 +1732,17 @@ function clamp(v, a, b) {
 const appNodeObjects = computed(() => objects.value.filter((o) => o.type === 'app'))
 
 // app 详情缓存：appId → 完整 app（含 template；picker 拾取/详情接口回填）
+// cacheVer 是响应式触发器：Map.set 不触发 computed，靠版本号驱动面板刷新
 const appCache = new Map()
+const appCacheVer = ref(0)
 async function ensureAppDetail(appId) {
   if (appCache.has(appId)) return appCache.get(appId)
   try {
     const app = await appStore.getAppById(appId)
-    if (app) appCache.set(appId, app)
+    if (app) {
+      appCache.set(appId, app)
+      appCacheVer.value++
+    }
     return app || null
   } catch {
     return null
@@ -1753,6 +1758,9 @@ function openAppPicker(wx, wy) {
 function onAppPicked(app) {
   appPicker.open = false
   if (!app?.id) return
+  // picker 的 app 已带完整 template —— 立即入缓存（面板字段即时渲染）
+  appCache.set(app.id, app)
+  appCacheVer.value++
   beforeChange()
   const node = makeAppNode(app.id, app.name, appPicker.wx, appPicker.wy)
   objects.value.push(node)
@@ -1776,9 +1784,10 @@ Object.defineProperty(appPanel, 'node', {
   get: () => appPanelNode.value,
   enumerable: true,
 })
-const appPanelApp = computed(() =>
-  appPanelNode.value ? appCache.get(appPanelNode.value.appId) || null : null,
-)
+const appPanelApp = computed(() => {
+  appCacheVer.value // 依赖缓存版本（Map.set 本身不触发）
+  return appPanelNode.value ? appCache.get(appPanelNode.value.appId) || null : null
+})
 const appPanelPos = computed(() => {
   const n = appPanelNode.value
   if (!n) return { x: 0, y: 0 }
