@@ -172,6 +172,84 @@
           </v-layer>
         </v-stage>
 
+        <!-- 项目栏（左上：标题编辑 + 画布列表下拉，参考 canvas-top-bar） -->
+        <div
+          data-project-bar
+          class="absolute top-3 left-3 z-10 flex items-center gap-1.5"
+          @mousedown.stop
+        >
+          <button
+            class="w-9 h-9 rounded-lg bg-[var(--wb-surface)] border border-[var(--wb-stroke)] text-[var(--wb-text-1)] hover:border-[var(--wb-accent)] transition flex items-center justify-center"
+            :title="t('canvasProjectsMenu')"
+            @click="projectMenuOpen = !projectMenuOpen"
+          >
+            <i class="fas fa-layer-group"></i>
+          </button>
+          <div
+            v-if="activeProject"
+            class="h-9 px-3 rounded-lg bg-[var(--wb-surface)] border border-[var(--wb-stroke)] flex items-center min-w-0 max-w-[260px]"
+            @dblclick="startProjectTitleEdit"
+            :title="t('canvasProjectRenameHint')"
+          >
+            <input
+              v-if="projectTitleEditing"
+              ref="projectTitleInput"
+              v-model="projectTitleDraft"
+              class="bg-transparent outline-none text-sm text-[var(--wb-text-1)] w-[180px]"
+              @blur="finishProjectTitleEdit"
+              @keydown.enter.prevent="finishProjectTitleEdit"
+              @keydown.esc.prevent="projectTitleEditing = false"
+            />
+            <span v-else class="text-sm font-medium text-[var(--wb-text-1)] truncate">{{
+              activeProject.title
+            }}</span>
+          </div>
+          <!-- 画布列表下拉 -->
+          <div
+            v-if="projectMenuOpen"
+            class="absolute top-12 left-0 w-64 rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl overflow-hidden z-20"
+          >
+            <div class="max-h-[320px] overflow-y-auto">
+              <button
+                v-for="pr in projectStore.projects"
+                :key="pr.id"
+                class="w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-[var(--wb-accent)]/15 transition"
+                :class="
+                  pr.id === projectStore.activeId
+                    ? 'text-[var(--wb-accent)]'
+                    : 'text-[var(--wb-text-1)]'
+                "
+                @click="openProjectById(pr.id)"
+              >
+                <i
+                  class="fas text-xs w-4"
+                  :class="
+                    pr.id === projectStore.activeId ? 'fa-check' : 'fa-' + 'circle text-transparent'
+                  "
+                ></i>
+                <span class="flex-1 truncate text-sm">{{ pr.title }}</span>
+                <span class="text-[10px] text-[var(--wb-text-2)]">{{
+                  new Date(pr.updatedAt).toLocaleDateString()
+                }}</span>
+              </button>
+            </div>
+            <div class="border-t border-[var(--wb-stroke)]">
+              <button
+                class="w-full text-left px-3 py-2 text-sm text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+                @click="createNewProject"
+              >
+                <i class="fas fa-plus w-4"></i>{{ t('canvasProjectNew') }}
+              </button>
+              <button
+                class="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-red-400/10 flex items-center gap-2"
+                @click="deleteActiveProject"
+              >
+                <i class="fas fa-trash w-4"></i>{{ t('canvasProjectDelete') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- 悬浮工具条 -->
         <div class="absolute top-3 right-3 flex gap-1.5">
           <button
@@ -477,7 +555,7 @@ import { useI18n } from '@/utils/i18n'
 import { useAppStore } from '@/stores/appStore'
 import { drainFiles, pushAttachments } from '@/utils/canvasBridge'
 import { useCanvasMode } from '@/utils/canvasMode'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import Workbench from '../workbench/index.vue'
 import AppHeader from '../apps/components/AppHeader.vue'
 import AppNodeCard from './AppNodeCard.vue'
@@ -522,10 +600,163 @@ import {
 const { t } = useI18n()
 const appStore = useAppStore()
 const router = useRouter()
+import {
+  PROJECTS_STORAGE_KEY,
+  LEGACY_STORAGE_KEY,
+  migrateLegacyStore,
+  normalizeStore,
+  addProject as psAddProject,
+  renameProject as psRenameProject,
+  deleteProject as psDeleteProject,
+  switchProject as psSwitchProject,
+  updateProjectDoc as psUpdateProjectDoc,
+} from './projectStore'
 const { onResult, emitAttachments, emitCanvasState, emitPrompt, onOps } = useCanvasMode()
 const wbOpen = ref(true) // 工作台侧边栏开合
 
 const STORAGE_KEY = 'artify.canvas.doc.v1'
+
+// —— 多画布项目集（S1）：artify.canvas.projects.v1，旧 artify.canvas.doc.v1 自动迁移 ——
+const projectStore = reactive({ ...emptyProjectStore() })
+function emptyProjectStore() {
+  return { version: 1, activeId: null, projects: [] }
+}
+const activeProject = computed(
+  () => projectStore.projects.find((p) => p.id === projectStore.activeId) || null,
+)
+const projectMenuOpen = ref(false)
+
+// 启动迁移：旧单画布档升格首个项目（幂等）
+;(function bootProjects() {
+  const { store, migrated } = migrateLegacyStore(
+    localStorage.getItem(PROJECTS_STORAGE_KEY),
+    localStorage.getItem(LEGACY_STORAGE_KEY),
+  )
+  Object.assign(projectStore, store)
+  if (migrated) persistProjects()
+})()
+function persistProjects() {
+  try {
+    localStorage.setItem(
+      PROJECTS_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        activeId: projectStore.activeId,
+        projects: projectStore.projects,
+      }),
+    )
+  } catch {
+    /* 容量满静默 */
+  }
+}
+/** 当前 doc → 项目集（saveNow 一并落盘） */
+function syncActiveDocToStore() {
+  if (!projectStore.activeId) return
+  Object.assign(
+    projectStore,
+    psUpdateProjectDoc(normalizeStore({ ...projectStore }), projectStore.activeId, {
+      version: 2,
+      name: activeProject.value?.title || '未命名画布',
+      viewport: { scale: viewport.value.scale, x: viewport.value.x, y: viewport.value.y },
+      objects: objects.value.map((o) => ({ ...o })),
+      links: links.value.map((l) => ({ ...l })),
+      groups: groups.value.map((g) => ({ ...g })),
+    }),
+  )
+}
+/** 切换项目：当前内容先入库，再载入目标 */
+function openProjectById(id) {
+  if (id === projectStore.activeId) {
+    projectMenuOpen.value = false
+    return
+  }
+  syncActiveDocToStore()
+  persistProjects()
+  const target = projectStore.projects.find((p) => p.id === id)
+  if (!target) return
+  beforeChange()
+  objects.value = target.doc.objects.map((o) => ({ ...o }))
+  links.value = target.doc.links.map((l) => ({ ...l }))
+  groups.value = target.doc.groups.map((g) => ({ ...g }))
+  viewport.value = makeViewport(
+    target.doc.viewport.scale,
+    target.doc.viewport.x,
+    target.doc.viewport.y,
+  )
+  Object.assign(projectStore, psSwitchProject({ ...projectStore }, id))
+  selection.value = []
+  selectedLinkId.value = null
+  appPanel.id = null
+  history.value = createHistory(60)
+  nextTick(() => syncDraggables())
+  persistProjects()
+  projectMenuOpen.value = false
+  message.info(t('canvasProjectSwitched').replace('{n}', target.title))
+}
+function createNewProject() {
+  syncActiveDocToStore()
+  const n = projectStore.projects.length + 1
+  Object.assign(
+    projectStore,
+    psAddProject({ ...projectStore }, t('canvasProjectDefaultName').replace('{n}', String(n))),
+  )
+  loadProjectIntoCanvas()
+  persistProjects()
+  projectMenuOpen.value = false
+}
+function renameActiveProject(title) {
+  if (!projectStore.activeId) return
+  Object.assign(projectStore, psRenameProject({ ...projectStore }, projectStore.activeId, title))
+  persistProjects()
+}
+function deleteActiveProject() {
+  const cur = activeProject.value
+  if (!cur) return
+  Modal.confirm({
+    title: t('canvasProjectDeleteTitle'),
+    content: t('canvasProjectDeleteConfirm').replace('{n}', cur.title),
+    okText: t('canvasProjectDeleteOk'),
+    cancelText: t('cancel'),
+    okButtonProps: { danger: true },
+    onOk: () => {
+      Object.assign(projectStore, psDeleteProject({ ...projectStore }, cur.id))
+      loadProjectIntoCanvas()
+      persistProjects()
+    },
+  })
+}
+/** 项目集当前激活项目 → 画布状态（新建/删除后回落） */
+function loadProjectIntoCanvas() {
+  const p = activeProject.value
+  if (!p) return
+  objects.value = p.doc.objects.map((o) => ({ ...o }))
+  links.value = p.doc.links.map((l) => ({ ...l }))
+  groups.value = p.doc.groups.map((g) => ({ ...g }))
+  viewport.value = makeViewport(p.doc.viewport.scale, p.doc.viewport.x, p.doc.viewport.y)
+  selection.value = []
+  selectedLinkId.value = null
+  appPanel.id = null
+  history.value = createHistory(60)
+  nextTick(() => syncDraggables())
+}
+/** 项目标题双击编辑（inline） */
+const projectTitleInput = ref(null)
+const projectTitleEditing = ref(false)
+const projectTitleDraft = ref('')
+function startProjectTitleEdit() {
+  projectTitleDraft.value = activeProject.value?.title || ''
+  projectTitleEditing.value = true
+}
+watch(projectTitleEditing, (v) => {
+  if (v) nextTick(() => projectTitleInput.value?.focus?.())
+})
+
+function finishProjectTitleEdit() {
+  if (projectTitleEditing.value) {
+    renameActiveProject(projectTitleDraft.value)
+    projectTitleEditing.value = false
+  }
+}
 const MIN_SCALE = 0.1
 const MAX_SCALE = 4
 const SNAP_THRESHOLD = 8
@@ -2534,6 +2765,9 @@ function saveSoon() {
   saveTimer = setTimeout(saveNow, 500)
 }
 function saveNow() {
+  // 项目集为唯一事实源；旧 key 继续双写（迁移兼容，外部工具可读）
+  syncActiveDocToStore()
+  persistProjects()
   try {
     localStorage.setItem(
       STORAGE_KEY,
@@ -2544,6 +2778,11 @@ function saveNow() {
   }
 }
 function loadNow() {
+  // S1 起以项目集为准（bootProjects 已迁移并装载 activeProject）
+  if (activeProject.value) {
+    loadProjectIntoCanvas()
+    return
+  }
   const raw = localStorage.getItem(STORAGE_KEY)
   if (!raw) return
   const doc = parseDoc(raw)
@@ -2600,6 +2839,19 @@ function onKeyUp(e) {
 
 // —— 图片落画布：文件拖入 + 剪贴板粘贴 ——
 const dragOver = ref(false)
+
+// 项目下拉外点关闭（capture 阶段判定；项目栏自身 mousedown.stop 不影响 document 捕获）
+onMounted(() => {
+  document.addEventListener(
+    'mousedown',
+    (e) => {
+      if (!projectMenuOpen.value) return
+      const bar = wrapEl.value?.querySelector?.('[data-project-bar]')
+      if (bar && !bar.contains(e.target)) projectMenuOpen.value = false
+    },
+    { capture: true },
+  )
+})
 // blob 图持久化：降采样到最长边 640 转 JPEG dataURL 存进文档（画布显示用原 blob
 // URL 保持清晰；存档用 persist dataURL，刷新/重开仍在）。
 function persistImage(o) {
