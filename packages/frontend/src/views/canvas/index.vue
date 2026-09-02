@@ -2783,7 +2783,6 @@ async function applyUpscale() {
     if (!blob) return
     const url = URL.createObjectURL(blob)
     beforeChange()
-    const k = (o.width || 1) / (iw || 1)
     o.src = url
     // 显示尺寸维持（像素翻倍但画布上大小不变）
     persistImage(o)
