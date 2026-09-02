@@ -206,6 +206,26 @@
                 @mousedown="onAnchorDown(seg.id, 'to', $event)"
               />
             </v-group>
+            <!-- 选中对象四角缩放手柄（拖角实时改尺寸写回数据；同句柄常驻渲染 +
+                 hitFunc 动态热区，避免 v-if 破坏 hit graph） -->
+            <v-group v-for="o in resizeTargets" :key="'rz' + o.id" :config="{ x: o.x, y: o.y }">
+              <v-circle
+                :config="resizeAnchorConfig(o, 'nw')"
+                @mousedown="onResizeStart(o.id, 'nw', $event)"
+              />
+              <v-circle
+                :config="resizeAnchorConfig(o, 'ne')"
+                @mousedown="onResizeStart(o.id, 'ne', $event)"
+              />
+              <v-circle
+                :config="resizeAnchorConfig(o, 'sw')"
+                @mousedown="onResizeStart(o.id, 'sw', $event)"
+              />
+              <v-circle
+                :config="resizeAnchorConfig(o, 'se')"
+                @mousedown="onResizeStart(o.id, 'se', $event)"
+              />
+            </v-group>
             <!-- 框选橡皮筋 -->
             <v-rect v-if="rubber" :config="rubberConfig" />
             <!-- 圈选裁剪橡皮筋 -->
@@ -1576,6 +1596,58 @@ function linkAnchorConfig(seg, side) {
   }
 }
 
+// —— 选中对象四角缩放手柄（第 3 批，参考 infinite-canvas 的 resize handles）——
+// 支持类型：图片（默认锁原图宽高比，Ctrl/⌘ 按住自由）/ 便签 / Frame（恒自由）。
+// 媒体（HTML overlay 播放器盖住节点区无法命中角柄）与 App/分镜卡（固定布局）不支持；
+// 组内成员禁止（组合语义由组拖动承载，防破坏成员相对位置）。
+const RESIZE_TYPES = ['image', 'note', 'frame']
+const RESIZE_MIN = 24 // 最小宽高（世界坐标）
+const resizeDrag = reactive({
+  active: false,
+  id: null, // 被拖对象 id
+  corner: null, // 'nw' | 'ne' | 'sw' | 'se'
+  fixed: null, // 对角不动点 {x,y}（拖 nw → 固定 se）
+  orig: null, // 起拖时 {x,y,w,h}
+  ratio: 0, // >0 锁宽高比（图片原图比例）；0 = 自由拉伸
+  pushed: false, // 首次实际位移才压 undo 快照（点住不拖不产生历史）
+})
+/** 单选且可缩放的对象（唯一显示角柄的目标；多选/不可缩放/crop 工具返回空） */
+const resizeTargets = computed(() => {
+  if (tool.value === 'crop') return [] // crop 需从图片角落起圈，角柄热区会抢命中
+  if (selection.value.length !== 1) return []
+  const o = objects.value.find((x) => x.id === selection.value[0])
+  if (!o || !RESIZE_TYPES.includes(o.type)) return []
+  if (groupOf(o.id)) return []
+  return [o]
+})
+/** 角柄显隐/命中判定（实时状态：拖动中仅目标对象自身保留角柄并跟随其角移动） */
+function resizeVisible(o) {
+  const t = resizeTargets.value[0]
+  if (t !== o) return false
+  return !resizeDrag.active || resizeDrag.id === o.id
+}
+/** 角柄 circle 配置（同 linkAnchorConfig 模式：常驻渲染 + hitFunc 动态热区） */
+function resizeAnchorConfig(o, corner) {
+  return {
+    x: corner.endsWith('e') ? o.width : 0,
+    y: corner.startsWith('s') ? o.height : 0,
+    radius: 6 / viewport.value.scale,
+    fill: '#fafaf9',
+    stroke: '#1f1d1a',
+    strokeWidth: 1.5 / viewport.value.scale,
+    opacity: resizeVisible(o) ? 1 : 0,
+    cursor: corner === 'nw' || corner === 'se' ? 'nwse-resize' : 'nesw-resize',
+    hitFunc(ctx, shape) {
+      if (!resizeVisible(o)) return
+      const r = 20 / viewport.value.scale
+      ctx.beginPath()
+      ctx.arc(0, 0, r, 0, Math.PI * 2, false)
+      ctx.closePath()
+      ctx.fillStrokeShape(shape)
+    },
+  }
+}
+
 // —— 撤销/重做（有界快照栈；快照 = objects+links+groups 序列化） ——
 const history = ref(createHistory(60))
 let historyPaused = false // 拖拽等连续操作期间暂停记录
@@ -2089,11 +2161,116 @@ function onReconnectEnd() {
   saveSoon()
 }
 
+// —— 角柄缩放拖拽（stage mousemove/up 驱动；数据实时写回 → 连线/句柄/文本/overlay 同步跟随）——
+function onResizeStart(id, corner, kev) {
+  stopKonvaEvent(kev)
+  if (tool.value === 'crop') return // 裁剪工具态不抢手势
+  if (spaceDown.value || kev.evt?.button === 1) return // 平移意图交还
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || groupOf(id)) return
+  const st = stageEl.value.getStage()
+  const p = st.getPointerPosition()
+  if (!p) return
+  resizeDrag.active = true
+  resizeDrag.id = id
+  resizeDrag.corner = corner
+  // 对角不动点（拖 nw → 固定右下角；拖 se → 固定左上角）
+  resizeDrag.fixed = {
+    x: o.x + (corner.endsWith('w') ? o.width : 0),
+    y: o.y + (corner.startsWith('n') ? o.height : 0),
+  }
+  resizeDrag.orig = { x: o.x, y: o.y, w: o.width, h: o.height }
+  resizeDrag.pushed = false
+  // 图片默认锁原图宽高比（Ctrl/⌘ 按住自由）；note/frame 恒自由
+  const lockRatio = o.type === 'image' && !kev.evt?.ctrlKey && !kev.evt?.metaKey
+  const nat = naturalOf(o)
+  const ar = nat.naturalWidth / nat.naturalHeight
+  resizeDrag.ratio = lockRatio && isFinite(ar) && ar > 0 ? ar : 0
+  drag.mode = 'resize' // 占住拖拽态：阻止平移/物件拖动（onMouseDown 同 connect 跳过）
+  drag.last = null
+}
+/** 缩放拖拽中：以固定角为锚 + 指针位置算新矩形，实时写回对象（首次位移才压 undo） */
+function onResizeMove() {
+  if (!resizeDrag.active) return
+  const o = objects.value.find((x) => x.id === resizeDrag.id)
+  if (!o) return
+  const st = stageEl.value.getStage()
+  const p = st.getPointerPosition()
+  if (!p) return
+  const ptr = screenToWorld(viewport.value, p.x, p.y)
+  const { fixed, corner, ratio } = resizeDrag
+  const rect = ratio ? ratioRect(fixed, ptr, corner, ratio) : freeRect(fixed, ptr, corner)
+  if (
+    !resizeDrag.pushed &&
+    (rect.x !== resizeDrag.orig.x ||
+      rect.y !== resizeDrag.orig.y ||
+      rect.w !== resizeDrag.orig.w ||
+      rect.h !== resizeDrag.orig.h)
+  ) {
+    beforeChange() // 压栈 = 缩放前状态（仅首次真实位移）
+    resizeDrag.pushed = true
+  }
+  if (!resizeDrag.pushed) return // 点住未拖：数据零改动
+  o.x = Math.round(rect.x)
+  o.y = Math.round(rect.y)
+  o.width = Math.round(rect.w)
+  o.height = Math.round(rect.h)
+  layerRefresh()
+}
+/** 自由拉伸矩形：固定对角不动，指针侧 clamp 最小尺寸（拖过对角也不会翻转） */
+function freeRect(fixed, ptr, corner) {
+  const right = corner.endsWith('e') ? Math.max(ptr.x, fixed.x + RESIZE_MIN) : fixed.x
+  const bottom = corner.endsWith('s') ? Math.max(ptr.y, fixed.y + RESIZE_MIN) : fixed.y
+  const left = corner.endsWith('e') ? fixed.x : Math.min(ptr.x, right - RESIZE_MIN)
+  const top = corner.endsWith('s') ? fixed.y : Math.min(ptr.y, bottom - RESIZE_MIN)
+  return { x: left, y: top, w: right - left, h: bottom - top }
+}
+/** 等比矩形：以固定角为锚，取指针在 x/y 两轴中「主导轴」定宽，h=w/ratio（对角不动） */
+function ratioRect(fixed, ptr, corner, ratio) {
+  const dirX = corner.endsWith('e') ? 1 : -1
+  const dirY = corner.endsWith('s') ? 1 : -1
+  const dx = Math.max(0, (ptr.x - fixed.x) * dirX) // 期望宽
+  const dy = Math.max(0, (ptr.y - fixed.y) * dirY) // 期望高
+  if (dx === 0 && dy === 0) {
+    // 指针贴住不动点：给最小尺寸兜底
+    const w = Math.max(RESIZE_MIN, RESIZE_MIN * ratio)
+    return rectFromFixed(fixed, corner, w, w / ratio)
+  }
+  // 主导轴 = 两候选与指针偏差更小者（x 主导则高由宽推，y 主导则宽由高推）
+  const errByX = Math.abs(dy - dx / ratio)
+  const errByY = Math.abs(dx - dy * ratio)
+  const w =
+    errByX <= errByY
+      ? Math.max(dx, RESIZE_MIN * ratio, RESIZE_MIN)
+      : Math.max(dy * ratio, RESIZE_MIN * ratio, RESIZE_MIN)
+  return rectFromFixed(fixed, corner, w, w / ratio)
+}
+/** 由固定角 + 宽高反推矩形左上角（固定角保持不动） */
+function rectFromFixed(fixed, corner, w, h) {
+  const x = corner.endsWith('e') ? fixed.x : fixed.x - w
+  const y = corner.endsWith('s') ? fixed.y : fixed.y - h
+  return { x, y, w, h }
+}
+/** 缩放松手：收尾（数据已实时写回；窗口外松手由 onWindowMouseUp 兜底） */
+function onResizeEnd() {
+  if (!resizeDrag.active) return
+  resizeDrag.active = false
+  resizeDrag.id = null
+  resizeDrag.corner = null
+  resizeDrag.fixed = null
+  resizeDrag.orig = null
+  resizeDrag.ratio = 0
+  resizeDrag.pushed = false
+  drag.mode = null
+  drag.last = null
+  saveSoon()
+}
+
 function onMouseDown(e) {
   // 空地（没点到任何 shape）按下：
   //   普通拖 = 平移画布；Shift/中键 拖 = 框选；crop 工具 = 圈选裁剪
   // 物件按下（onItemDown 先触发，drag.mode='item'）时 stage 级事件直接跳过
-  if (drag.mode === 'item' || drag.mode === 'connect' || drag.mode === 'reconnect') return
+  if (drag.mode === 'item' || drag.mode === 'connect' || drag.mode === 'reconnect' || drag.mode === 'resize') return
   // 兜底：重连拖拽异常残留（未松手/未 Esc）时，点空白即取消
   if (reconnectDrag.active) cancelReconnectDrag()
   const st = stageEl.value.getStage()
@@ -2147,6 +2324,10 @@ function onMouseMove(e) {
     onReconnectMove()
     return
   }
+  if (drag.mode === 'resize') {
+    onResizeMove()
+    return
+  }
   if (drag.mode === 'pan' && drag.last) {
     viewport.value = {
       scale: viewport.value.scale,
@@ -2178,6 +2359,12 @@ function onMouseUp() {
   }
   if (drag.mode === 'reconnect') {
     onReconnectEnd()
+    drag.mode = null
+    drag.last = null
+    return
+  }
+  if (drag.mode === 'resize') {
+    onResizeEnd()
     drag.mode = null
     drag.last = null
     return
@@ -4858,6 +5045,7 @@ const shortcutList = computed(() => [
   { label: '双击便签', desc: t('canvasScNoteEdit') },
   { label: '双击 Frame', desc: t('canvasScFrameRename') },
   { label: '拖拽连线端点', desc: t('canvasScLinkReconnect') },
+  { label: '四角手柄', desc: t('canvasScResize') },
   { label: 'Esc', desc: t('canvasScEscape') },
 ])
 
@@ -5001,6 +5189,10 @@ function placeFiles(files) {
 function viewportCenterWorld() {
   return screenToWorld(viewport.value, size.w / 2, size.h / 2)
 }
+/** 窗口级 mouseup 兜底：缩放等 stage 拖拽若指针移出画布松手，Konva mouseup 不触发，这里收尾 */
+function onWindowMouseUp() {
+  if (drag.mode === 'resize') onResizeEnd()
+}
 function drainPinned() {
   placeFiles(drainFiles())
 }
@@ -5051,6 +5243,7 @@ onMounted(() => {
   ro.observe(el)
   window.addEventListener('keydown', onKey)
   window.addEventListener('keyup', onKeyUp)
+  window.addEventListener('mouseup', onWindowMouseUp)
   window.addEventListener('paste', onPaste)
   // stage 初始变换
   requestAnimationFrame(applyViewport)
@@ -5069,6 +5262,7 @@ onBeforeUnmount(() => {
   ro?.disconnect()
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('keyup', onKeyUp)
+  window.removeEventListener('mouseup', onWindowMouseUp)
   window.removeEventListener('paste', onPaste)
   clearTimeout(saveTimer)
   cancelHoverHide()
