@@ -437,6 +437,97 @@
         </div>
 
         <!-- App 节点展开参数面板（HTML overlay，锚定节点屏幕坐标） -->
+        <!-- 提示词库面板（S6b）：内置分词 + 自定义 + JSON 导入 -->
+        <div
+          v-if="promptLib.open"
+          class="absolute z-30 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[560px] max-h-[70vh] flex flex-col rounded-2xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-2xl"
+          @mousedown.stop
+          @pointerdown.stop
+        >
+          <div class="flex items-center gap-2 px-4 pt-3 pb-2">
+            <i class="fas fa-book-open text-[var(--wb-accent)]"></i>
+            <span class="text-sm font-medium text-[var(--wb-text-1)]">{{
+              t('canvasPromptLibTitle')
+            }}</span>
+            <span
+              v-if="promptTarget"
+              class="text-xs px-2 py-0.5 rounded-full bg-[var(--wb-accent)]/15 text-[var(--wb-accent)]"
+            >
+              {{
+                promptTarget.kind === 'rewrite'
+                  ? t('canvasPromptTargetRewrite')
+                  : t('canvasPromptTargetNote')
+              }}
+            </span>
+            <div class="flex-1"></div>
+            <button
+              class="w-7 h-7 rounded-lg text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] transition"
+              @click="promptLib.open = false"
+            >
+              <i class="fas fa-xmark"></i>
+            </button>
+          </div>
+          <div class="flex items-center gap-2 px-4 pb-2">
+            <button
+              v-for="tb in ['builtin', 'custom']"
+              :key="tb"
+              class="h-7 px-3 rounded-lg text-xs transition"
+              :class="
+                promptLib.tab === tb
+                  ? 'text-white bg-[var(--wb-accent)]'
+                  : 'text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] border border-[var(--wb-stroke)]'
+              "
+              @click="promptLib.tab = tb"
+            >
+              {{ tb === 'builtin' ? t('canvasPromptBuiltinTab') : t('canvasPromptCustomTab') }}
+            </button>
+            <div class="flex-1"></div>
+            <input
+              v-model="promptLib.q"
+              class="w-44 bg-transparent outline-none text-sm text-[var(--wb-text-1)] border border-[var(--wb-stroke)] rounded-lg px-2 py-1"
+              :placeholder="t('canvasPromptSearch')"
+            />
+            <button
+              v-if="promptLib.tab === 'custom'"
+              class="h-7 px-2.5 rounded-lg text-xs text-[var(--wb-accent)] border border-[var(--wb-accent)]/40 hover:bg-[var(--wb-accent)]/10 transition"
+              @click="importPromptsFile"
+            >
+              <i class="fas fa-file-import mr-1"></i>{{ t('canvasPromptImport') }}
+            </button>
+          </div>
+          <div class="flex-1 overflow-y-auto px-4 pb-4 space-y-3">
+            <div v-for="cat in promptLibView" :key="cat.category">
+              <div
+                class="text-xs text-[var(--wb-text-2)] mb-1.5 sticky top-0 bg-[var(--wb-surface)] py-1"
+              >
+                {{ cat.category }}
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="it in cat.items"
+                  :key="it.text"
+                  class="group max-w-full flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-[var(--wb-stroke)] hover:border-[var(--wb-accent)] text-xs text-[var(--wb-text-1)] transition"
+                  :title="it.hint || it.text"
+                  @click="applyPrompt(it.text)"
+                >
+                  <span class="truncate max-w-[280px]">{{ it.text }}</span>
+                  <i
+                    v-if="promptLib.tab === 'custom'"
+                    class="fas fa-xmark opacity-0 group-hover:opacity-60 hover:!opacity-100 text-[var(--wb-text-2)]"
+                    @click.stop="removeCustomPrompt(it.text)"
+                  ></i>
+                </button>
+              </div>
+            </div>
+            <div
+              v-if="promptLib.tab === 'custom' && !customPrompts.length"
+              class="text-xs text-[var(--wb-text-2)] py-6 text-center"
+            >
+              {{ t('canvasPromptEmptyHint') }}
+            </div>
+          </div>
+        </div>
+
         <!-- 切分对话框（S6a）：横/竖切 N 片 -->
         <div
           v-if="splitDlg.open"
@@ -820,6 +911,14 @@ import {
   switchProject as psSwitchProject,
   updateProjectDoc as psUpdateProjectDoc,
 } from './projectStore'
+import {
+  builtinLibrary,
+  loadCustomPrompts,
+  saveCustomPrompts,
+  parseImportedPrompts,
+  mergePrompts,
+  searchPrompts,
+} from './promptLibrary'
 import { buildExportPayload, packExportZip, parseImportZip, parseImportJson } from './canvasExport'
 import { importProject as psImportProject, cloneProject as psCloneProject } from './projectStore'
 const { onResult, emitAttachments, emitCanvasState, emitPrompt, onOps } = useCanvasMode()
@@ -1625,6 +1724,11 @@ const tools = computed(() => [
     action: sendSelectionToWorkbench,
     disabled: !selection.value.some((id) => refOf(id)),
   },
+  {
+    icon: 'fas fa-book-open',
+    title: t('canvasPromptLibBtn'),
+    action: () => (promptLib.open = !promptLib.open),
+  },
   { icon: 'fas fa-file-export', title: t('canvasExportBtn'), action: exportCurrentProject },
   { icon: 'fas fa-file-import', title: t('canvasImportBtn'), action: pickImportFile },
   { icon: 'fas fa-trash', title: t('canvasDeleteSelected'), action: deleteSelected },
@@ -2189,6 +2293,76 @@ function cropImageNode(id) {
   if (!o || o.type !== 'image') return
   selection.value = [id]
   setTool('crop')
+}
+
+// —— 提示词库（S6b）：内置分词 + 自定义（localStorage）+ JSON 导入 ——
+const promptLib = reactive({ open: false, q: '', tab: 'builtin' }) // tab: builtin | custom
+const customPrompts = ref([])
+try {
+  customPrompts.value = loadCustomPrompts(localStorage)
+} catch {
+  customPrompts.value = []
+}
+const promptLibView = computed(() => {
+  if (promptLib.tab === 'custom') {
+    return searchPrompts(
+      [{ category: t('canvasPromptCustomTab'), items: customPrompts.value }],
+      promptLib.q,
+    )
+  }
+  return searchPrompts(builtinLibrary(), promptLib.q)
+})
+/** 选中词条 → 回填目标（note 编辑/改写指令，按当前激活输入） */
+function applyPrompt(text) {
+  const target = promptTarget.value
+  if (target?.kind === 'note') {
+    const o = objects.value.find((x) => x.id === target.id)
+    if (o) {
+      beforeChange()
+      o.text = o.text ? o.text + '\n' + text : text
+      saveSoon()
+    }
+  } else if (target?.kind === 'rewrite') {
+    noteRewrite.instruction = noteRewrite.instruction ? noteRewrite.instruction + '；' + text : text
+  }
+  promptLib.open = false
+}
+/** 回填目标推导：改写输入条开着优先，否则选中的 note，否则悬停 note */
+const promptTarget = computed(() => {
+  if (noteRewrite.noteId) return { kind: 'rewrite', id: noteRewrite.noteId }
+  const selNote = objects.value.find((o) => o.id === selection.value[0] && o.type === 'note')
+  if (selNote) return { kind: 'note', id: selNote.id }
+  const hovNote = objects.value.find((o) => o.id === hoverNodeId.value && o.type === 'note')
+  if (hovNote) return { kind: 'note', id: hovNote.id }
+  return null
+})
+function addCustomPrompt(text) {
+  const t = String(text || '').trim()
+  if (!t) return
+  customPrompts.value = [{ text: t, hint: '' }, ...customPrompts.value]
+  saveCustomPrompts(customPrompts.value, localStorage)
+}
+function removeCustomPrompt(text) {
+  customPrompts.value = customPrompts.value.filter((x) => x.text !== text)
+  saveCustomPrompts(customPrompts.value, localStorage)
+}
+function importPromptsFile() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.json,application/json'
+  input.onchange = () => {
+    const f = input.files?.[0]
+    if (!f) return
+    f.text()
+      .then(parseImportedPrompts)
+      .then((list) => {
+        customPrompts.value = mergePrompts(list, customPrompts.value)
+        saveCustomPrompts(customPrompts.value, localStorage)
+        message.success(t('canvasPromptImported').replace('{n}', String(list.length)))
+      })
+      .catch((e) => message.error(t('canvasPromptImportFailed') + ': ' + (e?.message || '')))
+  }
+  input.click()
 }
 
 function openGenNode(ids = []) {
@@ -3510,6 +3684,20 @@ const hoverToolbar = computed(() => {
         icon: 'fas fa-wand-magic-sparkles',
         title: t('canvasTbRewrite'),
         action: () => startNoteRewrite(id),
+      },
+      {
+        icon: 'fas fa-bookmark',
+        title: t('canvasTbSavePrompt'),
+        action: () => {
+          const o = objects.value.find((x) => x.id === id)
+          const text = String(o?.text || '').trim()
+          if (!text) {
+            message.warning(t('canvasGenNeedText'))
+            return
+          }
+          addCustomPrompt(text)
+          message.success(t('canvasPromptSaved'))
+        },
       },
     )
   } else if (o.type === 'image') {
