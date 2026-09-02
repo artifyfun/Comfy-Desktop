@@ -172,6 +172,7 @@ describe('createCodexMapper — 完整正常轮', () => {
     const todos = out.find((e) => e.type === 'CUSTOM') as { name: string; value: unknown }
     expect(todos.name).toBe('todos')
     expect(todos.value).toEqual({
+      runId: 'r-1',
       items: [
         { text: '选模板', completed: true },
         { text: '执行', completed: true }
@@ -275,6 +276,94 @@ describe('createCodexMapper — 幂等(同一 item.id 只发一次 START)', () =
 
     expect(typesOf(mapper.feed(itemCompleted(todoList('td1', []))))).toEqual(['CUSTOM'])
     expect(typesOf(mapper.feed(itemCompleted(todoList('td1', []))))).toEqual([])
+  })
+})
+
+describe('createCodexMapper — todo_list 实时进度（P1-B3）', () => {
+  it('updated 相位:状态变化发快照(runId+items),无变化不发;completed 终态再发一次', () => {
+    const mapper = createCodexMapper({ threadId: 't', runId: 'r-9' })
+    // 首次 updated:无基线,发快照
+    const u1 = mapper.feed(
+      itemUpdated(
+        todoList('td9', [
+          { text: '选模板', completed: true },
+          { text: '执行', completed: false }
+        ])
+      )
+    )
+    expect(u1).toHaveLength(1)
+    expect(u1[0]).toMatchObject({
+      type: 'CUSTOM',
+      name: 'todos',
+      value: {
+        runId: 'r-9',
+        items: [
+          { text: '选模板', completed: true },
+          { text: '执行', completed: false }
+        ]
+      }
+    })
+    // 同内容 updated(重放/模型重复回推):不发
+    expect(
+      mapper.feed(
+        itemUpdated(
+          todoList('td9', [
+            { text: '选模板', completed: true },
+            { text: '执行', completed: false }
+          ])
+        )
+      )
+    ).toEqual([])
+    // 变化(执行完成):再发
+    const u2 = mapper.feed(
+      itemUpdated(
+        todoList('td9', [
+          { text: '选模板', completed: true },
+          { text: '执行', completed: true }
+        ])
+      )
+    )
+    expect(u2).toHaveLength(1)
+    expect((u2[0] as { value: unknown }).value).toMatchObject({
+      items: [
+        { text: '选模板', completed: true },
+        { text: '执行', completed: true }
+      ]
+    })
+    // completed 终态:再发一次(与最后 updated 同内容;前端 upsert 幂等收敛)
+    const done = mapper.feed(
+      itemCompleted(
+        todoList('td9', [
+          { text: '选模板', completed: true },
+          { text: '执行', completed: true }
+        ])
+      )
+    )
+    expect(done).toHaveLength(1)
+    // 重放的 completed 不再发
+    expect(
+      mapper.feed(
+        itemCompleted(
+          todoList('td9', [
+            { text: '选模板', completed: true },
+            { text: '执行', completed: true }
+          ])
+        )
+      )
+    ).toEqual([])
+    // completed 后模型再回推 updated(异常序):finishedIds 已拦,零帧
+    expect(mapper.feed(itemUpdated(todoList('td9', [{ text: 'x', completed: true }])))).toEqual([])
+  })
+
+  it('completed 直接到达(无 updated):自愈直接发终态快照,不依赖 updated 先行', () => {
+    const mapper = createCodexMapper({ threadId: 't', runId: 'r-10' })
+    const out = mapper.feed(itemCompleted(todoList('tdA', [{ text: '收尾', completed: true }])))
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({
+      type: 'CUSTOM',
+      name: 'todos',
+      value: { runId: 'r-10', items: [{ text: '收尾', completed: true }] }
+    })
   })
 })
 

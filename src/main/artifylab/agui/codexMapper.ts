@@ -38,6 +38,8 @@ import type {
   TodoListItem,
   WebSearchItem
 } from '../vendor/codex-sdk'
+/** todo 条目类型：TodoItem 未导出(vendor d.ts 内部声明)，从 TodoListItem.items 派生 */
+type TodoEntry = TodoListItem['items'][number]
 import {
   custom,
   reasoningMessageContent,
@@ -90,8 +92,15 @@ export function createCodexMapper(opts: CodexMapperOptions): CodexMapper {
   const finishedIds = new Set<string>()
   /** reasoning item.id → 上次已下发的文本快照(增量 diff 基线) */
   const reasoningSnapshots = new Map<string, string>()
+  /** todo_list item.id → 上次已下发 items 快照(updated 相位 diff 防重复刷屏) */
+  const todoSnapshots = new Map<string, TodoEntry[]>()
   /** C16:已按 token delta 发过 CONTENT 的 agent_message item.id(completed 只收口) */
   const streamedTextIds = new Set<string>()
+
+  /** todo items 逐项相等比较(顺序敏感;completed/text 任一变化即视为状态变化) */
+  const todoItemsEqual = (a: TodoEntry[], b: TodoEntry[]): boolean =>
+    a.length === b.length &&
+    a.every((x, k) => x.completed === b[k]?.completed && x.text === b[k]?.text)
 
   /**
    * 推理增量 diff:返回相对上次已下发快照的 delta;无增量返回 null(不发帧)。
@@ -259,11 +268,25 @@ export function createCodexMapper(opts: CodexMapperOptions): CodexMapper {
     ]
   }
 
+  /**
+   * todo_list(P1-B3 任务进度数据源):
+   * - updated:模型执行中多次改待办清单 → 与上次已下发快照 diff,状态变化才发
+   *   CUSTOM {runId, items}(前端按 runId 原位 upsert 同一张进度卡,实时勾选);
+   *   无变化不发(防重放/防刷屏)。
+   * - completed:终态照发一次(runId 同构;重放去重走 finishedIds)。
+   * runId 进 value 是前端 per-run 稳定寻址的前提(replay 时多帧快照收敛为一卡)。
+   */
   const feedTodoList = (item: TodoListItem, phase: ItemPhase): AGUIEvent[] => {
-    if (phase !== 'completed') return []
     if (finishedIds.has(item.id)) return [] // 重放去重
+    if (phase === 'updated') {
+      const prev = todoSnapshots.get(item.id)
+      if (prev && todoItemsEqual(prev, item.items)) return []
+      todoSnapshots.set(item.id, item.items)
+      return [custom('todos', { runId, items: item.items })]
+    }
+    if (phase !== 'completed') return []
     finishedIds.add(item.id)
-    return [custom('todos', { items: item.items })]
+    return [custom('todos', { runId, items: item.items })]
   }
 
   /** 条目级 error(非致命):CUSTOM 上抛留痕,不终止 run;重放去重 */
