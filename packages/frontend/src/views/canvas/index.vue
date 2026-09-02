@@ -22,6 +22,7 @@
         @dragleave.prevent="dragOver = false"
         @drop.prevent="onDrop"
         @contextmenu.prevent="onWrapContext"
+        @mouseleave="scheduleHoverHide(0)"
       >
         <!-- 网格背景（随视口平移/缩放，纯 CSS） -->
         <div class="absolute inset-0 pointer-events-none" :style="gridStyle"></div>
@@ -795,13 +796,14 @@
         <!-- 节点悬浮工具栏（参考 canvas-node-hover-toolbar）：悬停物件上方 HTML overlay -->
         <div
           v-if="hoverToolbar.items.length"
-          class="absolute z-20 flex h-9 -translate-x-1/2 -translate-y-full items-center rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl"
+          class="node-hover-toolbar absolute z-20 flex h-9 -translate-x-1/2 items-center rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl"
+          :class="hoverToolbar.below ? 'is-below' : '-translate-y-full'"
           :style="{ left: hoverToolbar.x + 'px', top: hoverToolbar.y + 'px' }"
           @mousedown.stop
           @pointerdown.stop
           @dblclick.stop
-          @mouseenter="toolbarKeep = true"
-          @mouseleave="toolbarKeep = false"
+          @mouseenter="keepToolbar(true)"
+          @mouseleave="keepToolbar(false)"
         >
           <button
             v-for="b in hoverToolbar.items"
@@ -813,7 +815,26 @@
           >
             <i :class="b.icon" class="text-sm pointer-events-none"></i>
           </button>
+          <!-- 桥接热区：填住工具栏底边与节点顶边之间的 10px 间隙 -->
+          <span class="tb-bridge" aria-hidden="true"></span>
         </div>
+
+        <!-- note 就地编辑：同位置 HTML textarea 接管（Konva v-text 不可编辑） -->
+        <textarea
+          v-if="noteEditPos"
+          ref="noteEditArea"
+          v-model="noteEdit.text"
+          class="note-editor absolute z-20 resize-none rounded-lg border-2 border-[var(--wb-accent)] outline-none"
+          :style="noteEditPos"
+          :placeholder="t('canvasNoteEditPh')"
+          @mousedown.stop
+          @pointerdown.stop
+          @dblclick.stop
+          @wheel.stop
+          @keydown.esc.stop.prevent="cancelNoteEdit"
+          @keydown.enter.ctrl.prevent="commitNoteEdit"
+          @blur="commitNoteEdit"
+        ></textarea>
 
         <!-- 缩放控件条（左下，参考 canvas-zoom-controls）：小地图开关/复位/滑杆/百分比/适应/快捷键 -->
         <div
@@ -1600,6 +1621,65 @@ function noteTextConfig(o) {
     align: 'left',
   }
 }
+
+// —— note 文本就地编辑：双击便签 / 悬浮工具栏「编辑」/ 右键菜单 ——
+// Konva 的 v-text 不可编辑，故用同位置的 HTML textarea 覆盖接管（视口变化自动跟随）
+const noteEdit = reactive({ id: null, text: '', skipCommit: false })
+const noteEditArea = ref(null)
+const noteEditPos = computed(() => {
+  const o = objects.value.find((x) => x.id === noteEdit.id && x.type === 'note')
+  if (!o) return null
+  const tl = worldToScreen(viewport.value, o.x, o.y)
+  const s = viewport.value.scale
+  return {
+    left: tl.x + 'px',
+    top: tl.y + 'px',
+    width: o.width * s + 'px',
+    height: o.height * s + 'px',
+    fontSize: Math.max(10, (o.fontSize || 13) * s) + 'px',
+  }
+})
+function startNoteEdit(id) {
+  const o = objects.value.find((x) => x.id === id && x.type === 'note')
+  if (!o) return
+  if (noteEdit.id && noteEdit.id !== id) commitNoteEdit()
+  noteEdit.id = id
+  noteEdit.text = o.text || ''
+  noteEdit.skipCommit = false
+  selection.value = [id]
+  nextTick(() => {
+    const el = noteEditArea.value
+    if (!el) return
+    el.focus()
+    const end = el.value.length
+    el.setSelectionRange(end, end)
+  })
+}
+/** 提交：内容有变才记撤销点（避免空编辑污染历史） */
+function commitNoteEdit() {
+  const id = noteEdit.id
+  if (!id) return
+  if (noteEdit.skipCommit) return
+  const o = objects.value.find((x) => x.id === id)
+  const next = noteEdit.text
+  noteEdit.id = null
+  noteEdit.text = ''
+  if (!o || o.type !== 'note') return
+  if (next !== (o.text || '')) {
+    beforeChange()
+    o.text = next
+    saveSoon()
+  }
+}
+/** 取消：丢弃改动。置 skipCommit —— 元素被摘除时部分浏览器仍会补发 blur */
+function cancelNoteEdit() {
+  noteEdit.id = null
+  noteEdit.text = ''
+  noteEdit.skipCommit = true
+  setTimeout(() => {
+    noteEdit.skipCommit = false
+  }, 0)
+}
 function rubberConfig() {
   return {
     x: Math.min(rubber.value.x, rubber.value.x + rubber.value.w),
@@ -1657,6 +1737,8 @@ function syncFromStage() {
 
 function onWheel(e) {
   e.evt.preventDefault()
+  // 缩放改变屏幕坐标，浮层锚点会漂移 —— 直接收起
+  if (ctxMenu.value) ctxMenu.value = null
   const st = stageEl.value.getStage()
   const pointer = st.getPointerPosition()
   const factor = e.evt.deltaY < 0 ? 1.1 : 1 / 1.1
@@ -1669,6 +1751,9 @@ function onWheel(e) {
 function onItemDown(i, e) {
   // 物件按下：记录待拖，交给 Konva 的节点拖拽；框选模式空地按下走 onMouseDown
   hoverNodeId.value = objects.value[i].id
+  // 右键菜单/连线创建菜单：点任何物件即收起（此前只有点空地才关，点物件关不掉）
+  if (ctxMenu.value) ctxMenu.value = null
+  if (connectCreate.open) closeConnectCreate()
   if (tool.value === 'crop') {
     // 圈选裁剪：允许从图片上起圈（拖拽交给 stage 级 mousemove/mouseup 完成）
     const st = stageEl.value.getStage()
@@ -1807,8 +1892,14 @@ function onMouseMove(e) {
     const w = screenToWorld(viewport.value, p.x, p.y)
     const hit = hitTest(objects.value, w.x, w.y)
     const id = hit >= 0 ? objects.value[hit].id : null
-    // 悬浮工具栏 keep：指针在工具栏上时不清悬停（参考 onKeep）
-    if (!(toolbarKeep.value && !id) && id !== hoverNodeId.value) hoverNodeId.value = id
+    if (id) {
+      // 命中物件：立即切换（节点间移动无延迟），撤销待收起
+      cancelHoverHide()
+      if (id !== hoverNodeId.value) hoverNodeId.value = id
+    } else if (!toolbarKeep.value) {
+      // 空白：延时收起，给鼠标移入工具栏的时间（间隙已由桥接热区兜住）
+      scheduleHoverHide()
+    }
   }
   if (drag.mode === 'connect') {
     onConnectMove()
@@ -1969,7 +2060,7 @@ const tools = computed(() => [
   },
   {
     icon: 'fas fa-vector-square',
-    title: t('canvasCropTool'),
+    title: t('canvasCropToolTip'),
     action: () => setTool('crop'),
     active: tool.value === 'crop',
   },
@@ -2048,8 +2139,9 @@ function sendSelectionToWorkbench() {
 function addNote() {
   const c = screenToWorld(viewport.value, size.w / 2, size.h / 2)
   beforeChange()
+  const id = 'n' + Date.now()
   objects.value.push({
-    id: 'n' + Date.now(),
+    id,
     type: 'note',
     x: c.x - 90,
     y: c.y - 60,
@@ -2058,6 +2150,7 @@ function addNote() {
     text: '',
   })
   saveSoon()
+  startNoteEdit(id) // 新建即进入编辑，免去「不知道怎么输入」的困惑
 }
 
 // —— I2 右键上下文菜单 ——
@@ -2071,6 +2164,7 @@ const ctxItems = computed(() => {
   const hasImg = ids.some((id) => (objects.value.find((o) => o.id === id) || {}).type === 'image')
   const imgWithMeta = ids.some((id) => (objects.value.find((o) => o.id === id) || {}).meta?.prompt)
   const appIds = ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app')
+  const noteIds = ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'note')
   const items = [
     {
       key: 'copy',
@@ -2082,6 +2176,17 @@ const ctxItems = computed(() => {
       },
     },
   ]
+  if (noteIds.length === 1) {
+    items.push({
+      key: 'note-edit',
+      icon: 'fa-pen',
+      label: t('canvasMenuEditNote'),
+      run: () => {
+        startNoteEdit(noteIds[0])
+        closeCtxMenu()
+      },
+    })
+  }
   if (imgWithMeta) {
     items.push({
       key: 'gen-info',
@@ -2298,8 +2403,9 @@ function pasteAt(wx, wy) {
 }
 function addNoteAt(wx, wy) {
   beforeChange()
+  const id = 'n' + Date.now()
   objects.value.push({
-    id: 'n' + Date.now(),
+    id,
     type: 'note',
     x: wx - 90,
     y: wy - 60,
@@ -2309,6 +2415,7 @@ function addNoteAt(wx, wy) {
   })
   closeCtxMenu()
   saveSoon()
+  startNoteEdit(id) // 新建即进入编辑
 }
 
 // —— A14 选区快捷指令条 ——
@@ -2818,6 +2925,8 @@ function applyPrompt(text) {
     if (o) {
       beforeChange()
       o.text = o.text ? o.text + '\n' + text : text
+      // 正在就地编辑同一便签时，把回填同步进编辑框（否则提交会覆盖掉刚插的词条）
+      if (noteEdit.id === target.id) noteEdit.text = o.text
       saveSoon()
     }
   } else if (target?.kind === 'rewrite') {
@@ -4028,7 +4137,9 @@ function onKey(e) {
     if (inEditor) return
     shortcutsOpen.value = !shortcutsOpen.value
   } else if (e.key === 'Escape') {
-    if (shortcutsOpen.value) {
+    if (ctxMenu.value) {
+      ctxMenu.value = null
+    } else if (shortcutsOpen.value) {
       shortcutsOpen.value = false
     } else if (tool.value) {
       tool.value = null
@@ -4154,6 +4265,38 @@ watch(mediaObjects, (list) => {
 // —— 节点悬浮工具栏（S4a）：悬停物件上方快捷动作条 ——
 /** 工具栏“停留”保护：鼠标移入工具栏本身时不算离开节点（参考 onKeep/onLeave） */
 const toolbarKeep = ref(false)
+/**
+ * 悬停收起延迟：鼠标移出节点后延时再清 hoverNodeId，途中移入工具栏可取消。
+ * 原逻辑为 mousemove 命中空白即立刻清空，鼠标从节点走向工具栏必然途经
+ * 10px 间隙（工具栏 y = 节点顶 - 10），工具栏先于鼠标到达而消失 —— 表现为
+ * “菜单无法停留”。延迟 + 桥接热区共同解决。
+ */
+const HOVER_HIDE_DELAY = 220
+let hoverHideTimer = null
+function cancelHoverHide() {
+  if (hoverHideTimer) {
+    clearTimeout(hoverHideTimer)
+    hoverHideTimer = null
+  }
+}
+/** 排一次收起；delay<=0 为立即（如指针移出整个画布区）。同时复位 toolbarKeep，
+ *  避免工具栏被 v-if 摘掉后 mouseleave 不触发、toolbarKeep 残留 true 卡住后续悬停 */
+function scheduleHoverHide(delay = HOVER_HIDE_DELAY) {
+  cancelHoverHide()
+  const hide = () => {
+    hoverHideTimer = null
+    toolbarKeep.value = false
+    hoverNodeId.value = null
+  }
+  if (delay > 0) hoverHideTimer = setTimeout(hide, delay)
+  else hide()
+}
+/** 鼠标进出工具栏：进 = 钉住（取消待收起），出 = 延时收起 */
+function keepToolbar(on) {
+  toolbarKeep.value = on
+  if (on) cancelHoverHide()
+  else scheduleHoverHide()
+}
 function nodeBumpFont(id, delta) {
   const o = objects.value.find((x) => x.id === id)
   if (!o || o.type !== 'note') return
@@ -4186,18 +4329,23 @@ function nodeDeleteObj(id) {
   selection.value = [id]
   deleteSelected()
 }
+/** 悬浮工具栏高度（h-9），用于贴顶时翻转到节点下方的判定 */
+const TOOLBAR_H = 36
 /** 悬停节点 → 工具栏屏幕坐标 + 按类型装配动作 */
 const hoverToolbar = computed(() => {
   const id = hoverNodeId.value
-  if (!id) return { x: 0, y: 0, items: [] }
+  if (!id) return { x: 0, y: 0, items: [], below: false }
   const o = objects.value.find((x) => x.id === id)
-  if (!o) return { x: 0, y: 0, items: [] }
+  if (!o) return { x: 0, y: 0, items: [], below: false }
   const tl = worldToScreen(viewport.value, o.x, o.y)
   const x = tl.x + (o.width * viewport.value.scale) / 2
-  const y = tl.y - 10
+  // 顶部空间不足（工具栏会被容器 overflow 裁掉）→ 翻到节点下方
+  const below = tl.y - 10 < TOOLBAR_H + 12
+  const y = below ? tl.y + o.height * viewport.value.scale + 10 : tl.y - 10
   const items = []
   if (o.type === 'note') {
     items.push(
+      { icon: 'fas fa-pen', title: t('canvasTbEditNote'), action: () => startNoteEdit(id) },
       { icon: 'fas fa-minus', title: t('canvasTbFontDown'), action: () => nodeBumpFont(id, -1) },
       { icon: 'fas fa-plus', title: t('canvasTbFontUp'), action: () => nodeBumpFont(id, 1) },
       {
@@ -4325,8 +4473,19 @@ const hoverToolbar = computed(() => {
       action: () => nodeDeleteObj(id),
     },
   )
-  return { x, y, items }
+  return { x, y, items, below }
 })
+/** 工具栏被摘掉（节点删除/类型无动作）时 DOM 消失，mouseleave 不再触发 —— 兜底复位 keep，
+ *  否则 toolbarKeep 残留 true 会让后续悬停永远收不起来 */
+watch(
+  () => hoverToolbar.value.items.length,
+  (n) => {
+    if (!n) {
+      toolbarKeep.value = false
+      cancelHoverHide()
+    }
+  },
+)
 
 const miniOpen = ref(true) // 小地图开关（缩放控件条内切换）
 const shortcutsOpen = ref(false) // 快捷键面板
@@ -4355,6 +4514,7 @@ const shortcutList = computed(() => [
   { label: 'Ctrl/⌘ + Z / ⇧Z / Y', desc: t('canvasScUndoRedo') },
   { label: 'Ctrl/⌘ + G / ⇧G', desc: t('canvasScGroup') },
   { label: 'Delete / Backspace', desc: t('canvasScDelete') },
+  { label: '双击便签', desc: t('canvasScNoteEdit') },
   { label: 'Esc', desc: t('canvasScEscape') },
 ])
 
@@ -4515,12 +4675,15 @@ function bindNodeEvents() {
     g.on('mousedown.wb', (e) => onItemDown(idx(), e))
     g.on('dragmove.wb', onNodeDrag)
     g.on('dragend.wb', onNodeDragEnd)
-    // App 节点双击 = 展开参数面板
+    // 双击：App 节点 = 展开参数面板；note = 就地编辑文本
     g.on('dblclick.wb', (e) => {
       const o = objects.value.find((x) => x.id === g.id())
       if (o?.type === 'app') {
         e.evt?.preventDefault?.()
         openAppNodePanel(o.id)
+      } else if (o?.type === 'note') {
+        e.evt?.preventDefault?.()
+        startNoteEdit(o.id)
       }
     })
   })
@@ -4559,6 +4722,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keyup', onKeyUp)
   window.removeEventListener('paste', onPaste)
   clearTimeout(saveTimer)
+  cancelHoverHide()
   // app 节点轮询清场
   for (const nodeId of [...nodePolls.keys()]) stopNodePoll(nodeId)
   // AI ops 订阅清场
@@ -4593,5 +4757,32 @@ onBeforeUnmount(() => {
   padding: 2px 6px;
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.2);
+}
+/* 悬浮工具栏底部透明桥接区：工具栏定位在节点顶边上方 10px（top: tl.y - 10 + -translate-y-full），
+   鼠标从节点移向工具栏必经过这段空白，那里命中 canvas 空地 → 悬停被清 → 工具栏消失。
+   桥接区把这段空白（+10px 余量）纳入工具栏 DOM，鼠标中途不会“掉出”。 */
+.node-hover-toolbar .tb-bridge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 20px;
+}
+.node-hover-toolbar:not(.is-below) .tb-bridge {
+  top: 100%;
+}
+/* 翻转到节点下方时，桥接区改挂顶部（工具栏上沿 → 节点底边） */
+.node-hover-toolbar.is-below .tb-bridge {
+  bottom: 100%;
+}
+/* note 就地编辑框：与便签底色/字号对齐，仅边框高亮提示编辑中 */
+.note-editor {
+  padding: 10px;
+  line-height: 1.4;
+  background: #475569;
+  color: #e2e8f0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.note-editor::placeholder {
+  color: rgba(226, 232, 240, 0.45);
 }
 </style>
