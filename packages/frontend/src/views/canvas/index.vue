@@ -869,6 +869,32 @@
           <span class="tb-bridge" aria-hidden="true"></span>
         </div>
 
+        <!-- note 调色板（悬浮工具栏的调色按钮展开，位于工具栏下方） -->
+        <div
+          v-if="notePalette.open"
+          class="absolute z-30 flex h-10 -translate-x-1/2 items-center gap-1.5 rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] px-2 shadow-xl"
+          :style="{ left: notePalette.x + 'px', top: notePalette.y + 'px' }"
+          @mousedown.stop
+          @pointerdown.stop
+          @dblclick.stop
+          @mouseenter="keepToolbar(true)"
+          @mouseleave="keepToolbar(false)"
+        >
+          <button
+            v-for="c in NOTE_COLORS"
+            :key="c"
+            class="w-6 h-6 rounded-full transition hover:scale-110"
+            :class="
+              notePaletteColor === c
+                ? 'border border-[var(--wb-accent)] ring-2 ring-[var(--wb-accent)]/40'
+                : 'border border-black/20'
+            "
+            :style="{ background: c }"
+            :title="c"
+            @click="setNoteColor(c)"
+          ></button>
+        </div>
+
         <!-- note 就地编辑：同位置 HTML textarea 接管（Konva v-text 不可编辑） -->
         <textarea
           v-if="noteEditPos"
@@ -1766,11 +1792,34 @@ function mediaRectConfig(o) {
   }
 }
 
+// note 调色板：预设底色（前 7 个为亮色 → 深色文字；默认 slate 深色 → 浅色文字）
+const NOTE_COLORS = [
+  '#fef08a', // yellow
+  '#f9a8d4', // pink
+  '#86efac', // green
+  '#7dd3fc', // sky
+  '#fdba74', // orange
+  '#c4b5fd', // violet
+  '#fda4af', // rose
+  '#475569', // slate（默认）
+]
+const NOTE_DEFAULT_COLOR = '#475569'
+/** 按背景亮度选文字色：亮底深字 / 深底浅字（便签新配色可读性） */
+function noteTextColor(bg) {
+  const hex = String(bg || NOTE_DEFAULT_COLOR).replace('#', '')
+  if (hex.length !== 6) return '#e2e8f0'
+  const r = parseInt(hex.slice(0, 2), 16)
+  const g = parseInt(hex.slice(2, 4), 16)
+  const b = parseInt(hex.slice(4, 6), 16)
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+  return lum > 0.55 ? '#1e293b' : '#e2e8f0'
+}
+
 function noteRectConfig(o) {
   return {
     width: o.width,
     height: o.height,
-    fill: '#475569',
+    fill: o.color || NOTE_DEFAULT_COLOR,
     opacity: 0.9,
     cornerRadius: 8,
     stroke: selection.value.includes(o.id) ? '#38bdf8' : 'rgba(148,163,184,0.4)',
@@ -1785,7 +1834,7 @@ function noteTextConfig(o) {
     padding: 10,
     fontSize: o.fontSize || 13,
     lineHeight: 1.4,
-    fill: '#e2e8f0',
+    fill: noteTextColor(o.color),
     align: 'left',
   }
 }
@@ -1808,6 +1857,7 @@ const noteEditPos = computed(() => {
   }
 })
 function startNoteEdit(id) {
+  closeNotePalette() // 进入文本编辑：收起色板浮层，避免与 textarea 叠层
   const o = objects.value.find((x) => x.id === id && x.type === 'note')
   if (!o) return
   if (noteEdit.id && noteEdit.id !== id) commitNoteEdit()
@@ -1847,6 +1897,41 @@ function cancelNoteEdit() {
   setTimeout(() => {
     noteEdit.skipCommit = false
   }, 0)
+}
+
+// —— note 底色（调色板挂悬浮工具栏，点色即换；参考项目 note color）——
+const notePalette = reactive({ id: null, x: 0, y: 0, open: false })
+/** 当前色板对应便签（选中色高亮用） */
+const notePaletteColor = computed(() => {
+  const o = objects.value.find((x) => x.id === notePalette.id && x.type === 'note')
+  return o ? o.color || NOTE_DEFAULT_COLOR : ''
+})
+/** 打开：以悬浮工具栏几何定位（工具栏视觉下沿，色板居中于节点中线） */
+function openNotePalette(id) {
+  const o = objects.value.find((x) => x.id === id && x.type === 'note')
+  if (!o) return
+  notePalette.id = id
+  const tb = hoverToolbar.value
+  // 工具栏：below=false 时整体在 y 之上（占 [y-36, y]）；below=true 时在 y 之下（占 [y, y+36]）
+  notePalette.x = clamp(tb.below ? tb.x : tb.x, 132, Math.max(132, size.w - 132))
+  notePalette.y = clamp(tb.y + (tb.below ? 38 : 2), 8, Math.max(8, size.h - 48))
+  notePalette.open = true
+}
+function closeNotePalette() {
+  notePalette.open = false
+  notePalette.id = null
+}
+/** 设底色：变更前压 undo 快照，改后即时保存（对象已选/悬停态保持） */
+function setNoteColor(c) {
+  const o = objects.value.find((x) => x.id === notePalette.id && x.type === 'note')
+  if (!o) return
+  if ((o.color || NOTE_DEFAULT_COLOR) !== c) {
+    beforeChange()
+    o.color = c
+    layerRefresh()
+    saveSoon()
+  }
+  closeNotePalette()
 }
 
 // —— frame 名称就地重命名：单行 HTML input 覆盖在分区标签（frame.y - 20 上方）位置 ——
@@ -4867,6 +4952,11 @@ const hoverToolbar = computed(() => {
   const items = []
   if (o.type === 'note') {
     items.push(
+      {
+        icon: 'fas fa-palette',
+        title: t('canvasTbNoteColor'),
+        action: () => openNotePalette(id),
+      },
       { icon: 'fas fa-pen', title: t('canvasTbEditNote'), action: () => startNoteEdit(id) },
       { icon: 'fas fa-minus', title: t('canvasTbFontDown'), action: () => nodeBumpFont(id, -1) },
       { icon: 'fas fa-plus', title: t('canvasTbFontUp'), action: () => nodeBumpFont(id, 1) },
@@ -5011,6 +5101,7 @@ watch(
     if (!n) {
       toolbarKeep.value = false
       cancelHoverHide()
+      closeNotePalette() // 工具栏消失（hover 移开/节点删除）时一并收起色板
     }
   },
 )
