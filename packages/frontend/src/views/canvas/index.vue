@@ -611,6 +611,8 @@ import {
   switchProject as psSwitchProject,
   updateProjectDoc as psUpdateProjectDoc,
 } from './projectStore'
+import { buildExportPayload, packExportZip, parseImportZip, parseImportJson } from './canvasExport'
+import { importProject as psImportProject, cloneProject as psCloneProject } from './projectStore'
 const { onResult, emitAttachments, emitCanvasState, emitPrompt, onOps } = useCanvasMode()
 const wbOpen = ref(true) // 工作台侧边栏开合
 
@@ -725,6 +727,60 @@ function deleteActiveProject() {
     },
   })
 }
+// —— 导入导出（S2）：当前项目导出 ZIP（projects.json + 图片文件），导入支持 zip/json ——
+function exportCurrentProject() {
+  syncActiveDocToStore()
+  const clone = psCloneProject({ ...projectStore }, projectStore.activeId)
+  if (!clone) return
+  const { payload, files } = buildExportPayload([clone])
+  packExportZip(payload, files).then((blob) => {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${(activeProject.value?.title || 'canvas').replace(/[\\/:*?"<>|]/g, '_')}.artify-canvas.zip`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 5000)
+    message.success(t('canvasExported'))
+  })
+}
+function pickImportFile() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.zip,.json,application/zip,application/json'
+  input.onchange = () => {
+    const f = input.files?.[0]
+    if (f) importCanvasFile(f)
+  }
+  input.click()
+}
+async function importCanvasFile(f) {
+  try {
+    let projects = null
+    if (f.name.endsWith('.json') || f.type === 'application/json') {
+      projects = parseImportJson(await f.text()).projects
+    } else {
+      projects = (await parseImportZip(f)).projects
+    }
+    if (!projects?.length) {
+      message.warning(t('canvasImportEmpty'))
+      return
+    }
+    let lastId = null
+    for (const prj of projects) {
+      const { store, id } = psImportProject({ ...projectStore }, prj)
+      Object.assign(projectStore, store)
+      lastId = id
+    }
+    persistProjects()
+    if (lastId) {
+      openProjectById(lastId)
+      message.success(t('canvasImported').replace('{n}', String(projects.length)))
+    }
+  } catch (e) {
+    message.error(t('canvasImportFailed') + ': ' + (e?.message || 'format'))
+  }
+}
+
 /** 项目集当前激活项目 → 画布状态（新建/删除后回落） */
 function loadProjectIntoCanvas() {
   const p = activeProject.value
@@ -1340,6 +1396,8 @@ const tools = computed(() => [
     action: sendSelectionToWorkbench,
     disabled: !selection.value.some((id) => refOf(id)),
   },
+  { icon: 'fas fa-file-export', title: t('canvasExportBtn'), action: exportCurrentProject },
+  { icon: 'fas fa-file-import', title: t('canvasImportBtn'), action: pickImportFile },
   { icon: 'fas fa-trash', title: t('canvasDeleteSelected'), action: deleteSelected },
 ])
 // 工具模式下禁用物件拖拽（否则 Konva dragstart 会吞掉 crop/link 的 mousedown 语义）
