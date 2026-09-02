@@ -484,10 +484,12 @@ describe('aguiBridge — 附件上行(C4 差异收敛)', () => {
     const pageApi = makePageApi()
     const bridge = createAguiBridge(pageApi)
     const fetchMock = vi.fn(() =>
-      Promise.resolve(new Response('data: {"type":"RUN_FINISHED"}\n\n', {
-        status: 200,
-        headers: { 'Content-Type': 'text/event-stream' },
-      })),
+      Promise.resolve(
+        new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }),
+      ),
     )
     vi.stubGlobal('fetch', fetchMock)
     const atts = [{ name: 'img.png', kind: 'image', filename: 'img.png', size: 10 }]
@@ -529,6 +531,31 @@ describe('aguiBridge — 附件上行(C4 差异收敛)', () => {
     expect(JSON.parse(init2.body).approvalMode).toBeUndefined()
     vi.unstubAllGlobals()
   })
+
+  it('runAgentTurn POST body 携带 reasoningEffort(E1 推理强度);无 getter 时字段省略', async () => {
+    const { createAguiBridge } = await import('../aguiBridge')
+    const pageApi = makePageApi()
+    pageApi.getReasoningEffort = () => 'high'
+    const bridge = createAguiBridge(pageApi)
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    await bridge.runAgentTurn('优化这段流程', [], {})
+    const [, init1] = fetchMock.mock.calls[0]
+    expect(JSON.parse(init1.body).reasoningEffort).toBe('high')
+    // 旧桩(无 getter)→ 字段被 JSON.stringify 省略,后端保持会话现状
+    const legacy = createAguiBridge(makePageApi())
+    await legacy.runAgentTurn('x', [], {})
+    const [, init2] = fetchMock.mock.calls[1]
+    expect(JSON.parse(init2.body).reasoningEffort).toBeUndefined()
+    vi.unstubAllGlobals()
+  })
 })
 
 describe('aguiBridge — STATE_DELTA /tokenUsage 接线', () => {
@@ -537,7 +564,13 @@ describe('aguiBridge — STATE_DELTA /tokenUsage 接线', () => {
     api.curSession = {
       value: {
         turnUsages: [
-          { inputTokens: 10, cachedInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0, at: 1 },
+          {
+            inputTokens: 10,
+            cachedInputTokens: 0,
+            outputTokens: 5,
+            reasoningOutputTokens: 0,
+            at: 1,
+          },
         ],
       },
     }

@@ -49,9 +49,8 @@
           <i class="fas fa-link mx-1"></i>{{ canvasState.counts.links }}
         </span>
         <span v-if="canvasState.selection?.length" class="truncate" style="color: var(--wb-accent)">
-          <i class="fas fa-vector-square mr-1"></i>{{
-            canvasState.selection.map((s) => s.label || s || '').join(' · ')
-          }}
+          <i class="fas fa-vector-square mr-1"></i
+          >{{ canvasState.selection.map((s) => s.label || s || '').join(' · ') }}
         </span>
         <span v-if="canvasState.models?.length" class="truncate" style="color: var(--wb-text-1)">
           {{ canvasState.models[0] }}
@@ -719,6 +718,7 @@
             :skills="skills"
             :model-override="modelOverride"
             :approval-mode="approvalMode"
+            :reasoning-effort="reasoningEffort"
             @send="send"
             @stop="stopChat"
             @upload-files="uploadFiles"
@@ -726,6 +726,7 @@
             @remove-attachment="removeAttachment"
             @update:model-override="saveModelOverride"
             @update:approval-mode="saveApprovalMode"
+            @update:reasoning-effort="saveReasoningEffort"
           />
         </section>
 
@@ -1200,6 +1201,15 @@ const approvalMode = ref(
     ? 'conservative'
     : 'standard',
 )
+// E1 决策推理强度(会话级偏好,思考投入档位):localStorage 持久化(UI 偏好而非
+// 会话数据——不开历史会话联动),每轮 run 随请求透传 → 后端 codex 引擎
+// model_reasoning_effort。同样须在桥前声明——桥经 getReasoningEffort 每轮自取。
+const REASONING_EFFORT_UI = ['auto', 'low', 'medium', 'high', 'xhigh']
+const storedEffort =
+  typeof localStorage !== 'undefined' ? localStorage.getItem('wb.reasoningEffort') : null
+const reasoningEffort = ref(
+  storedEffort && REASONING_EFFORT_UI.includes(storedEffort) ? storedEffort : 'auto',
+)
 const aguiBridge = createAguiBridge({
   origin,
   t,
@@ -1212,6 +1222,7 @@ const aguiBridge = createAguiBridge({
   isStopCancelled,
   getThreadId: () => sessionId.value,
   getApprovalMode: () => approvalMode.value,
+  getReasoningEffort: () => reasoningEffort.value,
   curSession, // STATE_DELTA /tokenUsage 兜底同步进会话用量(aguiBridge.applyTokenUsage)
   // 执行类副作用(审查修复 C1):wb_artifact/wb_sync/wb_canvas_exec/wb_invalid
   // 四类 CUSTOM 走同一分派,产物卡/画布同步/执行轮询/pendingIssues 语义完整
@@ -1472,6 +1483,21 @@ function saveApprovalMode(v) {
   approvalMode.value = mode
   try {
     localStorage.setItem('wb.approvalMode', mode)
+  } catch {
+    /* localStorage 不可用(隐私模式等)不影响本轮生效 */
+  }
+}
+
+/**
+ * E1 推理强度切换(auto/low/medium/high/xhigh):前端 localStorage 持久化
+ * (UI 偏好而非会话数据),每轮 run 由桥 getReasoningEffort 自取透传,后端
+ * exec 通道改 threadOptions 下轮即时生效(auto=撤销回引擎默认)。
+ */
+function saveReasoningEffort(v) {
+  const effort = REASONING_EFFORT_UI.includes(v) ? v : 'auto'
+  reasoningEffort.value = effort
+  try {
+    localStorage.setItem('wb.reasoningEffort', effort)
   } catch {
     /* localStorage 不可用(隐私模式等)不影响本轮生效 */
   }

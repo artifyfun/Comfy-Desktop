@@ -93,7 +93,8 @@ import {
   type ExecutionResult
 } from '../mcp/executor'
 import { Codex, resolveCodexBaseUrl, resolveCodexBinary } from '../agentDriver'
-import type { Thread } from '../vendor/codex-sdk'
+import type { Thread, ThreadOptions } from '../vendor/codex-sdk'
+import { toEngineEffort, type ReasoningEffort } from './reasoningEffort'
 import { startBatch } from '../services/batchRunner'
 import { deriveAttachmentKind } from './presetCore'
 
@@ -366,6 +367,14 @@ interface AgentSession {
   /** 本会话累计 agent 轮次（decide/恢复轮各 +1） */
   turns: number
   totalTokens: number
+  /**
+   * E1 当前会话推理强度（未指定/已撤销 = undefined，引擎默认）。
+   * exec 通道靠下方 threadOptions 引用改写下轮即时生效；appserver 通道在
+   * 会话创建时已注入 configArgs，中途变更需会话重建。
+   */
+  reasoningEffort?: ReasoningEffort
+  /** startThread 入参引用（exec 通道）：E1 强度变更直接改引用字段，下轮 run 生效 */
+  threadOptions?: ThreadOptions
 }
 
 /** agent session 空闲回收：超过该时长无活动即销毁（线程/代理/tempHome） */
@@ -423,11 +432,22 @@ class WorkbenchService {
    */
   private async getOrCreateAgentSession(
     sessionId: string,
-    onProgress: DecideProgressCallback
+    onProgress: DecideProgressCallback,
+    /**
+     * E1 本轮期望推理强度：
+     * - 具名档位（minimal/low/…/xhigh）→ 新建会话随 startThread/configArgs 注入；
+     *   已建会话（exec 通道）改 threadOptions 引用，下轮 run 即时生效
+     * - 'auto' → 撤销具名档位回引擎默认（新建会话即无注入）
+     * - undefined（请求未带/非法值被路由过滤）→ 保持会话现状，零行为变化
+     */
+    reasoningEffort?: ReasoningEffort
   ): Promise<AgentSession> {
     const cached = this.agentSessions.get(sessionId)
     if (cached) {
       this.touchAgentSession(sessionId)
+      // E1:undefined=请求未带/非法值(旧客户端)→保持会话现状;仅显式档位或
+      // 'auto'(撤销)才变更。创建路径的 auto/undefined 由 toEngineEffort 折叠。
+      if (reasoningEffort !== undefined) this.applyAgentEffort(cached, reasoningEffort)
       return cached
     }
     const binary = resolveCodexBinary()
@@ -495,6 +515,10 @@ class WorkbenchService {
     // delta);默认 exec(零行为变化,红线:M3 默认不切)。两通道共用 tempHome
     // (MCP 配置/技能同构)与代理(provider base_url 同源)。
     const transport = this.resolveAgentTransport()
+    // E1 会话级推理强度 → 引擎 config 值:具名档位原样透传,auto/缺省=undefined
+    // 不注入(引擎默认,零行为变化)。appserver 通道随 configArgs 在 spawn 时注入
+    // (中途变更需会话重建);exec 通道走下方 threadOptions 引用,下轮即时生效。
+    const engineEffort = toEngineEffort(reasoningEffort)
     let appServer: AgentSession['appServer']
     if (transport === 'appserver') {
       appServer = await createAppServerRuntime({
@@ -508,6 +532,7 @@ class WorkbenchService {
         configArgs: [
           `model="${cfg.buildModel || 'glm-5.3-flash'}"`,
           'model_provider="openai_http"',
+          ...(engineEffort ? [`model_reasoning_effort="${engineEffort}"`] : []),
           `model_providers.openai_http={ name = "Artify Workbench HTTP", base_url = "${resolveCodexBaseUrl({ baseUrl: codexBaseUrl })}", env_key = "WORKBENCH_CODEX_API_KEY", wire_api = "responses", requires_openai_auth = false, supports_websockets = false }`
         ]
       })
@@ -569,18 +594,24 @@ class WorkbenchService {
           appStoreManager.getConfig().workbenchAgentAccess === 'full' ? 'full' : 'standard'
       } catch {}
     }
-    const thread = codex.startThread({
+    // E1:threadOptions 保留引用——exec 通道每轮 run 从该对象读 modelReasoningEffort,
+    // 中途切档直接改引用字段即可下轮生效(SDK startThread 原样持有入参对象,零拷贝)
+    const threadOptions: ThreadOptions = {
       model: cfg.buildModel || 'glm-5.3-flash',
       sandboxMode: agentAccess === 'full' ? 'danger-full-access' : 'workspace-write',
       workingDirectory: process.cwd(),
-      skipGitRepoCheck: true
-    })
+      skipGitRepoCheck: true,
+      ...(engineEffort ? { modelReasoningEffort: engineEffort } : {})
+    }
+    const thread = codex.startThread(threadOptions)
     const agent: AgentSession = {
       codex,
       thread,
       tempHome,
       proxy,
       ...(appServer ? { appServer } : {}),
+      ...(engineEffort ? { reasoningEffort: engineEffort } : {}),
+      threadOptions,
       lastActiveAt: Date.now(),
       turns: 0,
       totalTokens: 0
@@ -594,6 +625,22 @@ class WorkbenchService {
       })
     }
     return agent
+  }
+
+  /**
+   * E1 会话推理强度落 agent（调用方保证 reasoningEffort 为具名档位或 'auto'）：
+   * - exec 通道：改 threadOptions 引用（SDK 每轮 spawn 前读该字段），下轮即时生效
+   * - appserver 通道：effort 已在会话创建时注入 configArgs，此处仅记档——
+   *   中途变更需会话重建才生效
+   * - 具名档位 → 记档 + 注入；'auto' → 清档回引擎默认
+   */
+  private applyAgentEffort(agent: AgentSession, reasoningEffort?: ReasoningEffort): void {
+    const eff = toEngineEffort(reasoningEffort)
+    agent.reasoningEffort = eff
+    if (agent.threadOptions) {
+      if (eff) agent.threadOptions.modelReasoningEffort = eff
+      else delete agent.threadOptions.modelReasoningEffort
+    }
   }
 
   private touchAgentSession(sessionId: string): void {
@@ -1201,7 +1248,7 @@ ${userInput}`
     rawInput: string,
     onProgress: DecideProgressCallback,
     attachments: AttachmentMeta[] = [],
-    opts: { signal?: AbortSignal } = {}
+    opts: { signal?: AbortSignal; reasoningEffort?: ReasoningEffort } = {}
   ): Promise<{
     plan: WorkbenchPlan | null
     issues: PlanValidationIssue[]
@@ -1236,7 +1283,9 @@ ${userInput}`
     // 用户消息/恢复轮之间上下文连续（能看到自己此前的工具调用与执行结果）。
     // 首次创建含代理+临时 CODEX_HOME；之后直接复用。应用重启后 Map 为空 →
     // 自动重建，spec 注入近史兜底。
-    const agent = await this.getOrCreateAgentSession(sessionId, onProgress)
+    // E1:opts.reasoningEffort(路由层已枚举校验;非法值折叠为 undefined,auto 显式
+    // 透传=撤销具名档位)随创建透传,exec 通道下轮即时生效。
+    const agent = await this.getOrCreateAgentSession(sessionId, onProgress, opts.reasoningEffort)
     if (agent.turns >= MAX_AGENT_TURNS) {
       throw new Error(`本会话 agent 轮次已达上限（${MAX_AGENT_TURNS} 轮），请新建会话继续`)
     }

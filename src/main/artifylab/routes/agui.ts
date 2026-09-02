@@ -28,6 +28,7 @@ import { HTTP_STATUS } from '../config/constants'
 import { logger } from '../utils/logger'
 import { createErrorResponse } from '../utils/errorHandler'
 import { workbenchService } from '../workbench/service'
+import { isReasoningEffort } from '../workbench/reasoningEffort'
 import type { WorkbenchMessageKind } from '../workbench/service'
 import { stopExecution } from '../mcp/executor'
 import appStoreManager from '../appStore'
@@ -117,6 +118,12 @@ export function createAguiRouter(deps: { store?: EventStore } = {}): express.Rou
        * 缺省/非法值不 setMode → gate 走 defaultMode(standard),行为零突变。
        */
       approvalMode?: ApprovalMode
+      /**
+       * E1 会话级推理强度(可选,前端下拉):具名档位 minimal/low/medium/high/xhigh
+       * → codex model_reasoning_effort(exec 通道下轮即时生效);'auto' = 撤销具名
+       * 档位回引擎默认;非法值/缺省 = 不传(保持会话现状),行为零突变。
+       */
+      reasoningEffort?: unknown
     }
     // 对齐旧路由:附件-only 输入(无文本)合法,service 内有默认占位提示
     if (!threadId || !runId || (!input && !(attachments && attachments.length > 0))) {
@@ -158,6 +165,11 @@ export function createAguiRouter(deps: { store?: EventStore } = {}): express.Rou
     if (approvalMode === 'conservative' || approvalMode === 'standard') {
       gate.setMode(threadId, approvalMode)
     }
+    // E1:effort 枚举校验(非法值/缺省 = undefined = 不传,decide 保持会话现状)。
+    // auto 是合法显式档位(撤销此前具名档位回引擎默认)。
+    const reasoningEffort = isReasoningEffort(req.body?.reasoningEffort)
+      ? req.body.reasoningEffort
+      : undefined
     gate.register(threadId, (approvalReq) => {
       emit(custom(TOOL_APPROVAL_REQUIRED, toolApprovalRequiredValue(approvalReq)))
     })
@@ -305,7 +317,7 @@ export function createAguiRouter(deps: { store?: EventStore } = {}): express.Rou
           }
         },
         attachments ?? [],
-        { signal: ac.signal }
+        { signal: ac.signal, reasoningEffort }
       )
 
       if (!ac.signal.aborted) {

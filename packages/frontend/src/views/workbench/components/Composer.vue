@@ -96,6 +96,11 @@
           :mode="approvalMode"
           @update:mode="(v) => $emit('update:approvalMode', v)"
         />
+        <!-- E1 决策推理强度（思考投入档位；会话级,随每轮 run 请求透传） -->
+        <ReasoningEffortMenu
+          :effort="reasoningEffort"
+          @update:effort="(v) => $emit('update:reasoningEffort', v)"
+        />
         <div class="flex-1 min-w-0"></div>
         <span v-if="slashOpen" class="text-[11px] text-[var(--wb-text-3)] mr-2 hidden sm:inline">
           ↑↓ {{ t('workbenchNavigate') }} · Tab/{{ t('confirm') }} · Esc
@@ -138,6 +143,7 @@ import AttachmentRail from './AttachmentRail.vue'
 import ModelMenu from './ModelMenu.vue'
 import SkillMenu from './SkillMenu.vue'
 import ApprovalModeMenu from './ApprovalModeMenu.vue'
+import ReasoningEffortMenu from './ReasoningEffortMenu.vue'
 
 const props = defineProps({
   busy: { type: Boolean, default: false },
@@ -148,6 +154,8 @@ const props = defineProps({
   modelOverride: { type: Object, default: null },
   /** B1 审批模式:'standard' | 'conservative'(默认 standard=只读+本地写自动放行) */
   approvalMode: { type: String, default: 'standard' },
+  /** E1 推理强度:'auto'(默认,不指定) | low | medium | high | xhigh */
+  reasoningEffort: { type: String, default: 'auto' },
   modelValue: { type: String, default: '' },
 })
 const emit = defineEmits([
@@ -159,6 +167,7 @@ const emit = defineEmits([
   'remove-attachment',
   'update:modelOverride',
   'update:approvalMode',
+  'update:reasoningEffort',
 ])
 
 const { t } = useI18n()
