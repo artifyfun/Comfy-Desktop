@@ -1892,6 +1892,45 @@ function composeSelection() {
 
 // —— N3 生成节点（prompt 卡弹窗；产物落布+溯源） ——
 const genNode = ref(null) // {x,y,prompt,refs:[],running}
+// —— S5a note→生图自动编排（参考 config-node 流）：生图按钮 → 选 app →
+// 右侧建 App 节点 + note→app 连线 + 立即运行（note 文本自动填 text 槽） ——
+const genFromNote = ref(null) // {noteId} 待选 app 的编排请求
+function startGenerateFromNote(noteId) {
+  const note = objects.value.find((o) => o.id === noteId)
+  if (!note || note.type !== 'note') return
+  if (!String(note.text || '').trim()) {
+    message.warning(t('canvasGenNeedText'))
+    return
+  }
+  const src = objects.value.find((o) => o.id === noteId)
+  genFromNote.value = { noteId }
+  // picker 定位到 note 右侧（App 节点将落的位置）
+  const wx = src.x + src.width + 80
+  const wy = src.y
+  const sc = worldToScreen(viewport.value, wx, wy)
+  appPicker.wx = wx
+  appPicker.wy = wy
+  appPicker.open = true
+}
+/** picker 选中后：若在编排流中，建节点+连线+自动运行 */
+function maybeRunGenFromNote(node) {
+  const req = genFromNote.value
+  genFromNote.value = null
+  if (!req) return
+  const note = objects.value.find((o) => o.id === req.noteId)
+  if (!note) return
+  beforeChange()
+  links.value.push({
+    id: 'l' + Date.now() + Math.random().toString(36).slice(2, 6),
+    from: note.id,
+    to: node.id,
+  })
+  saveSoon()
+  message.info(t('canvasGenFlowStarted'))
+  // 立即运行（collectUpstream 沿新连线吃到 note 文本）
+  nextTick(() => runAppNode(node.id))
+}
+
 function openGenNode(ids = []) {
   const imgs = ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'image')
   const refs = imgs.map(refOf).filter(Boolean)
@@ -2394,6 +2433,11 @@ function onAppPicked(app) {
   saveSoon()
   // 拾取即展开参数面板
   nextTick(() => openAppNodePanel(node.id))
+  // S5a 编排流：note 生图 → 连线 + 自动运行（不展开面板避免遮挡）
+  if (genFromNote.value) {
+    appPanel.id = null
+    maybeRunGenFromNote(node)
+  }
 }
 
 /** 右键菜单位置开拾取器（点选后关闭菜单） */
@@ -3200,10 +3244,7 @@ const hoverToolbar = computed(() => {
       {
         icon: 'fas fa-image',
         title: t('canvasTbGenImage'),
-        action: () => {
-          selection.value = [id]
-          openGenNode([id])
-        },
+        action: () => startGenerateFromNote(id),
       },
     )
   } else if (o.type === 'image') {
