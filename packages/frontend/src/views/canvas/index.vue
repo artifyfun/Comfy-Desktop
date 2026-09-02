@@ -528,6 +528,103 @@
           </div>
         </div>
 
+        <!-- 角度/翻转对话框（A2）：滑杆 + 翻转开关 -->
+        <div
+          v-if="angleDlg.open"
+          class="absolute z-30 flex flex-col gap-3 w-[300px] p-4 rounded-2xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-2xl"
+          :style="{ left: '50%', top: '50%', transform: 'translate(-50%,-50%)' }"
+          @mousedown.stop
+          @pointerdown.stop
+        >
+          <div class="text-sm font-medium text-[var(--wb-text-1)]">{{ t('canvasAngleTitle') }}</div>
+          <div class="flex items-center gap-2">
+            <input
+              :value="angleDlg.deg"
+              type="range"
+              min="-45"
+              max="45"
+              step="1"
+              class="flex-1"
+              @input="angleDlg.deg = Number($event.target.value)"
+            />
+            <span class="w-12 text-right text-xs text-[var(--wb-text-2)]">{{ angleDlg.deg }}°</span>
+          </div>
+          <div class="flex gap-2">
+            <button
+              v-for="fl in [
+                { k: 'flipH', label: t('canvasAngleFlipH') },
+                { k: 'flipV', label: t('canvasAngleFlipV') },
+              ]"
+              :key="fl.k"
+              class="flex-1 h-8 rounded-lg text-xs border transition"
+              :class="
+                angleDlg[fl.k]
+                  ? 'text-white bg-[var(--wb-accent)] border-transparent'
+                  : 'text-[var(--wb-text-2)] border-[var(--wb-stroke)] hover:text-[var(--wb-text-1)]'
+              "
+              @click="angleDlg[fl.k] = !angleDlg[fl.k]"
+            >
+              {{ fl.label }}
+            </button>
+          </div>
+          <div class="flex gap-2 justify-end">
+            <button
+              class="h-8 px-3 rounded-lg text-xs text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] border border-[var(--wb-stroke)] transition"
+              @click="angleDlg.open = false"
+            >
+              {{ t('canvasDlgCancel') }}
+            </button>
+            <button
+              class="h-8 px-3 rounded-lg text-xs text-white bg-[var(--wb-accent)] transition"
+              @click="applyAngle"
+            >
+              {{ t('canvasAngleApply') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 放大对话框（A3）：目标长边 + 算法 -->
+        <div
+          v-if="upscaleDlg.open"
+          class="absolute z-30 flex flex-col gap-3 w-[300px] p-4 rounded-2xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-2xl"
+          :style="{ left: '50%', top: '50%', transform: 'translate(-50%,-50%)' }"
+          @mousedown.stop
+          @pointerdown.stop
+        >
+          <div class="text-sm font-medium text-[var(--wb-text-1)]">
+            {{ t('canvasUpscaleTitle') }}
+          </div>
+          <div class="flex gap-1.5">
+            <button
+              v-for="tp in [1024, 2048, 4096]"
+              :key="tp"
+              class="flex-1 h-8 rounded-lg text-xs border transition"
+              :class="
+                upscaleDlg.target === tp
+                  ? 'text-white bg-[var(--wb-accent)] border-transparent'
+                  : 'text-[var(--wb-text-2)] border-[var(--wb-stroke)] hover:text-[var(--wb-text-1)]'
+              "
+              @click="upscaleDlg.target = tp"
+            >
+              {{ tp }}px
+            </button>
+          </div>
+          <div class="flex gap-2 justify-end">
+            <button
+              class="h-8 px-3 rounded-lg text-xs text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] border border-[var(--wb-stroke)] transition"
+              @click="upscaleDlg.open = false"
+            >
+              {{ t('canvasDlgCancel') }}
+            </button>
+            <button
+              class="h-8 px-3 rounded-lg text-xs text-white bg-[var(--wb-accent)] transition"
+              @click="applyUpscale"
+            >
+              {{ t('canvasUpscaleApply') }}
+            </button>
+          </div>
+        </div>
+
         <!-- 切分对话框（S6a）：横/竖切 N 片 -->
         <div
           v-if="splitDlg.open"
@@ -545,11 +642,12 @@
             <option value="v">{{ t('canvasSplitDirV') }}</option>
           </select>
           <input
-            v-model.number="splitDlg.n"
+            :value="splitDlg.n"
             type="number"
             min="2"
             max="6"
             class="w-16 bg-transparent outline-none text-sm text-[var(--wb-text-1)] border border-[var(--wb-stroke)] rounded-lg px-2 py-1"
+            @input="splitDlg.n = Math.min(6, Math.max(2, Number($event.target.value) || 2))"
           />
           <button
             class="h-7 px-3 rounded-lg text-xs text-white bg-[var(--wb-accent)] transition"
@@ -885,6 +983,8 @@ import {
   cropRectFor,
   splitRects,
   rotatedSize,
+  videoFrameTime,
+  upscaleSize,
   createHistory,
   pushHistory,
   undo as engineUndo,
@@ -2293,6 +2393,177 @@ function cropImageNode(id) {
   if (!o || o.type !== 'image') return
   selection.value = [id]
   setTool('crop')
+}
+
+// —— A1 视频截帧：抓首/末/当前帧 → 新图片节点 + 溯源连线 ——
+async function captureVideoFrameAt(id, position) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || o.type !== 'video' || !o.src) return
+  // 找 overlay 里正在播的 video 元素拿 currentTime；没有则 0
+  const el = document.querySelector(`[data-media-node="${id}"]`)
+  const ct = el && el.tagName === 'VIDEO' ? el.currentTime : 0
+  const video = document.createElement('video')
+  video.muted = true
+  video.playsInline = true
+  video.preload = 'auto'
+  video.crossOrigin = 'anonymous'
+  const waitEvent = (ev) =>
+    new Promise((resolve, reject) => {
+      const done = () => {
+        video.removeEventListener(ev, done)
+        video.removeEventListener('error', fail)
+        resolve()
+      }
+      const fail = () => {
+        video.removeEventListener(ev, done)
+        video.removeEventListener('error', fail)
+        reject(new Error('video load failed'))
+      }
+      video.addEventListener(ev, done)
+      video.addEventListener('error', fail)
+    })
+  try {
+    const meta = waitEvent('loadedmetadata')
+    video.src = o.src
+    video.load()
+    await meta
+    const t = videoFrameTime(position, video.duration, ct)
+    if (t > 0) {
+      const seeked = waitEvent('seeked')
+      video.currentTime = t
+      await seeked
+    } else if (video.readyState < 2) {
+      await waitEvent('loadeddata')
+    }
+    const cv = document.createElement('canvas')
+    cv.width = video.videoWidth
+    cv.height = video.videoHeight
+    cv.getContext('2d').drawImage(video, 0, 0)
+    const blob = await new Promise((r) => cv.toBlob(r, 'image/png'))
+    if (!blob) throw new Error('toBlob null')
+    const url = URL.createObjectURL(blob)
+    const ratio = Math.min(1, 240 / cv.width)
+    beforeChange()
+    const node = {
+      id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+      type: 'image',
+      x: o.x + o.width + 60,
+      y: o.y,
+      width: Math.max(20, Math.round(cv.width * ratio)),
+      height: Math.max(20, Math.round(cv.height * ratio)),
+      src: url,
+      persist: null,
+    }
+    objects.value.push(node)
+    links.value.push({
+      id: 'l' + Date.now() + Math.random().toString(36).slice(2, 6),
+      from: o.id,
+      to: node.id,
+    })
+    persistImage(node)
+    selection.value = [node.id]
+    saveSoon()
+  } catch (e) {
+    message.error(t('canvasFrameFailed') + ': ' + String(e?.message || e).slice(0, 60))
+  } finally {
+    video.removeAttribute('src')
+    video.load()
+  }
+}
+
+// —— A2 任意角度旋转 + 翻转（angle 对话框） ——
+const angleDlg = reactive({ open: false, id: null, deg: 0, flipH: false, flipV: false })
+async function applyAngle() {
+  const o = objects.value.find((x) => x.id === angleDlg.id)
+  const { deg, flipH, flipV } = angleDlg
+  if (!o || o.type !== 'image' || !o.src) return
+  angleDlg.open = false
+  let img
+  try {
+    img = await fetchImageForCrop(o.src)
+  } catch {
+    message.warning(t('canvasCropNoImage'))
+    return
+  }
+  const iw = img.naturalWidth || img.width
+  const ih = img.naturalHeight || img.height
+  // 任意角度：pad 18% 容纳旋转后画布（参考 transformAngleDataUrl）
+  const pad = Math.round(Math.max(iw, ih) * 0.18)
+  const cv = document.createElement('canvas')
+  cv.width = iw + pad * 2
+  cv.height = ih + pad * 2
+  const ctx = cv.getContext('2d')
+  ctx.translate(cv.width / 2, cv.height / 2)
+  ctx.rotate((Number(deg) * Math.PI) / 180)
+  ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1)
+  ctx.drawImage(img, -iw / 2, -ih / 2)
+  cv.toBlob((blob) => {
+    if (!blob) return
+    const url = URL.createObjectURL(blob)
+    beforeChange()
+    const k = (o.width || 1) / (iw || 1)
+    o.src = url
+    o.width = Math.max(20, Math.round(cv.width * k))
+    o.height = Math.max(20, Math.round(cv.height * k))
+    persistImage(o)
+    saveSoon()
+  }, 'image/png')
+}
+
+// —— A3 无损放大（长边重采样，步进放大保平滑） ——
+const upscaleDlg = reactive({ open: false, id: null, target: 2048, algo: 'high' })
+async function applyUpscale() {
+  const o = objects.value.find((x) => x.id === upscaleDlg.id)
+  if (!o || o.type !== 'image' || !o.src) return
+  upscaleDlg.open = false
+  let img
+  try {
+    img = await fetchImageForCrop(o.src)
+  } catch {
+    message.warning(t('canvasCropNoImage'))
+    return
+  }
+  const iw = img.naturalWidth || img.width
+  const ih = img.naturalHeight || img.height
+  const sz = upscaleSize(iw, ih, upscaleDlg.target)
+  if (sz.width <= iw && sz.height <= ih) {
+    message.warning(t('canvasUpscaleSkip'))
+    return
+  }
+  let src = img
+  let sw = iw
+  let sh = ih
+  // 步进放大（每步 ≤2x，参考 drawStepUpscale）防一步到位的锯齿
+  const steps = []
+  while (sw * 2 < sz.width && sh * 2 < sz.height) {
+    steps.push({ w: sw * 2, h: sh * 2 })
+    sw *= 2
+    sh *= 2
+  }
+  steps.push({ w: sz.width, h: sz.height })
+  for (const st of steps) {
+    const cv = document.createElement('canvas')
+    cv.width = st.w
+    cv.height = st.h
+    cv.getContext('2d').imageSmoothingEnabled = true
+    cv.getContext('2d').imageSmoothingQuality = 'high'
+    cv.getContext('2d').drawImage(src, 0, 0, cv.width, cv.height)
+    src = cv
+  }
+  const out = src
+  out.toBlob((blob) => {
+    if (!blob) return
+    const url = URL.createObjectURL(blob)
+    beforeChange()
+    const k = (o.width || 1) / (iw || 1)
+    o.src = url
+    // 显示尺寸维持（像素翻倍但画布上大小不变）
+    persistImage(o)
+    saveSoon()
+    message.success(
+      t('canvasUpscaleDone').replace('{w}', String(sz.width)).replace('{h}', String(sz.height)),
+    )
+  }, 'image/png')
 }
 
 // —— 提示词库（S6b）：内置分词 + 自定义（localStorage）+ JSON 导入 ——
@@ -3727,6 +3998,27 @@ const hoverToolbar = computed(() => {
       },
       { icon: 'fas fa-table-cells', title: t('canvasTbSplit'), action: () => splitImageNode(id) },
       { icon: 'fas fa-crop-simple', title: t('canvasTbCrop'), action: () => cropImageNode(id) },
+      {
+        icon: 'fas fa-camera-rotate',
+        title: t('canvasTbAngle'),
+        action: () => {
+          angleDlg.id = id
+          angleDlg.deg = 0
+          angleDlg.flipH = false
+          angleDlg.flipV = false
+          angleDlg.open = true
+        },
+      },
+      {
+        icon: 'fas fa-magnifying-glass-plus',
+        title: t('canvasTbUpscale'),
+        action: () => {
+          upscaleDlg.id = id
+          upscaleDlg.target = 2048
+          upscaleDlg.algo = 'high'
+          upscaleDlg.open = true
+        },
+      },
     )
   } else if (o.type === 'video' || o.type === 'audio') {
     items.push({
@@ -3734,6 +4026,25 @@ const hoverToolbar = computed(() => {
       title: o.src ? t('canvasMediaReplace') : t('canvasMediaUpload'),
       action: () => uploadMediaFor(id),
     })
+    if (o.type === 'video' && o.src) {
+      items.push(
+        {
+          icon: 'fas fa-backward-step',
+          title: t('canvasFrameFirst'),
+          action: () => captureVideoFrameAt(id, 'first'),
+        },
+        {
+          icon: 'fas fa-forward-step',
+          title: t('canvasFrameLast'),
+          action: () => captureVideoFrameAt(id, 'last'),
+        },
+        {
+          icon: 'fas fa-camera',
+          title: t('canvasFrameCurrent'),
+          action: () => captureVideoFrameAt(id, 'current'),
+        },
+      )
+    }
   } else if (o.type === 'app') {
     items.push(
       { icon: 'fas fa-play', title: t('canvasRunAppNodes'), action: () => runAppNode(id) },

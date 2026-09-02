@@ -422,3 +422,22 @@ export function rotatedSize(w, h, deg) {
 export function px(v) {
   return Math.max(1, Math.round(v))
 }
+
+// —— 二期 A 组：媒体编辑纯几何 ——
+
+/** 视频截帧时间点解析：first/last/current → 秒（last 留 1ms 余量防越界） */
+export function videoFrameTime(position, duration, currentTime) {
+  const dur = Math.max(0, Number(duration) || 0)
+  if (position === 'first') return 0
+  if (position === 'last') return Math.max(0, dur - 0.001)
+  return Math.min(Math.max(0, Number(currentTime) || 0), Math.max(0, dur - 0.001))
+}
+
+/** 放大目标尺寸：长边对齐 target（clamp 1..maxEdge），短边按比例 */
+export function upscaleSize(w, h, targetLongEdge, maxEdge = 8192) {
+  const iw = Math.max(1, Math.round(w))
+  const ih = Math.max(1, Math.round(h))
+  const target = Math.min(maxEdge, Math.max(1, Math.round(targetLongEdge)))
+  const scale = target / Math.max(iw, ih)
+  return { width: Math.max(1, Math.round(iw * scale)), height: Math.max(1, Math.round(ih * scale)) }
+}

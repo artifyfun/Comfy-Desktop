@@ -18,6 +18,15 @@ import { normaliseFirstUseMode } from '../shared/firstUseMode'
 import { execFile } from 'child_process'
 import type { ChildProcess } from 'child_process'
 import todesktop from '@todesktop/runtime'
+
+// 开发调试：ARTIFY_DEV_DEBUG_PORT=9222 pnpm dev → 开 CDP 供浏览器自动化验收
+// （只在显式设置时生效，不影响正常 dev/打包）
+if (process.env.ARTIFY_DEV_DEBUG_PORT) {
+  app.commandLine.appendSwitch(
+    'remote-debugging-port',
+    String(parseInt(process.env.ARTIFY_DEV_DEBUG_PORT, 10) || 9222)
+  )
+}
 import * as ipc from './lib/ipc'
 import { getAppVersion } from './lib/ipc'
 import type { ExitCallbackInfo } from './lib/ipc'

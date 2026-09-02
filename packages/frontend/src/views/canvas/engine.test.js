@@ -18,6 +18,8 @@ import {
   cropRectFor,
   splitRects,
   rotatedSize,
+  videoFrameTime,
+  upscaleSize,
   createHistory,
   pushHistory,
   undo,
@@ -346,5 +348,21 @@ describe('splitRects / rotatedSize（S6a 节点级图像编辑）', () => {
     expect(rotatedSize(640, 480, -90)).toEqual({ w: 480, h: 640 })
     expect(rotatedSize(640, 480, 180)).toEqual({ w: 640, h: 480 })
     expect(rotatedSize(640, 480, 450)).toEqual({ w: 480, h: 640 })
+  })
+})
+
+describe('videoFrameTime / upscaleSize（二期 A 组媒体编辑）', () => {
+  it('截帧时间点：first/last/current', () => {
+    expect(videoFrameTime('first', 10, 3.5)).toBe(0)
+    expect(videoFrameTime('last', 10, 3.5)).toBeCloseTo(9.999)
+    expect(videoFrameTime('current', 10, 3.5)).toBe(3.5)
+    expect(videoFrameTime('current', 10, 99)).toBeCloseTo(9.999) // clamp 到末尾
+    expect(videoFrameTime('current', 0, 5)).toBe(0) // 无时长安全
+  })
+  it('放大尺寸：长边对齐 + 短边等比 + clamp', () => {
+    expect(upscaleSize(256, 128, 1024)).toEqual({ width: 1024, height: 512 })
+    expect(upscaleSize(128, 256, 1024)).toEqual({ width: 512, height: 1024 })
+    expect(upscaleSize(2000, 1000, 1024)).toEqual({ width: 1024, height: 512 }) // 缩小也算
+    expect(upscaleSize(10, 10, 99999)).toEqual({ width: 8192, height: 8192 }) // maxEdge clamp
   })
 })
