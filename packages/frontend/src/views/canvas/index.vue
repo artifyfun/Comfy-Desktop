@@ -110,6 +110,16 @@
                 }"
               />
             </v-group>
+            <!-- 媒体物件（video/audio）：Konva 占位框（拖拽/选中/连线热区），播放器是 HTML overlay -->
+            <v-group
+              v-for="o in mediaObjects"
+              :key="o.id"
+              :config="groupConfig(o)"
+              :draggable="true"
+            >
+              <v-rect :config="mediaRectConfig(o)" />
+            </v-group>
+
             <!-- 便签物件 -->
             <v-group
               v-for="o in noteObjects"
@@ -427,6 +437,21 @@
         </div>
 
         <!-- App 节点展开参数面板（HTML overlay，锚定节点屏幕坐标） -->
+        <!-- 媒体节点播放器 overlay（S4b）：跟随视口变换定位 -->
+        <template v-for="o in mediaObjects" :key="'media-' + o.id">
+          <div
+            class="absolute z-[15]"
+            :style="{
+              left: mediaPosOf(o).x + 'px',
+              top: mediaPosOf(o).y + 'px',
+              width: mediaPosOf(o).w + 'px',
+              height: mediaPosOf(o).h + 'px',
+            }"
+          >
+            <MediaNodeCard :node="o" :pos="mediaPosOf(o)" @upload="uploadMediaFor" />
+          </div>
+        </template>
+
         <AppNodeCard
           v-if="appPanel.node"
           :node="appPanel.node"
@@ -670,6 +695,7 @@ import { message, Modal } from 'ant-design-vue'
 import Workbench from '../workbench/index.vue'
 import AppHeader from '../apps/components/AppHeader.vue'
 import AppNodeCard from './AppNodeCard.vue'
+import MediaNodeCard from './MediaNodeCard.vue'
 import AppPickerModal from './AppPickerModal.vue'
 import {
   makeAppNode,
@@ -1107,6 +1133,25 @@ function imageConfig(o) {
     cornerRadius: 6,
   }
 }
+/** 媒体节点占位框（overlay 播放器下的 Konva 热区/选中框） */
+function mediaRectConfig(o) {
+  const sel = selection.value.includes(o.id)
+  return {
+    x: o.x,
+    y: o.y,
+    width: o.width,
+    height: o.height,
+    fill: o.type === 'video' ? 'rgba(14,165,233,0.10)' : 'rgba(168,85,247,0.10)',
+    stroke: sel
+      ? '#38bdf8'
+      : o.type === 'video'
+        ? 'rgba(56,189,248,0.55)'
+        : 'rgba(192,132,252,0.55)',
+    strokeWidth: sel ? 2 : 1.5,
+    cornerRadius: 12,
+  }
+}
+
 function noteRectConfig(o) {
   return {
     width: o.width,
@@ -3012,6 +3057,96 @@ function onKeyUp(e) {
   if (e.code === 'Space') spaceDown.value = false
 }
 
+// —— 媒体节点（S4b video/audio）：拖入/上传 + overlay 播放器 + 存档 ——
+const mediaObjects = computed(() =>
+  objects.value.filter((o) => o.type === 'video' || o.type === 'audio'),
+)
+/** 媒体节点屏幕矩形（overlay 定位） */
+function mediaPosOf(o) {
+  const tl = worldToScreen(viewport.value, o.x, o.y)
+  return {
+    x: tl.x,
+    y: tl.y,
+    w: o.width * viewport.value.scale,
+    h: o.height * viewport.value.scale,
+  }
+}
+/** 从文件建媒体节点；视频取首帧定尺寸，音频固定 280x96 */
+function addMediaFromFile(f, wx, wy, onSized) {
+  const isVideo = f.type.startsWith('video/')
+  const url = URL.createObjectURL(f)
+  const o = {
+    id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+    type: isVideo ? 'video' : 'audio',
+    x: wx,
+    y: wy,
+    width: isVideo ? 320 : 280,
+    height: isVideo ? 180 : 96,
+    src: url,
+    persist: null,
+    name: f.name,
+  }
+  objects.value.push(o)
+  saveSoon()
+  if (isVideo) {
+    // 视频元信息定尺寸（最大 320 宽，16:9 兜底）
+    const probe = document.createElement('video')
+    probe.preload = 'metadata'
+    probe.onloadedmetadata = () => {
+      const ratio = probe.videoHeight / probe.videoWidth || 0.5625
+      o.width = Math.min(320, Math.max(160, probe.videoWidth))
+      o.height = Math.round(o.width * ratio)
+      onSized?.(o.height)
+      saveSoon()
+    }
+    probe.src = url
+  } else {
+    onSized?.(o.height)
+  }
+  // 存档：小文件 dataURL 内嵌；大文件只留会话（刷新丢失，提示）
+  if (f.size <= 4 * 1024 * 1024) {
+    const rd = new FileReader()
+    rd.onload = () => {
+      o.persist = rd.result
+      saveSoon()
+    }
+    rd.readAsDataURL(f)
+  }
+}
+/** 工具栏/占位点击上传媒体（替换或新建） */
+function uploadMediaFor(id) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o) return
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = o.type === 'video' ? 'video/*' : 'audio/*'
+  input.onchange = () => {
+    const f = input.files?.[0]
+    if (!f) return
+    const url = URL.createObjectURL(f)
+    beforeChange()
+    o.src = url
+    o.name = f.name
+    o.persist = null
+    if (f.size <= 4 * 1024 * 1024) {
+      const rd = new FileReader()
+      rd.onload = () => {
+        o.persist = rd.result
+        saveSoon()
+      }
+      rd.readAsDataURL(f)
+    }
+    saveSoon()
+  }
+  input.click()
+}
+/** 载入时恢复媒体 src（persist dataURL → src） */
+watch(mediaObjects, (list) => {
+  for (const o of list) {
+    if (!o.src && o.persist) o.src = o.persist
+  }
+})
+
 // —— 图片落画布：文件拖入 + 剪贴板粘贴 ——
 // —— 节点悬浮工具栏（S4a）：悬停物件上方快捷动作条 ——
 /** 工具栏“停留”保护：鼠标移入工具栏本身时不算离开节点（参考 onKeep/onLeave） */
@@ -3087,6 +3222,12 @@ const hoverToolbar = computed(() => {
         },
       },
     )
+  } else if (o.type === 'video' || o.type === 'audio') {
+    items.push({
+      icon: 'fas fa-upload',
+      title: o.src ? t('canvasMediaReplace') : t('canvasMediaUpload'),
+      action: () => uploadMediaFor(id),
+    })
   } else if (o.type === 'app') {
     items.push(
       { icon: 'fas fa-play', title: t('canvasRunAppNodes'), action: () => runAppNode(id) },
@@ -3179,6 +3320,11 @@ function filesToObjects(files, world) {
   const made = []
   let cursorY = world.y
   for (const f of files) {
+    if (f.type.startsWith('video/') || f.type.startsWith('audio/')) {
+      made.push(f.name)
+      addMediaFromFile(f, world.x, cursorY, (h) => (cursorY += h + 16))
+      continue
+    }
     if (!f.type.startsWith('image/')) continue
     const url = URL.createObjectURL(f)
     const probe = new Image()
