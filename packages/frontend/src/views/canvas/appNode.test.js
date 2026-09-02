@@ -64,6 +64,44 @@ describe('paramFieldsFromTemplate', () => {
   it('空模板/无 paramsNodes 安全返回 []', () => {
     expect(paramFieldsFromTemplate(null)).toEqual([])
     expect(paramFieldsFromTemplate({ template: {} })).toEqual([])
+  })
+  it('LoadImage 文件槽：历史模板 selectedWidget.type=string 也识别为 image', () => {
+    // 真实模板形状（文生图·文本批量）：type string 而非 combo，按节点类型判定
+    const app = {
+      template: {
+        paramsNodes: [
+          {
+            id: '1',
+            title: 'image',
+            category: 'input',
+            type: 'LoadImage',
+            selectedWidget: { name: 'image', type: 'string' },
+          },
+        ],
+        prompt: { 1: { class_type: 'LoadImage', inputs: { image: 'x.png' } } },
+      },
+    }
+    const fields = paramFieldsFromTemplate(app)
+    expect(fields.length).toBe(1)
+    expect(fields[0].widget).toBe('image')
+    // 喂养：上游 image 物件 → 该槽（filename 引用）
+    const { overrides, fedFields } = buildNodeOverrides({ params: {} }, fields, {
+      images: [
+        {
+          id: 'i1',
+          type: 'image',
+          name: 'ref.png',
+          src: 'http://h/view?filename=ref.png&subfolder=&type=output',
+        },
+      ],
+      notes: [],
+      apps: [],
+      srcIds: ['i1'],
+    })
+    expect(overrides['1']).toEqual({ image: 'ref.png' })
+    expect(fedFields.length).toBe(1)
+  })
+  it('widget 缺失/无法识别的字段跳过', () => {
     expect(
       paramFieldsFromTemplate({ template: { paramsNodes: [{ id: '1', category: 'input' }] } }),
     ).toEqual([])

@@ -73,6 +73,7 @@ vi.mock('../workbench/service', () => {
         prompt_id: 'p1'
       })),
       markOrchestrated: vi.fn((id: string) => calls.marked.push(id)),
+      syncTemplateToCanvas: vi.fn(),
       rememberMemory: vi.fn((key: string, value: string) => calls.remembered.push({ key, value })),
       forgetMemory: vi.fn((key: string) => {
         calls.forgotten.push(key)

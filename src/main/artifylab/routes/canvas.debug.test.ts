@@ -1,8 +1,29 @@
 // @vitest-environment node
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import express from 'express'
+
+// workbench/service 顶层拉 settings → electron app.getPath（测试环境无 electron），
+// 与 canvas.test.ts 同款 mock 绕开（本套件不测 workbench 逻辑）
+vi.mock('../workbench/service', () => ({
+  workbenchService: {
+    recordCanvasExecution: vi.fn(),
+    getSession: vi.fn(() => null),
+    appendMessage: vi.fn()
+  }
+}))
+// canvas.ts 的执行链依赖（executor/batchRunner/appStore）顶层拉 electron
+// app.getPath（测试环境无 electron），与 canvas.test.ts 同款 mock 绕开
+vi.mock('../mcp/executor', () => ({
+  executePrompt: vi.fn(),
+  getHistory: vi.fn(),
+  extractExecutionError: vi.fn(() => null)
+}))
+vi.mock('../services/batchRunner', () => ({ startBatch: vi.fn() }))
+vi.mock('../appStore', () => ({
+  default: { getConfig: vi.fn(() => ({ comfyHost: 'http://127.0.0.1:8188' })) }
+}))
 import { createCanvasRouter, type CanvasDigestStore, type CheckpointStore } from './canvas'
 
 /**

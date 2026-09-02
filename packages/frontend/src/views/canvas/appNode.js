@@ -33,12 +33,16 @@ const WIDGET_FIELD_TYPES = new Set([
 export function paramFieldsFromTemplate(app) {
   const nodes = app?.template?.paramsNodes
   if (!Array.isArray(nodes)) return []
+  const prompt = app?.template?.prompt || {}
   const fields = []
   for (const node of nodes) {
     if (!node || node.category === 'output') continue
     const w = node.selectedWidget
     if (!w || typeof w.name !== 'string') continue
-    const widget = widgetKindOf(node, w)
+    // class_type 优先取 prompt 图（paramsNode.type 是 widget 值类型如 string，
+    // 不是 ComfyUI 节点类型；历史模板 paramsNodes 无 type 字段时回落 node.type）
+    const nodeType = prompt[String(node.id)]?.class_type || node.type
+    const widget = widgetKindOf(nodeType, w)
     if (!widget) continue
     fields.push({
       nodeId: String(node.id),
@@ -57,7 +61,7 @@ export function paramFieldsFromTemplate(app) {
       max: w.options?.max,
       step: w.options?.step,
       precision: w.options?.precision,
-      nodeType: node.type,
+      nodeType,
       widgetType: w.type,
     })
   }
@@ -65,18 +69,18 @@ export function paramFieldsFromTemplate(app) {
 }
 
 /** 单个 paramsNode → 表单 widget 种类；无法识别返回 null（字段跳过） */
-function widgetKindOf(node, w) {
+function widgetKindOf(nodeType, w) {
+  // LoadImage/LoadAudio/LoadVideo 的文件槽是上传位：按 ComfyUI 节点类型判定。
+  // paramsNode.type 是 widget 值类型（string 等）而非节点类型；历史模板
+  // selectedWidget.type 也可能是 string 而非 combo——都不能作文件槽依据
+  if (nodeType === 'LoadImage' && w.name === 'image') return 'image'
+  if (nodeType === 'LoadAudio' && w.name === 'audio') return 'audio'
+  if (nodeType === 'LoadVideo' && w.name === 'video') return 'video'
   if (w.type === 'toggle') return 'switch'
   if (w.type === 'slider') return 'slider'
   if (w.type === 'number') return 'number'
   if (w.type === 'customtext' || w.type === 'string' || w.type === 'text') return 'text'
-  if (w.type === 'combo') {
-    // 特殊：LoadImage/LoadAudio/LoadVideo 的文件槽是上传位，不是下拉
-    if (node.type === 'LoadImage' && w.name === 'image') return 'image'
-    if (node.type === 'LoadAudio' && w.name === 'audio') return 'audio'
-    if (node.type === 'LoadVideo' && w.name === 'video') return 'video'
-    return 'select'
-  }
+  if (w.type === 'combo') return 'select'
   return null
 }
 

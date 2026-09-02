@@ -191,24 +191,13 @@
           </button>
         </div>
 
-        <!-- 模式提示条（连线/裁剪工具激活时） -->
+        <!-- 模式提示条（裁剪工具激活时） -->
         <div
           v-if="tool"
           class="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur text-xs text-slate-200 flex items-center gap-2 z-10"
         >
-          <i
-            class="fas"
-            :class="
-              tool === 'link' ? 'fa-bezier-curve text-sky-400' : 'fa-vector-square text-sky-400'
-            "
-          ></i>
-          <span>{{
-            tool === 'link'
-              ? linkDraft
-                ? t('canvasLinkPickSecond')
-                : t('canvasLinkPickFirst')
-              : t('canvasCropHint')
-          }}</span>
+          <i class="fas fa-vector-square text-sky-400"></i>
+          <span>{{ t('canvasCropHint') }}</span>
           <button
             class="text-slate-400 hover:text-white"
             :title="t('canvasToolCancel')"
@@ -552,9 +541,8 @@ const selection = ref([]) // 选中的 object id 列表
 const guides = reactive({ v: [], h: [] })
 const rubber = ref(null) // {x,y,w,h} 世界坐标
 const drag = reactive({ mode: null, item: -1, last: null, moved: false })
-// 交互工具模式：null=选择 | 'link'=点两个物件连线 | 'crop'=圈图裁剪
+// 交互工具模式：null=选择 | 'crop'=圈图裁剪（连线走句柄拖拽）
 const tool = ref(null)
-const linkDraft = ref(null) // 'link' 模式：已点第一个物件 id
 const spaceDown = ref(false) // 空格按住 = 强制平移
 const cropRect = ref(null) // 'crop' 模式拖出的世界矩形
 // —— 连线（参考 infinite-canvas）：句柄拖拽建线 + 连线点选 ——
@@ -813,34 +801,6 @@ function onWheel(e) {
 function onItemDown(i, e) {
   // 物件按下：记录待拖，交给 Konva 的节点拖拽；框选模式空地按下走 onMouseDown
   hoverNodeId.value = objects.value[i].id
-  if (tool.value === 'link') {
-    // 连线模式：点第一个物件记起点，点第二个建连线
-    const id = objects.value[i].id
-    if (!linkDraft.value) {
-      linkDraft.value = id
-      message.info(t('canvasLinkPickSecond'))
-    } else if (linkDraft.value !== id) {
-      const exists = links.value.some(
-        (l) =>
-          (l.from === linkDraft.value && l.to === id) ||
-          (l.from === id && l.to === linkDraft.value),
-      )
-      if (!exists) {
-        beforeChange()
-        links.value.push({
-          id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5),
-          from: linkDraft.value,
-          to: id,
-        })
-        saveSoon()
-      }
-      linkDraft.value = null
-      tool.value = null
-      syncDraggables()
-    }
-    drag.mode = 'link-wait'
-    return
-  }
   if (tool.value === 'crop') {
     // 圈选裁剪：允许从图片上起圈（拖拽交给 stage 级 mousemove/mouseup 完成）
     const st = stageEl.value.getStage()
@@ -931,7 +891,7 @@ function onMouseDown(e) {
   // 空地（没点到任何 shape）按下：
   //   普通拖 = 平移画布；Shift/中键 拖 = 框选；crop 工具 = 圈选裁剪
   // 物件按下（onItemDown 先触发，drag.mode='item'）时 stage 级事件直接跳过
-  if (drag.mode === 'item' || drag.mode === 'line-wait' || drag.mode === 'link-wait') return
+  if (drag.mode === 'item' || drag.mode === 'connect') return
   const st = stageEl.value.getStage()
   if (e.target !== st) return // 物件由节点拖拽处理
   const p = st.getPointerPosition()
@@ -1011,10 +971,8 @@ function onMouseUp() {
     tool.value = null
     syncDraggables()
   }
-  if (drag.mode !== 'link-wait') {
-    drag.mode = null
-    drag.last = null
-  }
+  drag.mode = null
+  drag.last = null
   saveSoon()
 }
 
@@ -1132,12 +1090,6 @@ const tools = computed(() => [
     active: tool.value === 'crop',
   },
   {
-    icon: 'fas fa-bezier-curve',
-    title: t('canvasLinkTool'),
-    action: () => setTool('link'),
-    active: tool.value === 'link',
-  },
-  {
     icon: 'fas fa-object-group',
     title: t('canvasGroupSel'),
     action: groupSelected,
@@ -1166,7 +1118,6 @@ function syncDraggables() {
 }
 function setTool(m) {
   tool.value = tool.value === m ? null : m
-  linkDraft.value = null
   if (m) selection.value = []
   syncDraggables()
 }
@@ -2056,13 +2007,15 @@ function refreshFed() {
   appPanelFed.value = fedFields
 }
 
-// 参数面板打开时：文档/视口/连线变化刷新喂养提示
+// 参数面板打开时：文档/视口/连线/app 缓存变化刷新喂养提示
+// （appCacheVer：Map.set 不触发响应，靠版本号驱动 detail 到达后的重算）
 watch(
   () => [
     appPanel.id,
     links.value.length,
     objects.value.length,
     Math.round(viewport.value.scale * 4),
+    appCacheVer.value,
   ],
   () => {
     if (appPanel.id) refreshFed()
@@ -2617,7 +2570,6 @@ function onKey(e) {
   } else if (e.key === 'Escape') {
     if (tool.value) {
       tool.value = null
-      linkDraft.value = null
       syncDraggables()
     } else if (!inEditor) selection.value = []
   } else if ((e.ctrlKey || e.metaKey) && (e.key === 'g' || e.key === 'G')) {
