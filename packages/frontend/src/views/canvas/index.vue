@@ -480,9 +480,97 @@
           {{ Math.round(viewport.scale * 100) }}%
         </div>
 
+        <!-- 缩放控件条（左下，参考 canvas-zoom-controls）：小地图开关/复位/滑杆/百分比/适应/快捷键 -->
+        <div
+          class="absolute bottom-3 left-3 z-10 flex items-center gap-1 h-11 px-2 rounded-xl bg-[var(--wb-surface)] border border-[var(--wb-stroke)] shadow-lg"
+          @pointerdown.stop
+          @mousedown.stop
+          @dblclick.stop
+        >
+          <button
+            class="w-8 h-8 rounded-lg text-sm transition flex items-center justify-center"
+            :class="
+              miniOpen
+                ? 'text-[var(--wb-accent)] bg-[var(--wb-accent)]/10'
+                : 'text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10'
+            "
+            :title="t('canvasMiniMapToggle')"
+            @click="miniOpen = !miniOpen"
+          >
+            <i class="fas fa-compass"></i>
+          </button>
+          <button
+            class="w-8 h-8 rounded-lg text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10 transition flex items-center justify-center"
+            :title="t('canvasResetView')"
+            @click="resetView"
+          >
+            <i class="fas fa-crosshairs"></i>
+          </button>
+          <button
+            class="w-8 h-8 rounded-lg text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10 transition flex items-center justify-center"
+            :title="t('canvasFitAll')"
+            @click="fitAll"
+          >
+            <i class="fas fa-expand"></i>
+          </button>
+          <input
+            type="range"
+            min="10"
+            max="400"
+            step="5"
+            :value="Math.round(viewport.scale * 100)"
+            class="w-24 accent-[var(--wb-accent)]"
+            :title="t('canvasZoomSlider')"
+            @input="onZoomSlider"
+          />
+          <span class="w-11 text-right text-xs tabular-nums text-[var(--wb-text-2)] select-none"
+            >{{ Math.round(viewport.scale * 100) }}%</span
+          >
+          <button
+            class="w-8 h-8 rounded-lg text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10 transition flex items-center justify-center"
+            :title="t('canvasShortcuts')"
+            @click="shortcutsOpen = true"
+          >
+            <i class="fas fa-circle-question"></i>
+          </button>
+        </div>
+
+        <!-- 快捷键面板 -->
+        <div
+          v-if="shortcutsOpen"
+          class="absolute inset-0 z-30 flex items-center justify-center bg-black/40"
+          @mousedown.self="shortcutsOpen = false"
+        >
+          <div
+            class="w-[420px] max-w-[90vw] rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-2xl p-5"
+          >
+            <div class="flex items-center justify-between mb-4">
+              <span class="text-base font-semibold text-[var(--wb-text-1)]">{{
+                t('canvasShortcuts')
+              }}</span>
+              <button
+                class="text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)]"
+                @click="shortcutsOpen = false"
+              >
+                <i class="fas fa-xmark"></i>
+              </button>
+            </div>
+            <div class="space-y-2.5 text-sm">
+              <div
+                v-for="sc in shortcutList"
+                :key="sc.label"
+                class="flex items-center justify-between gap-4"
+              >
+                <span class="font-medium text-[var(--wb-text-1)]">{{ sc.label }}</span>
+                <span class="text-[var(--wb-text-2)]">{{ sc.desc }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- minimap：全景小窗（点击/拖动跳转视口） -->
         <div
-          v-if="objects.length"
+          v-if="miniOpen && objects.length"
           class="absolute bottom-3 right-3 w-[160px] h-[110px] rounded-lg bg-black/50 border border-[var(--wb-stroke)] overflow-hidden cursor-pointer"
           @pointerdown="miniJump"
         >
@@ -2864,8 +2952,13 @@ function onKey(e) {
   } else if (e.code === 'Space' && !e.repeat) {
     spaceDown.value = true
     if (!inEditor) e.preventDefault()
+  } else if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+    if (inEditor) return
+    shortcutsOpen.value = !shortcutsOpen.value
   } else if (e.key === 'Escape') {
-    if (tool.value) {
+    if (shortcutsOpen.value) {
+      shortcutsOpen.value = false
+    } else if (tool.value) {
       tool.value = null
       syncDraggables()
     } else if (!inEditor) selection.value = []
@@ -2896,6 +2989,36 @@ function onKeyUp(e) {
 }
 
 // —— 图片落画布：文件拖入 + 剪贴板粘贴 ——
+const miniOpen = ref(true) // 小地图开关（缩放控件条内切换）
+const shortcutsOpen = ref(false) // 快捷键面板
+/** 滑杆缩放：以画布中心为锚（与滚轮一致的锚点语义） */
+function onZoomSlider(e) {
+  const target = Number(e.target.value) / 100
+  const cur = viewport.value.scale
+  if (!target || target === cur) return
+  viewport.value = zoomAtPoint(
+    viewport.value,
+    target / cur,
+    size.w / 2,
+    size.h / 2,
+    MIN_SCALE,
+    MAX_SCALE,
+  )
+  applyViewport()
+}
+const shortcutList = computed(() => [
+  { label: '滚轮', desc: t('canvasScWheel') },
+  { label: '空格 + 拖拽', desc: t('canvasScSpaceDrag') },
+  { label: 'Ctrl/⌘ + 拖拽', desc: t('canvasScCtrlDrag') },
+  { label: 'Shift + 点击', desc: t('canvasScShiftClick') },
+  { label: 'Ctrl/⌘ + A', desc: t('canvasScSelectAll') },
+  { label: 'Ctrl/⌘ + C / V', desc: t('canvasScCopyPaste') },
+  { label: 'Ctrl/⌘ + Z / ⇧Z / Y', desc: t('canvasScUndoRedo') },
+  { label: 'Ctrl/⌘ + G / ⇧G', desc: t('canvasScGroup') },
+  { label: 'Delete / Backspace', desc: t('canvasScDelete') },
+  { label: 'Esc', desc: t('canvasScEscape') },
+])
+
 const dragOver = ref(false)
 
 // 项目下拉外点关闭（capture 阶段判定；项目栏自身 mousedown.stop 不影响 document 捕获）
