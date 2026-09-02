@@ -1622,11 +1622,12 @@ function linkAnchorConfig(seg, side) {
   }
 }
 
-// —— 选中对象四角缩放手柄（第 3 批，参考 infinite-canvas 的 resize handles）——
-// 支持类型：图片（默认锁原图宽高比，Ctrl/⌘ 按住自由）/ 便签 / Frame（恒自由）。
-// 媒体（HTML overlay 播放器盖住节点区无法命中角柄）与 App/分镜卡（固定布局）不支持；
-// 组内成员禁止（组合语义由组拖动承载，防破坏成员相对位置）。
-const RESIZE_TYPES = ['image', 'note', 'frame']
+// —— 选中对象四角缩放手柄（第 3 批 + 媒体扩展，参考 infinite-canvas resize handles）——
+// 支持类型：图片/视频（默认锁宽高比，Ctrl/⌘ 按住自由）/ 便签 / Frame / 音频（恒自由）。
+// 角柄画在节点四角外侧（RESIZE_ANCHOR_OFF）——媒体节点的 HTML overlay 播放器占满节点
+// 矩形，角柄外置才不被遮挡；App/分镜卡（固定布局）不支持；组内成员禁止
+// （组合语义由组拖动承载，防破坏成员相对位置）。
+const RESIZE_TYPES = ['image', 'note', 'frame', 'video', 'audio']
 const RESIZE_MIN = 24 // 最小宽高（世界坐标）
 const resizeDrag = reactive({
   active: false,
@@ -1652,11 +1653,14 @@ function resizeVisible(o) {
   if (t !== o) return false
   return !resizeDrag.active || resizeDrag.id === o.id
 }
-/** 角柄 circle 配置（同 linkAnchorConfig 模式：常驻渲染 + hitFunc 动态热区） */
+/** 角柄 circle 配置（同 linkAnchorConfig 模式：常驻渲染 + hitFunc 动态热区）。
+ *  圆心外偏 10px（屏幕恒定）：媒体节点 overlay 播放器占满矩形，角柄外置才可命中；
+ *  普通节点上也让角柄悬于边框外，避免盖住节点像素。 */
 function resizeAnchorConfig(o, corner) {
+  const off = 10 / viewport.value.scale // 屏幕 10px → 世界（随缩放）
   return {
-    x: corner.endsWith('e') ? o.width : 0,
-    y: corner.startsWith('s') ? o.height : 0,
+    x: corner.endsWith('e') ? o.width + off : -off,
+    y: corner.startsWith('s') ? o.height + off : -off,
     radius: 6 / viewport.value.scale,
     fill: '#fafaf9',
     stroke: '#1f1d1a',
@@ -2266,8 +2270,10 @@ function onResizeStart(id, corner, kev) {
   }
   resizeDrag.orig = { x: o.x, y: o.y, w: o.width, h: o.height }
   resizeDrag.pushed = false
-  // 图片默认锁原图宽高比（Ctrl/⌘ 按住自由）；note/frame 恒自由
-  const lockRatio = o.type === 'image' && !kev.evt?.ctrlKey && !kev.evt?.metaKey
+  // 图片/视频默认锁宽高比（Ctrl/⌘ 按住自由）；note/frame/audio 恒自由。
+  // 视频无 naturalWidth → naturalOf 回落当前 o.width/o.height，即保持起拖前比例
+  const lockRatio =
+    (o.type === 'image' || o.type === 'video') && !kev.evt?.ctrlKey && !kev.evt?.metaKey
   const nat = naturalOf(o)
   const ar = nat.naturalWidth / nat.naturalHeight
   resizeDrag.ratio = lockRatio && isFinite(ar) && ar > 0 ? ar : 0
