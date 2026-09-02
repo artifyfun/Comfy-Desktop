@@ -4592,12 +4592,37 @@ const canvasDigest = computed(() => {
     workflowName: t('canvasDigestName'),
     nodeCount: objects.value.length,
     models: [],
+    // 选区项结构化:LLM 工具读 digest 时可寻址(后续 wb_canvas_ops/get_state
+    // 接入摘要注入的前置;UI 感知条用 label 拼单行)。app 节点 status 单独
+    // 通过 queue.running 展示,不重复进 label。
     selection: selection.value
       .map((id) => {
         const o = objects.value.find((x) => x.id === id)
         if (!o) return null
-        if (o.type === 'app') return `app:${o.name || o.appId}(${o.status || 'idle'})`
-        return o.type === 'image' ? `image ${o.width}×${o.height}` : 'note'
+        const size = o.width && o.height ? `${o.width}×${o.height}` : null
+        if (o.type === 'app') {
+          return { id, kind: 'app', label: o.name || o.appId || 'app', status: o.status || 'idle' }
+        }
+        if (o.type === 'image') {
+          let label = 'image'
+          try {
+            if (o.src) {
+              const u = new URL(o.src)
+              label =
+                u.searchParams.get('filename') ||
+                decodeURIComponent(u.pathname.split('/').pop() || '') ||
+                label
+            }
+          } catch {
+            /* blob:/data: 等 fallback 'image' */
+          }
+          return { id, kind: 'image', label, size }
+        }
+        if (o.type === 'note') {
+          const t = (o.text || '').replace(/\s+/g, ' ').slice(0, 24)
+          return { id, kind: 'note', label: t || 'note' }
+        }
+        return { id, kind: o.type, label: o.name || o.type, size }
       })
       .filter(Boolean),
     counts: {

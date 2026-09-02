@@ -49,7 +49,9 @@
           <i class="fas fa-link mx-1"></i>{{ canvasState.counts.links }}
         </span>
         <span v-if="canvasState.selection?.length" class="truncate" style="color: var(--wb-accent)">
-          <i class="fas fa-vector-square mr-1"></i>{{ canvasState.selection.join(' · ') }}
+          <i class="fas fa-vector-square mr-1"></i>{{
+            canvasState.selection.map((s) => s.label || s || '').join(' · ')
+          }}
         </span>
         <span v-if="canvasState.models?.length" class="truncate" style="color: var(--wb-text-1)">
           {{ canvasState.models[0] }}
