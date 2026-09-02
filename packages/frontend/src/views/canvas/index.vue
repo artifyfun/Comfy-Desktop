@@ -480,6 +480,29 @@
           {{ Math.round(viewport.scale * 100) }}%
         </div>
 
+        <!-- 节点悬浮工具栏（参考 canvas-node-hover-toolbar）：悬停物件上方 HTML overlay -->
+        <div
+          v-if="hoverToolbar.items.length"
+          class="absolute z-20 flex h-9 -translate-x-1/2 -translate-y-full items-center rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl"
+          :style="{ left: hoverToolbar.x + 'px', top: hoverToolbar.y + 'px' }"
+          @mousedown.stop
+          @pointerdown.stop
+          @dblclick.stop
+          @mouseenter="toolbarKeep = true"
+          @mouseleave="toolbarKeep = false"
+        >
+          <button
+            v-for="b in hoverToolbar.items"
+            :key="b.icon + b.title"
+            :title="b.title"
+            class="h-9 px-2 rounded-lg text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/15 transition flex items-center justify-center"
+            :class="b.danger ? 'text-red-400' : ''"
+            @click="b.action"
+          >
+            <i :class="b.icon" class="text-sm pointer-events-none"></i>
+          </button>
+        </div>
+
         <!-- 缩放控件条（左下，参考 canvas-zoom-controls）：小地图开关/复位/滑杆/百分比/适应/快捷键 -->
         <div
           class="absolute bottom-3 left-3 z-10 flex items-center gap-1 h-11 px-2 rounded-xl bg-[var(--wb-surface)] border border-[var(--wb-stroke)] shadow-lg"
@@ -1101,7 +1124,7 @@ function noteTextConfig(o) {
     width: o.width,
     height: o.height,
     padding: 10,
-    fontSize: 13,
+    fontSize: o.fontSize || 13,
     lineHeight: 1.4,
     fill: '#e2e8f0',
     align: 'left',
@@ -1299,7 +1322,8 @@ function onMouseMove(e) {
     const w = screenToWorld(viewport.value, p.x, p.y)
     const hit = hitTest(objects.value, w.x, w.y)
     const id = hit >= 0 ? objects.value[hit].id : null
-    if (id !== hoverNodeId.value) hoverNodeId.value = id
+    // 悬浮工具栏 keep：指针在工具栏上时不清悬停（参考 onKeep）
+    if (!(toolbarKeep.value && !id) && id !== hoverNodeId.value) hoverNodeId.value = id
   }
   if (drag.mode === 'connect') {
     onConnectMove()
@@ -2989,6 +3013,104 @@ function onKeyUp(e) {
 }
 
 // —— 图片落画布：文件拖入 + 剪贴板粘贴 ——
+// —— 节点悬浮工具栏（S4a）：悬停物件上方快捷动作条 ——
+/** 工具栏“停留”保护：鼠标移入工具栏本身时不算离开节点（参考 onKeep/onLeave） */
+const toolbarKeep = ref(false)
+function nodeBumpFont(id, delta) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || o.type !== 'note') return
+  beforeChange()
+  o.fontSize = clamp((o.fontSize || 13) + delta, 9, 48)
+  saveSoon()
+}
+function nodeDownloadImage(id) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o) return
+  const url = o.persist || o.src
+  if (!url) return
+  fetch(url)
+    .then((r) => r.blob())
+    .then((b) => {
+      const u = URL.createObjectURL(b)
+      const a = document.createElement('a')
+      a.href = u
+      a.download = `canvas-${o.id}.png`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(u), 5000)
+    })
+    .catch(() => message.error(t('canvasDownloadFailed')))
+}
+function nodeCopyObj(id) {
+  selection.value = [id]
+  copySelection()
+}
+function nodeDeleteObj(id) {
+  selection.value = [id]
+  deleteSelected()
+}
+/** 悬停节点 → 工具栏屏幕坐标 + 按类型装配动作 */
+const hoverToolbar = computed(() => {
+  const id = hoverNodeId.value
+  if (!id) return { x: 0, y: 0, items: [] }
+  const o = objects.value.find((x) => x.id === id)
+  if (!o) return { x: 0, y: 0, items: [] }
+  const tl = worldToScreen(viewport.value, o.x, o.y)
+  const x = tl.x + (o.width * viewport.value.scale) / 2
+  const y = tl.y - 10
+  const items = []
+  if (o.type === 'note') {
+    items.push(
+      { icon: 'fas fa-minus', title: t('canvasTbFontDown'), action: () => nodeBumpFont(id, -1) },
+      { icon: 'fas fa-plus', title: t('canvasTbFontUp'), action: () => nodeBumpFont(id, 1) },
+      {
+        icon: 'fas fa-image',
+        title: t('canvasTbGenImage'),
+        action: () => {
+          selection.value = [id]
+          openGenNode([id])
+        },
+      },
+    )
+  } else if (o.type === 'image') {
+    items.push(
+      {
+        icon: 'fas fa-download',
+        title: t('canvasTbDownload'),
+        action: () => nodeDownloadImage(id),
+      },
+      {
+        icon: 'fas fa-paper-plane',
+        title: t('canvasSendToWorkbench'),
+        action: () => {
+          selection.value = [id]
+          sendSelectionToWorkbench()
+        },
+      },
+    )
+  } else if (o.type === 'app') {
+    items.push(
+      { icon: 'fas fa-play', title: t('canvasRunAppNodes'), action: () => runAppNode(id) },
+      {
+        icon: 'fas fa-sliders',
+        title: t('canvasCtxAppPanel'),
+        action: () => {
+          appPanel.id = appPanel.id === id ? null : id
+        },
+      },
+    )
+  }
+  items.push(
+    { icon: 'fas fa-copy', title: t('canvasTbCopy'), action: () => nodeCopyObj(id) },
+    {
+      icon: 'fas fa-trash',
+      title: t('canvasTbDelete'),
+      danger: true,
+      action: () => nodeDeleteObj(id),
+    },
+  )
+  return { x, y, items }
+})
+
 const miniOpen = ref(true) // 小地图开关（缩放控件条内切换）
 const shortcutsOpen = ref(false) // 快捷键面板
 /** 滑杆缩放：以画布中心为锚（与滚轮一致的锚点语义） */
