@@ -88,7 +88,7 @@
           :override="modelOverride"
           @update:override="(v) => $emit('update:modelOverride', v)"
         />
-        <div class="flex-1"></div>
+        <div class="flex-1 min-w-0"></div>
         <span v-if="slashOpen" class="text-[11px] text-[var(--wb-text-3)] mr-2 hidden sm:inline">
           ↑↓ {{ t('workbenchNavigate') }} · Tab/{{ t('confirm') }} · Esc
         </span>

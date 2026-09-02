@@ -1,13 +1,14 @@
 <template>
   <div
     class="page-container"
-    :class="isCanvasEmbedded ? 'h-full flex flex-col' : ''"
+    :class="isCanvasEmbedded ? 'h-full flex flex-col min-w-0 overflow-hidden' : ''"
     style="background: var(--wb-bg-base)"
   >
     <div
       id="app"
       class="flex flex-col"
-      :class="isCanvasEmbedded ? 'flex-1 min-h-0' : 'pb-4 min-h-screen'"
+      :class="isCanvasEmbedded ? 'flex-1 min-h-0 min-w-0 overflow-hidden' : 'pb-4 min-h-screen'"
+      :style="isCanvasEmbedded ? 'width:100%;max-width:100%' : ''"
     >
       <AppHeader
         v-if="isStandalone"
