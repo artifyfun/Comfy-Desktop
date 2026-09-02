@@ -1604,6 +1604,21 @@ async function autoRecover(errorText) {
   }
 }
 
+// A1/A2(吸收参考项目引用注入 + agent-instructions 规约):
+// canvas-embedded 且本轮带画布引用附件时,给 LLM 的 input 拼「行为规约头 + 引用清单尾」。
+// 页面可见气泡(userBubble)保持纯用户文本;注入只进模型上下文。
+// 取舍:input 即服务端落库的用户消息,历史回放该轮会显示注入段——按块引用排版,
+// 视觉可读,且仅发生在"从画布附图"这类本就该交代图源的轮次,可接受。
+function buildCanvasInjection(text, refs) {
+  const lines = refs.map((a) => `1. @${a.cardId} · 「${a.cardTitle || a.filename}」(画布图片)`)
+  const rule = [
+    '【画布规则】本次附带的图片均来自用户画布,回答与生成以它们为事实依据;',
+    '需要动画面布时先产出操作方案交用户确认,禁止声称已执行未发生的改动;无法完成就如实说明。',
+  ].join('')
+  const block = `\n\n${rule}\n\n【画布引用】\n${lines.join('\n')}\n`
+  return text ? text + block : block.trim()
+}
+
 async function send() {
   const text = input.value.trim()
   const readyAttachments = draftAttachments.value.filter((a) => !a.uploading)
@@ -1619,10 +1634,15 @@ async function send() {
     mime: a.mime,
     localPath: a.localPath,
   }))
+  // A1:画布引用清单注入(仅无限画布侧栏模式;独立页/A 画布 embed 不改变行为)
+  const canvasRefs = isCanvasEmbedded.value
+    ? readyAttachments.filter((a) => a.fromCanvas && a.cardId)
+    : []
+  const inputText = canvasRefs.length ? buildCanvasInjection(text, canvasRefs) : text
   input.value = ''
   for (const a of draftAttachments.value) if (a._preview) URL.revokeObjectURL(a._preview)
   draftAttachments.value = []
-  await runChat(text, attachments, { userBubble: text })
+  await runChat(inputText, attachments, { userBubble: text })
 }
 
 // ---------- codex 条目流转写（抄 codex app-server/dsh transcript：
@@ -2399,6 +2419,9 @@ function pushCanvasAttachments(files) {
       mime: '',
       uploading: false,
       fromCanvas: true,
+      // A1:画布卡片身份(选区发送经 refOf 携带),send 注入引用清单用
+      cardId: f.cardId || '',
+      cardTitle: f.cardTitle || '',
     })
   }
 }

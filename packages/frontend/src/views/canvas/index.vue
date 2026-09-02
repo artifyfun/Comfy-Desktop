@@ -2695,10 +2695,15 @@ function refOf(id) {
   try {
     const u = new URL(o.src)
     if (!u.pathname.endsWith('/view')) return null
+    const filename = u.searchParams.get('filename') || ''
     return {
-      filename: u.searchParams.get('filename') || '',
+      filename,
       subfolder: u.searchParams.get('subfolder') || '',
       type: u.searchParams.get('type') || 'output',
+      // A1(吸收参考项目引用注入):附件携带画布卡片身份,工作台发送时拼引用清单
+      // 注入 prompt——LLM 看图即知"这是画布上哪张卡片",对话可 @cardId 指代
+      cardId: id,
+      cardTitle: o.name || filename || 'image',
     }
   } catch {
     return null // blob:/data: 等（拖入/粘贴图），无 /view 引用

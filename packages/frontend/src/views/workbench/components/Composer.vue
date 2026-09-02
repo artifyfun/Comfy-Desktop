@@ -34,8 +34,11 @@
         :disabled="uploading && !busy"
         class="w-full bg-transparent border-none outline-none resize-none text-[14px] leading-[22px] text-white placeholder-slate-500 max-h-40 min-h-[66px] py-1"
         @input="autoResize"
-        @keydown.enter.exact.prevent="onEnter"
+        @keydown.enter.exact="onEnterKey"
         @keydown="onKeydown"
+        @compositionstart="composing = true"
+        @compositionend="composing = false"
+        @paste="onPaste"
       ></textarea>
 
       <!-- 技能菜单（浮层锚在卡片上方） -->
@@ -157,6 +160,7 @@ const draft = computed({
 const dragOver = ref(false)
 const fileEl = ref(null)
 const textareaEl = ref(null)
+const composing = ref(false) // A3:IME 合成状态(compositionstart/end 翻转,防选词回车误发)
 const slashOpen = ref(false)
 const slashQuery = ref('')
 const activeIndex = ref(0)
@@ -201,6 +205,15 @@ function autoResize(e) {
   el.style.height = Math.min(el.scrollHeight, 160) + 'px'
 }
 
+function onEnterKey(e) {
+  // A3(吸收参考项目 IME 守卫):中文/日文输入法选词或合成中的回车不是"发送"意图,
+  // 放行默认行为(确认候选/换行);仅合成结束后的裸回车才发。不带 .prevent 修饰符,
+  // 由这里按需 prevent——否则合成中回车被拦截会卡死输入法候选。
+  if (composing.value || e.isComposing) return
+  e.preventDefault()
+  onEnter()
+}
+
 function onEnter() {
   if (slashOpen.value && filteredSkills.value.length) {
     onSkillPick(filteredSkills.value[activeIndex.value])
@@ -213,6 +226,8 @@ function onEnter() {
 }
 
 function onKeydown(e) {
+  // IME 合成中方向键/Tab 是输入法候选导航,不接管(避免与技能菜单导航打架)
+  if (composing.value || e.isComposing) return
   if (!slashOpen.value) return
   if (e.key === 'ArrowDown') {
     e.preventDefault()
@@ -293,6 +308,42 @@ function onFileChange(e) {
   const files = [...e.target.files]
   if (files.length) emit('upload-files', files)
   e.target.value = ''
+}
+
+// A4(吸收参考项目粘贴图经验):剪贴板图片(截图/网页复制图)→ 附件,与拖放同通道。
+// 纯文本粘贴不受影响(无 image item 时直接放行默认);粘贴图文混排时图转附件、
+// 文本不抢插,避免 textarea 出现乱码/富文本残留。
+function onPaste(e) {
+  const cd = e.clipboardData
+  const files = []
+  const items = cd && cd.items
+  if (items) {
+    for (const it of items) {
+      if (it.kind === 'file' && it.type && it.type.startsWith('image/')) {
+        const f = it.getAsFile()
+        if (f) files.push(f)
+      }
+    }
+  }
+  // 兜底通道:部分环境 items 只给 text/plain 而 files 有图
+  if (!files.length && cd && cd.files && cd.files.length) {
+    for (const f of cd.files) {
+      if (f.type && f.type.startsWith('image/')) files.push(f)
+    }
+  }
+  if (!files.length) return
+  // 剪贴板截图常无文件名(File.name 只读,需重建):按 mime 补标准名,防上传链 filename 空
+  for (let i = 0; i < files.length; i++) {
+    if (!files[i].name) {
+      const m = /image\/(\w+)/.exec(files[i].type || '')
+      const ext = m && m[1] ? m[1].replace('jpeg', 'jpg') : 'png'
+      files[i] = new File([files[i]], `paste-${Date.now()}-${i}.${ext}`, {
+        type: files[i].type || 'image/png',
+      })
+    }
+  }
+  e.preventDefault()
+  emit('upload-files', files)
 }
 
 function onDrop(e) {
