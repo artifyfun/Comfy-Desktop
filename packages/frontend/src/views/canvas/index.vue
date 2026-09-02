@@ -437,6 +437,39 @@
         </div>
 
         <!-- App 节点展开参数面板（HTML overlay，锚定节点屏幕坐标） -->
+        <!-- note AI 改写输入条（S5b）：note 下方，指令 + 发送 -->
+        <div
+          v-if="noteRewrite.noteId"
+          class="absolute z-20 w-[360px] rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl p-2.5 flex items-center gap-2"
+          :style="{ left: noteRewritePos.x + 'px', top: noteRewritePos.y + 'px' }"
+          @mousedown.stop
+          @pointerdown.stop
+        >
+          <input
+            ref="noteRewriteInput"
+            v-model="noteRewrite.instruction"
+            class="flex-1 bg-transparent outline-none text-sm text-[var(--wb-text-1)] placeholder:text-[var(--wb-text-2)]"
+            :placeholder="t('canvasRewritePlaceholder')"
+            :disabled="noteRewrite.running"
+            @keydown.enter.prevent="runNoteRewrite"
+            @keydown.esc.prevent="noteRewrite.noteId = null"
+          />
+          <button
+            class="h-7 px-2.5 rounded-lg text-xs text-white bg-[var(--wb-accent)] disabled:opacity-50 transition"
+            :disabled="noteRewrite.running || !noteRewrite.instruction.trim()"
+            @click="runNoteRewrite"
+          >
+            <i v-if="noteRewrite.running" class="fas fa-spinner fa-spin mr-1"></i
+            >{{ noteRewrite.running ? t('canvasRewriteRunning') : t('canvasRewriteSend') }}
+          </button>
+          <button
+            class="w-7 h-7 rounded-lg text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] transition"
+            @click="noteRewrite.noteId = null"
+          >
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
+
         <!-- 媒体节点播放器 overlay（S4b）：跟随视口变换定位 -->
         <template v-for="o in mediaObjects" :key="'media-' + o.id">
           <div
@@ -1931,6 +1964,82 @@ function maybeRunGenFromNote(node) {
   nextTick(() => runAppNode(node.id))
 }
 
+// —— S5b note AI 改写流（参考 text-node 对话框）：有内容 note → 输入改写
+// 指令 → 右侧生成新 note 并自动连线（原 note 保留） ——
+const noteRewriteInput = ref(null)
+const noteRewrite = reactive({ noteId: null, instruction: '', running: false })
+watch(
+  () => noteRewrite.noteId,
+  (v) => {
+    if (v) nextTick(() => noteRewriteInput.value?.focus?.())
+  },
+)
+
+function startNoteRewrite(id) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || o.type !== 'note') return
+  noteRewrite.noteId = noteRewrite.noteId === id ? null : id
+  noteRewrite.instruction = ''
+}
+const noteRewritePos = computed(() => {
+  const o = objects.value.find((x) => x.id === noteRewrite.noteId)
+  if (!o) return { x: 0, y: 0 }
+  const tl = worldToScreen(viewport.value, o.x, o.y)
+  return {
+    x: clamp(tl.x, 8, Math.max(8, size.w - 380)),
+    y: clamp(tl.y + o.height * viewport.value.scale + 8, 8, size.h - 60),
+  }
+})
+async function runNoteRewrite() {
+  const src = objects.value.find((x) => x.id === noteRewrite.noteId)
+  const instruction = noteRewrite.instruction.trim()
+  if (!src || noteRewrite.running || !instruction || !String(src.text || '').trim()) return
+  noteRewrite.running = true
+  try {
+    const composed = `${t('canvasRewriteCompose').replace('{i}', instruction)}\n\n${src.text}`
+    const res = await fetch(`${serverOrigin.value}/api/optimize-prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: composed,
+        language: 'zh',
+        api_key: appStore.config?.api_key || undefined,
+        base_url: appStore.config?.base_url || undefined,
+        model: appStore.config?.model || undefined,
+      }),
+    })
+    const j = await res.json().catch(() => null)
+    const out = j?.data?.optimizedPrompt || j?.optimizedPrompt || ''
+    if (!res.ok || !out) throw new Error(j?.message || `HTTP ${res.status}`)
+    // 右侧新 note + 连线（原节点保留）
+    beforeChange()
+    const nn = {
+      id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+      type: 'note',
+      x: src.x + src.width + 80,
+      y: src.y,
+      width: src.width,
+      height: src.height,
+      text: out,
+      fontSize: src.fontSize || 13,
+    }
+    objects.value.push(nn)
+    links.value.push({
+      id: 'l' + Date.now() + Math.random().toString(36).slice(2, 6),
+      from: src.id,
+      to: nn.id,
+    })
+    selection.value = [nn.id]
+    saveSoon()
+    noteRewrite.noteId = null
+    message.success(t('canvasRewriteDone'))
+  } catch (e) {
+    message.error(t('canvasRewriteFailed') + ': ' + String(e?.message || e).slice(0, 80))
+  } finally {
+    noteRewrite.running = false
+  }
+}
+
 function openGenNode(ids = []) {
   const imgs = ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'image')
   const refs = imgs.map(refOf).filter(Boolean)
@@ -3245,6 +3354,11 @@ const hoverToolbar = computed(() => {
         icon: 'fas fa-image',
         title: t('canvasTbGenImage'),
         action: () => startGenerateFromNote(id),
+      },
+      {
+        icon: 'fas fa-wand-magic-sparkles',
+        title: t('canvasTbRewrite'),
+        action: () => startNoteRewrite(id),
       },
     )
   } else if (o.type === 'image') {
