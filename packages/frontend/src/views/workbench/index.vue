@@ -303,6 +303,15 @@
                   <div
                     class="rounded-lg px-3 py-2 text-sm break-words bg-[var(--wb-surface-deep)] text-slate-200 border border-[var(--wb-stroke-strong)]"
                   >
+                    <!-- P1-B3 合成兜底活动卡:turn 在途时置顶(turnActCover 同步隐藏
+                         重复的过程折叠行);全完成自动回落「过程(N 步)」→ 历史零新增 -->
+                    <ProgressCard
+                      v-if="turnProgressModel(i)?.mode === 'activity'"
+                      :mode="'activity'"
+                      :title="turnProgressModel(i).title"
+                      :running="true"
+                      :steps="turnProgressModel(i).steps"
+                    />
                     <template
                       v-for="({ m: tm, i: tmi }, ti) in turnGroupItems(i)"
                       :key="tm._key ?? tmi"
@@ -325,9 +334,20 @@
                           />
                         </div>
                       </div>
+                      <!-- P1-B3 原生 todo 清单 → 任务进度卡(独立渲染,不折叠进过程组) -->
+                      <div v-if="isTodoMsg(tm)" class="py-0.5">
+                        <ProgressCard
+                          mode="todo"
+                          :title="t('workbenchTaskProgress')"
+                          :running="todoCardRunning(tm.toolItem)"
+                          :items="tm.toolItem.items || []"
+                        />
+                      </div>
                       <!-- 过程（reasoning/tool part）：同 turn tool_item 聚合折叠 -->
                       <div
-                        v-if="tm.kind === 'tool_item' && tm.toolItem && !processGroupSkipped(tmi)"
+                        v-else-if="
+                          isActivityMsg(tm) && !processGroupSkipped(tmi) && !turnActCover(tmi)
+                        "
                         class="py-0.5"
                       >
                         <template v-if="processGroupAt(tmi)">
@@ -542,10 +562,18 @@
                       <a-spin size="small" />
                       <span class="ml-2">{{ m.text }}</span>
                     </template>
+                    <!-- P1-B3 原生 todo 清单(独立消息,无 turn 归属的旧数据/兜底) -->
+                    <ProgressCard
+                      v-else-if="isTodoMsg(m)"
+                      mode="todo"
+                      :title="t('workbenchTaskProgress')"
+                      :running="todoCardRunning(m.toolItem)"
+                      :items="m.toolItem.items || []"
+                    />
                     <!-- codex 工具条目：同 turn 相邻条目聚合为一行「过程（N 步）」，点击展开；
                          单条目/旧数据保持原标题行（processGroupAt 返回 null 时） -->
                     <template
-                      v-else-if="m.kind === 'tool_item' && m.toolItem && !processGroupSkipped(i)"
+                      v-else-if="isActivityMsg(m) && !processGroupSkipped(i) && !turnActCover(i)"
                     >
                       <template v-if="processGroupAt(i)">
                         <div
@@ -1149,6 +1177,7 @@ import AppHeader from '@/views/apps/components/AppHeader.vue'
 import SessionSidebar from './components/SessionSidebar.vue'
 import WbMarkdown from './components/WbMarkdown.vue'
 import InteractionApprovalCard from './components/InteractionApprovalCard.vue'
+import ProgressCard from './components/ProgressCard.vue'
 import Composer from './components/Composer.vue'
 import NewSessionDialog from './components/NewSessionDialog.vue'
 import PresetManager from './components/PresetManager.vue'
@@ -1701,6 +1730,14 @@ async function send() {
 
 // ---------- codex 条目流转写（抄 codex app-server/dsh transcript：
 // item.id → 消息行索引，started 占行，updated/completed 原位 upsert） ----------
+
+// P1-B3:todo_list 是任务级进度卡(独立渲染,不参与「过程(N 步)」折叠)；
+// 其余 tool_item(reasoning/工具)是活动级条目(可折叠/合成 activity 步骤)。
+const isTodoMsg = (m) =>
+  m && m.kind === 'tool_item' && m.toolItem && m.toolItem.type === 'todo_list'
+const isActivityMsg = (m) =>
+  m && m.kind === 'tool_item' && m.toolItem && m.toolItem.type !== 'todo_list'
+
 function toolItemSummary(item) {
   switch (item.type) {
     case 'command_execution':
@@ -1736,17 +1773,18 @@ function toggleToolItem(m) {
 
 // 回合级过程折叠：同 turn 相邻 tool_item 消息聚合为一行「过程（N 步）」。
 // 仅组首 index 有映射；组内非首条由组首统一渲染，不单独占行。
+// P1-B3:todo_list 卡不参与折叠(任务级进度卡独立成行,见模板 isTodoMsg 分支)——它
+// 天然打断相邻 tool_item 的连续聚合(前后工具各自成组,互不横跨进度卡)。
 const processGroups = computed(() => {
   const map = new Map()
   const msgs = messages.value
   for (let i = 0; i < msgs.length; i++) {
     const m = msgs[i]
-    if (!m || m.kind !== 'tool_item' || !m.toolItem) continue
+    if (!m || !isActivityMsg(m)) continue
     const prev = msgs[i - 1]
-    if (prev && prev.kind === 'tool_item' && prev.turnId != null && prev.turnId === m.turnId)
-      continue
+    if (prev && isActivityMsg(prev) && prev.turnId != null && prev.turnId === m.turnId) continue
     let j = i
-    while (j < msgs.length && msgs[j] && msgs[j].kind === 'tool_item') {
+    while (j < msgs.length && msgs[j] && isActivityMsg(msgs[j])) {
       if (j > i && msgs[j].turnId !== m.turnId) break
       j++
     }
@@ -1762,15 +1800,14 @@ function processGroupAt(i) {
   return g && g.count > 1 ? g : null
 }
 
-/** 组内非首条：由组首聚合渲染，跳过占行 */
+/** 组内非首条：由组首聚合渲染，跳过占行（仅活动级条目参与；todo 卡独立成行） */
 function processGroupSkipped(i) {
   const m = messages.value[i]
   const prev = messages.value[i - 1]
   return !!(
-    m &&
+    isActivityMsg(m) &&
     prev &&
-    m.kind === 'tool_item' &&
-    prev.kind === 'tool_item' &&
+    isActivityMsg(prev) &&
     m.turnId != null &&
     prev.turnId === m.turnId
   )
@@ -1778,6 +1815,76 @@ function processGroupSkipped(i) {
 
 function processGroupItems(g) {
   return messages.value.slice(g.start, g.end + 1)
+}
+
+/**
+ * P1-B3 回合级进度模型（方案 C=A+B 混合，供 ProgressCard 消费）：
+ * - 原生优先(mode 'todo')：turn 内有 todo_list 消息 → 任务清单卡。卡在消息流
+ *   原位渲染(见模板 isTodoMsg 分支),此处只取 running 判定口径;
+ * - 合成兜底(mode 'activity')：无原生 todo 且 turn 存在**在途** reasoning/工具
+ *   条目时,把全 turn 活动条目归一为步骤叙事卡(置顶渲染,期间隐藏重复的
+ *   「过程(N 步)」折叠行);全完成后回落既有折叠行——终态/历史零新增视觉;
+ * - 纯文本回合 / 全终态 → null(不占位)。
+ */
+function turnProgressModel(turnFirst) {
+  const items = turnGroupItems(turnFirst)
+  const todoEntry = items.find((x) => isTodoMsg(x.m))
+  if (todoEntry) {
+    const ti = todoEntry.m.toolItem
+    const list = ti.items || []
+    const done = list.filter((it) => it && it.completed === true).length
+    return {
+      mode: 'todo',
+      title: t('workbenchTaskProgress'),
+      // 头部 spinner 口径:updated 全勾帧先于 completed 事件到达时也不闪 spinner
+      running: ti.status === 'in_progress' && busy.value && done < list.length,
+      items: list,
+    }
+  }
+  const acts = items.filter((x) => isActivityMsg(x.m))
+  if (!acts.length) return null
+  if (!acts.some((x) => toolItemRunning(x.m.toolItem))) return null // 全终态 → 回落
+  return {
+    mode: 'activity',
+    title: t('workbenchExecProgress'),
+    running: true,
+    steps: acts.map(({ m }) => {
+      const ti = m.toolItem
+      const sum = toolItemSummary(ti)
+      return {
+        label: sum.label,
+        icon: sum.icon,
+        status: toolItemRunning(ti) ? 'in_progress' : 'completed',
+        detail: toolItemDetail(ti) || '',
+      }
+    }),
+  }
+}
+
+/** activity 卡展示期间,该 turn 的「过程(N 步)」折叠行整体隐藏(防与卡重复) */
+function turnActCover(i) {
+  const base = messages.value[i]
+  if (!base || base.turnId == null || !isActivityMsg(base)) return false
+  let j = i
+  while (j > 0) {
+    const p = messages.value[j - 1]
+    if (p && p.role === 'agent' && p.turnId === base.turnId) j -= 1
+    else break
+  }
+  const model = turnProgressModel(j)
+  return !!(model && model.mode === 'activity')
+}
+
+/** 原生 todo 卡头部 running 口径：快照 in_progress 且页面仍在忙且未全勾才转 spinner
+ *  (updated 全勾帧先于 completed 事件到达时保持冷静,不闪 spinner) */
+function todoCardRunning(toolItem) {
+  const list = (toolItem && toolItem.items) || []
+  return !!(
+    toolItem &&
+    toolItem.status === 'in_progress' &&
+    busy.value &&
+    list.some((it) => !it || it.completed !== true)
+  )
 }
 
 function processGroupRunning(g) {

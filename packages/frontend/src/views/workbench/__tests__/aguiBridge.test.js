@@ -251,6 +251,113 @@ describe('aguiBridge — emit 序列 → 页面消息模型', () => {
   })
 })
 
+describe('aguiBridge — todos runId 原位 upsert（P1-B3）', () => {
+  it('同 runId updated/completed 多帧 → 单条 todo_list 卡原位翻新，不重复占行', () => {
+    const pageApi = makePageApi()
+    feed(
+      [
+        {
+          type: 'CUSTOM',
+          name: 'todos',
+          value: {
+            runId: 'r-1',
+            items: [
+              { text: '选模板', completed: true },
+              { text: '执行', completed: false },
+            ],
+          },
+        },
+        {
+          type: 'CUSTOM',
+          name: 'todos',
+          value: {
+            runId: 'r-1',
+            items: [
+              { text: '选模板', completed: true },
+              { text: '执行', completed: true },
+            ],
+          },
+        },
+      ],
+      pageApi,
+      freshRunState(),
+    )
+    expect(pageApi.messages.value).toHaveLength(1) // 两帧收敛为一卡
+    const m = pageApi.messages.value[0]
+    expect(m.toolItem.type).toBe('todo_list')
+    expect(m.toolItem.id).toBe('todos:r-1') // per-run 稳定 id
+    expect(m.toolItem.items).toEqual([
+      { text: '选模板', completed: true },
+      { text: '执行', completed: true },
+    ])
+    expect(m.toolItem.status).toBe('completed') // 全勾 → 终态
+  })
+
+  it('回放态多 run 各成一张卡；部分勾选时 status=in_progress', () => {
+    const pageApi = makePageApi()
+    feed(
+      [
+        {
+          type: 'CUSTOM',
+          name: 'todos',
+          value: { runId: 'r-1', items: [{ text: 'A', completed: false }] },
+        },
+        {
+          type: 'CUSTOM',
+          name: 'todos',
+          value: { runId: 'r-2', items: [{ text: 'B', completed: false }] },
+        },
+        {
+          type: 'CUSTOM',
+          name: 'todos',
+          value: { runId: 'r-1', items: [{ text: 'A', completed: true }] },
+        },
+      ],
+      pageApi,
+      freshRunState(),
+    )
+    expect(pageApi.messages.value).toHaveLength(2)
+    const [r1, r2] = pageApi.messages.value
+    expect(r1.toolItem.items).toEqual([{ text: 'A', completed: true }])
+    expect(r1.toolItem.status).toBe('completed')
+    expect(r2.toolItem.items).toEqual([{ text: 'B', completed: false }])
+    expect(r2.toolItem.status).toBe('in_progress')
+  })
+
+  it('无 runId 旧载荷每次推新卡（既有行为不变，兼容降级）', () => {
+    const pageApi = makePageApi()
+    feed(
+      [
+        { type: 'CUSTOM', name: 'todos', value: { items: [{ text: 'a', done: false }] } },
+        { type: 'CUSTOM', name: 'todos', value: { items: [{ text: 'b', done: false }] } },
+      ],
+      pageApi,
+      freshRunState(),
+    )
+    expect(pageApi.messages.value).toHaveLength(2)
+    expect(pageApi.messages.value.map((m) => m.toolItem.id)).toEqual(['todos:1', 'todos:2'])
+  })
+
+  it('空 items 快照不误标 completed（status 保持 in_progress）', () => {
+    const pageApi = makePageApi()
+    feed(
+      [
+        {
+          type: 'CUSTOM',
+          name: 'todos',
+          value: { runId: 'r-3', items: [{ text: '起步', completed: true }] },
+        },
+        { type: 'CUSTOM', name: 'todos', value: { runId: 'r-3', items: [] } },
+      ],
+      pageApi,
+      freshRunState(),
+    )
+    expect(pageApi.messages.value).toHaveLength(1)
+    expect(pageApi.messages.value[0].toolItem.status).toBe('in_progress')
+    expect(pageApi.messages.value[0].toolItem.items).toEqual([])
+  })
+})
+
 describe('aguiBridge — 停止与错误收尾', () => {
   let abortNow = () => {}
   beforeEach(() => {

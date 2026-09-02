@@ -89,6 +89,9 @@ export function freshRunState() {
     dismissed: false,
     sawRunError: false,
     sawRunFinish: false, // 审查修复 M1:SSE 干净截断(无终帧)收尾判定
+    // P1-B3:todo 卡 per-run 稳定寻址(runId → 消息 _key)。回放时一个 state 跨多个
+    // run 共享,靠 runId 区分目标卡;实时轮单 run 同态(updated 多帧收敛为一卡)。
+    todoByRunId: new Map(),
   }
 }
 
@@ -191,6 +194,47 @@ function upsertTool(pageApi, state, toolCallId, argsJson, result, done) {
   if (idx !== -1) pageApi.messages.value[idx] = { ...pageApi.messages.value[idx], toolItem: item }
 }
 
+/**
+ * todos CUSTOM → todo_list 进度卡（P1-B3，runId 作用域原位 upsert）：
+ * - 同 runId 的 updated/completed 多帧快照收敛为**一张**卡：首帧占行，
+ *   后续帧按 todoByRunId 找到目标消息原位替换 items/status，不重复刷屏；
+ * - 回放态（一个 state 跨多 run 共享）与实时态同构——runId 是 per-run 寻址键，
+ *   replay 的 N 帧 CUSTOM 快照落同一卡；不同 run 各成一张卡；
+ * - 无 runId（旧载荷/后端降级）保持既有行为：每次推新卡，不参与去重。
+ * status 语义：items 全 completed → completed（终态渲染），否则 in_progress。
+ */
+function upsertTodos(pageApi, state, value) {
+  const items = value && Array.isArray(value.items) ? value.items : []
+  const runId = value && value.runId != null ? String(value.runId) : null
+  dismissProgress(pageApi, state)
+  const key = runId !== null ? state.todoByRunId.get(runId) : undefined
+  const idx = key !== undefined ? pageApi.messages.value.findIndex((m) => m._key === key) : -1
+  const allDone = items.length > 0 && items.every((t) => t && t.completed === true)
+  const status = allDone ? 'completed' : 'in_progress'
+  if (idx === -1) {
+    // 首帧：占行 + 登记 runId → _key（唯一一次 push，后续全走原位替换）
+    state.customSeq += 1
+    const msg = pageApi.pushMsg({
+      role: 'agent',
+      kind: 'tool_item',
+      text: '',
+      toolItem: {
+        id: `todos:${runId !== null ? runId : state.customSeq}`,
+        type: 'todo_list',
+        items,
+        status,
+      },
+      createdAt: Date.now(),
+    })
+    if (runId !== null) state.todoByRunId.set(runId, msg._key)
+    pageApi.scrollToBottom()
+    return
+  }
+  // 原位 upsert：替换整个 toolItem（保消息 _key/turnId 稳定，渲染层不重建）
+  const prev = pageApi.messages.value[idx]
+  pageApi.messages.value[idx] = { ...prev, toolItem: { ...prev.toolItem, items, status } }
+}
+
 /** CUSTOM 分派（实时 emit 与历史回放共用）：wb_plan / todos / wb_error / 审批，其余忽略 */
 function applyCustom(pageApi, state, name, value) {
   if (name === 'tool_approval_required') {
@@ -230,20 +274,8 @@ function applyCustom(pageApi, state, name, value) {
     return
   }
   if (name === 'todos') {
-    dismissProgress(pageApi, state)
-    state.customSeq += 1
-    pageApi.pushMsg({
-      role: 'agent',
-      kind: 'tool_item',
-      text: '',
-      toolItem: {
-        id: `todos:${state.customSeq}`,
-        type: 'todo_list',
-        items: (value && value.items) || [],
-        status: 'completed',
-      },
-      createdAt: Date.now(),
-    })
+    // P1-B3:runId 作用域原位 upsert(updated/completed 多帧收敛为一卡)
+    upsertTodos(pageApi, state, value)
     return
   }
   if (name === 'wb_error') {
