@@ -55,6 +55,8 @@
                   data: bezierLinkPath(seg.x1, seg.y1, seg.x2, seg.y2),
                   stroke: selectedLinkId === seg.id ? '#fafaf9' : 'rgba(214,211,206,0.82)',
                   strokeWidth: (selectedLinkId === seg.id ? 3 : 2) / viewport.scale,
+                  opacity:
+                    reconnectDrag.active && reconnectDrag.linkId === seg.id ? 0.25 : 1,
                   listening: false,
                 }"
               />
@@ -71,6 +73,22 @@
                 ),
                 stroke: '#fafaf9',
                 strokeWidth: 2 / viewport.scale,
+                dash: [5 / viewport.scale, 5 / viewport.scale],
+                listening: false,
+              }"
+            />
+            <!-- 重连预览（选中连线拖锚点时：原线淡显 + 动端虚线跟随） -->
+            <v-path
+              v-if="reconnectDrag.seg"
+              :config="{
+                data: bezierLinkPath(
+                  reconnectDrag.seg.x1,
+                  reconnectDrag.seg.y1,
+                  reconnectDrag.seg.x2,
+                  reconnectDrag.seg.y2,
+                ),
+                stroke: '#fafaf9',
+                strokeWidth: 2.5 / viewport.scale,
                 dash: [5 / viewport.scale, 5 / viewport.scale],
                 listening: false,
               }"
@@ -174,6 +192,18 @@
               <v-circle
                 :config="handleConfig(o, 'source')"
                 @mousedown="onConnectStart(o.id, 'source', $event)"
+              />
+            </v-group>
+            <!-- 选中连线的重连锚点：两端圆点拖到其它物件即改接。
+                 常驻渲染 + hitFunc 动态热区（同句柄模式，避免 v-if 破坏 hit graph） -->
+            <v-group v-for="seg in linkSegs" :key="'la' + seg.id">
+              <v-circle
+                :config="linkAnchorConfig(seg, 'from')"
+                @mousedown="onAnchorDown(seg.id, 'from', $event)"
+              />
+              <v-circle
+                :config="linkAnchorConfig(seg, 'to')"
+                @mousedown="onAnchorDown(seg.id, 'to', $event)"
               />
             </v-group>
             <!-- 框选橡皮筋 -->
@@ -1332,6 +1362,25 @@ function closeConnectCreate() {
   connectCreate.to = null
   connectCreate.pickLink = null
 }
+// —— 选中连线的重连拖拽（参考 infinite-canvas ConnectionPath 两端锚点语义）——
+// 选中连线后在两端显示可拖锚点：拖源端(from)改接新源、拖目标端(to)改接新目标。
+// 复用 connect 的吸附规则：from 端贴目标右缘、to 端贴目标左缘。
+const reconnectDrag = reactive({
+  active: false,
+  linkId: null,
+  side: null, // 'from'（拖源端 x1,y1）| 'to'（拖目标端 x2,y2）
+  fixedId: null, // 不动端节点 id（防止自环与重复计算）
+  targetId: null, // 悬停吸附的目标物件 id
+  seg: null, // 预览贝塞尔端点 {x1,y1,x2,y2}
+})
+function cancelReconnectDrag() {
+  reconnectDrag.active = false
+  reconnectDrag.linkId = null
+  reconnectDrag.side = null
+  reconnectDrag.fixedId = null
+  reconnectDrag.targetId = null
+  reconnectDrag.seg = null
+}
 /** 按 connect 拖线方向连接新节点（from=源侧 to=目标侧，只补缺失侧） */
 function linkFromConnect(nodeId, from, to) {
   const fromId = from && from !== nodeId ? from : null
@@ -1447,7 +1496,8 @@ function showHandles(o) {
   return (
     hoverNodeId.value === o.id ||
     selection.value.includes(o.id) ||
-    (connectDrag.active && (connectDrag.nodeId === o.id || connectDrag.targetId === o.id))
+    (connectDrag.active && (connectDrag.nodeId === o.id || connectDrag.targetId === o.id)) ||
+    (reconnectDrag.active && reconnectDrag.targetId === o.id)
   )
 }
 /** 句柄显隐切换后 Konva 不会自动重绘 hit graph（hitFunc 结果变化），手动补绘 */
@@ -1458,7 +1508,12 @@ function redrawHandleHits() {
   })
 }
 watch(
-  [hoverNodeId, selectedLinkId, () => [connectDrag.active, connectDrag.targetId]],
+  [
+    hoverNodeId,
+    selectedLinkId,
+    () => [connectDrag.active, connectDrag.targetId],
+    () => [reconnectDrag.active, reconnectDrag.targetId],
+  ],
   redrawHandleHits,
   {
     deep: false,
@@ -1489,6 +1544,30 @@ function handleConfig(o, side) {
     hitFunc(ctx, shape) {
       if (!showHandles(o)) return
       const r = 24 / viewport.value.scale
+      ctx.beginPath()
+      ctx.arc(0, 0, r, 0, Math.PI * 2, false)
+      ctx.closePath()
+      ctx.fillStrokeShape(shape)
+    },
+  }
+}
+/** 连线重连锚点配置（选中连线才显现）：from 端=源侧(右端 x1,y1)、to 端=目标侧(左端 x2,y2)。
+ *  常驻渲染 + hitFunc 动态热区 —— 平时 opacity 0 且无热区，不拦截连线/物件交互；
+ *  选中后热区开启，可拖到其它物件重连。颜色区分两端便于识别方向。 */
+function linkAnchorConfig(seg, side) {
+  const active = selectedLinkId.value === seg.id && !reconnectDrag.active
+  return {
+    x: side === 'from' ? seg.x1 : seg.x2,
+    y: side === 'from' ? seg.y1 : seg.y2,
+    radius: 6.5 / viewport.value.scale,
+    fill: side === 'from' ? '#7dd3fc' : '#fcd34d', // 天蓝=源端 琥珀=目标端
+    stroke: '#1f1d1a',
+    strokeWidth: 1.5 / viewport.value.scale,
+    opacity: active ? 1 : 0,
+    cursor: 'grab',
+    hitFunc(ctx, shape) {
+      if (!active) return
+      const r = 22 / viewport.value.scale
       ctx.beginPath()
       ctx.arc(0, 0, r, 0, Math.PI * 2, false)
       ctx.closePath()
@@ -1938,11 +2017,85 @@ function onConnectEnd() {
   }
 }
 
+/** 重连锚点 mousedown：拆一端进入重连拖拽。side='from' 拖源端 → 改接新源（贴其右缘）；
+ *  side='to' 拖目标端 → 改接新目标（贴其左缘）。不动端坐标保持，预览从原线重合位置起拖 */
+function onAnchorDown(linkId, side, kev) {
+  stopKonvaEvent(kev)
+  const l = links.value.find((x) => x.id === linkId)
+  const seg = linkSegs.value.find((s) => s.id === linkId)
+  if (!l || !seg) return
+  selectedLinkId.value = linkId
+  reconnectDrag.active = true
+  reconnectDrag.linkId = linkId
+  reconnectDrag.side = side
+  reconnectDrag.fixedId = side === 'from' ? l.to : l.from
+  reconnectDrag.targetId = null
+  reconnectDrag.seg = { x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2 }
+  drag.mode = 'reconnect' // 占住拖拽态：阻止平移/物件拖动（onMouseDown 同 connect 跳过）
+  drag.last = null
+}
+/** 重连拖拽中：预览动端跟随指针，命中物件则吸附到其对应侧边缘中点 */
+function onReconnectMove() {
+  if (!reconnectDrag.active || !reconnectDrag.seg) return
+  const st = stageEl.value.getStage()
+  const p = st.getPointerPosition()
+  if (!p) return
+  const w = screenToWorld(viewport.value, p.x, p.y)
+  const seg = reconnectDrag.seg
+  // 不动端（另一端）坐标保持原样
+  const fixed =
+    reconnectDrag.side === 'from' ? { x: seg.x2, y: seg.y2 } : { x: seg.x1, y: seg.y1 }
+  const hit = hitTest(objects.value, w.x, w.y)
+  const hoverObj = hit >= 0 ? objects.value[hit] : null
+  const target = hoverObj && hoverObj.id !== reconnectDrag.fixedId ? hoverObj : null
+  reconnectDrag.targetId = target ? target.id : null
+  const end = target
+    ? reconnectDrag.side === 'from'
+      ? { x: target.x + target.width, y: target.y + target.height / 2 }
+      : { x: target.x, y: target.y + target.height / 2 }
+    : { x: w.x, y: w.y }
+  reconnectDrag.seg =
+    reconnectDrag.side === 'from'
+      ? { x1: end.x, y1: end.y, x2: fixed.x, y2: fixed.y }
+      : { x1: fixed.x, y1: fixed.y, x2: end.x, y2: end.y }
+}
+/** 重连松手：命中其它物件且非自环 → 更新连线端点；落空/拖回原端 → 取消 */
+function onReconnectEnd() {
+  if (!reconnectDrag.active) return
+  const { linkId, side, targetId, fixedId } = reconnectDrag
+  reconnectDrag.active = false
+  reconnectDrag.linkId = null
+  reconnectDrag.side = null
+  reconnectDrag.fixedId = null
+  reconnectDrag.targetId = null
+  reconnectDrag.seg = null
+  if (!linkId || !targetId || targetId === fixedId) return // 落空 / 拖到不动端自身 → 取消
+  const l = links.value.find((x) => x.id === linkId)
+  if (!l) return
+  const nextFrom = side === 'from' ? targetId : l.from
+  const nextTo = side === 'to' ? targetId : l.to
+  if (nextFrom === l.from && nextTo === l.to) return // 拖回原端：无变化
+  const dup = links.value.some((x) => x.id !== linkId && x.from === nextFrom && x.to === nextTo)
+  if (dup) {
+    // 目标关系已存在 → 被拖线成为冗余，移除（等效并入既有线）
+    beforeChange()
+    links.value = links.value.filter((x) => x.id !== linkId)
+    selectedLinkId.value = null
+  } else {
+    beforeChange()
+    l.from = nextFrom
+    l.to = nextTo
+  }
+  saveSoon()
+}
+
 function onMouseDown(e) {
   // 空地（没点到任何 shape）按下：
   //   普通拖 = 平移画布；Shift/中键 拖 = 框选；crop 工具 = 圈选裁剪
   // 物件按下（onItemDown 先触发，drag.mode='item'）时 stage 级事件直接跳过
-  if (drag.mode === 'item' || drag.mode === 'connect') return
+  if (drag.mode === 'item' || drag.mode === 'connect' || drag.mode === 'reconnect') return
+  // 兜底：重连拖拽异常残留（未松手/未 Esc）时，点空白即取消
+  if (reconnectDrag.active) cancelReconnectDrag()
   const st = stageEl.value.getStage()
   if (e.target !== st) return // 物件由节点拖拽处理
   const p = st.getPointerPosition()
@@ -1990,6 +2143,10 @@ function onMouseMove(e) {
     onConnectMove()
     return
   }
+  if (drag.mode === 'reconnect') {
+    onReconnectMove()
+    return
+  }
   if (drag.mode === 'pan' && drag.last) {
     viewport.value = {
       scale: viewport.value.scale,
@@ -2015,6 +2172,12 @@ function onMouseUp() {
   }
   if (drag.mode === 'connect') {
     onConnectEnd()
+    drag.mode = null
+    drag.last = null
+    return
+  }
+  if (drag.mode === 'reconnect') {
+    onReconnectEnd()
     drag.mode = null
     drag.last = null
     return
@@ -3448,6 +3611,7 @@ function onLinkContextMenu(evt, id) {
 }
 function deleteSelectedLink() {
   if (!selectedLinkId.value) return
+  if (reconnectDrag.active) cancelReconnectDrag()
   if (ctxMenu.value) ctxMenu.value = null
   beforeChange()
   links.value = links.value.filter((l) => l.id !== selectedLinkId.value)
@@ -4302,7 +4466,13 @@ function onKey(e) {
     if (inEditor) return
     shortcutsOpen.value = !shortcutsOpen.value
   } else if (e.key === 'Escape') {
-    if (ctxMenu.value) {
+    if (reconnectDrag.active) {
+      // 重连拖拽中：取消本次拖拽，保留连线选中（锚点仍可再拖）
+      e.preventDefault()
+      cancelReconnectDrag()
+      drag.mode = null
+      drag.last = null
+    } else if (ctxMenu.value) {
       ctxMenu.value = null
     } else if (shortcutsOpen.value) {
       shortcutsOpen.value = false
@@ -4686,6 +4856,8 @@ const shortcutList = computed(() => [
   { label: 'Ctrl/⌘ + G / ⇧G', desc: t('canvasScGroup') },
   { label: 'Delete / Backspace', desc: t('canvasScDelete') },
   { label: '双击便签', desc: t('canvasScNoteEdit') },
+  { label: '双击 Frame', desc: t('canvasScFrameRename') },
+  { label: '拖拽连线端点', desc: t('canvasScLinkReconnect') },
   { label: 'Esc', desc: t('canvasScEscape') },
 ])
 
