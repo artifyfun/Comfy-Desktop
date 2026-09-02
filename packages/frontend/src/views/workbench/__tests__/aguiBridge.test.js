@@ -504,6 +504,31 @@ describe('aguiBridge — 附件上行(C4 差异收敛)', () => {
     expect(JSON.parse(init2.body).attachments).toBeUndefined()
     vi.unstubAllGlobals()
   })
+
+  it('runAgentTurn POST body 携带 approvalMode(B1 会话级审批模式);无 getter 时字段省略', async () => {
+    const { createAguiBridge } = await import('../aguiBridge')
+    const pageApi = makePageApi()
+    pageApi.getApprovalMode = () => 'conservative'
+    const bridge = createAguiBridge(pageApi)
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }),
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    await bridge.runAgentTurn('帮我生成', [], {})
+    const [, init1] = fetchMock.mock.calls[0]
+    expect(JSON.parse(init1.body).approvalMode).toBe('conservative')
+    // 旧桩(无 getter)→ 字段被 JSON.stringify 省略,后端走默认 standard
+    const legacy = createAguiBridge(makePageApi())
+    await legacy.runAgentTurn('x', [], {})
+    const [, init2] = fetchMock.mock.calls[1]
+    expect(JSON.parse(init2.body).approvalMode).toBeUndefined()
+    vi.unstubAllGlobals()
+  })
 })
 
 describe('aguiBridge — STATE_DELTA /tokenUsage 接线', () => {

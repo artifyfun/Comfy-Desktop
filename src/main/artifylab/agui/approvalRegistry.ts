@@ -14,18 +14,54 @@
  *   无身份调用(外部 MCP 客户端)完全直通——审批只约束 decide 链路内的工具执行。
  */
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { APPROVAL_WHITELIST_DEFAULT, createApprovalGate, type ApprovalGate } from './approvalGate'
+import {
+  APPROVAL_MODE_DEFAULT,
+  createApprovalGate,
+  type ApprovalGate,
+  type ToolRiskTier
+} from './approvalGate'
 import type { ToolRegistry } from '../mcp/tools'
 
 /** /mcp 请求 → decide 会话身份(HTTP 层解析,CallTool handler 内读取;undefined = 外部无身份调用) */
 export const mcpIdentityStorage = new AsyncLocalStorage<string | undefined>()
+
+/**
+ * B1 工具风险级表(全量 wb_* 12 工具接线默认策略):
+ * - read    :只读查询/校验 → 永不弹卡(低危自动放行;wb_set_node_params 是「校验
+ *             不执行」的误命名只读工具,归 read)。
+ * - write   :本地写(会话模板变体/长期记忆)→ conservative 弹卡、standard 自动。
+ * - execute :真实执行/外部副作用(提交 ComfyUI、直跑 workflow、固化全局 App)→ 两档都弹卡。
+ * 未收录工具走 whitelist 兼容降级(read),不破坏既有语义。
+ */
+export const APPROVAL_TOOL_TIERS: Record<string, ToolRiskTier> = {
+  // —— read:查询/校验,任何模式自动放行 ——
+  wb_list_templates: 'read',
+  wb_list_nodes: 'read',
+  wb_set_node_params: 'read',
+  wb_validate_workflow: 'read',
+  wb_poll_execution: 'read',
+  wb_get_outputs: 'read',
+  // —— write:本地写(进程内会话数据),conservative 弹卡 ——
+  wb_clone_template: 'write',
+  wb_remember: 'write',
+  wb_forget: 'write',
+  // —— execute:真实执行/外部副作用,两档都弹卡 ——
+  wb_execute_template: 'execute',
+  wb_run_workflow: 'execute',
+  wb_publish_workflow: 'execute'
+}
 
 let gateSingleton: ApprovalGate | null = null
 
 /** 审批门控单例(SSE notify 注册方与 interaction-response 端点必须共用) */
 export function getApprovalGate(): ApprovalGate {
   if (!gateSingleton) {
-    gateSingleton = createApprovalGate({ whitelist: [...APPROVAL_WHITELIST_DEFAULT] })
+    gateSingleton = createApprovalGate({
+      tiers: { ...APPROVAL_TOOL_TIERS },
+      // 默认 standard = 与 C14 白名单语义等价(execute 弹卡、read/write 自动)——
+      // 红线:门控升级不改变未显式选择模式的既有会话行为。
+      defaultMode: APPROVAL_MODE_DEFAULT
+    })
   }
   return gateSingleton
 }

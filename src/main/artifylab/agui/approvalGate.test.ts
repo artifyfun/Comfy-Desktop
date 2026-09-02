@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
  */
 
 import {
+  APPROVAL_MODE_DEFAULT,
   APPROVAL_TIMEOUT_MS_DEFAULT,
   APPROVAL_WHITELIST_DEFAULT,
   ApprovalArgsError,
@@ -385,5 +386,140 @@ describe('onResolved 终态回执(审查修复 M4)', () => {
     })
     gate.unregister('t-x')
     expect(gate.rejectPending('t-x')).toBe(0)
+  })
+})
+
+describe('B1:低危自动放行(风险级×审批模式)', () => {
+  /** 典型 tier 表:read/write/execute 各一(与生产 APPROVAL_TOOL_TIERS 同构) */
+  const TIERS = {
+    wb_list_templates: 'read',
+    wb_clone_template: 'write',
+    wb_execute_template: 'execute'
+  } as const
+
+  /** 每次新建独立 gate(白名单为空——tiers 全量接管),返回 notify 探针 */
+  function gated(extra?: { defaultMode?: 'conservative' | 'standard' }) {
+    const notify = vi.fn()
+    const gate = createApprovalGate({ tiers: { ...TIERS }, timeoutMs: 5000, ...extra })
+    return { gate, notify }
+  }
+
+  it('read 级:conservative 与 standard 两档都自动放行,notify 零调用', async () => {
+    for (const mode of ['conservative', 'standard'] as const) {
+      const { gate, notify } = gated()
+      const tid = `t-read-${mode}`
+      gate.register(tid, notify)
+      gate.setMode(tid, mode)
+      await expect(gate.intercept(tid, 'wb_list_templates', { q: 1 })).resolves.toEqual({
+        suspended: false,
+        approved: true,
+        args: { q: 1 }
+      })
+      expect(notify).not.toHaveBeenCalled()
+    }
+  })
+
+  it('write 级:standard 自动放行;conservative 挂起待批(批准后原 args 执行)', async () => {
+    // standard → 自动(高频操作少打断)
+    const s = gated()
+    s.gate.register('t-w-s', s.notify)
+    s.gate.setMode('t-w-s', 'standard')
+    await expect(
+      s.gate.intercept('t-w-s', 'wb_clone_template', { template_id: 'a' })
+    ).resolves.toEqual({ suspended: false, approved: true, args: { template_id: 'a' } })
+    expect(s.notify).not.toHaveBeenCalled()
+
+    // conservative → 弹卡,approve 恢复
+    const c = gated()
+    let req!: ApprovalRequest
+    c.notify.mockImplementation((r) => (req = r))
+    c.gate.register('t-w-c', c.notify)
+    c.gate.setMode('t-w-c', 'conservative')
+    const p = c.gate.intercept('t-w-c', 'wb_clone_template', { template_id: 'a' })
+    expect(req.requestId).toBeTruthy()
+    expect(c.gate.resolve('t-w-c', req.requestId, 'approve')).toBe(true)
+    await expect(p).resolves.toEqual({
+      suspended: true,
+      approved: true,
+      args: { template_id: 'a' }
+    })
+  })
+
+  it('execute 级:两档都挂起(审批红线——执行绝不静默)', async () => {
+    for (const mode of ['conservative', 'standard'] as const) {
+      const { gate, notify } = gated()
+      const tid = `t-exe-${mode}`
+      gate.register(tid, notify)
+      gate.setMode(tid, mode)
+      let req!: ApprovalRequest
+      notify.mockImplementation((r) => (req = r))
+      const p = gate.intercept(tid, 'wb_execute_template', { templateId: 't1' })
+      await Promise.resolve()
+      expect(req.toolName).toBe('wb_execute_template')
+      expect(gate.resolve(tid, req.requestId, 'approve')).toBe(true)
+      await expect(p).resolves.toMatchObject({ suspended: true, approved: true })
+    }
+  })
+
+  it('mode per-thread 隔离:同 gate 内 conservative 审 write、未 setMode 的 thread 走默认(自动)', async () => {
+    const { gate, notify } = gated()
+    let req!: ApprovalRequest
+    notify.mockImplementation((r) => (req = r))
+    gate.register('t-cons', notify)
+    gate.setMode('t-cons', 'conservative')
+    gate.register('t-def', notify) // 未 setMode → defaultMode(standard) → write 自动
+
+    await expect(gate.intercept('t-def', 'wb_clone_template', {})).resolves.toMatchObject({
+      suspended: false,
+      approved: true
+    })
+    const p = gate.intercept('t-cons', 'wb_clone_template', {})
+    await Promise.resolve()
+    expect(req.threadId).toBe('t-cons')
+    expect(gate.resolve('t-cons', req.requestId, 'approve')).toBe(true)
+    await expect(p).resolves.toMatchObject({ suspended: true, approved: true })
+    expect(notify).toHaveBeenCalledTimes(1) // 只 t-cons 弹过卡
+  })
+
+  it('unregister 清 mode:重 register 同 thread 后 write 回到默认 standard(自动)', async () => {
+    const { gate, notify } = gated()
+    gate.register('t-x', notify)
+    gate.setMode('t-x', 'conservative')
+    gate.unregister('t-x') // run 结束
+    gate.register('t-x', notify) // 下一 run 未带 approvalMode
+    await expect(gate.intercept('t-x', 'wb_clone_template', {})).resolves.toMatchObject({
+      suspended: false,
+      approved: true
+    })
+    expect(notify).not.toHaveBeenCalled()
+  })
+
+  it('defaultMode=conservative 时未 setMode 的 thread 也审 write', async () => {
+    const { gate, notify } = gated({ defaultMode: 'conservative' })
+    let req!: ApprovalRequest
+    notify.mockImplementation((r) => (req = r))
+    gate.register('t-dc', notify)
+    const p = gate.intercept('t-dc', 'wb_clone_template', {})
+    await Promise.resolve()
+    expect(req.requestId).toBeTruthy()
+    expect(gate.resolve('t-dc', req.requestId, 'approve')).toBe(true)
+    await expect(p).resolves.toMatchObject({ suspended: true, approved: true })
+  })
+
+  it('tiers 优先于 whitelist:同工具 tiers=read 但白名单命中 → 自动放行', async () => {
+    const gate = createApprovalGate({
+      whitelist: ['wb_run_workflow'],
+      tiers: { wb_run_workflow: 'read' }
+    })
+    gate.register('t-override', () => {})
+    await expect(gate.intercept('t-override', 'wb_run_workflow', {})).resolves.toEqual({
+      suspended: false,
+      approved: true,
+      args: {}
+    })
+  })
+
+  it('默认审批模式常量 = standard(legacy 白名单语义等价)', () => {
+    expect(APPROVAL_MODE_DEFAULT).toBe('standard')
   })
 })

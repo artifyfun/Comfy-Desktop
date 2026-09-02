@@ -262,4 +262,31 @@ describe('approvalRegistry — gate 单例', () => {
       'wb_publish_workflow'
     ])
   })
+
+  it('B1 单例 tiers 接线:read 任意模式自动放行;conservative 下 write 弹卡待批', async () => {
+    const gate = getApprovalGate()
+    const threadId = 'th-b1'
+    const notify = vi.fn()
+    gate.register(threadId, notify)
+    try {
+      // read(wb_list_templates)→ 默认 standard 自动,notify 零调用
+      await expect(gate.intercept(threadId, 'wb_list_templates', {})).resolves.toEqual({
+        suspended: false,
+        approved: true,
+        args: {}
+      })
+      expect(notify).not.toHaveBeenCalled()
+      // write(wb_clone_template)→ conservative 弹卡,approve 恢复
+      gate.setMode(threadId, 'conservative')
+      let req!: { requestId: string }
+      notify.mockImplementation((r) => (req = r))
+      const p = gate.intercept(threadId, 'wb_clone_template', { template_id: 'x' })
+      await Promise.resolve()
+      expect(req.requestId).toBeTruthy()
+      expect(gate.resolve(threadId, req.requestId, 'approve')).toBe(true)
+      await expect(p).resolves.toMatchObject({ suspended: true, approved: true })
+    } finally {
+      gate.unregister(threadId)
+    }
+  })
 })

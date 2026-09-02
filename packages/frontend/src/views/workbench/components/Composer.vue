@@ -91,6 +91,11 @@
           :override="modelOverride"
           @update:override="(v) => $emit('update:modelOverride', v)"
         />
+        <!-- B1 工具审批模式（低危自动放行策略；会话级,随每轮 run 请求透传） -->
+        <ApprovalModeMenu
+          :mode="approvalMode"
+          @update:mode="(v) => $emit('update:approvalMode', v)"
+        />
         <div class="flex-1 min-w-0"></div>
         <span v-if="slashOpen" class="text-[11px] text-[var(--wb-text-3)] mr-2 hidden sm:inline">
           ↑↓ {{ t('workbenchNavigate') }} · Tab/{{ t('confirm') }} · Esc
@@ -132,6 +137,7 @@ import { useI18n } from '@/utils/i18n'
 import AttachmentRail from './AttachmentRail.vue'
 import ModelMenu from './ModelMenu.vue'
 import SkillMenu from './SkillMenu.vue'
+import ApprovalModeMenu from './ApprovalModeMenu.vue'
 
 const props = defineProps({
   busy: { type: Boolean, default: false },
@@ -140,6 +146,8 @@ const props = defineProps({
   attachments: { type: Array, default: () => [] },
   skills: { type: Array, default: () => [] },
   modelOverride: { type: Object, default: null },
+  /** B1 审批模式:'standard' | 'conservative'(默认 standard=只读+本地写自动放行) */
+  approvalMode: { type: String, default: 'standard' },
   modelValue: { type: String, default: '' },
 })
 const emit = defineEmits([
@@ -150,6 +158,7 @@ const emit = defineEmits([
   'reference-files',
   'remove-attachment',
   'update:modelOverride',
+  'update:approvalMode',
 ])
 
 const { t } = useI18n()

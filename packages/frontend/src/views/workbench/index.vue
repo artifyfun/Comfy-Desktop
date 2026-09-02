@@ -718,12 +718,14 @@
             :attachments="draftAttachments"
             :skills="skills"
             :model-override="modelOverride"
+            :approval-mode="approvalMode"
             @send="send"
             @stop="stopChat"
             @upload-files="uploadFiles"
             @reference-files="referenceLocalFiles"
             @remove-attachment="removeAttachment"
             @update:model-override="saveModelOverride"
+            @update:approval-mode="saveApprovalMode"
           />
         </section>
 
@@ -1190,6 +1192,14 @@ const uploading = ref(false)
 // curSession 必须在 createAguiBridge 之前声明——桥注入直接引用该 ref,
 // 声明滞后会踩 TDZ(setup 抛 ReferenceError → 整页白屏,2026-08 实测)。
 const curSession = ref(null)
+// B1 工具审批模式(会话级偏好,低危自动放行策略):localStorage 持久化,
+// 每轮 run 随请求透传 → 后端 gate per-thread 生效。同样须在桥前声明——
+// 桥经 getApprovalMode 每轮自取,自动恢复/画布嵌入链路同源生效。
+const approvalMode = ref(
+  typeof localStorage !== 'undefined' && localStorage.getItem('wb.approvalMode') === 'conservative'
+    ? 'conservative'
+    : 'standard',
+)
 const aguiBridge = createAguiBridge({
   origin,
   t,
@@ -1201,6 +1211,7 @@ const aguiBridge = createAguiBridge({
   stopping,
   isStopCancelled,
   getThreadId: () => sessionId.value,
+  getApprovalMode: () => approvalMode.value,
   curSession, // STATE_DELTA /tokenUsage 兜底同步进会话用量(aguiBridge.applyTokenUsage)
   // 执行类副作用(审查修复 C1):wb_artifact/wb_sync/wb_canvas_exec/wb_invalid
   // 四类 CUSTOM 走同一分派,产物卡/画布同步/执行轮询/pendingIssues 语义完整
@@ -1449,6 +1460,21 @@ async function saveModelOverride(v) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: sessionId.value, modelOverride: v }),
   })
+}
+
+/**
+ * B1 审批模式切换(标准/保守):前端 localStorage 持久化(人机信任档,属 UI 偏好
+ * 而非会话数据——不开历史会话联动),每轮 run 由桥 getApprovalMode 自取透传,
+ * 后端 gate per-thread 生效(run 结束即失效,无跨会话泄漏)。
+ */
+function saveApprovalMode(v) {
+  const mode = v === 'conservative' ? 'conservative' : 'standard'
+  approvalMode.value = mode
+  try {
+    localStorage.setItem('wb.approvalMode', mode)
+  } catch {
+    /* localStorage 不可用(隐私模式等)不影响本轮生效 */
+  }
 }
 
 // ---------- 附件 ----------

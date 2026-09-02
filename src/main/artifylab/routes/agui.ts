@@ -38,7 +38,11 @@ import type { AttachmentMeta } from '../workbench/presetCore'
 import type { ThreadEvent } from '../vendor/codex-sdk'
 import { createCodexMapper } from '../agui/codexMapper'
 import { getApprovalGate } from '../agui/approvalRegistry'
-import { TOOL_APPROVAL_REQUIRED, toolApprovalRequiredValue } from '../agui/approvalGate'
+import {
+  TOOL_APPROVAL_REQUIRED,
+  toolApprovalRequiredValue,
+  type ApprovalMode
+} from '../agui/approvalGate'
 import {
   custom,
   encodeSseFrame,
@@ -100,12 +104,19 @@ export function createAguiRouter(deps: { store?: EventStore } = {}): express.Rou
 
   // AG-UI SSE 主入口:decide 流式 + 完整业务分派(次序对齐 workbench.ts chat)
   router.post('/api/workbench/agent/run', async (req: Request, res: Response) => {
-    const { threadId, runId, input, force, attachments } = req.body as {
+    const { threadId, runId, input, force, attachments, approvalMode } = req.body as {
       threadId?: string
       runId?: string
       input?: string
       force?: boolean
       attachments?: AttachmentMeta[]
+      /**
+       * B1 会话级审批模式(可选,前端下拉 保守/标准):
+       * conservative = 只读自动放行,本地写 + 执行都弹卡;
+       * standard     = 只读 + 本地写自动放行,只有执行弹卡(默认,与 C14 白名单语义等价)。
+       * 缺省/非法值不 setMode → gate 走 defaultMode(standard),行为零突变。
+       */
+      approvalMode?: ApprovalMode
     }
     // 对齐旧路由:附件-only 输入(无文本)合法,service 内有默认占位提示
     if (!threadId || !runId || (!input && !(attachments && attachments.length > 0))) {
@@ -142,6 +153,11 @@ export function createAguiRouter(deps: { store?: EventStore } = {}): express.Rou
     // 共享 approvalRegistry 单例——与 mcp 门控 registry、interaction-response
     // 端点同一 gate 实例,pending 才能跨端点闭环。run 结束统一清理。
     const gate = getApprovalGate()
+    // B1:会话级审批模式落 gate(per-thread)。run 结束 finally 的 unregister
+    // 会一并清理 mode——同 thread 下一次 run 不带 approvalMode 时回到默认 standard。
+    if (approvalMode === 'conservative' || approvalMode === 'standard') {
+      gate.setMode(threadId, approvalMode)
+    }
     gate.register(threadId, (approvalReq) => {
       emit(custom(TOOL_APPROVAL_REQUIRED, toolApprovalRequiredValue(approvalReq)))
     })

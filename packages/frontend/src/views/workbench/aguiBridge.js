@@ -400,6 +400,8 @@ function applyTokenUsage(pageApi, delta) {
  *   - busy / stopping   ref<boolean>  页面在途状态（停止按钮语义）
  *   - isStopCancelled   (e) => boolean  停止导致的流中断不算错误
  *   - getThreadId       () => string  当前 sessionId 即 AG-UI threadId
+ *   - getApprovalMode   () => string  当前会话审批模式(B1:'standard'|'conservative',
+ *                         每轮随 run 请求透传;缺省 undefined 后端走默认 standard)
  */
 export function createAguiBridge(pageApi) {
   let activeCtl = null // 当前轮 AbortController（单飞行轮，同 legacy chatReader）
@@ -444,6 +446,10 @@ export function createAguiBridge(pageApi) {
           threadId,
           runId,
           input: inputText,
+          // B1 会话级审批模式(标准/保守):桥每轮自取当前 UI 偏好透传;
+          // undefined(旧页面/测试桩未提供 getter)时后端 gate 走默认 standard。
+          approvalMode:
+            typeof pageApi.getApprovalMode === 'function' ? pageApi.getApprovalMode() : undefined,
           // 附件透传(AttachmentMeta 形状,后端 decide 落用户消息+会话素材表)
           attachments: attachments && attachments.length ? attachments : undefined,
         }),

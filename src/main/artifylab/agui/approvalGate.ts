@@ -35,12 +35,39 @@ export const APPROVAL_TIMEOUT_MS_DEFAULT = 10 * 60 * 1000
  * 白名单默认值建议(C14 计划文档点名的「执行家族」):
  * wb_execute_template(wait=true 阻塞执行)、wb_run_workflow(任意 workflow 直跑)、
  * wb_publish_workflow(固化进模板库)。只读/低危 wb_* 不进默认白名单,接线时可配置扩大。
+ *
+ * 注意:whitelist 是 B1「低危自动放行」引入前的 legacy 判定面,新接线优先用
+ * tiers(工具风险级表);未在 tiers 的工具按 whitelist 兼容降级——命中视为
+ * execute(需审),未命中视为 read(自动放行),保证旧调用方语义零变化。
  */
 export const APPROVAL_WHITELIST_DEFAULT: readonly string[] = [
   'wb_execute_template',
   'wb_run_workflow',
   'wb_publish_workflow'
 ]
+
+// ==================== B1:风险级 × 审批模式 ====================
+
+/**
+ * 工具风险级(B1「低危工具自动放行」的分级面,对齐参考项目 request/automatic):
+ * - read    :只读查询/校验,无副作用(含 wb_set_node_params 这类「校验不执行」的误命名工具)。
+ *             任何模式下都自动放行,永不弹审批卡——高频操作少打断。
+ * - write   :本地写(会话模板变体/长期记忆等进程内数据)。conservative 弹卡,standard 自动。
+ * - execute :外部副作用/真实执行(提交 ComfyUI 生成、直跑 workflow、固化全局 App)。
+ *             两个模式都弹卡(审批红线:执行绝不静默)。
+ */
+export type ToolRiskTier = 'read' | 'write' | 'execute'
+
+/**
+ * 会话级审批模式(前端下拉 保守/标准,随 agent/run 请求透传):
+ * - conservative:只 read 自动放行;write + execute 都弹卡审批(最严)。
+ * - standard    :read + write 自动放行;只有 execute 弹卡(≈ C14 白名单语义,
+ *                 默认值,与门控引入前的行为等价——红线:默认不突变)。
+ */
+export type ApprovalMode = 'conservative' | 'standard'
+
+/** 默认审批模式:standard(= legacy whitelist 语义:执行家族弹卡、其余自动放行) */
+export const APPROVAL_MODE_DEFAULT: ApprovalMode = 'standard'
 
 // ==================== 类型 ====================
 
@@ -59,9 +86,9 @@ export interface ApprovalRequest {
 /** 通知回调(路由层实现:emit AG-UI CUSTOM 事件 + 旁路落库) */
 export type ApprovalNotify = (request: ApprovalRequest) => void
 
-/** intercept 结果:白名单外 {suspended:false};白名单内挂起后按决策/超时恢复 */
+/** intercept 结果:低危自动放行 {suspended:false};需人审挂起后按决策/超时恢复 */
 export interface InterceptResult {
-  /** true = 经历过审批挂起(含通知抛错的 fail-safe 拒绝);false = 白名单外/无通知通道直通 */
+  /** true = 经历过审批挂起(含通知抛错的 fail-safe 拒绝);false = 低危自动放行/无通知通道直通 */
   suspended: boolean
   /** approve/直通 = true;reject/超时/fail-safe = false */
   approved: boolean
@@ -129,6 +156,12 @@ export interface ApprovalGate {
   /** 登记某 thread 的通知通道(SSE 打开时调用;重复登记覆盖,SSE 重连幂等) */
   register(threadId: string, notify: ApprovalNotify): void
   /**
+   * 设置某 thread 的审批模式(B1:会话级,随 agent/run 请求透传)。
+   * run 开始前调用;unregister 时一并清理,防跨 run 泄漏到同 id 的下一个会话。
+   * 未设置的 thread 走 defaultMode(= standard,与 legacy whitelist 语义等价)。
+   */
+  setMode(threadId: string, mode: ApprovalMode): void
+  /**
    * 登记终态回执钩子(与 notify 同生命周期,unregister 一并清理;审查修复 M4)。
    * 审批被 resolve(应答/超时兜底)时回调 {requestId, threadId, toolName, approved}。
    */
@@ -142,8 +175,8 @@ export interface ApprovalGate {
    */
   rejectPending(threadId: string): number
   /**
-   * 工具执行前拦截:白名单外直通;白名单内置 pending + notify 并挂起 Promise。
-   * args 非对象时归一化为 {}(防御 MCP 入参)。
+   * 工具执行前拦截:无需人审(低危自动放行/白名单外)直通;需人审(高风险工具)
+   * 置 pending + notify 并挂起 Promise。args 非对象时归一化为 {}(防御 MCP 入参)。
    */
   intercept(threadId: string, toolName: string, args: unknown): Promise<InterceptResult>
   /**
@@ -166,14 +199,37 @@ interface PendingApproval {
 }
 
 export function createApprovalGate(opts: {
-  whitelist: string[]
+  /** legacy 判定面:whitelist 命中且未在 tiers 声明的工具按 execute 处理 */
+  whitelist?: string[]
+  /** B1 工具风险级表(优先于 whitelist);未收录工具降级走 whitelist 兼容语义 */
+  tiers?: Record<string, ToolRiskTier>
   timeoutMs?: number
+  /** 未 setMode 的 thread 所用默认审批模式(缺省 standard = legacy 等价) */
+  defaultMode?: ApprovalMode
 }): ApprovalGate {
-  const whitelist = new Set(opts.whitelist)
+  const whitelist = new Set(opts.whitelist ?? [])
+  const tiers = opts.tiers ?? {}
   const timeoutMs =
     typeof opts.timeoutMs === 'number' && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0
       ? opts.timeoutMs
       : APPROVAL_TIMEOUT_MS_DEFAULT
+  const defaultMode: ApprovalMode =
+    opts.defaultMode === 'conservative' ? 'conservative' : APPROVAL_MODE_DEFAULT
+
+  /** threadId → 审批模式(AG-UI run 生命周期;未设置走 defaultMode) */
+  const modes = new Map<string, ApprovalMode>()
+
+  /** 工具风险级:优先 tiers,未声明时 whitelist 命中按 execute、否则 read(兼容旧语义) */
+  function tierOf(toolName: string): ToolRiskTier {
+    const t = tiers[toolName]
+    if (t === 'read' || t === 'write' || t === 'execute') return t
+    return whitelist.has(toolName) ? 'execute' : 'read'
+  }
+
+  /** 该工具在当前模式下是否需要人审(B1 分级决策):conservative 拦 write+execute,standard 只拦 execute */
+  function shouldAsk(toolName: string, mode: ApprovalMode): boolean {
+    return mode === 'conservative' ? tierOf(toolName) !== 'read' : tierOf(toolName) === 'execute'
+  }
 
   /** threadId → 通知通道(SSE 生命周期) */
   const notifies = new Map<string, ApprovalNotify>()
@@ -220,6 +276,12 @@ export function createApprovalGate(opts: {
     unregister(threadId) {
       notifies.delete(threadId)
       onResolvedHooks.delete(threadId)
+      // B1:run 生命周期结束,审批模式一并失效(防同 id 复用泄漏上一会话的模式)
+      modes.delete(threadId)
+    },
+
+    setMode(threadId, mode) {
+      modes.set(threadId, mode)
     },
 
     rejectPending(threadId) {
@@ -237,8 +299,11 @@ export function createApprovalGate(opts: {
       // 防御归一化:MCP 入参顶层必须是对象,否则按空参处理(不阻断白名单语义)
       const safeArgs = isPlainObject(args) ? args : {}
 
-      // 白名单外 → 直接放行(无挂起、无通知)
-      if (!whitelist.has(toolName)) {
+      // B1 低危自动放行:该工具在当前 thread 审批模式下无需人审
+      // (read 永不审;write 在 standard 下自动;execute 两档都审)→ 直通,
+      // 不挂起、不通知——与 C14 引入前「白名单外直通」的行为等价。
+      const mode = modes.get(threadId) ?? defaultMode
+      if (!shouldAsk(toolName, mode)) {
         return Promise.resolve({ suspended: false, approved: true, args: safeArgs })
       }
 
