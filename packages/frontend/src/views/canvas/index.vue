@@ -80,13 +80,13 @@
             <!-- 对齐参考线 -->
             <v-line v-for="(g, i) in guides.v" :key="'gv' + i" :config="guideConfig(g, 'v')" />
             <v-line v-for="(g, i) in guides.h" :key="'gh' + i" :config="guideConfig(g, 'h')" />
-            <!-- Frame 分区（纯背景容器：不响应鼠标，成员物件自由进出；管理走右键/大纲） -->
+            <!-- Frame 分区（背景容器：可点选/拖拽/重命名/删除；成员物件自由进出） -->
             <v-group
               v-for="o in frameObjects"
               :key="o.id"
               :config="groupConfig(o)"
-              :draggable="false"
-              :listening="false"
+              :draggable="true"
+              :listening="true"
             >
               <v-rect :config="frameConfig(o)" />
               <v-text :config="frameLabelConfig(o)" />
@@ -835,6 +835,23 @@
           @keydown.enter.ctrl.prevent="commitNoteEdit"
           @blur="commitNoteEdit"
         ></textarea>
+
+        <!-- frame 名称就地重命名：单行 input 覆盖在分区标签（分区顶上方）位置 -->
+        <input
+          v-if="frameEditPos"
+          ref="frameEditArea"
+          v-model="frameEdit.text"
+          class="frame-editor absolute z-20 rounded-lg border-2 border-[var(--wb-accent)] outline-none px-1.5"
+          :style="frameEditPos"
+          :placeholder="t('canvasFrameNamePh')"
+          @mousedown.stop
+          @pointerdown.stop
+          @dblclick.stop
+          @wheel.stop
+          @keydown.esc.stop.prevent="cancelFrameRename"
+          @keydown.enter.prevent="commitFrameRename"
+          @blur="commitFrameRename"
+        />
 
         <!-- 缩放控件条（左下，参考 canvas-zoom-controls）：小地图开关/复位/滑杆/百分比/适应/快捷键 -->
         <div
@@ -1680,6 +1697,61 @@ function cancelNoteEdit() {
     noteEdit.skipCommit = false
   }, 0)
 }
+
+// —— frame 名称就地重命名：单行 HTML input 覆盖在分区标签（frame.y - 20 上方）位置 ——
+const frameEdit = reactive({ id: null, text: '', skipCommit: false })
+const frameEditArea = ref(null)
+const frameEditPos = computed(() => {
+  const o = objects.value.find((x) => x.id === frameEdit.id && x.type === 'frame')
+  if (!o) return null
+  const tl = worldToScreen(viewport.value, o.x, o.y)
+  const s = viewport.value.scale
+  return {
+    left: tl.x + 'px',
+    top: tl.y - Math.max(22, 24 * s) + 'px',
+    width: Math.max(80, o.width * s) + 'px',
+    fontSize: Math.max(11, 13 * s) + 'px',
+  }
+})
+function startFrameRename(id) {
+  const o = objects.value.find((x) => x.id === id && x.type === 'frame')
+  if (!o) return
+  if (noteEdit.id && noteEdit.id !== id) commitNoteEdit()
+  if (frameEdit.id && frameEdit.id !== id) commitFrameRename()
+  frameEdit.id = id
+  frameEdit.text = o.name || ''
+  frameEdit.skipCommit = false
+  selection.value = [id]
+  nextTick(() => {
+    const el = frameEditArea.value
+    if (!el) return
+    el.focus()
+    el.select()
+  })
+}
+function commitFrameRename() {
+  const id = frameEdit.id
+  if (!id) return
+  if (frameEdit.skipCommit) return
+  const o = objects.value.find((x) => x.id === id)
+  const next = frameEdit.text.trim()
+  frameEdit.id = null
+  frameEdit.text = ''
+  if (!o || o.type !== 'frame') return
+  if (next && next !== (o.name || '')) {
+    beforeChange()
+    o.name = next
+    saveSoon()
+  }
+}
+function cancelFrameRename() {
+  frameEdit.id = null
+  frameEdit.text = ''
+  frameEdit.skipCommit = true
+  setTimeout(() => {
+    frameEdit.skipCommit = false
+  }, 0)
+}
 function rubberConfig() {
   return {
     x: Math.min(rubber.value.x, rubber.value.x + rubber.value.w),
@@ -1754,6 +1826,18 @@ function onItemDown(i, e) {
   // 右键菜单/连线创建菜单：点任何物件即收起（此前只有点空地才关，点物件关不掉）
   if (ctxMenu.value) ctxMenu.value = null
   if (connectCreate.open) closeConnectCreate()
+  // 平移意图（空格/中键）：即使落在物件/大 Frame 上也要平移 —— 临时关掉该节点
+  // 的 Konva 拖拽防止它抢走指针，抬手后再恢复（drag.panNode 见 onMouseUp）
+  if (spaceDown.value || e.evt?.button === 1) {
+    if (e.target?.draggable) e.target.draggable(false)
+    drag.panNode = e.target || null
+    drag.mode = 'pan'
+    const st = stageEl.value?.getStage?.()
+    const p = st?.getPointerPosition?.()
+    if (p) drag.last = { x: p.x, y: p.y }
+    if (!spaceDown.value) selection.value = []
+    return
+  }
   if (tool.value === 'crop') {
     // 圈选裁剪：允许从图片上起圈（拖拽交给 stage 级 mousemove/mouseup 完成）
     const st = stageEl.value.getStage()
@@ -1869,7 +1953,8 @@ function onMouseDown(e) {
     cropRect.value = { x: w.x, y: w.y, w: 0, h: 0 }
     return
   }
-  if (e.evt.button === 1 || e.evt.shiftKey) {
+  // 中键 / Shift / Ctrl(⌘) + 拖拽 = 框选（Ctrl 对齐快捷键面板「框选 / 复制节点」文案）
+  if (e.evt.button === 1 || e.evt.shiftKey || e.evt.ctrlKey || e.evt.metaKey) {
     drag.mode = 'rubber'
     drag.last = { x: p.x, y: p.y }
     rubber.value = { x: w.x, y: w.y, w: 0, h: 0 }
@@ -1923,6 +2008,11 @@ function onMouseMove(e) {
 }
 
 function onMouseUp() {
+  // 空格/中键平移时临时禁用了落点物件的 Konva 拖拽，抬手恢复
+  if (drag.panNode) {
+    drag.panNode.draggable(true)
+    drag.panNode = null
+  }
   if (drag.mode === 'connect') {
     onConnectEnd()
     drag.mode = null
@@ -1952,10 +2042,14 @@ function onMouseUp() {
 }
 
 let dragRecorded = false // 本次拖拽是否已压历史栈
+/** Ctrl/⌘/Alt+拖拽克隆手势：dragstart 时置位。记录被拖原件的 id、起拖坐标与克隆 id。
+ *  视觉策略：克隆体先以同坐标落布（留在原地=原版），原 Konva 节点继续被拖走
+ *  （=克隆体），dragend 时把数据身份与位置对齐（原版留起点、克隆归终点）。 */
+const dragClone = reactive({ armed: false, origId: null, cloneId: null, start: { x: 0, y: 0 } })
 function onNodeDrag(e) {
   // 物件拖拽中的吸附（e 为 Konva 原生事件对象）
   const node = e.target
-  if (!dragRecorded) {
+  if (!dragRecorded && !dragClone.armed) {
     beforeChange()
     dragRecorded = true
   }
@@ -2004,6 +2098,55 @@ function onNodeDragEnd(e) {
         }
       }
     }
+  }
+  saveSoon()
+}
+
+// —— Ctrl/⌘/Alt+拖拽克隆（dragstart 建副本，dragend 对齐身份与坐标；组合成员不支持，走普通拖拽）——
+function onNodeCloneStart(e) {
+  const key = e.evt?.ctrlKey || e.evt?.metaKey || e.evt?.altKey
+  if (!key || dragClone.armed) return
+  const i = objects.value.findIndex((o) => o.id === e.target.id())
+  if (i < 0) return
+  const o = objects.value[i]
+  if (!o || groupOf(o.id)) return // 组拖动会整体迁移成员，克隆语义复杂，退回普通拖拽
+  beforeChange() // 快照 = 克隆前状态（dragmove 因 armed 不再重复压栈）
+  const nid = 'n' + Date.now() + Math.random().toString(36).slice(2, 6)
+  objects.value.push({ ...JSON.parse(JSON.stringify(o)), id: nid })
+  dragClone.armed = true
+  dragClone.origId = o.id
+  dragClone.cloneId = nid
+  dragClone.start = { x: o.x, y: o.y }
+}
+function commitCloneDrag(e) {
+  if (!dragClone.armed) return
+  const { armed, origId, cloneId, start } = dragClone
+  dragClone.armed = false
+  dragClone.origId = null
+  dragClone.cloneId = null
+  const end = { x: e.target.x(), y: e.target.y() }
+  const st = stageEl.value?.getStage?.()
+  const orig = objects.value.find((x) => x.id === origId)
+  const clone = objects.value.find((x) => x.id === cloneId)
+  if (orig) {
+    // 原版留在起点（onNodeDragEnd 已把数据写成终点，这里纠正回起点 + 复位 Konva 节点）
+    orig.x = start.x
+    orig.y = start.y
+  }
+  const origNode = st?.findOne('#' + CSS.escape(origId))
+  if (origNode && orig) {
+    origNode.position({ x: orig.x, y: orig.y })
+  }
+  if (clone) {
+    clone.x = end.x
+    clone.y = end.y
+  }
+  if (orig && clone) {
+    selection.value = [clone.id]
+    // 组联动数据可能已按拖拽增量移动过成员；克隆场景不回滚（克隆前已阻止组内触发），此处无需处理
+  } else if (clone) {
+    // 原版数据异常（不应发生）：克隆体落终点并选中
+    selection.value = [clone.id]
   }
   saveSoon()
 }
@@ -2165,6 +2308,9 @@ const ctxItems = computed(() => {
   const imgWithMeta = ids.some((id) => (objects.value.find((o) => o.id === id) || {}).meta?.prompt)
   const appIds = ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app')
   const noteIds = ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'note')
+  const frameIds = ids.filter(
+    (id) => (objects.value.find((o) => o.id === id) || {}).type === 'frame',
+  )
   const items = [
     {
       key: 'copy',
@@ -2183,6 +2329,17 @@ const ctxItems = computed(() => {
       label: t('canvasMenuEditNote'),
       run: () => {
         startNoteEdit(noteIds[0])
+        closeCtxMenu()
+      },
+    })
+  }
+  if (frameIds.length === 1) {
+    items.push({
+      key: 'frame-rename',
+      icon: 'fa-pen',
+      label: t('canvasRenameFrame'),
+      run: () => {
+        startFrameRename(frameIds[0])
         closeCtxMenu()
       },
     })
@@ -3107,12 +3264,14 @@ function frameConfig(o) {
 function frameLabelConfig(o) {
   return {
     text: o.name || 'Frame',
-    x: o.x,
-    y: o.y - 20,
-    width: o.width,
+    // 局部坐标（group 已定位在 o.x/o.y；此前误用绝对坐标 o.x/o.y-20 导致标签双重偏移）
+    x: 10,
+    y: -22,
+    width: Math.max(40, o.width - 20),
     fontSize: 13,
     fill: '#818cf8',
     align: 'left',
+    listening: false,
   }
 }
 function shotRectConfig(o) {
@@ -3221,6 +3380,7 @@ function applyViewport() {
 
 function deleteSelected() {
   if (!selection.value.length) return
+  if (ctxMenu.value) ctxMenu.value = null
   beforeChange()
   const gone = new Set(selection.value)
   objects.value = objects.value.filter((o) => !gone.has(o.id))
@@ -3288,6 +3448,7 @@ function onLinkContextMenu(evt, id) {
 }
 function deleteSelectedLink() {
   if (!selectedLinkId.value) return
+  if (ctxMenu.value) ctxMenu.value = null
   beforeChange()
   links.value = links.value.filter((l) => l.id !== selectedLinkId.value)
   selectedLinkId.value = null
@@ -3326,14 +3487,6 @@ function pasteClipboard() {
     })
   }
   saveSoon()
-}
-// Alt+拖拽克隆（节点 dragstart 时按住 Alt 则复制一份再拖副本）
-function cloneOnDrag(i) {
-  const src = objects.value[i]
-  const nid = 'n' + Date.now() + Math.random().toString(36).slice(2, 6)
-  const copy = { ...JSON.parse(JSON.stringify(src)), id: nid }
-  objects.value.push(copy)
-  return objects.value.length - 1
 }
 
 // —— 圈选裁剪：把 crop 矩形与所压图片的交集裁下来，作为新图发工作台 ——
@@ -4126,10 +4279,22 @@ function onKey(e) {
   const inEditor = tag === 'INPUT' || tag === 'TEXTAREA'
   if (e.key === 'Delete' || e.key === 'Backspace') {
     if (inEditor) return
-    if (selection.value.length) {
+    if (selectedLinkId.value) {
+      // 连线与物件选中互斥，这里单独收（此前 Delete 对连线失效）
+      e.preventDefault()
+      deleteSelectedLink()
+    } else if (selection.value.length) {
       e.preventDefault()
       deleteSelected()
     }
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+    // Ctrl+A 全选画布物件（编辑态保留浏览器默认全选文本）
+    if (inEditor) return
+    e.preventDefault()
+    if (ctxMenu.value) ctxMenu.value = null
+    if (connectCreate.open) closeConnectCreate()
+    selection.value = objects.value.map((o) => o.id)
+    selectedLinkId.value = null
   } else if (e.code === 'Space' && !e.repeat) {
     spaceDown.value = true
     if (!inEditor) e.preventDefault()
@@ -4463,6 +4628,12 @@ const hoverToolbar = computed(() => {
         },
       },
     )
+  } else if (o.type === 'frame') {
+    items.push({
+      icon: 'fas fa-pen',
+      title: t('canvasRenameFrame'),
+      action: () => startFrameRename(id),
+    })
   }
   items.push(
     { icon: 'fas fa-copy', title: t('canvasTbCopy'), action: () => nodeCopyObj(id) },
@@ -4675,7 +4846,7 @@ function bindNodeEvents() {
     g.on('mousedown.wb', (e) => onItemDown(idx(), e))
     g.on('dragmove.wb', onNodeDrag)
     g.on('dragend.wb', onNodeDragEnd)
-    // 双击：App 节点 = 展开参数面板；note = 就地编辑文本
+    // 双击：App 节点 = 展开参数面板；note = 就地编辑文本；frame = 重命名
     g.on('dblclick.wb', (e) => {
       const o = objects.value.find((x) => x.id === g.id())
       if (o?.type === 'app') {
@@ -4684,8 +4855,14 @@ function bindNodeEvents() {
       } else if (o?.type === 'note') {
         e.evt?.preventDefault?.()
         startNoteEdit(o.id)
+      } else if (o?.type === 'frame') {
+        e.evt?.preventDefault?.()
+        startFrameRename(o.id)
       }
     })
+    // Ctrl/⌘/Alt+拖拽克隆：注册在 onNodeDragEnd 之后，保证 dragend 顺序 = 先同步数据再对齐克隆
+    g.on('dragstart.wb', onNodeCloneStart)
+    g.on('dragend.wb', commitCloneDrag)
   })
 }
 onMounted(() => {
@@ -4784,5 +4961,18 @@ onBeforeUnmount(() => {
 }
 .note-editor::placeholder {
   color: rgba(226, 232, 240, 0.45);
+}
+/* frame 名称重命名框：不透明底遮住下方 Konva 标签，Enter/blur 提交、Esc 取消 */
+.frame-editor {
+  padding: 1px 6px;
+  line-height: 1.5;
+  color: var(--wb-text-1);
+  background: var(--wb-surface);
+  box-shadow: 0 0 0 1px var(--wb-stroke), 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-sizing: border-box;
+}
+.frame-editor::placeholder {
+  color: var(--wb-text-2);
+  opacity: 0.6;
 }
 </style>
