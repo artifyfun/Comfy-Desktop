@@ -437,6 +437,43 @@
         </div>
 
         <!-- App 节点展开参数面板（HTML overlay，锚定节点屏幕坐标） -->
+        <!-- 切分对话框（S6a）：横/竖切 N 片 -->
+        <div
+          v-if="splitDlg.open"
+          class="absolute z-30 flex items-center gap-2 h-11 px-3 rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl"
+          :style="{ left: '50%', top: '50%', transform: 'translate(-50%,-50%)' }"
+          @mousedown.stop
+          @pointerdown.stop
+        >
+          <span class="text-sm text-[var(--wb-text-1)]">{{ t('canvasSplitDlgTitle') }}</span>
+          <select
+            v-model="splitDlg.dir"
+            class="bg-[var(--wb-bg-base)] text-sm text-[var(--wb-text-1)] rounded-lg px-2 py-1 border border-[var(--wb-stroke)]"
+          >
+            <option value="h">{{ t('canvasSplitDirH') }}</option>
+            <option value="v">{{ t('canvasSplitDirV') }}</option>
+          </select>
+          <input
+            v-model.number="splitDlg.n"
+            type="number"
+            min="2"
+            max="6"
+            class="w-16 bg-transparent outline-none text-sm text-[var(--wb-text-1)] border border-[var(--wb-stroke)] rounded-lg px-2 py-1"
+          />
+          <button
+            class="h-7 px-3 rounded-lg text-xs text-white bg-[var(--wb-accent)] transition"
+            @click="applySplit"
+          >
+            {{ t('canvasSplitGo') }}
+          </button>
+          <button
+            class="w-7 h-7 rounded-lg text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] transition"
+            @click="splitDlg.open = false"
+          >
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
+
         <!-- note AI 改写输入条（S5b）：note 下方，指令 + 发送 -->
         <div
           v-if="noteRewrite.noteId"
@@ -755,6 +792,8 @@ import {
   bezierLinkPath,
   distToSegment,
   cropRectFor,
+  splitRects,
+  rotatedSize,
   createHistory,
   pushHistory,
   undo as engineUndo,
@@ -2038,6 +2077,118 @@ async function runNoteRewrite() {
   } finally {
     noteRewrite.running = false
   }
+}
+
+// —— S6a 节点级图像编辑：旋转 ±90°/180°（原地）、切分（横/竖 N 片→子节点）、
+// 裁剪（进 crop 模式圈选，已有 canvas 级链路复用） ——
+async function imageToCanvasEl(o) {
+  const img = await fetchImageForCrop(o.src)
+  return img
+}
+async function rotateImageNode(id, deg) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || o.type !== 'image' || !o.src) return
+  let img
+  try {
+    img = await imageToCanvasEl(o)
+  } catch {
+    message.warning(t('canvasCropNoImage'))
+    return
+  }
+  const d = ((Math.round(deg / 90) % 4) + 4) % 4
+  // fetchImageForCrop 可能返回 ImageBitmap（width/height）或 HTMLImageElement
+  // （naturalWidth/naturalHeight），两者兼容取值
+  const iw = img.naturalWidth || img.width
+  const ih = img.naturalHeight || img.height
+  const sz = rotatedSize(iw, ih, d * 90)
+  const cv = document.createElement('canvas')
+  cv.width = Math.max(1, Math.round(sz.w))
+  cv.height = Math.max(1, Math.round(sz.h))
+  const ctx = cv.getContext('2d')
+  ctx.translate(cv.width / 2, cv.height / 2)
+  ctx.rotate((d * Math.PI) / 2)
+  ctx.drawImage(img, -iw / 2, -ih / 2)
+  cv.toBlob((blob) => {
+    if (!blob) return
+    const url = URL.createObjectURL(blob)
+    beforeChange()
+    const ratio = o.width / o.height
+    const nsz = rotatedSize(o.width, o.height, d * 90)
+    o.src = url
+    o.width = nsz.w
+    o.height = nsz.h
+    persistImage(o)
+    saveSoon()
+  }, 'image/png')
+}
+const splitDlg = reactive({ open: false, id: null, n: 2, dir: 'h' })
+async function splitImageNode(id) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || o.type !== 'image' || !o.src) return
+  splitDlg.open = true
+  splitDlg.id = id
+  splitDlg.n = 2
+  splitDlg.dir = 'h'
+}
+async function applySplit() {
+  const o = objects.value.find((x) => x.id === splitDlg.id)
+  if (!o || !splitDlg.open) return
+  splitDlg.open = false
+  let img
+  try {
+    img = await imageToCanvasEl(o)
+  } catch {
+    message.warning(t('canvasCropNoImage'))
+    return
+  }
+  const iw = img.naturalWidth || img.width
+  const ih = img.naturalHeight || img.height
+  const rects = splitRects(iw, ih, splitDlg.n, splitDlg.dir)
+  const scale = o.width / iw
+  beforeChange()
+  rects.forEach((r, i) => {
+    const cv = document.createElement('canvas')
+    cv.width = Math.max(1, Math.round(r.w))
+    cv.height = Math.max(1, Math.round(r.h))
+    const ctx = cv.getContext('2d')
+    ctx.drawImage(img, r.x, r.y, r.w, r.h, 0, 0, cv.width, cv.height)
+    cv.toBlob((blob) => {
+      if (!blob) return
+      const url = URL.createObjectURL(blob)
+      const node = {
+        id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+        type: 'image',
+        x:
+          o.x +
+          (splitDlg.dir === 'h' ? r.x * scale : 0) +
+          (splitDlg.dir === 'v' ? o.width + 40 : 0),
+        y:
+          o.y +
+          (splitDlg.dir === 'v' ? r.y * scale : 0) +
+          (splitDlg.dir === 'h' ? o.height + 40 : 0),
+        width: Math.max(20, Math.round(r.w * scale)),
+        height: Math.max(20, Math.round(r.h * scale)),
+        src: url,
+        persist: null,
+      }
+      objects.value.push(node)
+      persistImage(node)
+      links.value.push({
+        id: 'l' + Date.now() + Math.random().toString(36).slice(2, 6) + i,
+        from: o.id,
+        to: node.id,
+      })
+      saveSoon()
+    }, 'image/png')
+  })
+  message.success(t('canvasSplitDone').replace('{n}', String(rects.length)))
+}
+/** 节点级裁剪：进 crop 模式并选中该图（圈选已有链路：cropRectFor→canvas 裁剪→新节点） */
+function cropImageNode(id) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || o.type !== 'image') return
+  selection.value = [id]
+  setTool('crop')
 }
 
 function openGenNode(ids = []) {
@@ -3376,6 +3527,18 @@ const hoverToolbar = computed(() => {
           sendSelectionToWorkbench()
         },
       },
+      {
+        icon: 'fas fa-rotate-left',
+        title: t('canvasTbRotL'),
+        action: () => rotateImageNode(id, -90),
+      },
+      {
+        icon: 'fas fa-rotate-right',
+        title: t('canvasTbRotR'),
+        action: () => rotateImageNode(id, 90),
+      },
+      { icon: 'fas fa-table-cells', title: t('canvasTbSplit'), action: () => splitImageNode(id) },
+      { icon: 'fas fa-crop-simple', title: t('canvasTbCrop'), action: () => cropImageNode(id) },
     )
   } else if (o.type === 'video' || o.type === 'audio') {
     items.push({

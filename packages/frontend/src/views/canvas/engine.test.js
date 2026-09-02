@@ -16,6 +16,8 @@ import {
   bezierLinkPath,
   distToSegment,
   cropRectFor,
+  splitRects,
+  rotatedSize,
   createHistory,
   pushHistory,
   undo,
@@ -321,5 +323,28 @@ describe('childrenOf / subtreeOf 版本树', () => {
   })
   it('subtreeOf BFS 全树去重', () => {
     expect(subtreeOf(links, 'src').sort()).toEqual(['src', 'v1', 'v1a', 'v2'])
+  })
+})
+
+describe('splitRects / rotatedSize（S6a 节点级图像编辑）', () => {
+  it('横切 3 等分', () => {
+    const r = splitRects(300, 100, 3, 'h')
+    expect(r).toHaveLength(3)
+    expect(r[0]).toEqual({ x: 0, y: 0, w: 100, h: 100 })
+    expect(r[2].x).toBeCloseTo(200)
+  })
+  it('竖切 2 等分', () => {
+    const r = splitRects(100, 200, 2, 'v')
+    expect(r).toHaveLength(2)
+    expect(r[1]).toEqual({ x: 0, y: 100, w: 100, h: 100 })
+  })
+  it('n<=0 保护', () => {
+    expect(splitRects(10, 10, 0, 'h')).toHaveLength(1)
+  })
+  it('旋转尺寸交换', () => {
+    expect(rotatedSize(640, 480, 90)).toEqual({ w: 480, h: 640 })
+    expect(rotatedSize(640, 480, -90)).toEqual({ w: 480, h: 640 })
+    expect(rotatedSize(640, 480, 180)).toEqual({ w: 640, h: 480 })
+    expect(rotatedSize(640, 480, 450)).toEqual({ w: 480, h: 640 })
   })
 })

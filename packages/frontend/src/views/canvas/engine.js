@@ -392,3 +392,33 @@ export function subtreeOf(links, rootId) {
   }
   return [...seen]
 }
+
+// —— 节点级图像编辑（S6a）：纯几何计算 ——
+
+/**
+ * 切分布局：把 w×h 图按方向切成 n 份，返回每份源矩形（相对原点）。
+ * direction: 'h' 横切（沿 x 均分）| 'v' 竖切（沿 y 均分）
+ */
+export function splitRects(w, h, n, direction = 'h') {
+  const out = []
+  const cnt = Math.max(1, Math.floor(n))
+  if (direction === 'h') {
+    const cw = w / cnt
+    for (let i = 0; i < cnt; i++) out.push({ x: i * cw, y: 0, w: cw, h })
+  } else {
+    const ch = h / cnt
+    for (let i = 0; i < cnt; i++) out.push({ x: 0, y: i * ch, w, h: ch })
+  }
+  return out
+}
+
+/** 旋转 90° 步进的输出尺寸（±90 交换宽高，180 不变） */
+export function rotatedSize(w, h, deg) {
+  const d = ((Math.round(deg / 90) % 4) + 4) % 4
+  return d === 1 || d === 3 ? { w: h, h: w } : { w, h }
+}
+
+/** 四舍到像素且保正 */
+export function px(v) {
+  return Math.max(1, Math.round(v))
+}
