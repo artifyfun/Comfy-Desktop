@@ -295,6 +295,34 @@
           </button>
         </div>
 
+        <!-- C：拖线落空 → 创建节点菜单（参考 ConnectionCreateMenu） -->
+        <div
+          v-if="connectCreate.open"
+          id="connect-create-menu"
+          class="absolute z-30 min-w-[170px] py-1 rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl text-xs"
+          :style="{ left: connectCreate.x + 'px', top: connectCreate.y + 'px' }"
+          @contextmenu.prevent
+          @mousedown.stop
+        >
+          <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-500">
+            {{ t('canvasCreateMenuTitle') }}
+          </div>
+          <button
+            v-for="opt in [
+              { k: 'note', icon: 'fa-note-sticky', label: t('canvasCreateMenuNote') },
+              { k: 'image', icon: 'fa-image', label: t('canvasCreateMenuImage') },
+              { k: 'video', icon: 'fa-film', label: t('canvasCreateMenuVideo') },
+              { k: 'audio', icon: 'fa-volume-high', label: t('canvasCreateMenuAudio') },
+              { k: 'app', icon: 'fa-cube', label: t('canvasCreateMenuApp') },
+            ]"
+            :key="opt.k"
+            class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+            @click="createNodeFromConnect(opt.k)"
+          >
+            <i class="fas w-4 text-center text-slate-400" :class="opt.icon"></i>{{ opt.label }}
+          </button>
+        </div>
+
         <!-- 右键上下文菜单（物件/空地两态） -->
         <div
           v-if="ctxMenu"
@@ -1248,6 +1276,132 @@ const connectDrag = reactive({
   seg: null, // 预览贝塞尔端点 {x1,y1,x2,y2}
   targetId: null, // 悬停吸附的目标物件 id
 })
+// —— C 拖线落空 → 创建节点菜单（参考 ConnectionCreateMenu）——
+// 松手在空白处时弹小菜单：便签/图片/视频/音频/App，创建后与拖线起点自动连线
+const connectCreate = reactive({
+  open: false,
+  x: 0,
+  y: 0,
+  wx: 0,
+  wy: 0,
+  from: null, // 拖线源侧物件 id（source 句柄拖出）
+  to: null, // 拖线目标侧物件 id（target 句柄拖出）
+  pickLink: null, // app 分支等 picker 选完后连线
+})
+function closeConnectCreate() {
+  connectCreate.open = false
+  connectCreate.from = null
+  connectCreate.to = null
+  connectCreate.pickLink = null
+}
+/** 按 connect 拖线方向连接新节点（from=源侧 to=目标侧，只补缺失侧） */
+function linkFromConnect(nodeId, from, to) {
+  const fromId = from && from !== nodeId ? from : null
+  const toId = to && to !== nodeId ? to : null
+  const linksToAdd = []
+  if (fromId) linksToAdd.push({ from: fromId, to: nodeId })
+  if (toId) linksToAdd.push({ from: nodeId, to: toId })
+  for (const l of linksToAdd) {
+    if (!links.value.some((x) => x.from === l.from && x.to === l.to)) {
+      links.value.push({
+        id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5),
+        ...l,
+      })
+    }
+  }
+}
+/** 在 connectCreate.wx/wy 创建 kind 节点并按拖线方向连线 */
+function createNodeFromConnect(kind) {
+  const { wx, wy, from, to } = connectCreate
+  closeConnectCreate()
+  beforeChange()
+  if (kind === 'note') {
+    const o = {
+      id: 'n' + Date.now() + Math.random().toString(36).slice(2, 5),
+      type: 'note',
+      x: wx - 90,
+      y: wy - 60,
+      width: 180,
+      height: 120,
+      text: '',
+    }
+    objects.value.push(o)
+    linkFromConnect(o.id, from, to)
+    selection.value = [o.id]
+    saveSoon()
+    return o.id
+  }
+  if (kind === 'app') {
+    openAppPicker(wx, wy)
+    connectCreate.pickLink = { from, to }
+    return null
+  }
+  // 图片/视频/音频：文件选择器（创建后连线）
+  const accept = kind === 'image' ? 'image/*' : kind === 'video' ? 'video/*' : 'audio/*'
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = accept
+  input.onchange = () => {
+    const f = input.files?.[0]
+    if (!f) return
+    beforeChange()
+    if (kind === 'image') {
+      const url = URL.createObjectURL(f)
+      const probe = new Image()
+      probe.onload = () => {
+        const scale = Math.min(1, 260 / probe.naturalWidth)
+        const w = Math.round(probe.naturalWidth * scale)
+        const h = Math.round(probe.naturalHeight * scale)
+        const o = {
+          id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+          type: 'image',
+          x: wx - Math.round(w / 2),
+          y: wy - Math.round(h / 2),
+          width: w,
+          height: h,
+          src: url,
+          persist: null,
+        }
+        objects.value.push(o)
+        persistImage(o)
+        linkFromConnect(o.id, from, to)
+        selection.value = [o.id]
+        saveSoon()
+      }
+      probe.src = url
+    } else {
+      const isVideo = kind === 'video'
+      const o = {
+        id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+        type: kind,
+        x: wx - (isVideo ? 160 : 140),
+        y: wy - (isVideo ? 90 : 48),
+        width: isVideo ? 320 : 280,
+        height: isVideo ? 180 : 96,
+        src: URL.createObjectURL(f),
+        persist: null,
+        name: f.name,
+      }
+      objects.value.push(o)
+      if (isVideo) {
+        const probe = document.createElement('video')
+        probe.preload = 'metadata'
+        probe.onloadedmetadata = () => {
+          const ratio = probe.videoHeight / probe.videoWidth || 0.5625
+          o.height = Math.round(o.width * ratio)
+          saveSoon()
+        }
+        probe.src = o.src
+      }
+      linkFromConnect(o.id, from, to)
+      selection.value = [o.id]
+      saveSoon()
+    }
+  }
+  input.click()
+  return null
+}
+
 const selectedLinkId = ref(null) // 选中的连线 id（参考 selectedConnectionId）
 const hoverNodeId = ref(null) // 悬停物件 id（句柄显现条件，参考 hovered || isSelected || isConnecting）
 /** 物件是否显示连接句柄：悬停/选中/连线拖拽中（起点与悬停目标，参考 isConnecting 全显） */
@@ -1577,15 +1731,29 @@ function onConnectMove() {
       ? { x: target.x, y: target.y + target.height / 2 }
       : { x: target.x + target.width, y: target.y + target.height / 2 }
     : { x: w.x, y: w.y }
-  connectDrag.seg = { ...start, ...end }
+  // 修复：seg 必须保持 {x1,y1,x2,y2} 形状（此前 ...start/...end 合并成 {x,y}，
+  // 预览虚线端点与落空建节点的端点坐标全部变 undefined）
+  connectDrag.seg = { x1: start.x, y1: start.y, x2: end.x, y2: end.y }
 }
 /** connect 松手：落在物件上且非起点/无重复 → 建线（参考 handleConnectEnd） */
 function onConnectEnd() {
   if (!connectDrag.active) return
-  const { nodeId, handleType, targetId } = connectDrag
+  const { nodeId, handleType, targetId, seg } = connectDrag
   connectDrag.active = false
   connectDrag.seg = null
   connectDrag.targetId = null
+  // C：松手落空 → 在端点弹「创建节点」菜单，创建后自动连线
+  if (!targetId && seg) {
+    const endScreen = worldToScreen(viewport.value, seg.x2, seg.y2)
+    connectCreate.open = true
+    connectCreate.x = clamp(endScreen.x + 8, 8, Math.max(8, size.w - 180))
+    connectCreate.y = clamp(endScreen.y + 8, 8, Math.max(8, size.h - 210))
+    connectCreate.wx = seg.x2
+    connectCreate.wy = seg.y2
+    connectCreate.from = handleType === 'source' ? nodeId : null
+    connectCreate.to = handleType === 'target' ? nodeId : null
+    return
+  }
   if (!targetId || targetId === nodeId) return
   const from = handleType === 'source' ? nodeId : targetId
   const to = handleType === 'source' ? targetId : nodeId
@@ -1627,6 +1795,7 @@ function onMouseDown(e) {
     selectedLinkId.value = null // 空地点击清除连线选中（参考选中互斥）
   }
   if (ctxMenu.value) ctxMenu.value = null
+  if (connectCreate.open) closeConnectCreate()
 }
 
 function onMouseMove(e) {
@@ -3190,12 +3359,15 @@ function openAppPicker(wx, wy) {
 function onAppPicked(app) {
   appPicker.open = false
   if (!app?.id) return
+  const pendingLink = connectCreate.pickLink || null
+  connectCreate.pickLink = null
   // picker 的 app 已带完整 template —— 立即入缓存（面板字段即时渲染）
   appCache.set(app.id, app)
   appCacheVer.value++
   beforeChange()
   const node = makeAppNode(app.id, app.name, appPicker.wx, appPicker.wy)
   objects.value.push(node)
+  if (pendingLink) linkFromConnect(node.id, pendingLink.from, pendingLink.to)
   selection.value = [node.id]
   saveSoon()
   // 拾取即展开参数面板
