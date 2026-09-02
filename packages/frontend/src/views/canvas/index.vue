@@ -944,7 +944,7 @@
  * A 界面无限画布（Konva 渲染层）
  * 引擎逻辑在 engine.js（纯函数）；这里只做事件转发、渲染配置、持久化调度。
  */
-import { ref, computed, reactive, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, reactive, nextTick, onMounted, onBeforeUnmount, watch, h } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from '@/utils/i18n'
 import { useAppStore } from '@/stores/appStore'
@@ -1900,6 +1900,7 @@ const ctxItems = computed(() => {
   if (!ctxMenu.value) return []
   const ids = ctxMenu.value.targetIds
   const hasImg = ids.some((id) => (objects.value.find((o) => o.id === id) || {}).type === 'image')
+  const imgWithMeta = ids.some((id) => (objects.value.find((o) => o.id === id) || {}).meta?.prompt)
   const appIds = ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app')
   const items = [
     {
@@ -1912,6 +1913,17 @@ const ctxItems = computed(() => {
       },
     },
   ]
+  if (imgWithMeta) {
+    items.push({
+      key: 'gen-info',
+      icon: 'fa-circle-info',
+      label: t('canvasGenInfoTitle'),
+      run: () => {
+        showImageGenInfo(ids[0])
+        closeCtxMenu()
+      },
+    })
+  }
   if (appIds.length) {
     items.push(
       {
@@ -2395,6 +2407,53 @@ function cropImageNode(id) {
   setTool('crop')
 }
 
+// —— B2 图→提示词溯源：复制生成提示词 / 查看生成信息 ——
+async function copyImagePrompt(id) {
+  const o = objects.value.find((x) => x.id === id)
+  const prompt = o?.meta?.prompt
+  if (!prompt) {
+    message.warning(t('canvasNoPromptMeta'))
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(prompt)
+    message.success(t('canvasPromptCopied'))
+  } catch {
+    // 剪贴板被拒（如非聚焦窗口）：降级弹可复制层
+    const div = document.createElement('textarea')
+    div.value = prompt
+    document.body.appendChild(div)
+    div.select()
+    try {
+      document.execCommand('copy')
+      message.success(t('canvasPromptCopied'))
+    } catch {
+      message.error(t('canvasCopyFailed'))
+    }
+    div.remove()
+  }
+}
+function showImageGenInfo(id) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o?.meta) {
+    message.warning(t('canvasNoPromptMeta'))
+    return
+  }
+  const lines = [
+    o.meta.app ? t('canvasGenInfoApp') + ': ' + o.meta.app : null,
+    o.meta.prompt ? t('canvasGenInfoPrompt') + ': ' + o.meta.prompt : null,
+    o.meta.at ? t('canvasGenInfoAt') + ': ' + new Date(o.meta.at).toLocaleString() : null,
+  ].filter(Boolean)
+  Modal.info({
+    title: t('canvasGenInfoTitle'),
+    content: h(
+      'div',
+      { style: 'max-height:260px;overflow:auto;white-space:pre-wrap;font-size:12px' },
+      lines.join('\n'),
+    ),
+  })
+}
+
 // —— A1 视频截帧：抓首/末/当前帧 → 新图片节点 + 溯源连线 ——
 async function captureVideoFrameAt(id, position) {
   const o = objects.value.find((x) => x.id === id)
@@ -2725,12 +2784,15 @@ function onWrapContext(e) {
   const sx = e.clientX - r.left
   const sy = e.clientY - r.top
   const w = screenToWorld(viewport.value, sx, sy)
-  const ids = hitTest(objects.value, w.x, w.y)
-  const targetIds = ids.length
-    ? selection.value.length && ids.some((id) => selection.value.includes(id))
+  // hitTest 返回单个索引（-1 = 空地）；命中时若已选集合含该物件则整组操作
+  const hit = hitTest(objects.value, w.x, w.y)
+  const hitId = hit >= 0 ? objects.value[hit].id : null
+  const targetIds =
+    hitId && selection.value.length && selection.value.includes(hitId)
       ? selection.value
-      : [ids[0]]
-    : []
+      : hitId
+        ? [hitId]
+        : []
   if (targetIds.length) selection.value = targetIds
   ctxMenu.value = { x: sx + 8, y: sy + 8, wx: w.x, wy: w.y, targetIds }
 }
@@ -3296,6 +3358,19 @@ async function runAppNode(id) {
   node.status = 'running'
   node.statusText = t('canvasAppNodeQueued')
   node.lastRunSourceIds = up.srcIds
+  // B1 产物溯源：记录本次运行的 resolved 文本 + app 名（产物落布时写入图元数据）
+  const promptTexts = []
+  for (const w of Object.values(overrides)) {
+    for (const v of Object.values(w)) {
+      if (typeof v === 'string' && v.trim()) promptTexts.push(v.trim())
+    }
+  }
+  node.lastRun = {
+    promptId: null,
+    at: Date.now(),
+    appLabel: app.name || node.name || node.appId,
+    promptText: promptTexts.join('\n').slice(0, 2000) || null,
+  }
   saveSoon()
   try {
     const res = await fetch(`${serverOrigin.value}/api/canvas/execute`, {
@@ -3310,7 +3385,7 @@ async function runAppNode(id) {
     const j = await res.json().catch(() => null)
     if (!res.ok || !j?.success) throw new Error(j?.message || j?.error || `HTTP ${res.status}`)
     const promptId = j.data.promptId
-    node.lastRun = { promptId, at: Date.now() }
+    node.lastRun = { ...node.lastRun, promptId, at: Date.now() }
     node.statusText = t('canvasAppNodeRunningStatus')
     startNodePoll(node.id, promptId)
   } catch (e) {
@@ -3402,6 +3477,13 @@ function placeNodeArtifacts(node, files) {
     const heights = sizes.map((d) => Math.round(d.h * scaleOf(d)))
     const spots = artifactLayout(node, sizes.length, heights)
     beforeChange()
+    const genMeta = node.lastRun
+      ? {
+          app: node.lastRun.appLabel || null,
+          prompt: node.lastRun.promptText || null,
+          at: node.lastRun.at || Date.now(),
+        }
+      : null
     spots.forEach((spot, i) => {
       const id = 'n' + Date.now() + i + Math.random().toString(36).slice(2, 5)
       objects.value.push({
@@ -3412,6 +3494,7 @@ function placeNodeArtifacts(node, files) {
         width: widths[i],
         height: heights[i],
         src: ok[i],
+        meta: genMeta ? { ...genMeta } : undefined,
       })
       links.value.push({ id: 'l' + Date.now() + i, from: node.id, to: id })
     })
@@ -4018,6 +4101,11 @@ const hoverToolbar = computed(() => {
           upscaleDlg.algo = 'high'
           upscaleDlg.open = true
         },
+      },
+      {
+        icon: 'fas fa-quote-left',
+        title: t('canvasTbCopyPrompt'),
+        action: () => copyImagePrompt(id),
       },
     )
   } else if (o.type === 'video' || o.type === 'audio') {
