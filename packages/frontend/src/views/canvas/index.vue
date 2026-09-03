@@ -55,8 +55,7 @@
                   data: bezierLinkPath(seg.x1, seg.y1, seg.x2, seg.y2),
                   stroke: selectedLinkId === seg.id ? '#fafaf9' : 'rgba(214,211,206,0.82)',
                   strokeWidth: (selectedLinkId === seg.id ? 3 : 2) / viewport.scale,
-                  opacity:
-                    reconnectDrag.active && reconnectDrag.linkId === seg.id ? 0.25 : 1,
+                  opacity: reconnectDrag.active && reconnectDrag.linkId === seg.id ? 0.25 : 1,
                   listening: false,
                 }"
               />
@@ -704,6 +703,172 @@
           </div>
         </div>
 
+        <!-- D1a 蒙版编辑对话框：笔刷涂抹局部重绘区（对齐参考 mask-edit-dialog） -->
+        <div
+          v-if="maskDlg.open"
+          class="fixed inset-0 z-[80] flex items-center justify-center bg-black/60"
+          @mousedown.self="maskDlg.open = false"
+        >
+          <div
+            class="flex max-h-[92vh] w-[min(1080px,94vw)] gap-5 rounded-2xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] p-5 shadow-2xl"
+          >
+            <!-- 左：图 + 蒙版叠加 -->
+            <div
+              class="relative flex-1 overflow-auto rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-bg)]"
+            >
+              <div
+                class="relative mx-auto"
+                :style="{ width: maskDlg.imgW + 'px', height: maskDlg.imgH + 'px' }"
+              >
+                <img
+                  :src="(objects.find((o) => o.id === maskDlg.id) || {}).src"
+                  class="absolute inset-0 h-full w-full object-contain"
+                  draggable="false"
+                />
+                <canvas ref="maskCanvasEl" class="hidden"></canvas>
+                <canvas
+                  ref="maskPreviewEl"
+                  class="absolute inset-0 h-full w-full cursor-none touch-none"
+                  @pointerdown.prevent="onMaskPointerDown"
+                  @pointermove.prevent="onMaskPointerMove"
+                  @pointerup="onMaskPointerUp"
+                  @pointercancel="onMaskPointerUp"
+                  @pointerleave="maskDlg.cursor = null"
+                  @contextmenu.prevent
+                ></canvas>
+                <!-- 笔刷预览圆 -->
+                <div
+                  v-if="maskDlg.cursor && !maskDlg.brushAdjust"
+                  class="pointer-events-none absolute rounded-full border-2 border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,.8)]"
+                  :style="{
+                    left: maskDlg.cursor.x + 'px',
+                    top: maskDlg.cursor.y + 'px',
+                    width: maskDlg.brush + 'px',
+                    aspectRatio: '1',
+                    transform: 'translate(-50%, -50%)',
+                  }"
+                ></div>
+                <div
+                  v-if="maskDlg.cursor && maskDlg.brushAdjust"
+                  class="pointer-events-none absolute rounded-full border-2 border-amber-400 bg-black/10 shadow-[0_0_0_1px_rgba(0,0,0,.8)]"
+                  :style="{
+                    left: maskDlg.cursor.x + 'px',
+                    top: maskDlg.cursor.y + 'px',
+                    width: maskDlg.brush + 'px',
+                    aspectRatio: '1',
+                    transform: 'translate(-50%, -50%)',
+                  }"
+                >
+                  <span
+                    class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded bg-black/75 px-1.5 py-0.5 text-xs font-semibold text-white"
+                    >{{ maskDlg.brush }}px</span
+                  >
+                </div>
+              </div>
+            </div>
+            <!-- 右：工具面板 -->
+            <div class="flex w-[300px] flex-col gap-4">
+              <div>
+                <div class="text-lg font-semibold text-[var(--wb-text-1)]">
+                  {{ t('canvasMaskTitle') }}
+                </div>
+                <div class="mt-1 text-xs text-[var(--wb-text-2)]">
+                  {{ maskDlg.imgW }} × {{ maskDlg.imgH }}px · {{ t('canvasMaskHint') }}
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <button
+                  class="rounded-lg border px-3 py-1.5 text-xs"
+                  :class="
+                    maskDlg.mode === 'paint'
+                      ? 'border-[var(--wb-accent)] bg-[var(--wb-accent)]/15 text-[var(--wb-text-1)]'
+                      : 'border-[var(--wb-stroke)] text-[var(--wb-text-2)]'
+                  "
+                  @click="maskDlg.mode = 'paint'"
+                >
+                  <i class="fas fa-brush mr-1"></i>{{ t('canvasMaskBrush') }}
+                </button>
+                <button
+                  class="rounded-lg border px-3 py-1.5 text-xs"
+                  :class="
+                    maskDlg.mode === 'erase'
+                      ? 'border-[var(--wb-accent)] bg-[var(--wb-accent)]/15 text-[var(--wb-text-1)]'
+                      : 'border-[var(--wb-stroke)] text-[var(--wb-text-2)]'
+                  "
+                  @click="maskDlg.mode = 'erase'"
+                >
+                  <i class="fas fa-eraser mr-1"></i>{{ t('canvasMaskErase') }}
+                </button>
+              </div>
+              <div
+                class="flex items-center justify-between rounded-lg border border-[var(--wb-stroke)] px-2 py-1 text-xs"
+              >
+                <button
+                  class="rounded px-2 py-1 text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] disabled:opacity-30"
+                  :disabled="!maskDlg.strokes.length"
+                  @click="undoMaskStroke"
+                >
+                  <i class="fas fa-rotate-left"></i>
+                </button>
+                <button
+                  class="rounded px-2 py-1 text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] disabled:opacity-30"
+                  :disabled="!maskDlg.redoStack.length"
+                  @click="redoMaskStroke"
+                >
+                  <i class="fas fa-rotate-right"></i>
+                </button>
+                <span class="text-[var(--wb-text-2)]">{{ t('canvasMaskBrushSize') }}</span>
+                <span class="font-semibold text-[var(--wb-text-1)]">{{ maskDlg.brush }}px</span>
+              </div>
+              <input
+                :value="maskDlg.brush"
+                type="range"
+                min="8"
+                max="160"
+                step="2"
+                class="w-full"
+                @input="maskDlg.brush = clampBrushSize(Number($event.target.value))"
+              />
+              <div class="flex flex-col gap-1">
+                <span class="text-xs font-medium text-[var(--wb-text-2)]">{{
+                  t('canvasMaskPromptLabel')
+                }}</span>
+                <textarea
+                  v-model="maskDlg.prompt"
+                  rows="5"
+                  class="w-full resize-none rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-bg)] px-2 py-1.5 text-xs text-[var(--wb-text-1)]"
+                  :placeholder="t('canvasMaskPromptPlaceholder')"
+                ></textarea>
+              </div>
+              <div v-if="maskDlg.error" class="text-xs font-medium text-red-500">
+                {{ maskDlg.error }}
+              </div>
+              <div class="mt-auto flex items-center justify-between gap-2">
+                <button
+                  class="rounded-lg border border-[var(--wb-stroke)] px-3 py-1.5 text-xs text-[var(--wb-text-2)]"
+                  @click="resetMaskDialog"
+                >
+                  <i class="fas fa-arrows-rotate mr-1"></i>{{ t('canvasMaskReset') }}
+                </button>
+                <div class="flex gap-2">
+                  <button
+                    class="rounded-lg border border-[var(--wb-stroke)] px-3 py-1.5 text-xs text-[var(--wb-text-2)]"
+                    @click="maskDlg.open = false"
+                  >
+                    {{ t('canvasDlgCancel') }}
+                  </button>
+                  <button
+                    class="rounded-lg bg-[var(--wb-accent)] px-3 py-1.5 text-xs font-medium text-white"
+                    @click="submitMaskDialog"
+                  >
+                    <i class="fas fa-wand-magic-sparkles mr-1"></i>{{ t('canvasMaskSubmit') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 切分对话框（S6a）：横/竖切 N 片 -->
         <div
           v-if="splitDlg.open"
@@ -1127,6 +1292,10 @@ import {
   rotatedSize,
   videoFrameTime,
   upscaleSize,
+  clampBrushSize,
+  maskCanvasPoint,
+  maskHasPaint,
+  buildInpaintMask,
   createHistory,
   pushHistory,
   undo as engineUndo,
@@ -2204,8 +2373,7 @@ function onReconnectMove() {
   const w = screenToWorld(viewport.value, p.x, p.y)
   const seg = reconnectDrag.seg
   // 不动端（另一端）坐标保持原样
-  const fixed =
-    reconnectDrag.side === 'from' ? { x: seg.x2, y: seg.y2 } : { x: seg.x1, y: seg.y1 }
+  const fixed = reconnectDrag.side === 'from' ? { x: seg.x2, y: seg.y2 } : { x: seg.x1, y: seg.y1 }
   const hit = hitTest(objects.value, w.x, w.y)
   const hoverObj = hit >= 0 ? objects.value[hit] : null
   const target = hoverObj && hoverObj.id !== reconnectDrag.fixedId ? hoverObj : null
@@ -2361,7 +2529,13 @@ function onMouseDown(e) {
   // 空地（没点到任何 shape）按下：
   //   普通拖 = 平移画布；Shift/中键 拖 = 框选；crop 工具 = 圈选裁剪
   // 物件按下（onItemDown 先触发，drag.mode='item'）时 stage 级事件直接跳过
-  if (drag.mode === 'item' || drag.mode === 'connect' || drag.mode === 'reconnect' || drag.mode === 'resize') return
+  if (
+    drag.mode === 'item' ||
+    drag.mode === 'connect' ||
+    drag.mode === 'reconnect' ||
+    drag.mode === 'resize'
+  )
+    return
   // 兜底：重连拖拽异常残留（未松手/未 Esc）时，点空白即取消
   if (reconnectDrag.active) cancelReconnectDrag()
   const st = stageEl.value.getStage()
@@ -2866,7 +3040,7 @@ const ctxItems = computed(() => {
         icon: 'fa-paint-brush',
         label: t('canvasMenuInpaint'),
         run: () => {
-          startInpaint(ids[0])
+          openMaskDialog(ids[0])
           closeCtxMenu()
         },
       },
@@ -3601,6 +3775,206 @@ async function runGenNode() {
 
 // —— A1 画布内 inpaint / A2 扩图 / A9 增强 / A7 反推 / A4 视频 / A10 一致性 ——
 // 这些动作都收敛为「把指令+目标附件发工作台执行」，产物经 onResult 自动落布+溯源。
+// —— D1a 蒙版编辑对话框（对齐参考 canvas-node-mask-edit-dialog）——
+// 双 canvas：隐藏 mask（黑笔触，序列化用）+ 预览叠加（蓝半透明）。笔触历史数组
+// 支撑 undo/redo（重放）。Alt+水平拖 = 调笔刷。提交 = prompt + mask 附件发工作台。
+const maskDlg = reactive({
+  open: false,
+  id: null,
+  imgW: 0,
+  imgH: 0,
+  prompt: '',
+  brush: 100,
+  mode: 'paint', // paint | erase
+  drawing: false,
+  brushAdjust: null, // {startX, startSize}
+  strokes: [], // {mode,size,points:[]}
+  redoStack: [],
+  cursor: null, // {x,y} 预览圆
+  error: '',
+  view: 1, // 预览缩放（简单 1x，后续可扩展）
+})
+const maskCanvasEl = ref(null) // 隐藏 mask
+const maskPreviewEl = ref(null) // 预览叠加
+const MASK_PREVIEW_COLOR = 'rgba(37, 99, 235, .38)'
+function openMaskDialog(id) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || o.type !== 'image') return
+  const img = new Image()
+  img.onload = () => {
+    maskDlg.id = id
+    maskDlg.imgW = img.naturalWidth || img.width
+    maskDlg.imgH = img.naturalHeight || img.height
+    maskDlg.prompt = ''
+    maskDlg.brush = Math.round(clampBrushSize(Math.max(maskDlg.imgW, maskDlg.imgH) * 0.12))
+    maskDlg.mode = 'paint'
+    maskDlg.drawing = false
+    maskDlg.brushAdjust = null
+    maskDlg.strokes = []
+    maskDlg.redoStack = []
+    maskDlg.cursor = null
+    maskDlg.error = ''
+    maskDlg.open = true
+    // src 落位后清画布
+    nextTick(() => {
+      for (const el of [maskCanvasEl.value, maskPreviewEl.value]) {
+        if (!el) continue
+        el.width = maskDlg.imgW
+        el.height = maskDlg.imgH
+        el.getContext('2d')?.clearRect(0, 0, el.width, el.height)
+      }
+    })
+  }
+  img.onerror = () => message.error(t('canvasCropNoImage'))
+  img.src = o.src
+}
+function maskStrokeCtx(ctx, stroke) {
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.lineWidth = stroke.size
+  ctx.globalCompositeOperation = stroke.mode === 'paint' ? 'source-over' : 'destination-out'
+}
+function drawMaskSeg(ctx, from, to, size) {
+  if (from.x === to.x && from.y === to.y) {
+    ctx.beginPath()
+    ctx.arc(to.x, to.y, size / 2, 0, Math.PI * 2)
+    ctx.fill()
+    return
+  }
+  ctx.beginPath()
+  ctx.moveTo(from.x, from.y)
+  ctx.lineTo(to.x, to.y)
+  ctx.stroke()
+}
+function replayMaskStrokes() {
+  const mc = maskCanvasEl.value
+  const pc = maskPreviewEl.value
+  if (!mc || !pc) return
+  const mctx = mc.getContext('2d', { willReadFrequently: true })
+  const pctx = pc.getContext('2d')
+  if (!mctx || !pctx) return
+  mctx.clearRect(0, 0, mc.width, mc.height)
+  pctx.clearRect(0, 0, pc.width, pc.height)
+  for (const st of maskDlg.strokes) {
+    maskStrokeCtx(mctx, st)
+    mctx.strokeStyle = '#000'
+    mctx.fillStyle = '#000'
+    maskStrokeCtx(pctx, st)
+    pctx.strokeStyle = MASK_PREVIEW_COLOR
+    pctx.fillStyle = MASK_PREVIEW_COLOR
+    st.points.forEach((pt, i) => {
+      const prev = st.points[i - 1] || pt
+      drawMaskSeg(mctx, prev, pt, st.size)
+      drawMaskSeg(pctx, prev, pt, st.size)
+    })
+  }
+}
+function onMaskPointerDown(e) {
+  if (e.button !== 0 && !e.altKey) return
+  const el = e.currentTarget
+  el.setPointerCapture?.(e.pointerId)
+  // Alt+拖 = 调笔刷（参考 brushAdjust）
+  if (e.altKey) {
+    maskDlg.brushAdjust = { startX: e.clientX, startSize: maskDlg.brush }
+    return
+  }
+  if (e.button !== 0) return
+  maskDlg.drawing = true
+  maskDlg.redoStack = []
+  const st = { mode: maskDlg.mode, size: maskDlg.brush, points: [] }
+  maskDlg.strokes.push(st)
+  onMaskPointerMove(e)
+}
+function onMaskPointerMove(e) {
+  const el = maskPreviewEl.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  maskDlg.cursor = {
+    x: e.clientX - rect.left,
+    y: e.clientY - rect.top,
+  }
+  if (maskDlg.brushAdjust) {
+    maskDlg.brush = clampBrushSize(
+      maskDlg.brushAdjust.startSize + e.clientX - maskDlg.brushAdjust.startX,
+    )
+    return
+  }
+  if (!maskDlg.drawing) return
+  const st = maskDlg.strokes[maskDlg.strokes.length - 1]
+  if (!st) return
+  const pt = maskCanvasPoint(el, e.clientX, e.clientY)
+  const mctx = maskCanvasEl.value?.getContext('2d', { willReadFrequently: true })
+  const pctx = el.getContext('2d')
+  if (!mctx || !pctx) return
+  maskStrokeCtx(mctx, st)
+  mctx.strokeStyle = '#000'
+  mctx.fillStyle = '#000'
+  maskStrokeCtx(pctx, st)
+  pctx.strokeStyle = MASK_PREVIEW_COLOR
+  pctx.fillStyle = MASK_PREVIEW_COLOR
+  const prev = st.points[st.points.length - 1] || pt
+  drawMaskSeg(mctx, prev, pt, st.size)
+  drawMaskSeg(pctx, prev, pt, st.size)
+  st.points.push(pt)
+}
+function onMaskPointerUp() {
+  if (maskDlg.brushAdjust) maskDlg.brushAdjust = null
+  if (!maskDlg.drawing) return
+  maskDlg.drawing = false
+}
+function undoMaskStroke() {
+  if (maskDlg.drawing || !maskDlg.strokes.length) return
+  maskDlg.redoStack.push(maskDlg.strokes.pop())
+  replayMaskStrokes()
+}
+function redoMaskStroke() {
+  if (maskDlg.drawing || !maskDlg.redoStack.length) return
+  maskDlg.strokes.push(maskDlg.redoStack.pop())
+  replayMaskStrokes()
+}
+function resetMaskDialog() {
+  maskDlg.strokes = []
+  maskDlg.redoStack = []
+  replayMaskStrokes()
+}
+/** 提交蒙版编辑：mask 附件 + 原图引用 → 工作台局部重绘 */
+async function submitMaskDialog() {
+  const prompt = maskDlg.prompt.trim()
+  const mc = maskCanvasEl.value
+  if (!prompt) {
+    maskDlg.error = t('canvasMaskPromptRequired')
+    return
+  }
+  if (!mc || !maskHasPaint(mc)) {
+    maskDlg.error = t('canvasMaskRequired')
+    return
+  }
+  const objId = maskDlg.id
+  maskDlg.open = false
+  // mask 序列化 → File（ComfyUI inpaint 兼容：白=保留 透=重绘）
+  const dataUrl = buildInpaintMask(mc)
+  const blob = await (await fetch(dataUrl)).blob()
+  const maskFile = new File([blob], 'mask-' + Date.now() + '.png', { type: 'image/png' })
+  // 原图引用（/view 直附；blob/dataURL 时转 File 附）
+  const refs = [refOf(objId)].filter(Boolean)
+  const o = objects.value.find((x) => x.id === objId)
+  if (!refs.length && o?.src) {
+    try {
+      const b2 = await (await fetch(o.src)).blob()
+      refs.push({
+        filename: 'source-' + Date.now() + '.png',
+        file: new File([b2], 'source-' + Date.now() + '.png', { type: b2.type || 'image/png' }),
+      })
+    } catch {
+      /* 拿不到就只发 mask */
+    }
+  }
+  refs.push({ filename: maskFile.name, file: maskFile })
+  lastSourceIds = [objId]
+  emitPrompt(prompt, { autoSend: true, attachments: refs })
+  message.success(t('canvasAiQueued'))
+}
+
 const inpaintMask = ref(null) // {objId, points:[]} 简化：暂以选区矩形为蒙版
 function startInpaint(objId) {
   const o = objects.value.find((x) => x.id === objId)
@@ -5461,7 +5835,9 @@ onBeforeUnmount(() => {
   line-height: 1.5;
   color: var(--wb-text-1);
   background: var(--wb-surface);
-  box-shadow: 0 0 0 1px var(--wb-stroke), 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow:
+    0 0 0 1px var(--wb-stroke),
+    0 8px 24px rgba(0, 0, 0, 0.4);
   box-sizing: border-box;
 }
 .frame-editor::placeholder {

@@ -31,6 +31,11 @@ import {
   gridLayout,
   childrenOf,
   subtreeOf,
+  clampBrushSize,
+  maskHasPaint,
+  maskPaintBounds,
+  buildInpaintMask,
+  maskCanvasPoint,
 } from './engine'
 
 describe('canvas engine: viewport', () => {
@@ -364,5 +369,17 @@ describe('videoFrameTime / upscaleSize（二期 A 组媒体编辑）', () => {
     expect(upscaleSize(128, 256, 1024)).toEqual({ width: 512, height: 1024 })
     expect(upscaleSize(2000, 1000, 1024)).toEqual({ width: 1024, height: 512 }) // 缩小也算
     expect(upscaleSize(10, 10, 99999)).toEqual({ width: 8192, height: 8192 }) // maxEdge clamp
+  })
+})
+
+// —— 三期 D1a：蒙版编辑 ——
+
+describe('clampBrushSize（D1a）', () => {
+  it('夹取到 8..160 且步进 2', () => {
+    expect(clampBrushSize(0)).toBe(8)
+    expect(clampBrushSize(100)).toBe(100)
+    expect(clampBrushSize(999)).toBe(160)
+    expect(clampBrushSize(7)).toBe(8)
+    expect(clampBrushSize(101)).toBe(102)
   })
 })

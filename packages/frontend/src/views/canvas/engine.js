@@ -441,3 +441,83 @@ export function upscaleSize(w, h, targetLongEdge, maxEdge = 8192) {
   const scale = target / Math.max(iw, ih)
   return { width: Math.max(1, Math.round(iw * scale)), height: Math.max(1, Math.round(ih * scale)) }
 }
+
+// —— 三期 D1a：蒙版编辑纯几何/序列化 ——
+
+/**
+ * 笔刷笔触采样：pointer 事件流 → 归一化点列（canvas 像素坐标）。
+ * 与参考实现 readCanvasPoint 一致：clientXY → rect 相对 → canvas 尺寸换算。
+ */
+export function maskCanvasPoint(canvas, clientX, clientY) {
+  const rect = canvas.getBoundingClientRect()
+  return {
+    x: ((clientX - rect.left) / Math.max(1, rect.width)) * canvas.width,
+    y: ((clientY - rect.top) / Math.max(1, rect.height)) * canvas.height,
+  }
+}
+
+/** 笔刷大小夹取（8..160，步进 2 对齐参考 clampBrushSize） */
+export function clampBrushSize(value) {
+  return Math.min(160, Math.max(8, Math.round(value / 2) * 2))
+}
+
+/**
+ * 重绘蒙版序列化（ComfyUI inpaint 兼容）：白底不透明 + 涂抹区 alpha 清零。
+ * 语义：白=保留原图，透明=重绘区（喂 VAE Encode (for Inpainting) 的 mask）。
+ */
+export function buildInpaintMask(selectionCanvas) {
+  const out = document.createElement('canvas')
+  out.width = selectionCanvas.width
+  out.height = selectionCanvas.height
+  const ctx = out.getContext('2d', { willReadFrequently: true })
+  const selCtx = selectionCanvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx || !selCtx) return out.toDataURL('image/png')
+  ctx.fillStyle = '#fff'
+  ctx.fillRect(0, 0, out.width, out.height)
+  const sel = selCtx.getImageData(0, 0, out.width, out.height)
+  const mask = ctx.getImageData(0, 0, out.width, out.height)
+  for (let i = 3; i < mask.data.length; i += 4) {
+    if (sel.data[i] > 0) mask.data[i] = 0
+  }
+  ctx.putImageData(mask, 0, 0)
+  return out.toDataURL('image/png')
+}
+
+/** 蒙版是否有有效涂抹（任意像素 alpha>0）；全空返回 false 阻止提交 */
+export function maskHasPaint(selectionCanvas) {
+  const ctx = selectionCanvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return false
+  const d = ctx.getImageData(0, 0, selectionCanvas.width, selectionCanvas.height).data
+  for (let i = 3; i < d.length; i += 4) {
+    if (d[i] > 0) return true
+  }
+  return false
+}
+
+/**
+ * 蒙版涂抹区外接盒（返回 canvas 像素坐标盒或 null）。
+ * 用途：把「原图裁到涂抹区 + mask」一起发工作台时收紧附件尺寸。
+ */
+export function maskPaintBounds(selectionCanvas, step = 4) {
+  const ctx = selectionCanvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return null
+  const w = selectionCanvas.width
+  const h = selectionCanvas.height
+  const d = ctx.getImageData(0, 0, w, h).data
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (let y = 0; y < h; y += step) {
+    for (let x = 0; x < w; x += step) {
+      if (d[(y * w + x) * 4 + 3] > 0) {
+        if (x < minX) minX = x
+        if (y < minY) minY = y
+        if (x > maxX) maxX = x
+        if (y > maxY) maxY = y
+      }
+    }
+  }
+  if (minX === Infinity) return null
+  return { x: minX, y: minY, width: maxX - minX + step, height: maxY - minY + step }
+}
