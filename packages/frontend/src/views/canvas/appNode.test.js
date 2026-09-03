@@ -9,6 +9,7 @@ import {
   appNodesDigest,
   APP_NODE_W,
   APP_NODE_H,
+  mentionImageIds,
 } from './appNode'
 
 const APP = {
@@ -250,5 +251,39 @@ describe('appNodesDigest', () => {
       params: '3.steps=30',
     })
     expect(d[1].name).toBe('app-2') // 无 name 回落 appId
+  })
+})
+
+
+// —— D1d @ 提及解析 ——
+
+describe('mentionImageIds（D1d）', () => {
+  const objects = [
+    { id: 'imgA', type: 'image', name: 'cat.png' },
+    { id: 'imgB', type: 'image', name: 'dog.png' },
+    { id: 'note1', type: 'note', text: '' },
+    { id: 'app1', type: 'app' },
+  ]
+  it('解析 @[名]{id} 标记为图片 id', () => {
+    expect(mentionImageIds('use @[cat.png]{imgA} as base', objects)).toEqual(['imgA'])
+    expect(mentionImageIds('@[a]{imgA} 和 @[b]{imgB}', objects)).toEqual(['imgA', 'imgB'])
+  })
+  it('非图片 id / 裸 @ 不解析；无 @ 直接空', () => {
+    expect(mentionImageIds('@[note]{note1}', objects)).toEqual([])
+    expect(mentionImageIds('@cat.png 普通文本', objects)).toEqual([])
+    expect(mentionImageIds('no mention', objects)).toEqual([])
+    expect(mentionImageIds('', objects)).toEqual([])
+  })
+  it('collectUpstream 融合提及图片（不与连线重复）', async () => {
+    const { collectUpstream } = await import('./appNode')
+    const objs = [
+      ...objects,
+      { id: 'target', type: 'app' },
+      { id: 'n1', type: 'note', text: 'use @[cat.png]{imgA}' },
+    ]
+    const links = [{ from: 'n1', to: 'target' }]
+    const up = collectUpstream('target', objs, links)
+    expect(up.notes.map((n) => n.id)).toEqual(['n1'])
+    expect(up.images.map((i) => i.id)).toEqual(['imgA'])
   })
 })

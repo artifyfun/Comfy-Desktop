@@ -1072,10 +1072,40 @@
           @pointerdown.stop
           @dblclick.stop
           @wheel.stop
-          @keydown.esc.stop.prevent="cancelNoteEdit"
+          @input="onNoteInput"
+          @keydown="onNoteKeydown"
+          @keydown.esc.stop.prevent="onNoteEsc"
           @keydown.enter.ctrl.prevent="commitNoteEdit"
-          @blur="commitNoteEdit"
+          @blur="onNoteBlur"
         ></textarea>
+
+        <!-- D1d @ 提及候选浮层 -->
+        <div
+          v-if="noteMention.open && mentionCandidates.length"
+          class="absolute z-40 max-h-[200px] w-[230px] overflow-auto rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] py-1 text-xs shadow-xl"
+          :style="{ left: noteMention.x + 'px', top: noteMention.y + 'px' }"
+          @mousedown.stop
+          @pointerdown.stop
+        >
+          <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-500">
+            {{ t('canvasMentionTitle') }}
+          </div>
+          <button
+            v-for="(c, i) in mentionCandidates"
+            :key="c.id"
+            class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-[var(--wb-accent)]/15"
+            :class="i === noteMention.pick ? 'bg-[var(--wb-accent)]/15' : ''"
+            @click="pickMention(c)"
+          >
+            <i
+              class="fas w-4 text-center text-slate-400"
+              :class="
+                c.kind === 'img' ? 'fa-image' : c.kind === 'app' ? 'fa-cube' : 'fa-note-sticky'
+              "
+            ></i>
+            <span class="truncate text-[var(--wb-text-1)]">{{ c.label }}</span>
+          </button>
+        </div>
 
         <!-- frame 名称就地重命名：单行 input 覆盖在分区标签（分区顶上方）位置 -->
         <input
@@ -1550,6 +1580,9 @@ const drag = reactive({ mode: null, item: -1, last: null, moved: false })
 // 交互工具模式：null=选择 | 'crop'=圈图裁剪（连线走句柄拖拽）
 const tool = ref(null)
 const spaceDown = ref(false) // 空格按住 = 强制平移
+// D1c：Shift/Ctrl 全局键态（Konva 事件链不透传修饰键，resize 用实时键态判定）
+const shiftDown = ref(false)
+const ctrlDown = ref(false)
 const cropRect = ref(null) // 'crop' 模式拖出的世界矩形
 // —— 连线（参考 infinite-canvas）：句柄拖拽建线 + 连线点选 ——
 const connectDrag = reactive({
@@ -1805,6 +1838,7 @@ const resizeDrag = reactive({
   fixed: null, // 对角不动点 {x,y}（拖 nw → 固定 se）
   orig: null, // 起拖时 {x,y,w,h}
   ratio: 0, // >0 锁宽高比（图片原图比例）；0 = 自由拉伸
+  startRatio: 0, // D1c：起拖时比例快照（拖拽中 Shift 临时锁定用，防漂移）
   pushed: false, // 首次实际位移才压 undo 快照（点住不拖不产生历史）
 })
 /** 单选且可缩放的对象（唯一显示角柄的目标；多选/不可缩放/crop 工具返回空） */
@@ -2073,6 +2107,121 @@ function cancelNoteEdit() {
 }
 
 // —— note 底色（调色板挂悬浮工具栏，点色即换；参考项目 note color）——
+// —— D1d 便签 @ 资源提及：textarea 内输入 @ 弹资源清单，选中插入标记 ——
+// 标记语法 `@[显示名]{id}`：collectUpstream 解析为图片喂养（见 appNode.js）
+const noteMention = reactive({ open: false, query: '', x: 0, y: 0, start: -1, pick: 0 })
+/** 候选：画布图片（/view 引用或 blob 均可，名称可读）+ app 节点 + 其他便签（排除自身） */
+const mentionCandidates = computed(() => {
+  if (!noteMention.open) return []
+  const q = noteMention.query.toLowerCase()
+  const out = []
+  for (const o of objects.value) {
+    if (o.id === noteEdit.id) continue
+    let label = ''
+    let kind = ''
+    if (o.type === 'image') {
+      if (o.name) label = o.name
+      else if (o.src && o.src.startsWith('http')) {
+        try {
+          label = new URL(o.src).searchParams.get('filename') || '图片 ' + o.id.slice(-4)
+        } catch {
+          label = '图片 ' + o.id.slice(-4)
+        }
+      } else label = '图片 ' + o.id.slice(-4)
+      kind = 'img'
+    } else if (o.type === 'app') {
+      label = o.name || o.appId || 'App'
+      kind = 'app'
+    } else if (o.type === 'note') {
+      label = (o.text || '').replace(/\s+/g, ' ').slice(0, 20) || '便签'
+      kind = 'note'
+    } else continue
+    if (q && !label.toLowerCase().includes(q)) continue
+    out.push({ id: o.id, label, kind })
+  }
+  return out.slice(0, 8)
+})
+function onNoteInput(e) {
+  const el = e.target
+  const pos = el.selectionStart ?? el.value.length
+  const before = el.value.slice(0, pos)
+  // 光标前最近一个未闭合的 @（其后只允许查询字符）
+  const m = /(?:^|\s)@([^@\s]{0,24})$/.exec(before)
+  if (m) {
+    noteMention.open = true
+    noteMention.query = m[1]
+    noteMention.start = pos - m[1].length - 1
+    noteMention.pick = 0
+    const ta = noteEditArea.value
+    if (ta) {
+      const mirror = document.createElement('div')
+      const cs = getComputedStyle(ta)
+      mirror.style.cssText = `position:absolute;visibility:hidden;white-space:pre-wrap;word-wrap:break-word;width:${cs.width};font:${cs.font};line-height:${cs.lineHeight};letter-spacing:${cs.letterSpacing}`
+      mirror.textContent = before
+      document.body.appendChild(mirror)
+      const range = document.createRange()
+      const lastNode = mirror.lastChild
+      if (lastNode) {
+        range.selectNodeContents(lastNode)
+        range.collapse(false)
+      }
+      const rects = range.getClientRects()
+      const rect = rects.length ? rects[rects.length - 1] : mirror.getBoundingClientRect()
+      const host = wrapEl.value?.getBoundingClientRect() || { left: 0, top: 0 }
+      noteMention.x = clamp(rect.left - host.left, 8, Math.max(8, size.w - 240))
+      noteMention.y = clamp(rect.bottom - host.top + 4, 8, Math.max(8, size.h - 220))
+      mirror.remove()
+    }
+  } else {
+    noteMention.open = false
+  }
+}
+function pickMention(opt) {
+  const el = noteEditArea.value
+  if (!el || noteMention.start < 0) return closeMention()
+  const pos = el.selectionStart ?? el.value.length
+  const text = el.value
+  const insert = `@[${opt.label}]{${opt.id}} `
+  const next = text.slice(0, noteMention.start) + insert + text.slice(pos)
+  noteEdit.text = next
+  closeMention()
+  nextTick(() => {
+    const p = noteMention.start + insert.length
+    el.focus()
+    el.setSelectionRange(p, p)
+  })
+}
+function onNoteEsc() {
+  closeMention()
+  cancelNoteEdit()
+}
+function onNoteBlur() {
+  commitNoteEdit()
+  closeMention()
+}
+function closeMention() {
+  noteMention.open = false
+  noteMention.query = ''
+  noteMention.start = -1
+  noteMention.pick = 0
+}
+function onNoteKeydown(e) {
+  if (!noteMention.open || !mentionCandidates.value.length) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    noteMention.pick = (noteMention.pick + 1) % mentionCandidates.value.length
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    noteMention.pick =
+      (noteMention.pick - 1 + mentionCandidates.value.length) % mentionCandidates.value.length
+  } else if (e.key === 'Enter' || e.key === 'Tab') {
+    e.preventDefault()
+    pickMention(mentionCandidates.value[noteMention.pick])
+  } else if (e.key === 'Escape') {
+    closeMention()
+  }
+}
+
 const notePalette = reactive({ id: null, x: 0, y: 0, open: false })
 /** 当前色板对应便签（选中色高亮用） */
 const notePaletteColor = computed(() => {
@@ -2438,13 +2587,20 @@ function onResizeStart(id, corner, kev) {
   }
   resizeDrag.orig = { x: o.x, y: o.y, w: o.width, h: o.height }
   resizeDrag.pushed = false
-  // 图片/视频默认锁宽高比（Ctrl/⌘ 按住自由）；note/frame/audio 恒自由。
+  // 图片/视频默认锁宽高比（Ctrl/⌘ 按住自由）；note/frame/audio 平时自由，
+  // Shift 按住临时锁定当前比例（D1c：所有类型都可通过修饰键切换锁/自由）。
   // 视频无 naturalWidth → naturalOf 回落当前 o.width/o.height，即保持起拖前比例
-  const lockRatio =
-    (o.type === 'image' || o.type === 'video') && !kev.evt?.ctrlKey && !kev.evt?.metaKey
+  const baseRatioLocked = o.type === 'image' || o.type === 'video'
+  const modifierFree = kev.evt?.ctrlKey || kev.evt?.metaKey
+  const modifierLock = kev.evt?.shiftKey
+  const lockRatio = modifierFree ? false : baseRatioLocked || modifierLock
   const nat = naturalOf(o)
   const ar = nat.naturalWidth / nat.naturalHeight
   resizeDrag.ratio = lockRatio && isFinite(ar) && ar > 0 ? ar : 0
+  // D1c：起始比例快照 —— 拖拽中 Shift 临时锁定用（note/frame 无 natural 尺寸，
+  // 不能用 naturalOf 实时算：拖拽中 o.width/height 已变，比例会漂移失控）
+  const startAr = isFinite(ar) && ar > 0 ? ar : o.width / o.height
+  resizeDrag.startRatio = isFinite(startAr) && startAr > 0 ? startAr : 0
   drag.mode = 'resize' // 占住拖拽态：阻止平移/物件拖动（onMouseDown 同 connect 跳过）
   drag.last = null
 }
@@ -2457,7 +2613,16 @@ function onResizeMove() {
   const p = st.getPointerPosition()
   if (!p) return
   const ptr = screenToWorld(viewport.value, p.x, p.y)
-  const { fixed, corner, ratio } = resizeDrag
+  // D1c：拖拽中实时跟随修饰键（Konva move 事件不透传修饰键，读全局键态）。
+  // 比例一律用起拖快照（startRatio），杜绝拖拽中比例漂移
+  const baseRatioLocked = o.type === 'image' || o.type === 'video'
+  const liveRatio = ctrlDown.value
+    ? 0
+    : baseRatioLocked || shiftDown.value
+      ? resizeDrag.ratio || resizeDrag.startRatio
+      : 0
+  const { fixed, corner } = resizeDrag
+  const ratio = liveRatio
   const rect = ratio ? ratioRect(fixed, ptr, corner, ratio) : freeRect(fixed, ptr, corner)
   if (
     !resizeDrag.pushed &&
@@ -5244,13 +5409,14 @@ function addMediaFromFile(f, wx, wy, onSized) {
     rd.readAsDataURL(f)
   }
 }
-/** 工具栏/占位点击上传媒体（替换或新建） */
+/** 工具栏/占位点击上传媒体（替换或新建；D1b 图片同支持） */
 function uploadMediaFor(id) {
   const o = objects.value.find((x) => x.id === id)
   if (!o) return
+  const isImage = o.type === 'image'
   const input = document.createElement('input')
   input.type = 'file'
-  input.accept = o.type === 'video' ? 'video/*' : 'audio/*'
+  input.accept = o.type === 'video' ? 'video/*' : o.type === 'audio' ? 'audio/*' : 'image/*'
   input.onchange = () => {
     const f = input.files?.[0]
     if (!f) return
@@ -5259,6 +5425,28 @@ function uploadMediaFor(id) {
     o.src = url
     o.name = f.name
     o.persist = null
+    // D1b：替换图片时清掉旧产物的生成元数据（mask/prompt 已不代表新图）
+    if (isImage) o.meta = undefined
+    if (isImage) {
+      // 尺寸自适应：保持显示宽度，按新图比例调整高度（对齐拖入图片的 260 上限）
+      const probe = new Image()
+      probe.onload = () => {
+        const scale = Math.min(1, 260 / probe.naturalWidth)
+        const w = Math.round(probe.naturalWidth * scale)
+        const h = Math.round(probe.naturalHeight * scale)
+        // 中心不动：x/y 按新尺寸微调，视觉上图片中心保持
+        const cx = o.x + o.width / 2
+        const cy = o.y + o.height / 2
+        o.width = w
+        o.height = h
+        o.x = Math.round(cx - w / 2)
+        o.y = Math.round(cy - h / 2)
+        persistImage(o)
+        saveSoon()
+      }
+      probe.src = url
+      return
+    }
     if (f.size <= 4 * 1024 * 1024) {
       const rd = new FileReader()
       rd.onload = () => {
@@ -5444,6 +5632,11 @@ const hoverToolbar = computed(() => {
         },
       },
       {
+        icon: 'fas fa-repeat',
+        title: t('canvasTbReplaceImage'),
+        action: () => uploadMediaFor(id),
+      },
+      {
         icon: 'fas fa-quote-left',
         title: t('canvasTbCopyPrompt'),
         action: () => copyImagePrompt(id),
@@ -5554,6 +5747,27 @@ const dragOver = ref(false)
 
 // 项目下拉外点关闭（capture 阶段判定；项目栏自身 mousedown.stop 不影响 document 捕获）
 onMounted(() => {
+  // D1c：Shift/Ctrl 全局键态追踪（resize 比例锁实时切换；capture 确保先于组件逻辑）
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key === 'Shift') shiftDown.value = true
+      if (e.key === 'Control' || e.key === 'Meta') ctrlDown.value = true
+    },
+    { capture: true },
+  )
+  window.addEventListener(
+    'keyup',
+    (e) => {
+      if (e.key === 'Shift') shiftDown.value = false
+      if (e.key === 'Control' || e.key === 'Meta') ctrlDown.value = false
+    },
+    { capture: true },
+  )
+  window.addEventListener('blur', () => {
+    shiftDown.value = false
+    ctrlDown.value = false
+  })
   document.addEventListener(
     'mousedown',
     (e) => {
@@ -5732,6 +5946,10 @@ function bindNodeEvents() {
 }
 onMounted(() => {
   loadNow()
+  // 兜底：loadNow 恢复的 id 集合若与上个会话相同，id-watch 不触发，
+  // 但 Konva group 是新实例（无 _boundWb）—— 延迟一轮幂等补绑
+  setTimeout(() => nextTick(bindNodeEvents), 600)
+  setTimeout(() => nextTick(bindNodeEvents), 1800)
   // 工作台「贴到画布」的排队产物落布（SPA 内跨路由）
   nextTick(drainPinned)
   const el = wrapEl.value
@@ -5755,6 +5973,9 @@ onMounted(() => {
   })
 })
 watch(
+  // id 序列变化触发（bindNodeEvents 以 _boundWb 标记幂等，多调无副作用）。
+  // 另：页面重载/路由回访后 Konva group 全量重建但 id 集合可能与上个会话相同
+  // （watch 不触发）→ onMounted 里延迟兜底补绑一轮，确保新实例拿到事件。
   () => objects.value.map((o) => o.id).join(','),
   () => nextTick(bindNodeEvents),
   { immediate: true },

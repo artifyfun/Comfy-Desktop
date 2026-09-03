@@ -127,7 +127,36 @@ export function collectUpstream(nodeId, objects, links) {
     else if (o.type === 'note') notes.push(o)
     else if (o.type === 'app') apps.push(o)
   }
+  // D1d @ 提及融合：上游 note 文本里 @ 的画布图片（排除已被连线喂过的）
+  // 也并入 images —— 便签里“用 @图A 做 XX”即可喂图片槽，无需手动连线
+  const linkedIds = new Set(srcIds)
+  for (const n of notes) {
+    for (const rid of mentionImageIds(n.text || '', objects)) {
+      const img = byId.get(rid)
+      if (img && img.type === 'image' && !linkedIds.has(rid)) {
+        linkedIds.add(rid)
+        images.push(img)
+      }
+    }
+  }
   return { images, notes, apps, srcIds }
+}
+
+/**
+ * D1d：便签文本 @ 提及 → 图片物件 id 列表。
+ * 语法：`@[...,]{id}` 尾缀标记（插入时生成）；裸 `@名称` 不带 id 不解析
+ * （避免误匹配普通文本），回退按名称唯一匹配图片 name。
+ */
+export function mentionImageIds(text, objects) {
+  if (!text || !text.includes('@')) return []
+  const ids = []
+  const re = /@\[([^\]]*)\]\{([^}]+)\}/g
+  let m
+  while ((m = re.exec(text))) {
+    const id = m[2]
+    if (objects.some((o) => o.id === id && o.type === 'image')) ids.push(id)
+  }
+  return ids
 }
 
 /**
