@@ -530,3 +530,40 @@ export function maskPaintBounds(selectionCanvas, step = 4) {
 export function stripMentionMarks(text) {
   return String(text ?? '').replace(/@\[([^\]]*)\]\{([^}]+)\}/g, '@$1')
 }
+
+/**
+ * E5fix：resize 矩形纯函数（从 index.vue 抽出，修复南向角判定）。
+ * 角名 nw/ne/sw/se：南北看首字母（startsWith 's'），东西看尾字母
+ *（endsWith 'e'/'w'）—— 原实现南向误用 endsWith('s')，'se'/'sw' 均为
+ * false，拖南向角时高度恒坍塌为 RESIZE_MIN。
+ */
+export function freeResizeRect(fixed, ptr, corner, minSize) {
+  const right = corner.endsWith('e') ? Math.max(ptr.x, fixed.x + minSize) : fixed.x
+  const bottom = corner.startsWith('s') ? Math.max(ptr.y, fixed.y + minSize) : fixed.y
+  const left = corner.endsWith('e') ? fixed.x : Math.min(ptr.x, right - minSize)
+  const top = corner.startsWith('s') ? fixed.y : Math.min(ptr.y, bottom - minSize)
+  return { x: left, y: top, w: right - left, h: bottom - top }
+}
+/** 等比矩形：以固定角为锚，取指针主导轴定宽，h = w / ratio */
+export function ratioResizeRect(fixed, ptr, corner, ratio, minSize) {
+  const dirX = corner.endsWith('e') ? 1 : -1
+  const dirY = corner.startsWith('s') ? 1 : -1
+  const dx = Math.max(0, (ptr.x - fixed.x) * dirX)
+  const dy = Math.max(0, (ptr.y - fixed.y) * dirY)
+  if (dx === 0 && dy === 0) {
+    const w = Math.max(minSize, minSize * ratio)
+    return rectFromFixedCorner(fixed, corner, w, w / ratio)
+  }
+  const errByX = Math.abs(dy - dx / ratio)
+  const errByY = Math.abs(dx - dy * ratio)
+  const w =
+    errByX <= errByY
+      ? Math.max(dx, minSize * ratio, minSize)
+      : Math.max(dy * ratio, minSize * ratio, minSize)
+  return rectFromFixedCorner(fixed, corner, w, w / ratio)
+}
+export function rectFromFixedCorner(fixed, corner, w, h) {
+  const x = corner.endsWith('e') ? fixed.x : fixed.x - w
+  const y = corner.startsWith('s') ? fixed.y : fixed.y - h
+  return { x, y, w, h }
+}

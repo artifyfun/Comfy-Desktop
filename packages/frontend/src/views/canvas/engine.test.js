@@ -37,6 +37,8 @@ import {
   buildInpaintMask,
   maskCanvasPoint,
   stripMentionMarks,
+  freeResizeRect,
+  ratioResizeRect,
 } from './engine'
 
 describe('canvas engine: viewport', () => {
@@ -398,5 +400,44 @@ describe('stripMentionMarks（E3 便签提及显示净化）', () => {
   it('空值安全', () => {
     expect(stripMentionMarks(undefined)).toBe('')
     expect(stripMentionMarks(null)).toBe('')
+  })
+})
+
+describe('resize 矩形纯函数（E5fix：南向角高度坍塌回归）', () => {
+  const fixed = { x: 100, y: 50 } // 固定角（世界坐标）
+  it('拖 se 角：宽高都跟随指针（南向 startsWith 修正）', () => {
+    const r = freeResizeRect(fixed, { x: 400, y: 300 }, 'se', 24)
+    expect(r).toEqual({ x: 100, y: 50, w: 300, h: 250 })
+  })
+  it('拖 sw 角：向左下扩展，右上角不动', () => {
+    const r = freeResizeRect(fixed, { x: 0, y: 300 }, 'sw', 24)
+    expect(r).toEqual({ x: 0, y: 50, w: 100, h: 250 })
+  })
+  it('拖 ne/nw 角：向上扩展，南向边不动', () => {
+    expect(freeResizeRect(fixed, { x: 400, y: 0 }, 'ne', 24)).toEqual({
+      x: 100,
+      y: 0,
+      w: 300,
+      h: 50,
+    })
+    expect(freeResizeRect(fixed, { x: 0, y: 0 }, 'nw', 24)).toEqual({ x: 0, y: 0, w: 100, h: 50 })
+  })
+  it('南向不坍塌：拖 se 越远高度越大（旧 bug h 恒 24）', () => {
+    for (const dy of [50, 150, 400]) {
+      const r = freeResizeRect(fixed, { x: 400, y: 50 + dy }, 'se', 24)
+      expect(r.h).toBe(dy)
+    }
+  })
+  it('等比模式 se 角：16:9 宽度主导', () => {
+    const r = ratioResizeRect(fixed, { x: 420, y: 50 + (320 * 9) / 16 }, 'se', 16 / 9, 24)
+    expect(r.w).toBeCloseTo(320)
+    expect(r.h).toBeCloseTo(180)
+    expect(r.x).toBe(100)
+    expect(r.y).toBe(50)
+  })
+  it('等比模式指针贴固定角：最小尺寸兜底', () => {
+    const r = ratioResizeRect(fixed, { x: 100, y: 50 }, 'se', 2, 24)
+    expect(r.w).toBeGreaterThanOrEqual(24)
+    expect(r.h).toBeGreaterThanOrEqual(12)
   })
 })

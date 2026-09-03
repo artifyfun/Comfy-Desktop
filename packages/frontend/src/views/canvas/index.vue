@@ -1605,6 +1605,8 @@ import {
   gridLayout,
   subtreeOf,
   stripMentionMarks,
+  freeResizeRect,
+  ratioResizeRect,
 } from './engine'
 
 const { t } = useI18n()
@@ -3020,39 +3022,13 @@ function onResizeMove() {
   o.height = Math.round(rect.h)
   layerRefresh()
 }
-/** 自由拉伸矩形：固定对角不动，指针侧 clamp 最小尺寸（拖过对角也不会翻转） */
+/** 自由拉伸矩形（纯函数在 engine.js：南北看首字母，E5fix 修南向坍塌） */
 function freeRect(fixed, ptr, corner) {
-  const right = corner.endsWith('e') ? Math.max(ptr.x, fixed.x + RESIZE_MIN) : fixed.x
-  const bottom = corner.endsWith('s') ? Math.max(ptr.y, fixed.y + RESIZE_MIN) : fixed.y
-  const left = corner.endsWith('e') ? fixed.x : Math.min(ptr.x, right - RESIZE_MIN)
-  const top = corner.endsWith('s') ? fixed.y : Math.min(ptr.y, bottom - RESIZE_MIN)
-  return { x: left, y: top, w: right - left, h: bottom - top }
+  return freeResizeRect(fixed, ptr, corner, RESIZE_MIN)
 }
-/** 等比矩形：以固定角为锚，取指针在 x/y 两轴中「主导轴」定宽，h=w/ratio（对角不动） */
+/** 等比矩形 / 固定角反推（纯函数在 engine.js，E5fix 南向判定修正） */
 function ratioRect(fixed, ptr, corner, ratio) {
-  const dirX = corner.endsWith('e') ? 1 : -1
-  const dirY = corner.endsWith('s') ? 1 : -1
-  const dx = Math.max(0, (ptr.x - fixed.x) * dirX) // 期望宽
-  const dy = Math.max(0, (ptr.y - fixed.y) * dirY) // 期望高
-  if (dx === 0 && dy === 0) {
-    // 指针贴住不动点：给最小尺寸兜底
-    const w = Math.max(RESIZE_MIN, RESIZE_MIN * ratio)
-    return rectFromFixed(fixed, corner, w, w / ratio)
-  }
-  // 主导轴 = 两候选与指针偏差更小者（x 主导则高由宽推，y 主导则宽由高推）
-  const errByX = Math.abs(dy - dx / ratio)
-  const errByY = Math.abs(dx - dy * ratio)
-  const w =
-    errByX <= errByY
-      ? Math.max(dx, RESIZE_MIN * ratio, RESIZE_MIN)
-      : Math.max(dy * ratio, RESIZE_MIN * ratio, RESIZE_MIN)
-  return rectFromFixed(fixed, corner, w, w / ratio)
-}
-/** 由固定角 + 宽高反推矩形左上角（固定角保持不动） */
-function rectFromFixed(fixed, corner, w, h) {
-  const x = corner.endsWith('e') ? fixed.x : fixed.x - w
-  const y = corner.endsWith('s') ? fixed.y : fixed.y - h
-  return { x, y, w, h }
+  return ratioResizeRect(fixed, ptr, corner, ratio, RESIZE_MIN)
 }
 /** 缩放松手：收尾（数据已实时写回；窗口外松手由 onWindowMouseUp 兜底） */
 function onResizeEnd() {
@@ -6186,9 +6162,11 @@ const hoverToolbar = computed(() => {
   if (!o) return { x: 0, y: 0, items: [], below: false }
   const tl = worldToScreen(viewport.value, o.x, o.y)
   const x = tl.x + (o.width * viewport.value.scale) / 2
-  // 顶部空间不足（工具栏会被容器 overflow 裁掉）→ 翻到节点下方
+  // 顶部空间不足（工具栏会被容器 overflow 裁掉）→ 翻到节点下方。
+  // E5fix：下方态避让角柄（角柄外偏 10px + 20px 热区），否则工具栏盖住
+  // SE/SW 角柄，真实鼠标按下被 HTML 拦截、resize 无法启动
   const below = tl.y - 10 < TOOLBAR_H + 12
-  const y = below ? tl.y + o.height * viewport.value.scale + 10 : tl.y - 10
+  const y = below ? tl.y + o.height * viewport.value.scale + 34 : tl.y - 10
   const items = []
   if (o.type === 'note') {
     items.push(
@@ -6673,8 +6651,9 @@ onBeforeUnmount(() => {
    桥接区把这段空白（+10px 余量）纳入工具栏 DOM，鼠标中途不会“掉出”。 */
 .node-hover-toolbar .tb-bridge {
   position: absolute;
-  left: 0;
-  right: 0;
+  /* 两角各让 28px：桥接热区只护中段，不盖角柄热区（E5fix） */
+  left: 28px;
+  right: 28px;
   height: 20px;
 }
 .node-hover-toolbar:not(.is-below) .tb-bridge {

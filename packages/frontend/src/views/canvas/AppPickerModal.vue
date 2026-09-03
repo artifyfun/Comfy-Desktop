@@ -107,6 +107,9 @@ onMounted(async () => {
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
   overflow-y: auto;
+  /* 多行超出弹窗时滚动的关键：a-spin 包装层不传高度，grid 用视口相对
+     max-height 自行约束（弹窗本体 max-height:70% 同基准） */
+  max-height: calc(70vh * 0.7);
   padding-top: 4px;
 }
 .card {
