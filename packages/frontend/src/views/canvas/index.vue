@@ -1054,6 +1054,88 @@
           {{ Math.round(viewport.scale * 100) }}%
         </div>
 
+        <!-- E2 节点参考条（参考 canvas-node-reference-bar）：上游引用缩略图横排 -->
+        <div
+          v-if="nodeRefBar"
+          class="node-ref-bar absolute z-20 flex h-[54px] items-center gap-1.5 rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] px-1.5 shadow-xl"
+          :style="{ left: nodeRefBar.x + 'px', top: nodeRefBar.y + 'px' }"
+          @pointerenter.stop
+          @pointerleave="refBarLeave"
+          @mousedown.stop
+          @wheel.stop
+        >
+          <div
+            v-for="r in nodeRefBar.refs"
+            :key="r.linkId"
+            class="group relative grid size-11 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-bg)]"
+            :title="r.label"
+            @pointerenter="refBarEnter(r, $event)"
+            @pointerleave="refBarPreview.id = null"
+            @click.stop="selection = [r.fromId]"
+          >
+            <img v-if="r.kind === 'image'" :src="r.src" class="size-full object-cover" alt="" />
+            <video
+              v-else-if="r.kind === 'video'"
+              :src="r.src"
+              class="size-full object-cover"
+              muted
+            ></video>
+            <i
+              v-else
+              class="fas text-sm text-[var(--wb-text-2)]"
+              :class="
+                r.kind === 'note'
+                  ? 'fa-file-lines'
+                  : r.kind === 'app'
+                    ? 'fa-cube'
+                    : 'fa-puzzle-piece'
+              "
+            ></i>
+            <button
+              class="absolute right-0 top-0 grid size-4 place-items-center rounded-full border border-[var(--wb-stroke)] bg-[var(--wb-surface)] text-[9px] text-[var(--wb-text-2)] opacity-0 shadow transition-opacity group-hover:opacity-100"
+              :title="t('canvasRefBarDisconnect')"
+              @mousedown.stop
+              @click.stop="refBarDisconnect(r.linkId)"
+            >
+              <i class="fas fa-xmark"></i>
+            </button>
+          </div>
+          <button
+            class="grid size-11 shrink-0 place-items-center rounded-lg border border-dashed border-[var(--wb-stroke)] text-[var(--wb-text-2)] transition hover:border-[var(--wb-accent)] hover:text-[var(--wb-accent)]"
+            :title="t('canvasRefBarAdd')"
+            @mousedown.stop
+            @click.stop="refBarStartLink(nodeRefBar.id)"
+          >
+            <i class="fas fa-plus text-xs"></i>
+          </button>
+        </div>
+        <!-- E2 引用大图预览浮层 -->
+        <div
+          v-if="refBarPreview.id && refBarPreviewObj"
+          class="pointer-events-none absolute z-30 w-72 rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] p-1.5 shadow-2xl"
+          :style="{ left: refBarPreview.x + 'px', top: refBarPreview.y + 'px' }"
+        >
+          <img
+            v-if="refBarPreviewObj.kind === 'image'"
+            :src="refBarPreviewObj.src"
+            class="max-h-52 w-full rounded-lg object-contain"
+            alt=""
+          />
+          <video
+            v-else-if="refBarPreviewObj.kind === 'video'"
+            :src="refBarPreviewObj.src"
+            class="max-h-52 w-full rounded-lg"
+            muted
+            controls
+          ></video>
+          <div
+            v-else
+            class="max-h-52 w-full overflow-auto whitespace-pre-wrap rounded-lg p-2 text-xs text-[var(--wb-text-2)]"
+          >
+            {{ refBarPreviewObj.text || refBarPreviewObj.label }}
+          </div>
+        </div>
+
         <!-- 节点悬浮工具栏（参考 canvas-node-hover-toolbar）：悬停物件上方 HTML overlay -->
         <div
           v-if="hoverToolbar.items.length"
@@ -5744,6 +5826,100 @@ function nodeDeleteObj(id) {
 /** 悬浮工具栏高度（h-9），用于贴顶时翻转到节点下方的判定 */
 const TOOLBAR_H = 36
 /** 悬停节点 → 工具栏屏幕坐标 + 按类型装配动作 */
+/** E2：节点参考条 —— 悬停/选中节点的上游引用（缩略图横排 + 断开 + 预览 + 加引用） */
+const refBarPreview = reactive({ id: null, x: 0, y: 0 }) // 悬停预览大图
+const refBarHover = ref(null) // 锁定显示（防缩略图 hover 抖动）
+const nodeRefBar = computed(() => {
+  // 优先锁定 hover 的缩略图，其次当前悬停/选中节点
+  const id = refBarHover.value || hoverNodeId.value || selection.value[selection.value.length - 1]
+  if (!id || selection.value.length > 1) return null
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || o.type === 'frame') return null
+  const ups = links.value
+    .filter((l) => l.to === id)
+    .map((l) => ({ link: l, obj: objects.value.find((x) => x.id === l.from) }))
+    .filter((r) => r.obj)
+  // 无上游也显示（仅 + 按钮）——否则「添加引用」入口不可达
+  const tl = worldToScreen(viewport.value, o.x, o.y)
+  return {
+    id,
+    x: tl.x,
+    y: tl.y + o.height * viewport.value.scale + 6,
+    refs: ups.slice(0, 12).map((r) => ({
+      linkId: r.link.id,
+      fromId: r.obj.id,
+      kind: r.obj.type,
+      label: refLabelOf(r.obj),
+      src: r.obj.type === 'image' ? r.obj.src : r.obj.type === 'video' ? r.obj.src : null,
+      text: r.obj.type === 'note' ? String(r.obj.text || '') : '',
+    })),
+  }
+})
+/** 引用条缩略图 label（与 digest 口径一致） */
+function refLabelOf(o) {
+  if (o.type === 'note')
+    return (
+      String(o.text || '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 20) || 'note'
+    )
+  if (o.type === 'image' || o.type === 'video') {
+    if (o.name) return o.name
+    try {
+      if (o.src && o.src.startsWith('http')) {
+        const u = new URL(o.src)
+        return (
+          u.searchParams.get('filename') ||
+          decodeURIComponent(u.pathname.split('/').pop() || '') ||
+          (o.type === 'image' ? '图片' : '视频')
+        )
+      }
+    } catch {
+      /* blob:/data: */
+    }
+    return (o.type === 'image' ? '图片 #' : '视频 #') + String(o.id).slice(-4)
+  }
+  return o.name || o.type
+}
+/** E2：断开引用连线（X 按钮） */
+function refBarDisconnect(linkId) {
+  links.value = links.value.filter((l) => l.id !== linkId)
+  saveSoon()
+}
+/** E2：悬停缩略图 → 锁定条 + 大图预览浮层 */
+function refBarEnter(item, ev) {
+  refBarHover.value = nodeRefBar.value?.id ?? null
+  if (!item.src) return
+  const r = ev.currentTarget.getBoundingClientRect()
+  refBarPreview.id = item.fromId
+  refBarPreview.x = r.right + 8
+  refBarPreview.y = Math.max(8, r.top - 80)
+}
+function refBarLeave() {
+  refBarHover.value = null
+  refBarPreview.id = null
+}
+/** E2：+ 按钮 → 以本节点为 target 发起连线拖拽（把新上游拉进来） */
+function refBarStartLink(toId) {
+  // 复用句柄连线手势：target 句柄语义（connectDrag 从本节点左侧起拉，
+  // 松手落在某物件上即建 from=落点 → to=本节点）
+  connectDrag.active = true
+  connectDrag.nodeId = toId
+  connectDrag.handleType = 'target'
+  connectDrag.targetId = null
+  const o = objects.value.find((x) => x.id === toId)
+  if (!o) return
+  connectDrag.seg = { x1: o.x, y1: o.y + o.height / 2, x2: o.x, y2: o.y + o.height / 2 }
+  drag.mode = 'connect'
+}
+
+/** E2：预览浮层对应的引用源物件 */
+const refBarPreviewObj = computed(() => {
+  if (!refBarPreview.id) return null
+  const bar = nodeRefBar.value
+  return bar?.refs.find((r) => r.fromId === refBarPreview.id) ?? null
+})
+
 const hoverToolbar = computed(() => {
   const id = hoverNodeId.value
   if (!id) return { x: 0, y: 0, items: [], below: false }
