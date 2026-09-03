@@ -11,6 +11,7 @@ import {
   updateProjectDoc,
   cloneProject,
   importProject,
+  projectCardStats,
 } from './projectStore'
 
 const legacyDoc = JSON.stringify({
@@ -155,5 +156,43 @@ describe('normalizeStore', () => {
     expect(s.projects[0].id).toBe('ok')
     expect(s.activeId).toBe('ok')
     expect(s.projects[0].doc.viewport.scale).toBe(2)
+  })
+})
+
+describe('projectCardStats（E4 项目卡统计）', () => {
+  const mk = (objs, links, updatedAt) => ({ id: 'p1', doc: { objects: objs, links }, updatedAt })
+
+  it('计数物件/连线/图片/便签', () => {
+    const st = projectCardStats(
+      mk(
+        [
+          { id: 'a', type: 'image' },
+          { id: 'b', type: 'note' },
+          { id: 'c', type: 'image' },
+          { id: 'd', type: 'frame' },
+        ],
+        [{ id: 'l1' }, { id: 'l2' }],
+        Date.now(),
+      ),
+    )
+    expect(st.objects).toBe(4)
+    expect(st.links).toBe(2)
+    expect(st.images).toBe(2)
+    expect(st.notes).toBe(1)
+    expect(st.rel).toBe('justNow')
+  })
+
+  it('相对时间分档：分钟/小时/天', () => {
+    const now = Date.now()
+    expect(projectCardStats(mk([], [], now - 5 * 60000), now).rel).toBe('minutesAgo')
+    expect(projectCardStats(mk([], [], now - 3 * 3600000), now).rel).toBe('hoursAgo')
+    expect(projectCardStats(mk([], [], now - 2 * 86400000), now).rel).toBe('daysAgo')
+  })
+
+  it('doc 异常回退 0 不抛错', () => {
+    const st = projectCardStats({ id: 'x', updatedAt: 'bad' })
+    expect(st.objects).toBe(0)
+    expect(st.links).toBe(0)
+    expect(st.rel).toBe('justNow')
   })
 })

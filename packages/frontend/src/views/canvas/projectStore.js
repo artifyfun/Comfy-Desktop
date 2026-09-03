@@ -161,6 +161,33 @@ export function importProject(store, project, now = Date.now()) {
 }
 
 export const PROJECTS_STORAGE_KEY = PROJECTS_KEY
+
+/**
+ * E4 项目卡统计（纯投影）：物件/连线/便签/图片计数 + 相对时间描述。
+ * doc 异常（缺字段/非数组）一律回退 0，卡片永不抛错。
+ */
+export function projectCardStats(project, now = Date.now()) {
+  const objs = Array.isArray(project?.doc?.objects) ? project.doc.objects : []
+  const links = Array.isArray(project?.doc?.links) ? project.doc.links : []
+  const updatedAt = Number(project?.updatedAt) || now
+  const diffMin = Math.max(0, Math.round((now - updatedAt) / 60000))
+  const rel =
+    diffMin < 1 ? 'justNow' : diffMin < 60 ? 'minutesAgo' : diffMin < 1440 ? 'hoursAgo' : 'daysAgo'
+  return {
+    objects: objs.length,
+    links: links.length,
+    images: objs.filter((o) => o?.type === 'image').length,
+    notes: objs.filter((o) => o?.type === 'note').length,
+    rel,
+    relValue:
+      diffMin < 60
+        ? diffMin
+        : diffMin < 1440
+          ? Math.round(diffMin / 60)
+          : Math.round(diffMin / 1440),
+    updatedAt,
+  }
+}
 export const LEGACY_STORAGE_KEY = LEGACY_DOC_KEY
 
 function safeParse(json) {

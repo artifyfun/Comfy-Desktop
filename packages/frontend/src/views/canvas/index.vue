@@ -264,34 +264,136 @@
               activeProject.title
             }}</span>
           </div>
-          <!-- 画布列表下拉 -->
+          <!-- E4 画布列表下拉：卡片网格（统计/hover 操作/内联重命名/批量删除） -->
           <div
             v-if="projectMenuOpen"
-            class="absolute top-12 left-0 w-64 rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl overflow-hidden z-20"
+            class="absolute top-12 left-0 w-[420px] rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl overflow-hidden z-20"
+            @mousedown.stop
           >
-            <div class="max-h-[320px] overflow-y-auto">
-              <button
+            <div
+              class="flex items-center justify-between px-3 py-2 border-b border-[var(--wb-stroke)]"
+            >
+              <span class="text-xs font-medium text-[var(--wb-text-2)]">{{
+                t('canvasPrjCards') + ' · ' + projectStore.projects.length
+              }}</span>
+              <div class="flex items-center gap-1">
+                <button
+                  v-if="!prjBatchMode"
+                  class="rounded px-2 py-1 text-[11px] text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)]"
+                  @click="prjBatchMode = true"
+                >
+                  <i class="fas fa-list-check mr-1"></i>{{ t('canvasPrjBatchMode') }}
+                </button>
+                <template v-else>
+                  <button
+                    class="rounded px-2 py-1 text-[11px] text-red-400 hover:bg-red-400/10 disabled:opacity-40"
+                    :disabled="!prjChecked.size"
+                    @click="deleteCheckedProjects"
+                  >
+                    <i class="fas fa-trash mr-1"></i>{{ t('canvasPrjBatchDel') }}（{{
+                      prjChecked.size
+                    }}）
+                  </button>
+                  <button
+                    class="rounded px-2 py-1 text-[11px] text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)]"
+                    @click="exitPrjBatch"
+                  >
+                    {{ t('canvasPrjCancel') }}
+                  </button>
+                </template>
+              </div>
+            </div>
+            <div class="max-h-[360px] overflow-y-auto p-2 grid grid-cols-2 gap-2">
+              <div
                 v-for="pr in projectStore.projects"
                 :key="pr.id"
-                class="w-full text-left px-3 py-2 flex items-center gap-2 hover:bg-[var(--wb-accent)]/15 transition"
+                tabindex="0"
+                class="group relative rounded-lg border p-2 transition cursor-pointer focus:outline-none focus:border-[var(--wb-accent)]"
                 :class="
                   pr.id === projectStore.activeId
-                    ? 'text-[var(--wb-accent)]'
-                    : 'text-[var(--wb-text-1)]'
+                    ? 'border-[var(--wb-accent)] bg-[var(--wb-accent)]/10'
+                    : 'border-[var(--wb-stroke)] hover:border-[var(--wb-accent)]/60'
                 "
-                @click="openProjectById(pr.id)"
+                @click="prjBatchMode ? togglePrjCheck(pr.id) : openProjectById(pr.id)"
               >
-                <i
-                  class="fas text-xs w-4"
-                  :class="
-                    pr.id === projectStore.activeId ? 'fa-check' : 'fa-' + 'circle text-transparent'
-                  "
-                ></i>
-                <span class="flex-1 truncate text-sm">{{ pr.title }}</span>
-                <span class="text-[10px] text-[var(--wb-text-2)]">{{
-                  new Date(pr.updatedAt).toLocaleDateString()
-                }}</span>
-              </button>
+                <div v-if="prjBatchMode" class="absolute left-1.5 top-1.5 z-10">
+                  <input
+                    type="checkbox"
+                    class="size-3.5 accent-[var(--wb-accent)]"
+                    :checked="prjChecked.has(pr.id)"
+                    @click.stop="togglePrjCheck(pr.id)"
+                  />
+                </div>
+                <div class="flex items-center gap-1 min-w-0" :class="prjBatchMode ? 'pl-5' : ''">
+                  <i
+                    class="fas fa-layer-group text-[10px] shrink-0"
+                    :class="
+                      pr.id === projectStore.activeId
+                        ? 'text-[var(--wb-accent)]'
+                        : 'text-[var(--wb-text-3)]'
+                    "
+                  ></i>
+                  <input
+                    v-if="prjRenameId === pr.id"
+                    ref="prjRenameInput"
+                    :value="pr.title"
+                    class="bg-transparent outline-none text-xs font-medium text-[var(--wb-text-1)] w-full min-w-0 border-b border-[var(--wb-accent)]"
+                    @click.stop
+                    @mousedown.stop
+                    @blur="commitPrjRename"
+                    @keydown.enter.prevent="commitPrjRename"
+                    @keydown.esc.stop.prevent="prjRenameId = null"
+                  />
+                  <span v-else class="truncate text-xs font-medium text-[var(--wb-text-1)]">{{
+                    pr.title
+                  }}</span>
+                </div>
+                <div
+                  class="mt-1.5 flex items-center gap-2 text-[10px] text-[var(--wb-text-3)]"
+                  :class="prjBatchMode ? 'pl-5' : ''"
+                >
+                  <span
+                    ><i class="fas fa-shapes mr-0.5"></i
+                    >{{ t('canvasPrjObjects').replace('{n}', String(prjStats(pr).objects)) }}</span
+                  >
+                  <span
+                    ><i class="fas fa-link mr-0.5"></i
+                    >{{ t('canvasPrjLinks').replace('{n}', String(prjStats(pr).links)) }}</span
+                  >
+                </div>
+                <div
+                  class="mt-0.5 text-[10px] text-[var(--wb-text-3)]"
+                  :class="prjBatchMode ? 'pl-5' : ''"
+                >
+                  {{ prjRelTime(pr) }}
+                </div>
+                <div
+                  v-if="!prjBatchMode"
+                  class="absolute right-1 top-1 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                >
+                  <button
+                    class="grid size-5 place-items-center rounded text-[9px] text-[var(--wb-text-2)] hover:bg-[var(--wb-accent)]/20 hover:text-[var(--wb-accent)]"
+                    :title="t('canvasPrjRename')"
+                    @click.stop="startPrjRename(pr.id)"
+                  >
+                    <i class="fas fa-pen"></i>
+                  </button>
+                  <button
+                    class="grid size-5 place-items-center rounded text-[9px] text-[var(--wb-text-2)] hover:bg-[var(--wb-accent)]/20 hover:text-[var(--wb-accent)]"
+                    :title="t('canvasPrjExport')"
+                    @click.stop="exportProjectById(pr.id)"
+                  >
+                    <i class="fas fa-file-export"></i>
+                  </button>
+                  <button
+                    class="grid size-5 place-items-center rounded text-[9px] text-[var(--wb-text-2)] hover:bg-red-400/20 hover:text-red-400"
+                    :title="t('canvasProjectDelete')"
+                    @click.stop="deleteProjectById(pr.id)"
+                  >
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </div>
             </div>
             <div class="border-t border-[var(--wb-stroke)]">
               <button
@@ -299,12 +401,6 @@
                 @click="createNewProject"
               >
                 <i class="fas fa-plus w-4"></i>{{ t('canvasProjectNew') }}
-              </button>
-              <button
-                class="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-red-400/10 flex items-center gap-2"
-                @click="deleteActiveProject"
-              >
-                <i class="fas fa-trash w-4"></i>{{ t('canvasProjectDelete') }}
               </button>
             </div>
           </div>
@@ -1496,6 +1592,7 @@ import {
   deleteProject as psDeleteProject,
   switchProject as psSwitchProject,
   updateProjectDoc as psUpdateProjectDoc,
+  projectCardStats,
 } from './projectStore'
 import {
   builtinLibrary,
@@ -1605,6 +1702,110 @@ function renameActiveProject(title) {
   Object.assign(projectStore, psRenameProject({ ...projectStore }, projectStore.activeId, title))
   persistProjects()
 }
+// —— E4 项目卡：统计/相对时间/内联重命名/单删/导出/批量删除 ——
+const prjBatchMode = ref(false)
+const prjChecked = reactive(new Set())
+const prjRenameId = ref(null)
+const prjRenameInput = ref(null)
+function prjStats(pr) {
+  return projectCardStats(pr)
+}
+function prjRelTime(pr) {
+  const st = prjStats(pr)
+  const key =
+    st.rel === 'justNow'
+      ? 'canvasPrjJustNow'
+      : st.rel === 'minutesAgo'
+        ? 'canvasPrjMinutesAgo'
+        : st.rel === 'hoursAgo'
+          ? 'canvasPrjHoursAgo'
+          : 'canvasPrjDaysAgo'
+  return t(key).replace('{n}', String(st.relValue))
+}
+function togglePrjCheck(id) {
+  if (prjChecked.has(id)) prjChecked.delete(id)
+  else prjChecked.add(id)
+}
+function startPrjRename(id) {
+  prjRenameId.value = id
+  nextTick(() => {
+    const el = Array.isArray(prjRenameInput.value) ? prjRenameInput.value[0] : prjRenameInput.value
+    el?.focus?.()
+    el?.select?.()
+  })
+}
+function commitPrjRename(e) {
+  const title = String(e.target.value || '').trim()
+  const id = prjRenameId.value
+  prjRenameId.value = null
+  if (!id || !title) return
+  Object.assign(projectStore, psRenameProject({ ...projectStore }, id, title))
+  persistProjects()
+}
+/** E4：单项目导出（复用当前导出管线） */
+function exportProjectById(id) {
+  syncActiveDocToStore()
+  const clone = psCloneProject({ ...projectStore }, id)
+  if (!clone) return
+  const { payload, files } = buildExportPayload([clone])
+  packExportZip(payload, files).then((blob) => {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const pr = projectStore.projects.find((p) => p.id === id)
+    a.download = `${(pr?.title || 'canvas').replace(/[\\/:*?"<>|]/g, '_')}.artify-canvas.zip`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 5000)
+    message.success(t('canvasExported'))
+  })
+}
+/** E4：卡片单删（含当前项目时切走并重载） */
+function deleteProjectById(id) {
+  const pr = projectStore.projects.find((p) => p.id === id)
+  if (!pr) return
+  Modal.confirm({
+    title: t('canvasProjectDeleteTitle'),
+    content: t('canvasProjectDeleteConfirm').replace('{n}', pr.title),
+    okText: t('canvasProjectDeleteOk'),
+    cancelText: t('cancel'),
+    okButtonProps: { danger: true },
+    onOk: () => {
+      Object.assign(projectStore, psDeleteProject({ ...projectStore }, id))
+      if (projectStore.activeId !== activeProject.value?.id) loadProjectIntoCanvas()
+      persistProjects()
+    },
+  })
+}
+/** E4：批量删除（勾选集；当前项目被删则切默认并重载） */
+function exitPrjBatch() {
+  prjBatchMode.value = false
+  prjChecked.clear()
+}
+function deleteCheckedProjects() {
+  const ids = Array.from(prjChecked)
+  if (!ids.length) return
+  Modal.confirm({
+    title: t('canvasPrjBatchDel'),
+    content: `${ids.length} → ${ids
+      .slice(0, 5)
+      .map((i) => projectStore.projects.find((p) => p.id === i)?.title || i)
+      .join('、')}${ids.length > 5 ? '…' : ''}`,
+    okText: t('canvasProjectDeleteOk'),
+    cancelText: t('cancel'),
+    okButtonProps: { danger: true },
+    onOk: () => {
+      let store = { ...projectStore }
+      for (const id of ids) store = psDeleteProject(store, id)
+      Object.assign(projectStore, store)
+      if (!projectStore.projects.some((p) => p.id === activeProject.value?.id))
+        loadProjectIntoCanvas()
+      persistProjects()
+      prjChecked.clear()
+      prjBatchMode.value = false
+    },
+  })
+}
+
 function deleteActiveProject() {
   const cur = activeProject.value
   if (!cur) return
@@ -2513,17 +2714,6 @@ function guideConfig(v, axis) {
         dash: [4, 4],
         listening: false,
       }
-}
-
-// —— 视口变换：stage 容器上平移由 draggable 提供（Konva 拖 stage 改 x/y），
-// 这里在 stage dragmove 中同步到 viewport ——
-function syncFromStage() {
-  const st = stageEl.value?.getStage?.()
-  if (!st) return
-  // stage 自身位移即 viewport 平移（scale 由 wheel 改）
-  if (drag.mode === null) {
-    viewport.value = { scale: viewport.value.scale, x: st.x(), y: st.y() }
-  }
 }
 
 function onWheel(e) {
