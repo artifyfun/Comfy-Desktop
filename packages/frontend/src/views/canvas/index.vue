@@ -1188,12 +1188,28 @@
           ></button>
         </div>
 
+        <!-- E3 编辑态提及高亮：textarea 底下的 mirror 层（@[名]{id} 染 chip 色） -->
+        <div
+          v-if="noteEditPos"
+          class="note-editor note-editor-mirror absolute z-[19] overflow-hidden rounded-lg border-2 border-transparent pointer-events-none whitespace-pre-wrap break-words"
+          :style="noteEditPos"
+          aria-hidden="true"
+        >
+          <template v-for="(seg, i) in noteMentionSegments" :key="i">
+            <span
+              v-if="seg.mark"
+              class="rounded bg-[var(--wb-accent)]/25 text-[var(--wb-accent)]"
+              >{{ seg.raw }}</span
+            >
+            <span v-else>{{ seg.text }}</span>
+          </template>
+        </div>
         <!-- note 就地编辑：同位置 HTML textarea 接管（Konva v-text 不可编辑） -->
         <textarea
           v-if="noteEditPos"
           ref="noteEditArea"
           v-model="noteEdit.text"
-          class="note-editor absolute z-20 resize-none rounded-lg border-2 border-[var(--wb-accent)] outline-none"
+          class="note-editor absolute z-20 resize-none rounded-lg border-2 border-[var(--wb-accent)] bg-transparent outline-none"
           :style="noteEditPos"
           :placeholder="t('canvasNoteEditPh')"
           @mousedown.stop
@@ -1464,6 +1480,7 @@ import {
   objectsInFrame,
   gridLayout,
   subtreeOf,
+  stripMentionMarks,
 } from './engine'
 
 const { t } = useI18n()
@@ -2163,7 +2180,8 @@ function noteRectConfig(o) {
 }
 function noteTextConfig(o) {
   return {
-    text: o.text || '',
+    // E3：显示态净化 @ 提及标记（@[名]{id} → @名）
+    text: stripMentionMarks(o.text || ''),
     width: o.width,
     height: o.height,
     padding: 10,
@@ -2178,6 +2196,21 @@ function noteTextConfig(o) {
 // Konva 的 v-text 不可编辑，故用同位置的 HTML textarea 覆盖接管（视口变化自动跟随）
 const noteEdit = reactive({ id: null, text: '', skipCommit: false })
 const noteEditArea = ref(null)
+/** E3：编辑态文本按 @ 标记分段（mark 段渲染为 chip 样式） */
+const noteMentionSegments = computed(() => {
+  const text = noteEdit.text || ''
+  const segs = []
+  const re = /@\[([^\]]*)\]\{([^}]+)\}/g
+  let last = 0
+  let m
+  while ((m = re.exec(text))) {
+    if (m.index > last) segs.push({ text: text.slice(last, m.index) })
+    segs.push({ mark: true, label: m[1] || m[2], raw: m[0] })
+    last = m.index + m[0].length
+  }
+  if (last < text.length) segs.push({ text: text.slice(last) })
+  return segs
+})
 const noteEditPos = computed(() => {
   const o = objects.value.find((x) => x.id === noteEdit.id && x.type === 'note')
   if (!o) return null
@@ -6432,6 +6465,12 @@ onBeforeUnmount(() => {
 }
 .note-editor::placeholder {
   color: rgba(226, 232, 240, 0.45);
+}
+/* E3 提及高亮 mirror：与 textarea 同排版参数（padding/行高/字号由 inline
+   style 带出），承担底色；textarea 背景透明只显光标与选区 */
+.note-editor-mirror {
+  background: #475569;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 /* frame 名称重命名框：不透明底遮住下方 Konva 标签，Enter/blur 提交、Esc 取消 */
 .frame-editor {

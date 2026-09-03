@@ -36,6 +36,7 @@ import {
   maskPaintBounds,
   buildInpaintMask,
   maskCanvasPoint,
+  stripMentionMarks,
 } from './engine'
 
 describe('canvas engine: viewport', () => {
@@ -381,5 +382,21 @@ describe('clampBrushSize（D1a）', () => {
     expect(clampBrushSize(999)).toBe(160)
     expect(clampBrushSize(7)).toBe(8)
     expect(clampBrushSize(101)).toBe(102)
+  })
+})
+
+describe('stripMentionMarks（E3 便签提及显示净化）', () => {
+  it('把 @[label]{id} 净化为 @label', () => {
+    expect(stripMentionMarks('看下 @[图片 main]{img_main} 的风格')).toBe('看下 @图片 main 的风格')
+  })
+  it('多标记与普通 @ 共存', () => {
+    expect(stripMentionMarks('@[a]{x} 和 @[b]{y}，普通 @ 用户')).toBe('@a 和 @b，普通 @ 用户')
+  })
+  it('未闭合的手输标记保持原样', () => {
+    expect(stripMentionMarks('草稿 @[未闭合')).toBe('草稿 @[未闭合')
+  })
+  it('空值安全', () => {
+    expect(stripMentionMarks(undefined)).toBe('')
+    expect(stripMentionMarks(null)).toBe('')
   })
 })

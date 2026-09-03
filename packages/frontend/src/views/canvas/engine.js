@@ -521,3 +521,12 @@ export function maskPaintBounds(selectionCanvas, step = 4) {
   if (minX === Infinity) return null
   return { x: minX, y: minY, width: maxX - minX + step, height: maxY - minY + step }
 }
+
+/**
+ * 便签显示态净化：把 D1d 的 @ 提及标记 `@[label]{id}` 渲染为 `@label`
+ *（编辑态仍存完整标记，collectUpstream 按标记取 id 喂上游）。
+ * 非标记文本原样保留；未闭合的部分标记（手输一半）不动。
+ */
+export function stripMentionMarks(text) {
+  return String(text ?? '').replace(/@\[([^\]]*)\]\{([^}]+)\}/g, '@$1')
+}
