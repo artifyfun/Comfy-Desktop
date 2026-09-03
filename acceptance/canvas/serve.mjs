@@ -1,13 +1,11 @@
-// Batch 验收用静态服务器：托管前端构建产物 + SPA fallback + stub 注入
+// Canvas 验收用静态服务器：托管前端构建产物 + SPA fallback + stub 注入（localStorage seed）
 // 用法：node serve.mjs <port>   （须先构建前端：pnpm run build:frontend）
-// 产物位置：build:frontend 输出到 <repo>/src/main/artifylab/public/frontend（Electron 主进程 public，
-// 随 app.asar 打包；packages/frontend/dist/frontend 是 build:app 的旧路径，不再被 build:frontend 更新）
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { extname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// 本目录固定为 <repo>/acceptance/batch-queue/，产物在 <repo>/src/main/artifylab/public/frontend/
+// 本目录固定为 <repo>/acceptance/canvas/，产物在 <repo>/src/main/artifylab/public/frontend/
 const ROOT = fileURLToPath(new URL('../../src/main/artifylab/public/frontend/', import.meta.url))
 const STUB = fileURLToPath(new URL('./stub.js', import.meta.url))
 const port = Number(process.argv[2] || 5174)
@@ -27,7 +25,7 @@ const MIME = {
 
 // 普通 script（非 module）在解析到 </body> 前同步执行，早于 head 中 defer 的
 // module 入口，可保证 app boot 的 fetch 已被 stub 拦截。
-const STUB_TAG = '<script src="/__batch_stub.js"></script>'
+const STUB_TAG = '<script src="/__canvas_stub.js"></script>'
 
 async function serveStub(res) {
   try {
@@ -57,7 +55,7 @@ async function serveHtml(res) {
 createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`)
   const pathname = decodeURIComponent(url.pathname)
-  if (pathname === '/__batch_stub.js') return serveStub(res)
+  if (pathname === '/__canvas_stub.js') return serveStub(res)
 
   let p = pathname
   if (p === '/') p = '/index.html'
