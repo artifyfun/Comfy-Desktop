@@ -28,7 +28,8 @@ export default defineConfig([
       '.worktrees/**',
       '.pnpm-store/**',
       'electron.vite.config.*.mjs',
-      'packages/comfyui-desktop-bridge-types/*.d.ts'
+      'packages/comfyui-desktop-bridge-types/*.d.ts',
+      'acceptance/**'
     ]
   },
   {
