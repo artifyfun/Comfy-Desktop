@@ -52,23 +52,76 @@
   }
 
   // ============ 内存 sessions store ============
-  let sessions = [
-    {
-      id: 's-seed-1',
-      title: '验收会话',
-      archived: false,
-      createdAt: Date.now() - 3600e3,
-      updatedAt: Date.now() - 60e3,
-      threadId: 't-seed-1',
-    },
-  ]
-  let nextId = 2
+  // W6 历史回放:session.messages 存用户消息(对齐真实后端 decide() 落 legacy
+  // session.messages),reload 后由 localStorage 恢复,selectSession →
+  // loadHistoryIntoPage 才能归并出用户气泡,而不是 agent 独白。
+  const PERSIST_KEY = 'wb-stub-persist-v2'
+  function loadPersisted() {
+    try {
+      const raw = localStorage.getItem(PERSIST_KEY)
+      if (!raw) return null
+      const st = JSON.parse(raw)
+      if (!st || st.v !== 2) return null
+      return st
+    } catch { return null }
+  }
+  function persist() {
+    try {
+      localStorage.setItem(
+        PERSIST_KEY,
+        JSON.stringify({
+          v: 2,
+          sessions,
+          nextId,
+          history: [...eventsHistory.entries()],
+        }),
+      )
+    } catch { /* storage 满/禁用时降级为纯内存,验收不影响 */ }
+  }
+  const restored = loadPersisted()
+  let sessions = restored
+    ? restored.sessions
+    : [
+        {
+          id: 's-seed-1',
+          title: '验收会话',
+          archived: false,
+          createdAt: Date.now() - 3600e3,
+          updatedAt: Date.now() - 60e3,
+          threadId: 't-seed-1',
+          messages: [
+            {
+              role: 'user',
+              kind: 'chat',
+              text: '回放测试：规划任务并生成产物',
+              createdAt: Date.now() - 30e3,
+            },
+          ],
+        },
+      ]
+  let nextId = restored ? restored.nextId : 2
 
   // ============ Per-thread 流控制（持续可推帧的 SSE）============
-  // threads: threadId → { controller, encoder, queue, flushing, closed, doneEnqueued, intervalMs }
+  // threads: threadId → { controller, encoder, queue, flushing, closed, doneEnqueued, intervalMs,
+  //                       runId, seq, truncateAfterFlush }
   const threads = new Map()
   // approvals: requestId → { threadId, toolName }
   const pendingApprovals = new Map()
+  // eventsHistory: threadId → [{seq, runId, eventType, content}] 真实 AG-UI 事件回放源
+  // （实时流推送时同步入库,historyReassembler.replayToMessages 用同一套 handlers 重放）
+  const eventsHistory = new Map(restored ? restored.history : [])
+
+  function recordEvent(threadId, seq, ev, runId) {
+    let arr = eventsHistory.get(threadId)
+    if (!arr) { arr = []; eventsHistory.set(threadId, arr) }
+    arr.push({
+      seq,
+      runId: runId || '',
+      eventType: ev.type,
+      content: JSON.stringify(ev),
+    })
+    persist()
+  }
 
   function encodeFrame(ev) {
     return 'data: ' + JSON.stringify(ev) + '\n\n'
@@ -77,29 +130,35 @@
   function pushFrame(threadId, ev) {
     const t = threads.get(threadId)
     if (!t || t.closed) return
+    if (ev.type === 'RUN_STARTED') t.runId = ev.runId
+    const recRunId = ev.runId || t.runId || ''
+    t.seq = (t.seq || 0) + 1
     t.queue.push(ev)
+    recordEvent(threadId, t.seq, ev, recRunId)
     flushThread(threadId)
   }
 
   function flushThread(threadId) {
     const t = threads.get(threadId)
     if (!t || t.flushing || t.closed) return
-    if (t.queue.length === 0) {
-      t.flushing = false
-      // 队列空 + 已发过 RUN_FINISHED 才关闭（避免 RUN_FINISHED 之后还有待发帧）
-      if (t.doneEnqueued) {
-        try { t.controller.close() } catch { /* ignore */ }
-        t.closed = true
-        threads.delete(threadId)
+if (t.queue.length === 0) {
+        t.flushing = false
+        // doneEnqueued(RUN_FINISHED 收到) 或 truncateAfterFlush(W7 断流场景) 才关
+        if (t.doneEnqueued || t.truncateAfterFlush) {
+          try { t.controller.close() } catch { /* ignore */ }
+          t.closed = true
+          threads.delete(threadId)
+        }
+        return
       }
-      return
-    }
     t.flushing = true
     const tick = () => {
       if (t.closed) { t.flushing = false; return }
       if (t.queue.length === 0) {
         t.flushing = false
-        if (t.doneEnqueued) {
+        // W7:truncateAfterFlush(断流场景无 RUN_FINISHED)同样要在队列空后关流——
+        // 否则前端 readAguiStream 永远等 EOF,workbenchStreamInterrupted 永不触发
+        if (t.doneEnqueued || t.truncateAfterFlush) {
           try { t.controller.close() } catch { /* ignore */ }
           t.closed = true
           threads.delete(threadId)
@@ -133,6 +192,9 @@
           flushing: false,
           closed: false,
           doneEnqueued: false,
+          truncateAfterFlush: false,
+          runId: null,
+          seq: 0,
           intervalMs: intervalMs || INTERVAL_MS,
         })
         // 启动 flush 循环（无帧时 flush 立刻返回）
@@ -184,6 +246,14 @@
     const withTodos = /规划|任务|验收|todo/i.test(s)
     const withReasoning = /思考|推理|reasoning|thinking/i.test(s)
     const withApproval = /审批|执行|approval/i.test(s)
+    // W4 产物卡（输入含产物/artifacts/生成图）
+    const withArtifacts = /产物|artifacts|生成图/i.test(s)
+    // W5 错误气泡（输入含错误/wb_error/fail）
+    const withError = /错误|wb_error|fail|出错/i.test(s)
+    // W7 截断回归（输入含断流/truncate）—— 故意不发 RUN_FINISHED,走 workbenchStreamInterrupted 路径
+    const withTruncate = /断流|truncate/i.test(s)
+    // W8 approval edit 参数（输入含修改参数/edit args）—— 携带可编辑参数,interaction-response action='edit' 时回写
+    const withEditArgs = /修改参数|edit args/i.test(s)
 
     const mid = 'm-' + Math.random().toString(36).slice(2, 8)
     const rid = 'r-' + Math.random().toString(36).slice(2, 8)
@@ -224,9 +294,17 @@
     }
 
     // 5) B1 approval：发出 tool_approval_required;RUN_FINISHED 推迟到 interaction-response 之后
-    if (withApproval) {
+    if (withApproval || withEditArgs) {
       const requestId = 'req-' + Math.random().toString(36).slice(2, 8)
-      pendingApprovals.set(requestId, { threadId, runId, toolName: 'wb_execute_template' })
+      const args = withEditArgs
+        ? { templateId: 'portrait_lora', count: 4, seed: 42, customParam: '可编辑' }
+        : { templateId: 'portrait_lora', count: 1 }
+      pendingApprovals.set(requestId, {
+        threadId,
+        runId,
+        toolName: 'wb_execute_template',
+        args,
+      })
       pushFrame(
         threadId,
         frameCustom('tool_approval_required', {
@@ -235,14 +313,49 @@
           toolName: 'wb_execute_template',
           toolTier: 'execution',
           risk: 'write+side-effect',
-          arguments: { templateId: 'portrait_lora', count: 1 },
+          args, // C15 契约:卡片读 value.args(后端 toolApprovalRequiredValue 同形)
         }),
       )
       // 不在此处推 RUN_FINISHED；interaction-response 触发 resolved 后再推收尾
       return
     }
 
-    // 6) 收尾 RUN_FINISHED
+    // 6a) W4 wb_artifact 产物卡:CUSTOM wb_artifact{outputFiles} → applyExecutionSideEffect 'artifact' 渲染缩略图
+    if (withArtifacts) {
+      const files = [
+        { filename: 'w4-result-1.png', subfolder: 'w4', type: 'output' },
+        { filename: 'w4-result-2.png', subfolder: 'w4', type: 'output' },
+      ]
+      pushFrame(
+        threadId,
+        frameCustom('wb_artifact', {
+          promptId: 'p-' + Math.random().toString(36).slice(2, 8),
+          name: 'portrait_lora',
+          outputs: files.map((f) => f.filename),
+          outputFiles: files,
+        }),
+      )
+    }
+
+    // 6b) W5 wb_error 错误气泡:CUSTOM wb_error → applyCustom 'wb_error' 推 kind:'error'
+    if (withError) {
+      pushFrame(
+        threadId,
+        frameCustom('wb_error', {
+          itemId: 'e-' + Math.random().toString(36).slice(2, 8),
+          message: '执行失败：模型推理超时（stub 演示）',
+        }),
+      )
+    }
+
+    // 7) W7 截断回归:不推 RUN_FINISHED,帧队列清空后 close → 前端 finally 推 workbenchStreamInterrupted
+    if (withTruncate) {
+      const t = threads.get(threadId)
+      if (t) t.truncateAfterFlush = true
+      return
+    }
+
+    // 8) 收尾 RUN_FINISHED
     pushFrame(threadId, frameRunFinished(threadId, runId))
   }
 
@@ -281,25 +394,30 @@
         createdAt: Date.now(),
         updatedAt: Date.now(),
         threadId: body.threadId || ('t-' + Date.now()),
+        messages: [],
       }
       sessions.unshift(s)
+      persist()
       return jsonResp(s)
     }
     if (route === 'POST /api/workbench/sessions/update') {
       const body = init?.body ? JSON.parse(init.body) : {}
       const idx = sessions.findIndex((s) => s.id === body.id)
       if (idx >= 0) Object.assign(sessions[idx], body, { updatedAt: Date.now() })
+      persist()
       return jsonResp({ ok: true })
     }
     if (route === 'POST /api/workbench/sessions/delete') {
       const body = init?.body ? JSON.parse(init.body) : {}
       sessions = sessions.filter((s) => s.id !== body.id)
+      persist()
       return jsonResp({ ok: true })
     }
     if (m === 'GET' && p.startsWith('/api/workbench/session/')) {
       const id = p.replace('/api/workbench/session/', '')
       const s = sessions.find((x) => x.id === id)
-      return jsonResp(s || {})
+      // OkEnvelope:selectSession 读 json.success + json.data(index.vue:1396-1402)
+      return jsonResp(s ? { success: true, data: s } : { success: false })
     }
     if (route === 'GET /api/workbench/presets') return listResp([])
     if (route === 'GET /api/workbench/skills') return listResp([])
@@ -316,6 +434,19 @@
         reasoningEffort: body.reasoningEffort,
         inputPreview: String(body.input || '').slice(0, 60),
       })
+      // W6:用户消息落 legacy session.messages(真实后端 decide() 同语义)——
+      // loadHistoryIntoPage 靠它把用户气泡按 createdAt 归并回放
+      const s = sessions.find((x) => x.id === threadId)
+      if (s) {
+        s.messages = s.messages || []
+        s.messages.push({
+          role: 'user',
+          kind: 'chat',
+          text: String(body.input || ''),
+          createdAt: Date.now(),
+        })
+        persist()
+      }
       const stream = makeStream(threadId, INTERVAL_MS)
       // 同步起脚本：先把事件塞入队列,再让 flush 循环消费
       script(threadId, runId, body.input)
@@ -332,9 +463,16 @@
     if (route === 'POST /api/workbench/agent/interaction-response') {
       const body = init?.body ? JSON.parse(init.body) : {}
       const pending = pendingApprovals.get(body.requestId)
-      console.log('[workbench-stub] interaction-response', body)
+      // W8 edit args：原始 args 与前端传入的 args 一起打日志,便于 agent-browser eval 对比透传
+      console.log('[workbench-stub] interaction-response', {
+        requestId: body.requestId,
+        action: body.action,
+        echoArgs: body.args || null,
+        originalArgs: pending ? pending.args : null,
+      })
       if (pending) {
         pendingApprovals.delete(body.requestId)
+        // approve/edit 都是放行语义（aguiBridge.js L695）;只有 reject 才不算 approved
         const approved = body.action === 'approve' || body.action === 'edit'
         pushFrame(
           pending.threadId,
@@ -343,6 +481,8 @@
             threadId: pending.threadId,
             toolName: pending.toolName,
             approved,
+            finalAction: body.action,
+            finalArgs: body.action === 'edit' ? body.args || null : null,
           }),
         )
         // 审批解决后追加一段简短结果文本 + RUN_FINISHED 收尾
@@ -352,7 +492,11 @@
           pending.threadId,
           frameTextContent(
             mid,
-            approved ? '已审批通过,继续执行。' : '已拒绝,本轮终止。',
+            approved
+              ? body.action === 'edit'
+                ? '参数已编辑，按新参数放行。'
+                : '已审批通过,继续执行。'
+              : '已拒绝,本轮终止。',
           ),
         )
         pushFrame(pending.threadId, frameTextEnd(mid))
@@ -362,7 +506,21 @@
     }
 
     if (route === 'POST /api/workbench/agent/cancel') return jsonResp({ ok: true })
-    if (route === 'POST /api/workbench/agent/threads/messages') return jsonResp({ data: { records: [] } })
+    if (route === 'POST /api/workbench/agent/threads/messages') {
+      // W6 历史回放:实时流推送时同步入 eventsHistory,直接返回该 threadId 的所有 records
+      const body = init?.body ? JSON.parse(init.body) : {}
+      const arr = eventsHistory.get(body.threadId) || []
+      return jsonResp({ data: { records: arr } })
+    }
+
+    // /view?filename=...&subfolder=...&type=... —— W4 产物缩略图占位图（1x1 PNG）
+    // 真实后端经 routes/proxy.ts 转发到 ComfyUI /view;stub 返一张最小 PNG 防 404 噪声
+    if (route === 'GET /view') {
+      const png = Uint8Array.from(atob(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+      ), (c) => c.charCodeAt(0))
+      return new Response(png, { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=300' } })
+    }
 
     console.warn('[workbench-stub] unmocked', route)
     return origFetch(input, init)
@@ -373,6 +531,7 @@
     get sessions() { return sessions },
     get pendingApprovals() { return pendingApprovals },
     get threads() { return threads },
+    get eventsHistory() { return eventsHistory },
     // 验收用：捕获 stub 内 console.log + warn 文本,前端 eval 可读
     get logs() { return window.__stubLogs || (window.__stubLogs = []) },
     clearLogs() { if (window.__stubLogs) window.__stubLogs.splice(0) },
