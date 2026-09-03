@@ -3546,7 +3546,6 @@ async function rotateImageNode(id, deg) {
     if (!blob) return
     const url = URL.createObjectURL(blob)
     beforeChange()
-    const ratio = o.width / o.height
     const nsz = rotatedSize(o.width, o.height, d * 90)
     o.src = url
     o.width = nsz.w
@@ -4140,17 +4139,7 @@ async function submitMaskDialog() {
   message.success(t('canvasAiQueued'))
 }
 
-const inpaintMask = ref(null) // {objId, points:[]} 简化：暂以选区矩形为蒙版
-function startInpaint(objId) {
-  const o = objects.value.find((x) => x.id === objId)
-  if (!o) return
-  lastSourceIds = [objId]
-  emitPrompt(t('canvasInpaintPrompt'), {
-    autoSend: true,
-    attachments: [refOf(objId)].filter(Boolean),
-  })
-  message.info(t('canvasAiQueued'))
-}
+// （D1a 起局部重绘改走 openMaskDialog 蒙版编辑器，旧的直发工作台路径已删）
 function startOutpaint(objId) {
   lastSourceIds = [objId]
   emitPrompt(t('canvasOutpaintPrompt'), {
@@ -5174,6 +5163,32 @@ const canvasDigest = computed(() => {
     appNodes: apps, // P3：AI 感知画布上的 app 节点（id/名称/状态/参数摘要）
     queue: { running: apps.filter((a) => a.status === 'running').length, pending: 0 },
     ts: Date.now(),
+    // D2：A 画布标记 + 全量物件可寻址清单（wb_canvas_ops 寻址：真实物件 id）
+    surface: 'a-canvas',
+    links: links.value.length,
+    objects: objects.value.map((o) => {
+      let label = o.name || o.type
+      if (o.type === 'image') {
+        // /view 引用取 filename；blob:/data: 无可读名 → 「图片 #id尾」
+        label = o.name || ''
+        if (!label && o.src && o.src.startsWith('http')) {
+          try {
+            const u = new URL(o.src)
+            label =
+              u.searchParams.get('filename') ||
+              decodeURIComponent(u.pathname.split('/').pop() || '') ||
+              ''
+          } catch {
+            /* 异常 URL 保持空 */
+          }
+        }
+        if (!label) label = '图片 #' + String(o.id).slice(-4)
+      } else if (o.type === 'note') {
+        label = (o.text || '').replace(/\s+/g, ' ').slice(0, 24) || 'note'
+      }
+      const size = o.width && o.height ? `${o.width}×${o.height}` : undefined
+      return { id: o.id, kind: o.type, label: label.slice(0, 40), size }
+    }),
   }
 })
 watch(
@@ -5185,12 +5200,33 @@ watch(
     JSON.stringify(appNodesDigest(objects.value)),
   ],
   () => {
-    if (!wbOpen.value) return
+    // D2：digest 除总线推 UI 外，同步 POST 服务端 snapshot（AI 决策层
+    // fetchCanvasState 读 /api/canvas/state —— 不落服务端 AI 看不到 A 画布）
     const d = { ...canvasDigest.value, seq: ++canvasSeq }
     emitCanvasState(d)
+    pushDigestSnapshot(d)
   },
   { deep: false },
 )
+/** digest → 服务端（节流 2s；内容序列化一致时跳过；失败静默重试下轮） */
+let digestSnapLast = ''
+let digestSnapTimer = 0
+function pushDigestSnapshot(d) {
+  clearTimeout(digestSnapTimer)
+  digestSnapTimer = setTimeout(() => {
+    const json = JSON.stringify(d)
+    if (json === digestSnapLast) return
+    digestSnapLast = json
+    // A 画布页无注入桥全局：主窗 3008 同源代理 API server（ComfyUI iframe
+    // 侧才用 __ARTIFY_LAB_API__）；都取不到时放弃本轮（下轮重试）
+    const api = window.__ARTIFY_LAB_API__ || window.location.origin
+    void fetch(`${api}/api/canvas/snapshot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: json,
+    }).catch(() => {})
+  }, 2000)
+}
 
 // —— minimap：全景（物件 bbox ∪ 视口框，等比缩到 160x110 内）——
 const MINI_W = 160

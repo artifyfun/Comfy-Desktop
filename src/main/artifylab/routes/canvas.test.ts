@@ -104,6 +104,57 @@ describe('canvas routes', () => {
     }
   })
 
+  it('D2：A 画布 digest 的 appNodes/objects/surface/links 保留（canvasOps 寻址）', async () => {
+    const app = makeApp()
+    const s3 = http.createServer(app)
+    await new Promise<void>((resolve) => s3.listen(0, '127.0.0.1', resolve))
+    const base3 = `http://127.0.0.1:${(s3.address() as AddressInfo).port}`
+    try {
+      const res = await fetch(`${base3}/api/canvas/snapshot`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          seq: 7,
+          workflowName: 'A 画布',
+          nodeCount: 3,
+          models: [],
+          keyParams: {},
+          queue: { running: 0, pending: 0 },
+          ts: 1,
+          surface: 'a-canvas',
+          links: 2,
+          appNodes: [{ id: 'app1', name: '文生图', status: 'running' }],
+          objects: [
+            { id: 'img_main', kind: 'image', label: 'cat.png', size: '256×256' },
+            { id: 'note_main', kind: 'note', label: 'a cute cat' },
+            { id: 'bad', kind: '', label: '' }
+          ]
+        })
+      })
+      expect(res.status).toBe(200)
+      const st = await fetch(`${base3}/api/canvas/state`)
+      const stBody = (await st.json()) as {
+        ok: boolean
+        data: {
+          state: {
+            surface?: string
+            links?: number
+            appNodes?: Array<{ id: string; name: string }>
+            objects?: Array<{ id: string; kind: string; label: string }>
+          } | null
+        }
+      }
+      const stt = stBody.data.state
+      expect(stt?.surface).toBe('a-canvas')
+      expect(stt?.links).toBe(2)
+      expect(stt?.appNodes).toEqual([{ id: 'app1', name: '文生图', status: 'running' }])
+      expect(stt?.objects).toHaveLength(3) // 无 id 的脏行才被过滤；kind/label 空仍保留（宽松寻址）
+      expect(stt?.objects?.[0]).toMatchObject({ id: 'img_main', kind: 'image' })
+    } finally {
+      await new Promise<void>((resolve) => s3.close(() => resolve()))
+    }
+  })
+
   it('rejects missing body with 400', async () => {
     const res = await post('/api/canvas/snapshot', {})
     expect(res.status).toBe(400)

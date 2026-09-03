@@ -44,6 +44,14 @@ export interface CanvasDigest {
   ts: number
   /** 节点清单（id/type/标题，前 N 个；供服务端 PLAN 注入 agent 决策上下文） */
   nodes?: Array<{ id: number | string; type: string; title?: string }>
+  /** 来源面：'c-canvas'（ComfyUI 注入桥，默认）| 'a-canvas'（A 无限画布页） */
+  surface?: 'a-canvas' | 'c-canvas'
+  /** A 画布 app 节点台账（id/名称/状态/参数摘要；canvasOps 寻址用） */
+  appNodes?: Array<{ id: string; name: string; status?: string; params?: string }>
+  /** A 画布全量物件可寻址清单（图片/便签/frame/媒体；canvasOps 寻址用） */
+  objects?: Array<{ id: string; kind: string; label: string; size?: string }>
+  /** A 画布连线数（上下文提示用） */
+  links?: number
 }
 
 /** 进程内最新快照存储（单用户桌面应用，无需持久化；重启即失，桥会重报） */
@@ -154,7 +162,37 @@ export function createCanvasRouter(
               type: String(n.type),
               title: typeof n.title === 'string' ? n.title : undefined
             }))
-        : undefined
+        : undefined,
+      surface: body.surface === 'a-canvas' ? 'a-canvas' : 'c-canvas',
+      appNodes: Array.isArray(body.appNodes)
+        ? body.appNodes
+            .slice(0, 20)
+            .filter(
+              (a: unknown): a is { id: string; name: string; status?: string; params?: string } =>
+                !!a && typeof a === 'object' && typeof (a as { id?: unknown }).id === 'string'
+            )
+            .map((a) => ({
+              id: String(a.id),
+              name: String(a.name ?? ''),
+              status: typeof a.status === 'string' ? a.status : undefined,
+              params: typeof a.params === 'string' ? a.params : undefined
+            }))
+        : undefined,
+      objects: Array.isArray(body.objects)
+        ? body.objects
+            .slice(0, 60)
+            .filter(
+              (o: unknown): o is { id: string; kind: string; label: string; size?: string } =>
+                !!o && typeof o === 'object' && typeof (o as { id?: unknown }).id === 'string'
+            )
+            .map((o) => ({
+              id: String(o.id),
+              kind: String(o.kind ?? ''),
+              label: String(o.label ?? '').slice(0, 40),
+              size: typeof o.size === 'string' ? o.size : undefined
+            }))
+        : undefined,
+      links: typeof body.links === 'number' ? body.links : undefined
     }
     res.json(createSuccessResponse({ seq: store.latest.seq }))
   })

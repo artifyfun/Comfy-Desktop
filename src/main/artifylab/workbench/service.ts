@@ -1168,12 +1168,30 @@ class WorkbenchService {
               )
               .join('、')}`
           : ''
-        canvasSection = `\n## 画布当前状态（C 界面当前激活 tab；无则忽略）
+        // A 画布（无限画布页）digest：物件可寻址清单（canvasOps 寻址：图片/
+        // 便签/app 节点的真实 id），AI 据此产 select_nodes/connect_nodes 等指令
+        const aObjLine =
+          (
+            canvasState as {
+              objects?: Array<{ id: string; kind: string; label: string; size?: string }>
+            }
+          ).objects ?? []
+        const aObjectsLine = aObjLine.length
+          ? aObjLine
+              .slice(0, 30)
+              .map((o) => `${o.id}(${o.kind}${o.size ? ` ${o.size}` : ''}「${o.label}」)`)
+              .join('、')
+          : ''
+        const surface = (canvasState as { surface?: string }).surface
+        const aTag = surface === 'a-canvas' ? 'A 画布（无限画布）' : 'C 界面当前激活 tab'
+        canvasSection = `\n## 画布当前状态（${aTag}；无则忽略）
 工作流：${canvasState.workflowName} · 节点 ${canvasState.nodeCount} 个
 模型：${(canvasState.models ?? []).join('、') || '（无）'}
 关键参数：${renderKeyParams(canvasState.keyParams)}
 队列：running ${canvasState.queue?.running ?? 0} / pending ${canvasState.queue?.pending ?? 0}
-节点清单：${nodesLine || '（空画布）'}${appNodesLine ? `\n${appNodesLine}` : ''}
+节点清单：${nodesLine || '（空画布）'}${appNodesLine ? `\n${appNodesLine}` : ''}${
+          aObjectsLine ? `\nA 画布物件（canvasOps 可用 id 寻址）：${aObjectsLine}` : ''
+        }
 `
       }
     } catch (e) {

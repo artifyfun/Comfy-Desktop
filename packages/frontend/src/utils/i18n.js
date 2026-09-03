@@ -426,7 +426,6 @@ const translations = {
     canvasGenRefs: '参考图',
     canvasGenRun: '执行',
     canvasGenRunning: '执行中',
-    canvasInpaintPrompt: '对参考图做局部重绘：保持未蒙版区域不变，仅重绘主体区域',
     canvasOutpaintPrompt: '对参考图做扩图（outpaint）：向外扩展画面，保持风格与光照一致',
     canvasEnhancePrompt: '放大增强参考图（upscale 4x），锐化细节',
     canvasReversePrompt: '反推这张图的提示词，只输出可直接复用的英文 prompt',
@@ -1530,8 +1529,6 @@ const translations = {
     canvasGenRefs: 'Refs',
     canvasGenRun: 'Run',
     canvasGenRunning: 'Running',
-    canvasInpaintPrompt:
-      'Inpaint the reference: keep unmasked areas unchanged, redraw the subject region only',
     canvasOutpaintPrompt:
       'Outpaint the reference: extend the scene outward, keep style and lighting consistent',
     canvasEnhancePrompt: 'Upscale the reference image 4x with sharpened details',
