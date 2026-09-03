@@ -3177,10 +3177,17 @@ function onMouseUp() {
 }
 
 let dragRecorded = false // 本次拖拽是否已压历史栈
+let dragStartPos = null // 起拖快照（dragend 组联动增量基准；数据已实时写回，不能用拖后值）
 /** Ctrl/⌘/Alt+拖拽克隆手势：dragstart 时置位。记录被拖原件的 id、起拖坐标与克隆 id。
  *  视觉策略：克隆体先以同坐标落布（留在原地=原版），原 Konva 节点继续被拖走
  *  （=克隆体），dragend 时把数据身份与位置对齐（原版留起点、克隆归终点）。 */
 const dragClone = reactive({ armed: false, origId: null, cloneId: null, start: { x: 0, y: 0 } })
+/** dragstart 快照：记录起拖原位（Konva dragmove 首帧节点可能已大幅位移，
+ *  组联动增量必须以 dragstart 位置为基准） */
+function onNodeDragStartSnap(e) {
+  dragStartPos = { id: e.target.id(), x: e.target.x(), y: e.target.y() }
+}
+
 function onNodeDrag(e) {
   // 物件拖拽中的吸附（e 为 Konva 原生事件对象）
   const node = e.target
@@ -3191,6 +3198,10 @@ function onNodeDrag(e) {
   const idx = objects.value.findIndex((o) => o.id === node.id())
   if (idx < 0) return
   const o = objects.value[idx]
+  // 实时写回数据坐标：连线端点/句柄/锚点/HTML 浮层（工具栏、参考条）随拖
+  // 拽实时跟随，而非 dragend 才更新（原实现数据 lag 一拍）
+  o.x = node.x()
+  o.y = node.y()
   const others = objects.value.filter((_, i) => i !== idx)
   if (!others.length) return
   const moving = { x: node.x(), y: node.y(), width: o.width, height: o.height }
@@ -3200,19 +3211,23 @@ function onNodeDrag(e) {
   if (delta.dx || delta.dy) {
     node.x(node.x() + delta.dx)
     node.y(node.y() + delta.dy)
+    o.x = node.x()
+    o.y = node.y()
   }
 }
 
 function onNodeDragEnd(e) {
   dragRecorded = false
+  const startPos = dragStartPos
+  dragStartPos = null
   guides.v = []
   guides.h = []
   const o = objects.value.find((x) => x.id === e.target.id())
   if (o) {
-    // 组联动：以拖拽物数据旧值为基准算增量，同步同组成员（数据 + Konva 节点双写）
+    // 组联动：数据已实时写回，以起拖快照为基准算增量（否则恒 0，组联动失效）
     const g = groups.value.find((gr) => gr.members.includes(o.id))
-    const oldX = o.x
-    const oldY = o.y
+    const oldX = startPos?.id === o.id ? startPos.x : o.x
+    const oldY = startPos?.id === o.id ? startPos.y : o.y
     o.x = e.target.x()
     o.y = e.target.y()
     if (g) {
@@ -6563,6 +6578,7 @@ function bindNodeEvents() {
       }
     })
     // Ctrl/⌘/Alt+拖拽克隆：注册在 onNodeDragEnd 之后，保证 dragend 顺序 = 先同步数据再对齐克隆
+    g.on('dragstart.wb', onNodeDragStartSnap)
     g.on('dragstart.wb', onNodeCloneStart)
     g.on('dragend.wb', commitCloneDrag)
   })
