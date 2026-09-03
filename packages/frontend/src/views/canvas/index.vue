@@ -26,6 +26,21 @@
       >
         <!-- 网格背景（随视口平移/缩放，纯 CSS） -->
         <div class="absolute inset-0 pointer-events-none" :style="gridStyle"></div>
+        <!-- 图层面板（P1：画布右侧，参考 side-panel Canvas tab；宽 232px 可浮层收起） -->
+        <div
+          v-if="layersOpen"
+          class="absolute right-3 top-3 z-20 w-[232px] max-h-[calc(100%-24px)] rounded-xl border border-[var(--wb-stroke)] shadow-xl overflow-hidden"
+        >
+          <CanvasSidePanel
+            :objects="objects"
+            :selection="selection"
+            :groups="groups"
+            :hover-node-id="hoverNodeId"
+            @focus="focusObject"
+            @hover="(id) => (hoverFromPanel = id)"
+            @close="layersOpen = false"
+          />
+        </div>
         <v-stage
           ref="stageEl"
           :config="stageConfig"
@@ -1559,6 +1574,7 @@ import { message, Modal } from 'ant-design-vue'
 import Workbench from '../workbench/index.vue'
 import AppHeader from '../apps/components/AppHeader.vue'
 import AppNodeCard from './AppNodeCard.vue'
+import CanvasSidePanel from './CanvasSidePanel.vue'
 import MediaNodeCard from './MediaNodeCard.vue'
 import AppPickerModal from './AppPickerModal.vue'
 import {
@@ -1636,6 +1652,48 @@ import { buildExportPayload, packExportZip, parseImportZip, parseImportJson } fr
 import { importProject as psImportProject, cloneProject as psCloneProject } from './projectStore'
 const { onResult, emitAttachments, emitCanvasState, emitPrompt, onOps } = useCanvasMode()
 const wbOpen = ref(true) // 工作台侧边栏开合
+const layersOpen = ref(false) // 图层面板开合（P1：画布侧板）
+const hoverFromPanel = ref(null) // 面板悬停的物件 id（预留画布侧高亮联动）
+let layersFocusAnim = null // 图层定位的 rAF 句柄
+
+/** 图层树点击行：选中该物件并以 450ms easeOutCubic 动画居中（参考 focusNode） */
+function focusObject(id) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o) return
+  selection.value = [id]
+  selectedLinkId.value = null
+  if (ctxMenu.value) ctxMenu.value = null
+  const wx = o.x + o.width / 2
+  const wy = o.y + o.height / 2
+  const k = Math.min(
+    Math.max(Math.min((size.w * 0.6) / o.width, (size.h * 0.6) / o.height), 0.1),
+    1,
+  )
+  const target = {
+    x: size.w / 2 - wx * k,
+    y: size.h / 2 - wy * k,
+    scale: k,
+  }
+  if (layersFocusAnim) cancelAnimationFrame(layersFocusAnim)
+  const start = { ...viewport.value }
+  const duration = 450
+  const ease = (p) => 1 - Math.pow(1 - p, 3)
+  let t0 = null
+  const step = (now) => {
+    if (t0 === null) t0 = now
+    const p = Math.min((now - t0) / duration, 1)
+    const e = ease(p)
+    viewport.value = {
+      scale: start.scale + (target.scale - start.scale) * e,
+      x: start.x + (target.x - start.x) * e,
+      y: start.y + (target.y - start.y) * e,
+    }
+    applyViewport()
+    layersFocusAnim = p < 1 ? requestAnimationFrame(step) : null
+  }
+  layersFocusAnim = requestAnimationFrame(step)
+  saveSoon()
+}
 
 const STORAGE_KEY = 'artify.canvas.doc.v1'
 
@@ -3345,6 +3403,12 @@ const tools = computed(() => [
       const c = screenToWorld(viewport.value, size.w / 2, size.h / 2)
       addShotAt(c.x, c.y)
     },
+  },
+  {
+    icon: 'fas fa-table-cells-large',
+    title: t('canvasLayersBtn'),
+    action: () => (layersOpen.value = !layersOpen.value),
+    active: layersOpen.value,
   },
   {
     icon: 'fas fa-wand-magic-sparkles',
@@ -6630,6 +6694,7 @@ onMounted(() => {
   // 侧边栏工作台：产物生成 → 自动落画布（window 总线，见 canvasMode.js）
   const offResult = onResult(placeFiles)
   onBeforeUnmount(() => {
+    if (layersFocusAnim) cancelAnimationFrame(layersFocusAnim)
     offResult()
   })
 })
