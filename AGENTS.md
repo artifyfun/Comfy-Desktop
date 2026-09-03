@@ -6,6 +6,12 @@ This repository has a zero tolerance policy for flaky tests.
 - **Dev run output** (vite/electron stdout when run via `pnpm dev`): `D:\artifyfun\comfy-desktop-dev.log`.
 - When debugging a runtime error, read the tail of `app.log` first; per-install ComfyUI logs also land in `<installPath>/logs/comfyui.log` (see `src/main/lib/logRotation.ts`).
 
+## Pull request descriptions
+
+Every PR description must include a change breakdown that separates product code from test code. For each category, report its file count and paths, added lines, deleted lines, and share of total changed lines. Calculate total changed lines as added lines plus deleted lines. List documentation, configuration, generated files, lockfiles, and vendored code separately when present; do not count merge-only changes.
+
+Use this breakdown to make the implementation size clear when tests account for most of the diff. Summarize the feature behavior separately from the test coverage.
+
 ## ComfyUI-Manager is v4 (not the legacy v3 layout)
 
 Installs launched by this app run **Manager v4**: the `comfyui_manager` Python package inside the standalone env, enabled through ComfyUI's `--enable-manager` flag. Do not reason about Manager from the v3 codebase.
