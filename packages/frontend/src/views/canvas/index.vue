@@ -1679,7 +1679,7 @@ function syncActiveDocToStore() {
     projectStore,
     psUpdateProjectDoc(normalizeStore({ ...projectStore }), projectStore.activeId, {
       version: 2,
-      name: activeProject.value?.title || '未命名画布',
+      name: activeProject.value?.title || t('canvasUntitled'),
       viewport: { scale: viewport.value.scale, x: viewport.value.x, y: viewport.value.y },
       objects: objects.value.map((o) => ({ ...o })),
       links: links.value.map((l) => ({ ...l })),
@@ -2339,8 +2339,8 @@ function naturalOf(o) {
   return { ...o, naturalWidth: nw, naturalHeight: nh }
 }
 function layerRefresh() {
-  const layer = stageEl.value?.getStage?.()?.getLayers?.()[0]
-  if (layer) layer.batchDraw()
+  // 全层重绘：图片 onload 在节点层（第二层），只刷第一层会导致图片加载后不显示
+  stageEl.value?.getStage?.()?.batchDraw()
 }
 
 function groupConfig(o) {
@@ -2517,15 +2517,15 @@ const mentionCandidates = computed(() => {
         try {
           label = new URL(o.src).searchParams.get('filename') || '图片 ' + o.id.slice(-4)
         } catch {
-          label = '图片 ' + o.id.slice(-4)
+          label = t('canvasKindImage') + ' ' + o.id.slice(-4)
         }
-      } else label = '图片 ' + o.id.slice(-4)
+      } else label = t('canvasKindImage') + ' ' + o.id.slice(-4)
       kind = 'img'
     } else if (o.type === 'app') {
       label = o.name || o.appId || 'App'
       kind = 'app'
     } else if (o.type === 'note') {
-      label = (o.text || '').replace(/\s+/g, ' ').slice(0, 20) || '便签'
+      label = (o.text || '').replace(/\s+/g, ' ').slice(0, 20) || t('canvasKindNote')
       kind = 'note'
     } else continue
     if (q && !label.toLowerCase().includes(q)) continue
@@ -4250,11 +4250,14 @@ function applyPrompt(text) {
     }
   } else if (target?.kind === 'rewrite') {
     noteRewrite.instruction = noteRewrite.instruction ? noteRewrite.instruction + '；' + text : text
+  } else if (target?.kind === 'gen' && genNode.value) {
+    genNode.value.prompt = genNode.value.prompt ? genNode.value.prompt + '\n' + text : text
   }
   promptLib.open = false
 }
-/** 回填目标推导：改写输入条开着优先，否则选中的 note，否则悬停 note */
+/** 回填目标推导：生图对话框开着优先，其次改写输入条，再次选中/悬停的 note */
 const promptTarget = computed(() => {
+  if (genNode.value) return { kind: 'gen', id: null }
   if (noteRewrite.noteId) return { kind: 'rewrite', id: noteRewrite.noteId }
   const selNote = objects.value.find((o) => o.id === selection.value[0] && o.type === 'note')
   if (selNote) return { kind: 'note', id: selNote.id }
@@ -5775,17 +5778,32 @@ const miniView = computed(() => {
   }
 })
 function miniJump(e) {
-  const r = e.currentTarget.getBoundingClientRect()
+  const el = e.currentTarget
+  const r = el.getBoundingClientRect()
   // 小窗坐标 → 世界坐标 → 居中该点
-  const wx = mini.value.x0 + (e.clientX - r.left - MINI_PAD) / mini.value.s
-  const wy = mini.value.y0 + (e.clientY - r.top - MINI_PAD) / mini.value.s
-  viewport.value = {
-    scale: viewport.value.scale,
-    x: size.w / 2 - wx * viewport.value.scale,
-    y: size.h / 2 - wy * viewport.value.scale,
+  const moveTo = (cx, cy) => {
+    const wx = mini.value.x0 + (cx - r.left - MINI_PAD) / mini.value.s
+    const wy = mini.value.y0 + (cy - r.top - MINI_PAD) / mini.value.s
+    viewport.value = {
+      scale: viewport.value.scale,
+      x: size.w / 2 - wx * viewport.value.scale,
+      y: size.h / 2 - wy * viewport.value.scale,
+    }
+    applyViewport()
   }
-  applyViewport()
-  saveSoon()
+  moveTo(e.clientX, e.clientY)
+  // 拖动巡视：指针捕获后跟随 move，仅 x/y 平移（同参考实现，缩放不变）
+  el.setPointerCapture?.(e.pointerId)
+  const onMove = (ev) => moveTo(ev.clientX, ev.clientY)
+  const onUp = () => {
+    el.removeEventListener('pointermove', onMove)
+    el.removeEventListener('pointerup', onUp)
+    el.removeEventListener('pointercancel', onUp)
+    saveSoon()
+  }
+  el.addEventListener('pointermove', onMove)
+  el.addEventListener('pointerup', onUp)
+  el.addEventListener('pointercancel', onUp)
 }
 
 // —— 持久化（localStorage 防抖 500ms）——
@@ -5938,7 +5956,7 @@ function addMediaFromFile(f, wx, wy, onSized) {
   } else {
     onSized?.(o.height)
   }
-  // 存档：小文件 dataURL 内嵌；大文件只留会话（刷新丢失，提示）
+  // 存档：小文件 dataURL 内嵌；大文件只留会话（toast 告知刷新丢失）
   if (f.size <= 4 * 1024 * 1024) {
     const rd = new FileReader()
     rd.onload = () => {
@@ -5946,6 +5964,8 @@ function addMediaFromFile(f, wx, wy, onSized) {
       saveSoon()
     }
     rd.readAsDataURL(f)
+  } else {
+    message.warning(t('canvasMediaTooBig'))
   }
 }
 /** 工具栏/占位点击上传媒体（替换或新建；D1b 图片同支持） */
@@ -6111,7 +6131,7 @@ function refLabelOf(o) {
     return (
       String(o.text || '')
         .replace(/\s+/g, ' ')
-        .slice(0, 20) || 'note'
+        .slice(0, 20) || t('canvasKindNote')
     )
   if (o.type === 'image' || o.type === 'video') {
     if (o.name) return o.name
@@ -6121,13 +6141,15 @@ function refLabelOf(o) {
         return (
           u.searchParams.get('filename') ||
           decodeURIComponent(u.pathname.split('/').pop() || '') ||
-          (o.type === 'image' ? '图片' : '视频')
+          t(o.type === 'image' ? 'canvasKindImage' : 'canvasKindVideo')
         )
       }
     } catch {
       /* blob:/data: */
     }
-    return (o.type === 'image' ? '图片 #' : '视频 #') + String(o.id).slice(-4)
+    return (
+      t(o.type === 'image' ? 'canvasKindImage' : 'canvasKindVideo') + ' #' + String(o.id).slice(-4)
+    )
   }
   return o.name || o.type
 }
@@ -6365,19 +6387,19 @@ function onZoomSlider(e) {
   applyViewport()
 }
 const shortcutList = computed(() => [
-  { label: '滚轮', desc: t('canvasScWheel') },
-  { label: '空格 + 拖拽', desc: t('canvasScSpaceDrag') },
-  { label: 'Ctrl/⌘ + 拖拽', desc: t('canvasScCtrlDrag') },
-  { label: 'Shift + 点击', desc: t('canvasScShiftClick') },
+  { label: t('canvasScWheelK'), desc: t('canvasScWheel') },
+  { label: t('canvasScSpaceDragK'), desc: t('canvasScSpaceDrag') },
+  { label: 'Ctrl/⌘ + ' + t('canvasScDragK'), desc: t('canvasScCtrlDrag') },
+  { label: 'Shift + ' + t('canvasScClickK'), desc: t('canvasScShiftClick') },
   { label: 'Ctrl/⌘ + A', desc: t('canvasScSelectAll') },
   { label: 'Ctrl/⌘ + C / V', desc: t('canvasScCopyPaste') },
   { label: 'Ctrl/⌘ + Z / ⇧Z / Y', desc: t('canvasScUndoRedo') },
   { label: 'Ctrl/⌘ + G / ⇧G', desc: t('canvasScGroup') },
   { label: 'Delete / Backspace', desc: t('canvasScDelete') },
-  { label: '双击便签', desc: t('canvasScNoteEdit') },
-  { label: '双击 Frame', desc: t('canvasScFrameRename') },
-  { label: '拖拽连线端点', desc: t('canvasScLinkReconnect') },
-  { label: '四角手柄', desc: t('canvasScResize') },
+  { label: t('canvasScDblNoteK'), desc: t('canvasScNoteEdit') },
+  { label: t('canvasScDblFrameK'), desc: t('canvasScFrameRename') },
+  { label: t('canvasScLinkDragK'), desc: t('canvasScLinkReconnect') },
+  { label: t('canvasScHandleK'), desc: t('canvasScResize') },
   { label: 'Esc', desc: t('canvasScEscape') },
 ])
 
