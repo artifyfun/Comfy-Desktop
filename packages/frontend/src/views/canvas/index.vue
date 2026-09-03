@@ -496,14 +496,36 @@
             <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-500">
               {{ ctxMenu.targetIds.length }} {{ t('canvasMenuItems') }}
             </div>
-            <button
-              v-for="m in ctxItems"
-              :key="m.key"
-              class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
-              @click="m.run()"
-            >
-              <i class="fas w-4 text-center text-slate-400" :class="m.icon"></i>{{ m.label }}
-            </button>
+            <template v-for="m in ctxItems" :key="m.key">
+              <div v-if="m.sep" class="my-1 h-px bg-slate-600/60"></div>
+              <div v-else-if="m.children" class="group/ctx relative">
+                <button
+                  class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+                >
+                  <i class="fas w-4 text-center text-slate-400" :class="m.icon"></i>{{ m.label }}
+                  <i class="fas fa-chevron-right ml-auto text-[9px] text-slate-500"></i>
+                </button>
+                <div
+                  class="absolute left-full top-0 -ml-1 hidden min-w-[170px] rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] py-1 shadow-xl group-hover/ctx:block"
+                >
+                  <button
+                    v-for="c in m.children"
+                    :key="c.key"
+                    class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2 whitespace-nowrap"
+                    @click="c.run()"
+                  >
+                    <i class="fas w-4 text-center text-slate-400" :class="c.icon"></i>{{ c.label }}
+                  </button>
+                </div>
+              </div>
+              <button
+                v-else
+                class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+                @click="m.run()"
+              >
+                <i class="fas w-4 text-center text-slate-400" :class="m.icon"></i>{{ m.label }}
+              </button>
+            </template>
           </template>
           <template v-else>
             <button
@@ -1244,16 +1266,22 @@
           @mouseenter="keepToolbar(true)"
           @mouseleave="keepToolbar(false)"
         >
-          <button
-            v-for="b in hoverToolbar.items"
-            :key="b.icon + b.title"
-            :title="b.title"
-            class="h-9 px-2 rounded-lg text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/15 transition flex items-center justify-center"
-            :class="b.danger ? 'text-red-400' : ''"
-            @click="b.action"
-          >
-            <i :class="b.icon" class="text-sm pointer-events-none"></i>
-          </button>
+          <template v-for="b in hoverToolbar.items" :key="b.icon + (b.title || '')">
+            <span
+              v-if="b.sep"
+              class="mx-0.5 h-5 w-px self-center bg-[var(--wb-stroke)]"
+              aria-hidden="true"
+            ></span>
+            <button
+              v-else
+              :title="b.title"
+              class="h-9 px-2 rounded-lg text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/15 transition flex items-center justify-center"
+              :class="b.danger ? 'text-red-400' : ''"
+              @click="b.action"
+            >
+              <i :class="b.icon" class="text-sm pointer-events-none"></i>
+            </button>
+          </template>
           <!-- 桥接热区：填住工具栏底边与节点顶边之间的 10px 间隙 -->
           <span class="tb-bridge" aria-hidden="true"></span>
         </div>
@@ -3560,59 +3588,67 @@ const ctxItems = computed(() => {
           closeCtxMenu()
         },
       },
+      { key: 'sep-ai', sep: true },
       {
-        key: 'reverse',
-        icon: 'fa-comment-dots',
-        label: t('canvasMenuReverse'),
-        run: () => {
-          reversePrompt(ids[0])
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'enhance',
-        icon: 'fa-up-right-and-down-left-from-center',
-        label: t('canvasMenuEnhance'),
-        run: () => {
-          enhanceImage(ids[0])
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'outpaint',
-        icon: 'fa-expand-arrows-alt',
-        label: t('canvasMenuOutpaint'),
-        run: () => {
-          startOutpaint(ids[0])
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'video',
-        icon: 'fa-film',
-        label: t('canvasMenuVideo'),
-        run: () => {
-          imageToVideo(ids[0])
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'char',
-        icon: 'fa-user-tag',
-        label: t('canvasMenuSetChar'),
-        run: () => {
-          setConsistencyAsset(ids[0], 'character')
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'style',
-        icon: 'fa-palette',
-        label: t('canvasMenuSetStyle'),
-        run: () => {
-          setConsistencyAsset(ids[0], 'style')
-          closeCtxMenu()
-        },
+        key: 'ai-group',
+        icon: 'fa-wand-magic-sparkles',
+        label: t('canvasMenuAiGroup'),
+        children: [
+          {
+            key: 'reverse',
+            icon: 'fa-comment-dots',
+            label: t('canvasMenuReverse'),
+            run: () => {
+              reversePrompt(ids[0])
+              closeCtxMenu()
+            },
+          },
+          {
+            key: 'enhance',
+            icon: 'fa-up-right-and-down-left-from-center',
+            label: t('canvasMenuEnhance'),
+            run: () => {
+              enhanceImage(ids[0])
+              closeCtxMenu()
+            },
+          },
+          {
+            key: 'outpaint',
+            icon: 'fa-expand-arrows-alt',
+            label: t('canvasMenuOutpaint'),
+            run: () => {
+              startOutpaint(ids[0])
+              closeCtxMenu()
+            },
+          },
+          {
+            key: 'video',
+            icon: 'fa-film',
+            label: t('canvasMenuVideo'),
+            run: () => {
+              imageToVideo(ids[0])
+              closeCtxMenu()
+            },
+          },
+          {
+            key: 'char',
+            icon: 'fa-user-tag',
+            label: t('canvasMenuSetChar'),
+            run: () => {
+              setConsistencyAsset(ids[0], 'character')
+              closeCtxMenu()
+            },
+          },
+          {
+            key: 'style',
+            icon: 'fa-palette',
+            label: t('canvasMenuSetStyle'),
+            run: () => {
+              setConsistencyAsset(ids[0], 'style')
+              closeCtxMenu()
+            },
+          },
+        ],
       },
     )
   }
@@ -6204,6 +6240,7 @@ const hoverToolbar = computed(() => {
           sendSelectionToWorkbench()
         },
       },
+      { sep: true },
       {
         icon: 'fas fa-rotate-left',
         title: t('canvasTbRotL'),
@@ -6227,6 +6264,7 @@ const hoverToolbar = computed(() => {
           angleDlg.open = true
         },
       },
+      { sep: true },
       {
         icon: 'fas fa-magnifying-glass-plus',
         title: t('canvasTbUpscale'),
@@ -6242,6 +6280,7 @@ const hoverToolbar = computed(() => {
         title: t('canvasTbReplaceImage'),
         action: () => uploadMediaFor(id),
       },
+      { sep: true },
       {
         icon: 'fas fa-quote-left',
         title: t('canvasTbCopyPrompt'),
