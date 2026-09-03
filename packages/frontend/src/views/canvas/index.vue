@@ -711,58 +711,75 @@
         >
           <div
             class="flex max-h-[92vh] w-[min(1080px,94vw)] gap-5 rounded-2xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] p-5 shadow-2xl"
+            @keydown="onMaskKeydown"
+            @keyup="onMaskKeyup"
           >
-            <!-- 左：图 + 蒙版叠加 -->
-            <div
-              class="relative flex-1 overflow-auto rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-bg)]"
-            >
+            <!-- 左：图 + 蒙版叠加（E1 视口：滚轮缩放/空格中键平移/适配） -->
+            <div class="relative flex-1">
               <div
-                class="relative mx-auto"
-                :style="{ width: maskDlg.imgW + 'px', height: maskDlg.imgH + 'px' }"
+                ref="maskViewportEl"
+                class="relative h-full overflow-auto rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-bg)]"
+                :class="maskDlg.panning ? 'cursor-grabbing' : ''"
+                @wheel.prevent="onMaskWheel"
+                @pointerdown.capture="onMaskPanDown"
+                @pointermove.capture="onMaskPanMove"
+                @pointerup.capture="onMaskPanUp"
+                @pointercancel.capture="onMaskPanUp"
+                @auxclick.prevent
               >
-                <img
-                  :src="(objects.find((o) => o.id === maskDlg.id) || {}).src"
-                  class="absolute inset-0 h-full w-full object-contain"
-                  draggable="false"
-                />
-                <canvas ref="maskCanvasEl" class="hidden"></canvas>
-                <canvas
-                  ref="maskPreviewEl"
-                  class="absolute inset-0 h-full w-full cursor-none touch-none"
-                  @pointerdown.prevent="onMaskPointerDown"
-                  @pointermove.prevent="onMaskPointerMove"
-                  @pointerup="onMaskPointerUp"
-                  @pointercancel="onMaskPointerUp"
-                  @pointerleave="maskDlg.cursor = null"
-                  @contextmenu.prevent
-                ></canvas>
-                <!-- 笔刷预览圆 -->
                 <div
-                  v-if="maskDlg.cursor && !maskDlg.brushAdjust"
-                  class="pointer-events-none absolute rounded-full border-2 border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,.8)]"
-                  :style="{
-                    left: maskDlg.cursor.x + 'px',
-                    top: maskDlg.cursor.y + 'px',
-                    width: maskDlg.brush + 'px',
-                    aspectRatio: '1',
-                    transform: 'translate(-50%, -50%)',
-                  }"
-                ></div>
-                <div
-                  v-if="maskDlg.cursor && maskDlg.brushAdjust"
-                  class="pointer-events-none absolute rounded-full border-2 border-amber-400 bg-black/10 shadow-[0_0_0_1px_rgba(0,0,0,.8)]"
-                  :style="{
-                    left: maskDlg.cursor.x + 'px',
-                    top: maskDlg.cursor.y + 'px',
-                    width: maskDlg.brush + 'px',
-                    aspectRatio: '1',
-                    transform: 'translate(-50%, -50%)',
-                  }"
+                  class="relative flex min-h-full min-w-full items-center justify-center p-6"
+                  style="transform: translateZ(0)"
                 >
-                  <span
-                    class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded bg-black/75 px-1.5 py-0.5 text-xs font-semibold text-white"
-                    >{{ maskDlg.brush }}px</span
+                  <div
+                    class="relative"
+                    :style="{ width: maskStageSize.w + 'px', height: maskStageSize.h + 'px' }"
                   >
+                    <img
+                      :src="(objects.find((o) => o.id === maskDlg.id) || {}).src"
+                      class="absolute inset-0 h-full w-full object-contain"
+                      draggable="false"
+                    />
+                    <canvas ref="maskCanvasEl" class="hidden"></canvas>
+                    <canvas
+                      ref="maskPreviewEl"
+                      class="absolute inset-0 h-full w-full cursor-none touch-none"
+                      @pointerdown.prevent="onMaskPointerDown"
+                      @pointermove.prevent="onMaskPointerMove"
+                      @pointerup="onMaskPointerUp"
+                      @pointercancel="onMaskPointerUp"
+                      @pointerleave="maskDlg.cursor = null"
+                      @contextmenu.prevent
+                    ></canvas>
+                    <!-- 笔刷预览圆 -->
+                    <div
+                      v-if="maskDlg.cursor && !maskDlg.brushAdjust"
+                      class="pointer-events-none absolute rounded-full border-2 border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,.8)]"
+                      :style="{
+                        left: maskDlg.cursor.x + 'px',
+                        top: maskDlg.cursor.y + 'px',
+                        width: maskDlg.brush * maskImageScale + 'px',
+                        aspectRatio: '1',
+                        transform: 'translate(-50%, -50%)',
+                      }"
+                    ></div>
+                    <div
+                      v-if="maskDlg.cursor && maskDlg.brushAdjust"
+                      class="pointer-events-none absolute rounded-full border-2 border-amber-400 bg-black/10 shadow-[0_0_0_1px_rgba(0,0,0,.8)]"
+                      :style="{
+                        left: maskDlg.cursor.x + 'px',
+                        top: maskDlg.cursor.y + 'px',
+                        width: maskDlg.brush * maskImageScale + 'px',
+                        aspectRatio: '1',
+                        transform: 'translate(-50%, -50%)',
+                      }"
+                    >
+                      <span
+                        class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded bg-black/75 px-1.5 py-0.5 text-xs font-semibold text-white"
+                        >{{ maskDlg.brush }}px</span
+                      >
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -774,6 +791,35 @@
                 </div>
                 <div class="mt-1 text-xs text-[var(--wb-text-2)]">
                   {{ maskDlg.imgW }} × {{ maskDlg.imgH }}px · {{ t('canvasMaskHint') }}
+                </div>
+                <!-- E1 视口缩放控件：缩小/放大/适配/百分比（滚轮+空格平移提示） -->
+                <div class="mt-2 flex items-center gap-1">
+                  <button
+                    class="h-7 w-7 rounded-lg border border-[var(--wb-stroke)] text-xs text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] disabled:opacity-30"
+                    :disabled="maskDlg.view <= 1.001"
+                    @click="maskZoom(-1)"
+                  >
+                    <i class="fas fa-magnifying-glass-minus"></i>
+                  </button>
+                  <button
+                    class="h-7 w-7 rounded-lg border border-[var(--wb-stroke)] text-xs text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] disabled:opacity-30"
+                    :disabled="maskDlg.view >= 3.999"
+                    @click="maskZoom(1)"
+                  >
+                    <i class="fas fa-magnifying-glass-plus"></i>
+                  </button>
+                  <button
+                    class="h-7 rounded-lg border border-[var(--wb-stroke)] px-2 text-xs text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)]"
+                    @click="maskFitViewport"
+                  >
+                    <i class="fas fa-expand mr-1"></i>{{ t('canvasMaskFit') }}
+                  </button>
+                  <span class="ml-1 text-xs font-medium text-[var(--wb-text-2)]">{{
+                    Math.round(maskDlg.view * maskDlg.fitScale * 100) + '%'
+                  }}</span>
+                </div>
+                <div class="mt-1 text-[11px] leading-relaxed text-[var(--wb-text-3)]">
+                  {{ t('canvasMaskViewportHint') }}
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-2">
@@ -3954,10 +4000,22 @@ const maskDlg = reactive({
   brushAdjust: null, // {startX, startSize}
   strokes: [], // {mode,size,points:[]}
   redoStack: [],
-  cursor: null, // {x,y} 预览圆
+  cursor: null, // {x,y} 预览圆（stage 坐标）
   error: '',
-  view: 1, // 预览缩放（简单 1x，后续可扩展）
+  view: 1, // E1：编辑视口缩放（1..4，滚轮/按钮，指针锚定）
+  fitScale: 1, // E1：图适配视口的基准比例（stage 内容 = 原图 * fitScale * view）
+  panning: false, // E1：空格/中键平移中
+  spaceDown: false, // E1：空格按住（平移模式）
 })
+/** E1：蒙版编辑 stage 尺寸（适配 × 缩放） */
+const maskStageSize = computed(() => ({
+  w: Math.round(maskDlg.imgW * maskDlg.fitScale * maskDlg.view),
+  h: Math.round(maskDlg.imgH * maskDlg.fitScale * maskDlg.view),
+}))
+/** E1：stage 1px = 原图多少像素（笔刷/坐标换算） */
+const maskImageScale = computed(
+  () => (maskDlg.imgW ? maskStageSize.value.w / maskDlg.imgW : 1) || 1,
+)
 const maskCanvasEl = ref(null) // 隐藏 mask
 const maskPreviewEl = ref(null) // 预览叠加
 const MASK_PREVIEW_COLOR = 'rgba(37, 99, 235, .38)'
@@ -3978,8 +4036,11 @@ function openMaskDialog(id) {
     maskDlg.redoStack = []
     maskDlg.cursor = null
     maskDlg.error = ''
+    maskDlg.view = 1
+    maskDlg.panning = false
+    maskDlg.spaceDown = false
     maskDlg.open = true
-    // src 落位后清画布
+    // src 落位后清画布 + 适配视口
     nextTick(() => {
       for (const el of [maskCanvasEl.value, maskPreviewEl.value]) {
         if (!el) continue
@@ -3987,6 +4048,7 @@ function openMaskDialog(id) {
         el.height = maskDlg.imgH
         el.getContext('2d')?.clearRect(0, 0, el.width, el.height)
       }
+      maskFitViewport()
     })
   }
   img.onerror = () => message.error(t('canvasCropNoImage'))
@@ -4033,7 +4095,114 @@ function replayMaskStrokes() {
     })
   }
 }
+/** E1：适配视口 —— 图等比缩到可视区内（padding 24），记基准比例 */
+function maskFitViewport() {
+  const vp = maskViewportEl.value
+  if (!vp || !maskDlg.imgW) return
+  const availW = Math.max(1, vp.clientWidth - 48)
+  const availH = Math.max(1, vp.clientHeight - 48)
+  const sc = Math.min(availW / maskDlg.imgW, availH / maskDlg.imgH, 1)
+  maskDlg.fitScale = sc > 0 ? sc : 1
+  maskDlg.view = 1
+  nextTick(() => {
+    vp.scrollLeft = (vp.scrollWidth - vp.clientWidth) / 2
+    vp.scrollTop = (vp.scrollHeight - vp.clientHeight) / 2
+  })
+}
+/** E1：滚轮缩放（指针锚定：缩放后保持指针下的图像点不动） */
+function onMaskWheel(e) {
+  e.preventDefault()
+  const vp = maskViewportEl.value
+  if (!vp) return
+  const next = clamp(maskDlg.view * (e.deltaY < 0 ? 1.2 : 1 / 1.2), 1, 4)
+  if (Math.abs(next - maskDlg.view) < 0.001) return
+  // 指针在 stage 内的相对比例
+  const rect = maskPreviewEl.value?.getBoundingClientRect()
+  const anchor = rect
+    ? {
+        rx: clamp((e.clientX - rect.left) / Math.max(1, rect.width), 0, 1),
+        ry: clamp((e.clientY - rect.top) / Math.max(1, rect.height), 0, 1),
+        vx: e.clientX - vp.getBoundingClientRect().left,
+        vy: e.clientY - vp.getBoundingClientRect().top,
+      }
+    : null
+  maskDlg.view = next
+  if (!anchor) return
+  nextTick(() => {
+    // stage 新尺寸下把锚点拉回指针位置
+    const st = maskStageSize.value
+    vp.scrollLeft =
+      Math.max(0, (Math.max(vp.clientWidth, st.w) - st.w) / 2) + anchor.rx * st.w - anchor.vx
+    vp.scrollTop =
+      Math.max(0, (Math.max(vp.clientHeight, st.h) - st.h) / 2) + anchor.ry * st.h - anchor.vy
+  })
+}
+/** E1：缩放按钮（中心锚定） */
+function maskZoom(dir) {
+  const vp = maskViewportEl.value
+  if (!vp) return
+  const next = clamp(maskDlg.view * (dir > 0 ? 1.2 : 1 / 1.2), 1, 4)
+  if (Math.abs(next - maskDlg.view) < 0.001) return
+  const r = vp.getBoundingClientRect()
+  onMaskWheel({
+    preventDefault() {},
+    deltaY: dir > 0 ? -1 : 1,
+    clientX: r.left + r.width / 2,
+    clientY: r.top + r.height / 2,
+  })
+}
+/** E1：空格/中键平移（viewport 捕获指针，写 scrollLeft/Top） */
+function onMaskPanDown(e) {
+  if (!(e.button === 1 || (e.button === 0 && maskDlg.spaceDown))) return
+  const vp = e.currentTarget
+  // 合成事件/已释放指针会抛 InvalidPointerId —— 捕获失败不影响拖拽本身
+  try {
+    vp.setPointerCapture?.(e.pointerId)
+  } catch {
+    /* 指针不存在（测试合成事件）：跳过捕获 */
+  }
+  maskPan.pt = { x: e.clientX, y: e.clientY, l: vp.scrollLeft, t: vp.scrollTop, id: e.pointerId }
+  maskDlg.panning = true
+  e.preventDefault()
+  e.stopPropagation()
+}
+function onMaskPanMove(e) {
+  const p = maskPan.pt
+  if (!p || e.pointerId !== p.id) return
+  const vp = maskViewportEl.value
+  if (!vp) return
+  vp.scrollLeft = p.l - (e.clientX - p.x)
+  vp.scrollTop = p.t - (e.clientY - p.y)
+  e.preventDefault()
+  e.stopPropagation()
+}
+function onMaskPanUp(e) {
+  const p = maskPan.pt
+  if (!p || e.pointerId !== p.id) return
+  maskPan.pt = null
+  maskDlg.panning = false
+}
+const maskPan = reactive({ pt: null })
+const maskViewportEl = ref(null)
+/** E1：对话框空格键态（window 级，编辑器打开期间生效） */
+function onMaskKeydown(e) {
+  if (e.code === 'Space' && !e.repeat) {
+    const t = e.target
+    if (t && t.closest && t.closest("input,textarea,[contenteditable='true']")) return
+    e.preventDefault()
+    maskDlg.spaceDown = true
+  }
+}
+function onMaskKeyup(e) {
+  if (e.code === 'Space') {
+    e.preventDefault()
+    maskDlg.spaceDown = false
+  }
+}
+
 function onMaskPointerDown(e) {
+  // E1：空格/中键平移由容器捕获处理，这里不抢
+  if (maskDlg.panning || maskDlg.spaceDown) return
   if (e.button !== 0 && !e.altKey) return
   const el = e.currentTarget
   el.setPointerCapture?.(e.pointerId)
@@ -4058,8 +4227,10 @@ function onMaskPointerMove(e) {
     y: e.clientY - rect.top,
   }
   if (maskDlg.brushAdjust) {
+    // E1：屏幕位移按视口缩放还原为图像像素
     maskDlg.brush = clampBrushSize(
-      maskDlg.brushAdjust.startSize + e.clientX - maskDlg.brushAdjust.startX,
+      maskDlg.brushAdjust.startSize +
+        (e.clientX - maskDlg.brushAdjust.startX) / maskImageScale.value,
     )
     return
   }

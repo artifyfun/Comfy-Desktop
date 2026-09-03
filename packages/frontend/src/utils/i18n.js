@@ -299,6 +299,8 @@ const translations = {
     canvasTbReplaceImage: '替换图片（保留节点与连线）',
     canvasMaskTitle: '局部重绘（涂抹蒙版）',
     canvasMaskHint: '涂抹要重绘的区域，Alt+拖动调整笔刷大小',
+    canvasMaskFit: '适应',
+    canvasMaskViewportHint: '滚轮缩放（指针锚定）· 空格/中键拖动平移 · 1x–4x 精修大图',
     canvasMaskBrush: '画笔',
     canvasMaskErase: '橡皮',
     canvasMaskBrushSize: '笔刷',
@@ -1399,6 +1401,9 @@ const translations = {
     canvasTbReplaceImage: 'Replace image (keep node & links)',
     canvasMaskTitle: 'Inpaint (brush mask)',
     canvasMaskHint: 'Paint the area to redraw; Alt+drag to adjust brush size',
+    canvasMaskFit: 'Fit',
+    canvasMaskViewportHint:
+      'Wheel to zoom (pointer-anchored) · Space/middle-drag to pan · 1x–4x for large images',
     canvasMaskBrush: 'Brush',
     canvasMaskErase: 'Eraser',
     canvasMaskBrushSize: 'Brush',
