@@ -944,6 +944,16 @@ ipcMain.on('comfy-window:click-refresh-instance', (event) => {
   if (!found) return
   const { entry } = found
   if (entry.window.isDestroyed()) return
+  // fix(A 界面刷新不生效): 按钮此前无条件 reload comfyView(C 侧 ComfyUI)——
+  // 用户正看 A 界面时点击"无反应"(A 的 panelView 没动)。按可见表面分流:
+  // artify 激活时 reload panelView(A UI),其余才走原 comfyView reload 路径。
+  if (visibleSurface(entry) === 'artify') {
+    const pv = entry.panelView
+    if (!pv || pv.webContents.isDestroyed()) return
+    pv.webContents.reload()
+    focusActiveBody(entry)
+    return
+  }
   const id = entry.installationId
   if (id === null) return
   comfyReloads.get(id)?.()
