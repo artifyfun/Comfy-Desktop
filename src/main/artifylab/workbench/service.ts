@@ -766,6 +766,15 @@ class WorkbenchService {
     }, FLUSH_DEBOUNCE_MS)
   }
 
+  /** 导入件产物回填后触碰会话（updated 落盘） */
+  touchSession(id: string): void {
+    const s = this.getSession(id)
+    if (s) {
+      s.updatedAt = Date.now()
+      this.flush()
+    }
+  }
+
   /** 导出会话（纯函数核心见 sessionTransfer.ts；剥 debugLogs/batchJobId） */
   exportSession(id: string) {
     const session = this.getSession(id)

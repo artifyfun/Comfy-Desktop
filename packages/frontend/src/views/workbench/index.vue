@@ -1468,10 +1468,11 @@ async function onRename({ id, title }) {
 }
 
 // 归档走确认弹窗（dsh/Codex 惯例：破坏性视图操作需二次确认；单会话级操作）
-// 会话导出：走浏览器原生下载（Content-Disposition 附件）
-function exportSession(s) {
+// 会话导出：浏览器原生下载。kind='bundle' 时走完整包（session.json + 产物 ZIP）
+function exportSession(s, kind = 'json') {
+  const path = kind === 'bundle' ? 'export-bundle' : 'export'
   const a = document.createElement('a')
-  a.href = `${origin.value}/api/workbench/sessions/${s.id}/export`
+  a.href = `${origin.value}/api/workbench/sessions/${s.id}/${path}`
   a.download = ''
   document.body.appendChild(a)
   a.click()
@@ -1482,18 +1483,29 @@ function exportSession(s) {
 async function importSession() {
   const input = document.createElement('input')
   input.type = 'file'
-  input.accept = 'application/json,.json'
+  input.accept = 'application/json,.json,.zip,application/zip'
   input.onchange = async () => {
     const file = input.files?.[0]
     if (!file) return
     try {
-      const text = await file.text()
-      const body = JSON.parse(text)
-      const res = await fetch(`${origin.value}/api/workbench/sessions/import`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
+      const isZip = file.name.toLowerCase().endsWith('.zip')
+      let res
+      if (isZip) {
+        const fd = new FormData()
+        fd.append('file', file)
+        res = await fetch(`${origin.value}/api/workbench/sessions/import-bundle`, {
+          method: 'POST',
+          body: fd,
+        })
+      } else {
+        const text = await file.text()
+        const body = JSON.parse(text)
+        res = await fetch(`${origin.value}/api/workbench/sessions/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+      }
       if (!res.ok) throw new Error('import http ' + res.status)
       const j = await res.json()
       const imported = j?.data

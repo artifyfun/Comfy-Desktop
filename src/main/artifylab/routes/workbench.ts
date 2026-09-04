@@ -27,11 +27,14 @@ import { logger } from '../utils/logger'
 import { createErrorResponse, createSuccessResponse } from '../utils/errorHandler'
 import { templateLibrary } from '../workbench/templates'
 import { workbenchService } from '../workbench/service'
+import { buildSessionBundle } from '../workbench/sessionBundle'
 import { validateNodeOverridesLocal } from '../workbench/plan'
 import type { ComfyPrompt } from '../appStore'
+import { readFileSync } from 'fs'
+import { resolve, sep } from 'path'
+import { get as getSetting } from '../../settings'
 import { buildAppCode } from '../agentDriver'
 import appStoreManager from '../appStore'
-import { get as getSetting } from '../../settings'
 
 /** 附件上传 multer（内存态，直接透传 ComfyUI；大小限制交给 executor 的 MAX_MEDIA_BYTES） */
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 512 * 1024 * 1024 } })
@@ -85,6 +88,52 @@ export function createWorkbenchRouter(): express.Router {
   })
 
   // 会话导入：JSON 体校验 + 新 UUID 落库
+  // 会话完整包导出：session.json + 产物文件 ZIP（STORE 零依赖组包）。
+  // 与单会话 JSON 导出共存：?bundle=true 或独立路径，产物文件随包走。
+  router.get('/api/workbench/sessions/:id/export-bundle', (req, res) => {
+    const session = workbenchService.getSession(req.params.id ?? '')
+    if (!session) {
+      res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse('session not found'))
+      return
+    }
+    const outputDir = getSetting('outputDir')
+    if (!outputDir) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('outputDir not configured'))
+      return
+    }
+    const r = buildSessionBundle(session, (f) => {
+      // 路径穿越防御（safeJoin 同款语义，内联防跨模块导出）
+      const rel = f.subfolder ? `${f.subfolder}/${f.filename}` : f.filename
+      const segs = rel.split(/[\\/]/).filter(Boolean)
+      if (segs.includes('..')) return null
+      const full = resolve(outputDir, ...segs)
+      if (full !== outputDir && !full.startsWith(outputDir + sep)) return null
+      try {
+        return readFileSync(full)
+      } catch {
+        return null
+      }
+    })
+    if (!r.ok) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse(r.error))
+      return
+    }
+    const asciiName = 'workbench-session-' + session.id.slice(0, 8) + '-bundle.zip'
+    const encoded = encodeURIComponent(
+      (session.title || 'session').replace(/[/:*?"<>|]/g, '_') + '.zip'
+    )
+    res.setHeader('Content-Type', 'application/zip')
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${asciiName}"; filename*=UTF-8''${encoded}`
+    )
+    if (r.missing.length > 0) {
+      // 缺文件不阻断（历史产物被清理是常态），头里带摘要供前端提示
+      res.setHeader('X-Missing-Files', String(r.missing.length))
+    }
+    res.end(r.zip)
+  })
+
   router.post('/api/workbench/sessions/import', (req, res) => {
     const r = workbenchService.importSession(req.body)
     if (!r.ok) {
@@ -92,6 +141,127 @@ export function createWorkbenchRouter(): express.Router {
       return
     }
     res.status(HTTP_STATUS.CREATED).json(createSuccessResponse(r.session))
+  })
+
+  // 会话完整包导入：multipart(zip)。解包 session.json → 既有导入路径（新 UUID）；
+  // 产物文件写回 outputDir 对应 subfolder（保持会话引用有效）。ZIP 解析零依赖：
+  // 只读 EOCD → 中央目录 → STORE 条目直接切片（组包端是我们自己的 STORE 实现）。
+  router.post('/api/workbench/sessions/import-bundle', upload.single('file'), (req, res) => {
+    void (async () => {
+      const buf = req.file?.buffer
+      if (!buf || buf.length < 22) {
+        res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('zip file required'))
+        return
+      }
+      // EOCD 定位（末 22B，注释最长 64KB 往前扫）
+      let eocd = -1
+      const scanStart = Math.max(0, buf.length - 22 - 65535)
+      for (let i = buf.length - 22; i >= scanStart; i--) {
+        if (buf.readUInt32LE(i) === 0x06054b50) {
+          eocd = i
+          break
+        }
+      }
+      if (eocd < 0) {
+        res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('invalid zip'))
+        return
+      }
+      const count = buf.readUInt16LE(eocd + 10)
+      let ptr = buf.readUInt32LE(eocd + 16)
+      const entries = new Map<string, Buffer>()
+      for (let i = 0; i < count; i++) {
+        if (buf.readUInt32LE(ptr) !== 0x02014b50) break
+        const method = buf.readUInt16LE(ptr + 10)
+        const compSize = buf.readUInt32LE(ptr + 20)
+        const nameLen = buf.readUInt16LE(ptr + 28)
+        const extraLen = buf.readUInt16LE(ptr + 30)
+        const commentLen = buf.readUInt16LE(ptr + 32)
+        const localOff = buf.readUInt32LE(ptr + 42)
+        const name = buf.toString('utf8', ptr + 46, ptr + 46 + nameLen)
+        if (method === 0 && name) {
+          // 本地头：跳到 data（30 + nameLen + localExtra）
+          const lNameLen = buf.readUInt16LE(localOff + 26)
+          const lExtraLen = buf.readUInt16LE(localOff + 28)
+          const dataStart = localOff + 30 + lNameLen + lExtraLen
+          entries.set(name, buf.subarray(dataStart, dataStart + compSize))
+        }
+        ptr += 46 + nameLen + extraLen + commentLen
+      }
+      const manifestBuf = entries.get('session.json')
+      if (!manifestBuf) {
+        res
+          .status(HTTP_STATUS.BAD_REQUEST)
+          .json(createErrorResponse('session.json missing in bundle'))
+        return
+      }
+      let manifest: {
+        session?: unknown
+        files?: { path: string; filename?: string; subfolder?: string }[]
+      }
+      try {
+        manifest = JSON.parse(manifestBuf.toString('utf8'))
+      } catch {
+        res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('session.json invalid'))
+        return
+      }
+      // 会话数据导入（新 UUID）
+      const r = workbenchService.importSession(manifest)
+      if (!r.ok || !r.session) {
+        res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse(r.error ?? 'import failed'))
+        return
+      }
+      // 产物文件写回 outputDir（文件名冲突：新 UUID 前缀防覆盖本机已有产物）
+      const outputDir = getSetting('outputDir')
+      let filesRestored = 0
+      let filesSkipped = 0
+      if (outputDir) {
+        const { mkdirSync, writeFileSync: wf } = await import('fs')
+        const { join, resolve: rs, sep: sSep } = await import('path')
+        for (const [name, data] of entries) {
+          if (!name.startsWith('outputs/')) continue
+          const mf = manifest.files?.find?.((f) => f.path === name) ?? null
+          const subfolder = mf?.subfolder
+            ? `wb-import-${r.session.id.slice(0, 8)}/${mf.subfolder}`
+            : `wb-import-${r.session.id.slice(0, 8)}`
+          const base = mf?.filename || name.split('/').pop() || 'file'
+          const segs = `${subfolder}/${base}`.split('/').filter(Boolean)
+          if (segs.includes('..')) {
+            filesSkipped++
+            continue
+          }
+          const full = rs(outputDir, ...segs)
+          if (full !== outputDir && !full.startsWith(outputDir + sSep)) {
+            filesSkipped++
+            continue
+          }
+          try {
+            mkdirSync(join(full, '..'), { recursive: true })
+            wf(full, data)
+            // 回填会话引用：executions.outputs / messages.outputFiles 指向新位置
+            const target = { filename: base, subfolder, type: 'output' }
+            for (const ex of r.session.executions ?? []) {
+              ex.outputs = ex.outputs.map((o) =>
+                typeof o === 'string'
+                  ? o
+                  : o.filename === mf?.filename && o.subfolder === mf?.subfolder
+                    ? target
+                    : o
+              )
+            }
+            filesRestored++
+          } catch {
+            filesSkipped++
+          }
+        }
+        if (filesRestored > 0) workbenchService.touchSession(r.session.id)
+      }
+      res
+        .status(HTTP_STATUS.CREATED)
+        .json(createSuccessResponse({ ...r.session, filesRestored, filesSkipped }))
+    })().catch((e) => {
+      logger.warn('workbench import-bundle failed', e)
+      res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json(createErrorResponse('import failed'))
+    })
   })
 
   router.post('/api/workbench/sessions/create', (req, res) => {

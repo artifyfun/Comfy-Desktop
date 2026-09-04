@@ -772,6 +772,8 @@ const translations = {
     workbenchEarlier: '更早',
     workbenchRename: '重命名',
     workbenchExportSession: '导出会话',
+    workbenchExportBundle: '导出完整包（含产物文件）',
+    workbenchImportTipMixed: '支持 JSON（纯会话）与 ZIP（含产物文件）格式',
     workbenchImportSession: '导入会话',
     workbenchImportSessionTip: '从导出的 JSON 文件导入会话（生成新会话，不影响现有数据）',
     workbenchImportSuccess: '导入成功',
@@ -1962,6 +1964,8 @@ const translations = {
     workbenchEarlier: 'Earlier',
     workbenchRename: 'Rename',
     workbenchExportSession: 'Export Session',
+    workbenchExportBundle: 'Export Bundle (with artifacts)',
+    workbenchImportTipMixed: 'Accepts JSON (session only) or ZIP (with artifacts)',
     workbenchImportSession: 'Import Session',
     workbenchImportSessionTip:
       'Import a session from an exported JSON file (creates a new session)',

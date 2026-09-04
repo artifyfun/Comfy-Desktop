@@ -105,9 +105,16 @@
               <button
                 class="w-6 h-6 rounded text-slate-400 hover:text-white hover:bg-slate-600 flex items-center justify-center"
                 :title="t('workbenchExportSession')"
-                @click.stop="$emit('export-session', s)"
+                @click.stop="$emit('export-session', s, 'json')"
               >
                 <i class="fas fa-file-export text-xs"></i>
+              </button>
+              <button
+                class="w-6 h-6 rounded text-slate-400 hover:text-white hover:bg-slate-600 flex items-center justify-center"
+                :title="t('workbenchExportBundle')"
+                @click.stop="$emit('export-session', s, 'bundle')"
+              >
+                <i class="fas fa-box-archive text-xs"></i>
               </button>
               <button
                 v-if="!s.archived"
