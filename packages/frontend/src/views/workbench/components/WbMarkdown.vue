@@ -81,7 +81,13 @@ function ensurePurifyHook() {
  * 规范化渲染（一次性全量 parse + sanitize）。旧版 computed 的唯一实现，
  * 现在同时是：非流式路径、流式结束终态渲染的公共出口。
  */
-const SANITIZE_OPTS = { ADD_TAGS: ['button'], ADD_ATTR: ['data-label'] }
+// FORBID_ATTR style：DOMPurify 默认放行 style（Chromium 实测），聊天源里
+// 注入 position:fixed 全屏覆盖即可钓鱼；markdown 正常渲染不产生 style，禁之零损。
+const SANITIZE_OPTS = {
+  ADD_TAGS: ['button'],
+  ADD_ATTR: ['data-label'],
+  FORBID_ATTR: ['style'],
+}
 
 function parseMarkdown(source) {
   return marked.parse(source, { async: false })
@@ -138,7 +144,12 @@ export function computeStableCut(source) {
   while (pos < source.length) {
     const nl = source.indexOf('\n', pos)
     if (nl === -1) {
-      lines.push({ start: pos, end: source.length, hasNl: false, text: source.slice(pos).replace(/\r$/, '') })
+      lines.push({
+        start: pos,
+        end: source.length,
+        hasNl: false,
+        text: source.slice(pos).replace(/\r$/, ''),
+      })
       break
     }
     lines.push({ start: pos, end: nl, hasNl: true, text: source.slice(pos, nl).replace(/\r$/, '') })

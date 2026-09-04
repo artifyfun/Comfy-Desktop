@@ -37,6 +37,19 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+describe('安全 — style 属性剥离（防覆盖钓鱼）', () => {
+  it('内联 HTML 的 style 属性被剥（marked 会把 HTML 块原样传出，消毒靠 DOMPurify 兜底）', () => {
+    const out = renderMarkdown('<div style="position:fixed;inset:0">cover</div>')
+    expect(out).not.toContain('style=')
+    expect(out).toContain('cover')
+  })
+
+  it('常规 markdown 输出不含 style（回归：正常内容零影响）', () => {
+    const out = renderMarkdown(buildStreamDoc())
+    expect(out).not.toContain('style=')
+  })
+})
+
 describe('C10 — 非流式回归（既有用法零变化）', () => {
   it('默认 props：不传 streaming，渲染与旧实现等价（全量 parse+sanitize）', async () => {
     const src = buildStreamDoc()
@@ -95,7 +108,8 @@ describe('C10 — 流式 append 硬验收：最终 HTML === 一次性全量渲�
   })
 
   it('小片段高频 append（中文内容）收敛一致', async () => {
-    const doc = '中文标题 #\n\n中文**正文**段落，带 `代码` 与表格：\n\n| 一 | 二 |\n| - | - |\n| 1 | 2 |'
+    const doc =
+      '中文标题 #\n\n中文**正文**段落，带 `代码` 与表格：\n\n| 一 | 二 |\n| - | - |\n| 1 | 2 |'
     const deltas = chunkIntoDeltas(doc, 23)
     vi.useFakeTimers()
     const wrapper = mount(WbMarkdown, { props: { source: '', streaming: true } })
