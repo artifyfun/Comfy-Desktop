@@ -4067,9 +4067,22 @@ const ctxItems = computed(() => {
   )
   return items
 })
-/** z 层级四向（front/forward/backward/back），选中块整体移动保持内部顺序 */
+/**
+ * z 层级四向（front/forward/backward/back），选中块整体移动保持内部顺序。
+ * P3 undo 合并：同选中集连续同向 shift 在 800ms 窗口内合并一条历史。
+ */
+let zCoalesce = null // { key, dir, until }
 function zShift(ids, dir) {
-  beforeChange()
+  const now = Date.now()
+  const key = [...ids].sort().join(',')
+  const canMerge =
+    zCoalesce && zCoalesce.key === key && zCoalesce.dir === dir && now < zCoalesce.until
+  if (!canMerge) {
+    beforeChange()
+    zCoalesce = { key, dir, until: now + 800 }
+  } else {
+    zCoalesce.until = now + 800
+  }
   objects.value = zShiftObjects(objects.value, ids, dir)
   saveSoon()
 }
@@ -6502,10 +6515,27 @@ function keepToolbar(on) {
   if (on) cancelHoverHide()
   else scheduleHoverHide()
 }
+/**
+ * 字号微调（P3 undo 合并）：同 note 连续 bump 在 800ms 窗口内合并为一条
+ * 历史——undo 一步回到连续微调前，而非每 ±1px 一条。
+ * coalesce 窗口过期后新起一条。属性/对象变了也新起一条。
+ */
+let bumpCoalesce = null // { id, dir, until }
 function nodeBumpFont(id, delta) {
   const o = objects.value.find((x) => x.id === id)
   if (!o || o.type !== 'note') return
-  beforeChange()
+  const now = Date.now()
+  const canMerge =
+    bumpCoalesce &&
+    bumpCoalesce.id === id &&
+    bumpCoalesce.dir === (delta > 0 ? 1 : -1) &&
+    now < bumpCoalesce.until
+  if (!canMerge) {
+    beforeChange()
+    bumpCoalesce = { id, dir: delta > 0 ? 1 : -1, until: now + 800 }
+  } else {
+    bumpCoalesce.until = now + 800 // 仍在窗口内：续窗
+  }
   o.fontSize = clamp((o.fontSize || 13) + delta, 9, 48)
   saveSoon()
 }
