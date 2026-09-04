@@ -224,6 +224,8 @@ export interface WorkbenchSession {
   debugLogs?: WorkbenchDebugLog[]
   /** 回合序号（用户消息推进；agent 消息继承当前值，前端据此合并气泡） */
   turnSeq?: number
+  /** 导入溯源：源会话 UUID（重复导入检测锚点；原生会话无此字段） */
+  importedFrom?: string
 }
 
 /**
@@ -782,10 +784,30 @@ class WorkbenchService {
     return exportSession(session)
   }
 
-  /** 导入会话：校验 + 新 UUID 落库（防 id 冲突）。失败返回错误码。 */
-  importSession(raw: unknown): { ok: boolean; session?: WorkbenchSession; error?: string } {
+  /**
+   * 导入会话：校验 + 新 UUID 落库（防 id 冲突）。失败返回错误码。
+   * duplicate 检测：同源（originId）已导入且未 force → error='duplicate' +
+   * existing 摘要，前端确认后 force 重导。
+   */
+  importSession(
+    raw: unknown,
+    opts: { force?: boolean } = {}
+  ): {
+    ok: boolean
+    session?: WorkbenchSession
+    error?: string
+    existing?: { id: string; title: string; updatedAt: number }
+  } {
     const existing = new Set(this.store.sessions.map((s) => s.id))
-    const r = importSessionCore(raw, existing)
+    const imported = this.store.sessions
+      .filter((s) => !!s.importedFrom)
+      .map((s) => ({
+        importedFrom: s.importedFrom!,
+        id: s.id,
+        title: s.title,
+        updatedAt: s.updatedAt
+      }))
+    const r = importSessionCore(raw, existing, { force: opts.force, imported })
     if (!r.ok || !r.session) return { ok: false, error: r.error }
     this.store.sessions.unshift(r.session)
     this.flush()

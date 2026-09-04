@@ -19,6 +19,8 @@ export interface SessionExportFile {
   schema: typeof SESSION_EXPORT_SCHEMA_VERSION
   exportedAt: number
   app: 'artify-desktop'
+  /** 源会话 UUID：重复导入检测锚点（跨导入稳定） */
+  originId: string
   session: WorkbenchSession
 }
 
@@ -31,6 +33,7 @@ export function exportSession(session: WorkbenchSession): SessionExportFile {
     schema: SESSION_EXPORT_SCHEMA_VERSION,
     exportedAt: Date.now(),
     app: 'artify-desktop',
+    originId: session.id,
     session: clone
   }
 }
@@ -38,7 +41,9 @@ export function exportSession(session: WorkbenchSession): SessionExportFile {
 export interface ImportResult {
   ok: boolean
   session?: WorkbenchSession
-  error?: 'invalid_json' | 'unsupported_schema' | 'not_session_file'
+  error?: 'invalid_json' | 'unsupported_schema' | 'not_session_file' | 'duplicate'
+  /** 重复导入时的既有会话摘要（前端确认框展示） */
+  existing?: { id: string; title: string; updatedAt: number }
 }
 
 /** 结构骨架校验（轻量：字段存在性 + 类型，不逐消息深校验——渲染层本就有容错） */
@@ -53,13 +58,35 @@ export function validateSessionFile(raw: unknown): SessionExportFile | null {
     return null
   }
   if (!Array.isArray(s.executions)) return null
-  return f as SessionExportFile
+  // originId 老件可能缺：兜底用 session.id（语义等价——老件没被导入过时）
+  return {
+    schema: f.schema,
+    exportedAt: f.exportedAt ?? 0,
+    app: 'artify-desktop',
+    originId: f.originId ?? s.id,
+    session: s
+  }
 }
 
 /** 导入：校验 + 新 UUID + 时间戳刷新。existingIds 用于防撞（本机已有同 id）。 */
-export function importSession(raw: unknown, existingIds: Set<string>): ImportResult {
+export function importSession(
+  raw: unknown,
+  existingIds: Set<string>,
+  opts: {
+    force?: boolean
+    imported?: { importedFrom: string; id: string; title: string; updatedAt: number }[]
+  } = {}
+): ImportResult {
   const file = validateSessionFile(raw)
   if (!file) return { ok: false, error: 'not_session_file' }
+  const dupe = opts.imported?.find((x) => x.importedFrom === file.originId)
+  if (dupe && !opts.force) {
+    return {
+      ok: false,
+      error: 'duplicate',
+      existing: { id: dupe.id, title: dupe.title, updatedAt: dupe.updatedAt }
+    }
+  }
   const s = JSON.parse(JSON.stringify(file.session)) as WorkbenchSession
   s.id = randomUUID()
   // 防御：极端小概率 UUID 撞车
@@ -67,6 +94,8 @@ export function importSession(raw: unknown, existingIds: Set<string>): ImportRes
   existingIds.add(s.id)
   s.updatedAt = Date.now()
   s.debugLogs = undefined
+  s.importedFrom = file.originId
+  s.importedFrom = file.originId
   for (const ex of s.executions ?? []) delete ex.batchJobId
   // 基本面兜底（老导出件缺字段不至于 NaN）
   s.createdAt = typeof s.createdAt === 'number' ? s.createdAt : Date.now()

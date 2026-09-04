@@ -137,8 +137,16 @@ export function createWorkbenchRouter(): express.Router {
   })
 
   router.post('/api/workbench/sessions/import', (req, res) => {
-    const r = workbenchService.importSession(req.body)
+    const { force } = (req.body as { force?: boolean }) ?? {}
+    const r = workbenchService.importSession(req.body, { force })
     if (!r.ok) {
+      // duplicate 语义 409（非 4xx 泛错误）：前端据此弹确认框
+      if (r.error === 'duplicate') {
+        res
+          .status(HTTP_STATUS.CONFLICT)
+          .json({ success: false, error: 'duplicate', existing: r.existing })
+        return
+      }
       res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse(r.error ?? 'import failed'))
       return
     }
@@ -207,8 +215,15 @@ export function createWorkbenchRouter(): express.Router {
         return
       }
       // 会话数据导入（新 UUID）
-      const r = workbenchService.importSession(manifest)
+      const force = (req.query as { force?: string }).force === '1'
+      const r = workbenchService.importSession(manifest, { force })
       if (!r.ok || !r.session) {
+        if (r.error === 'duplicate') {
+          res
+            .status(HTTP_STATUS.CONFLICT)
+            .json({ success: false, error: 'duplicate', existing: r.existing })
+          return
+        }
         res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse(r.error ?? 'import failed'))
         return
       }

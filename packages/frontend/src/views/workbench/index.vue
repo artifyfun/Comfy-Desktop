@@ -1182,13 +1182,35 @@
         </div>
       </div>
     </a-modal>
+    <!-- 导入进度浮条（右下角；sessionImporting.active 驱动） -->
+    <Teleport to="body">
+      <div
+        v-if="sessionImporting.active"
+        class="fixed bottom-6 right-6 z-50 rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] px-4 py-3 shadow-xl flex items-center gap-3 text-sm text-[var(--wb-text-1)]"
+      >
+        <i class="fas fa-circle-notch fa-spin text-slate-400"></i>
+        <span>{{ sessionImporting.label }}</span>
+        <div
+          v-if="sessionImporting.percent > 0 && sessionImporting.percent < 100"
+          class="w-32 h-1.5 rounded bg-slate-700 overflow-hidden"
+        >
+          <div
+            class="h-full bg-sky-500 transition-all"
+            :style="{ width: sessionImporting.percent + '%' }"
+          ></div>
+        </div>
+        <span v-else-if="sessionImporting.percent >= 100" class="text-emerald-400"
+          ><i class="fas fa-check"></i
+        ></span>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { message, Modal } from 'ant-design-vue'
 import { useI18n } from '@/utils/i18n'
 import { useAppStore } from '@/stores/appStore'
 import AppHeader from '@/views/apps/components/AppHeader.vue'
@@ -1479,7 +1501,91 @@ function exportSession(s, kind = 'json') {
   a.remove()
 }
 
-// 会话导入：文件选择 → JSON 解析 → POST → 成功后刷新列表并选中新会话
+// 会话导入：文件选择 → JSON/ZIP 分流 → POST（XHR 带进度）→ 409 重复确认 → 选中新会话
+// sessionImporting 状态驱动底部提示条（进度百分比/结果统计），message 仅终态弹一次
+const sessionImporting = ref({ active: false, percent: 0, label: '' })
+function postImport(url, body, isZip, force) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', force ? url + (url.includes('?') ? '&' : '?') + 'force=1' : url)
+    xhr.responseType = 'json'
+    if (isZip) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          sessionImporting.value = {
+            active: true,
+            percent: Math.round((e.loaded / e.total) * 100),
+            label: t('workbenchImportUploading'),
+          }
+        }
+      }
+    }
+    xhr.onload = () => resolve({ status: xhr.status, data: xhr.response })
+    xhr.onerror = () => reject(new Error('network'))
+    if (isZip) xhr.send(body)
+    else {
+      xhr.setRequestHeader('Content-Type', 'application/json')
+      xhr.send(JSON.stringify(body))
+    }
+  })
+}
+async function doImport(file, force = false) {
+  const isZip = file.name.toLowerCase().endsWith('.zip')
+  try {
+    sessionImporting.value = {
+      active: true,
+      percent: isZip ? 0 : 100,
+      label: t('workbenchImportUploading'),
+    }
+    let res
+    if (isZip) {
+      const fd = new FormData()
+      fd.append('file', file)
+      res = await postImport(
+        `${origin.value}/api/workbench/sessions/import-bundle`,
+        fd,
+        true,
+        force,
+      )
+    } else {
+      const text = await file.text()
+      res = await postImport(
+        `${origin.value}/api/workbench/sessions/import`,
+        JSON.parse(text),
+        false,
+        force,
+      )
+    }
+    if (res.status === 409) {
+      // 同源已导入：确认后 force 重导（Modal.confirm 回调风格，ant-design-vue 不返回 promise）
+      const existing = res.data?.existing
+      sessionImporting.value = { active: false, percent: 0, label: '' }
+      Modal.confirm({
+        title: t('workbenchImportDupTitle'),
+        content: t('workbenchImportDupBody').replace('{title}', existing?.title ?? ''),
+        okText: t('workbenchImportDupOk'),
+        cancelText: t('workbenchCancel'),
+        onOk: () => doImport(file, true),
+      })
+      return
+    }
+    if (res.status !== 201) throw new Error('import http ' + res.status)
+    const imported = res.data?.data
+    sessionImporting.value = { active: true, percent: 100, label: t('workbenchImportDone') }
+    await loadSessions()
+    if (imported?.id) selectSession(imported.id)
+    const stats =
+      imported?.filesRestored != null
+        ? `（${t('workbenchImportFiles')}: ${imported.filesRestored}）`
+        : ''
+    message.success(t('workbenchImportSuccess') + stats)
+    setTimeout(() => (sessionImporting.value = { active: false, percent: 0, label: '' }), 1500)
+  } catch (e) {
+    console.warn('workbench import failed', e)
+    message.error(t('workbenchImportFailed'))
+    sessionImporting.value = { active: false, percent: 0, label: '' }
+  }
+}
 async function importSession() {
   const input = document.createElement('input')
   input.type = 'file'
@@ -1487,35 +1593,7 @@ async function importSession() {
   input.onchange = async () => {
     const file = input.files?.[0]
     if (!file) return
-    try {
-      const isZip = file.name.toLowerCase().endsWith('.zip')
-      let res
-      if (isZip) {
-        const fd = new FormData()
-        fd.append('file', file)
-        res = await fetch(`${origin.value}/api/workbench/sessions/import-bundle`, {
-          method: 'POST',
-          body: fd,
-        })
-      } else {
-        const text = await file.text()
-        const body = JSON.parse(text)
-        res = await fetch(`${origin.value}/api/workbench/sessions/import`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        })
-      }
-      if (!res.ok) throw new Error('import http ' + res.status)
-      const j = await res.json()
-      const imported = j?.data
-      await loadSessions()
-      if (imported?.id) selectSession(imported.id)
-      message.success(t('workbenchImportSuccess'))
-    } catch (e) {
-      console.warn('workbench import failed', e)
-      message.error(t('workbenchImportFailed'))
-    }
+    await doImport(file)
   }
   input.click()
 }

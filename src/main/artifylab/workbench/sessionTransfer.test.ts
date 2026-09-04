@@ -10,6 +10,7 @@ import {
   SESSION_EXPORT_SCHEMA_VERSION
 } from './sessionTransfer'
 import type { WorkbenchSession } from './service'
+import type { SessionExportFile } from './sessionTransfer'
 
 function buildSession(): WorkbenchSession {
   return {
@@ -149,6 +150,43 @@ describe('importSession', () => {
     const r = importSession(file, new Set())
     expect(r.ok).toBe(true)
     expect(typeof r.session!.createdAt).toBe('number')
+  })
+
+  it('重复导入检测：同源已导入且未 force → duplicate + existing 摘要', () => {
+    const file = exportSession(buildSession())
+    const imported = [
+      { importedFrom: file.originId, id: 'local-x', title: '已导入过', updatedAt: 123 }
+    ]
+    const r = importSession(file, new Set(), { imported })
+    expect(r.ok).toBe(false)
+    expect(r.error).toBe('duplicate')
+    expect(r.existing?.id).toBe('local-x')
+    expect(r.existing?.title).toBe('已导入过')
+  })
+
+  it('force 重导放行：同源 force=true 正常生成新会话', () => {
+    const file = exportSession(buildSession())
+    const imported = [
+      { importedFrom: file.originId, id: 'local-x', title: '已导入过', updatedAt: 123 }
+    ]
+    const r = importSession(file, new Set(), { force: true, imported })
+    expect(r.ok).toBe(true)
+    expect(r.session?.id).not.toBe('local-x')
+  })
+
+  it('导入件打 importedFrom 溯源（导出再导入后新会话可被检测）', () => {
+    const file = exportSession(buildSession())
+    const r = importSession(file, new Set())
+    expect(r.ok).toBe(true)
+    expect(r.session?.importedFrom).toBe(file.originId)
+  })
+
+  it('老导出件无 originId：validate 兜底 session.id 作锚点', () => {
+    const file = exportSession(buildSession())
+    const legacy = { ...file }
+    delete (legacy as Partial<SessionExportFile>).originId
+    const validated = validateSessionFile(legacy)
+    expect(validated?.originId).toBe(file.session.id)
   })
 
   it('非法输入 → not_session_file，不落库', () => {
