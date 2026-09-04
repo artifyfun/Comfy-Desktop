@@ -93,6 +93,63 @@ export function parseImportJson(text) {
   throw new Error('unrecognized import format')
 }
 
+/**
+ * 节点级导出（P2）：选中图片物件 → 纯图片 ZIP。
+ * 只收 persist/src 为 dataURL 或 http(s) 的 image 节点；返回 null 表示无可导出内容。
+ * 文件名 = 净化后的 prompt/名称（去 mention 标记）或 id，序号去重。
+ */
+export async function buildSelectionZip(objects, opts = {}) {
+  const imgs = (objects || []).filter((o) => o?.type === 'image' && (o.persist || o.src))
+  if (!imgs.length) return null
+  const used = new Map()
+  const zip = new JSZip()
+  let added = 0
+  for (const o of imgs) {
+    const url = o.persist || o.src
+    let entry = null
+    if (typeof url === 'string' && url.startsWith('data:')) {
+      entry = { data: dataUrlBase64(url), base64: true }
+    } else if (opts.fetcher && typeof url === 'string') {
+      // http(s)/blob：由调用方注入 fetcher（保持纯函数可测）
+      const b = await opts.fetcher(url)
+      entry = { data: b, base64: false }
+    }
+    if (!entry) continue
+    const name = selectionFileName(o, used)
+    zip.file(name, entry.data, { base64: entry.base64 })
+    added++
+  }
+  if (!added) return null
+  return zip.generateAsync({ type: 'blob' })
+}
+
+/** 节点 → 规范文件名：prompt 前 24 字符（去 mention 标记/控制字符/路径分隔），
+ *  冲突时叠加序号；保底 canvas-<id> */
+export function selectionFileName(o, usedMap) {
+  const clean = (v) =>
+    String(v || '')
+      .replace(/@\[[^\]]*\]\{[^}]*\}/g, '')
+      .replace(/[\r\n\t]/g, ' ')
+      .replace(/[\\/:*?"<>|]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  let base =
+    clean(o.prompt || o.name || '')
+      .slice(0, 24)
+      .trim() ||
+    clean(String(o.text || ''))
+      .slice(0, 24)
+      .trim()
+  if (!base) base = 'canvas-' + (o.id || 'image')
+  const ext = extOf(o.persist || o.src || '')
+  let name = `${base}.${ext}`
+  const used = usedMap || new Map()
+  const n = (used.get(base) || 0) + 1
+  used.set(base, n)
+  if (n > 1) name = `${base}-${n}.${ext}`
+  return name
+}
+
 function extOf(dataUrl) {
   if (dataUrl.startsWith('data:image/png')) return 'png'
   if (dataUrl.startsWith('data:image/webp')) return 'webp'

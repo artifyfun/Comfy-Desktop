@@ -1702,7 +1702,13 @@ import {
   mergePrompts,
   searchPrompts,
 } from './promptLibrary'
-import { buildExportPayload, packExportZip, parseImportZip, parseImportJson } from './canvasExport'
+import {
+  buildExportPayload,
+  packExportZip,
+  parseImportZip,
+  parseImportJson,
+  buildSelectionZip,
+} from './canvasExport'
 import { importProject as psImportProject, cloneProject as psCloneProject } from './projectStore'
 const { onResult, emitAttachments, emitCanvasState, emitPrompt, onOps } = useCanvasMode()
 const wbOpen = ref(true) // 工作台侧边栏开合
@@ -1934,6 +1940,27 @@ function commitPrjRename(e) {
   persistProjects()
 }
 /** E4：单项目导出（复用当前导出管线） */
+/** 选中图片节点 → 纯图片 ZIP 下载（P2 节点级导出） */
+function exportSelectionZip() {
+  const picked = objects.value.filter((o) => selection.value.includes(o.id))
+  buildSelectionZip(picked, {
+    fetcher: async (url) => {
+      const r = await fetch(url)
+      return new Uint8Array(await r.arrayBuffer())
+    },
+  }).then((blob) => {
+    if (!blob) {
+      message.warning(t('canvasExportSelEmpty'))
+      return
+    }
+    const u = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = u
+    a.download = `canvas-selection-${new Date().toISOString().slice(0, 10)}.zip`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(u), 5000)
+  })
+}
 function exportProjectById(id) {
   syncActiveDocToStore()
   const clone = psCloneProject({ ...projectStore }, id)
@@ -3837,6 +3864,18 @@ const ctxItems = computed(() => {
         },
       },
     )
+  }
+  // P2: export selection zip when images picked
+  if (ids.some((id) => objects.value.find((o) => o.id === id)?.type === 'image')) {
+    items.push({
+      key: 'exportSel',
+      icon: 'fa-file-zipper',
+      label: t('canvasExportSelBtn'),
+      run: () => {
+        exportSelectionZip()
+        closeCtxMenu()
+      },
+    })
   }
   if (ids.length >= 2) {
     items.push(

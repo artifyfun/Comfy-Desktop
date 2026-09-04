@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { buildExportPayload, packExportZip, parseImportZip, parseImportJson } from './canvasExport'
+import {
+  buildExportPayload,
+  packExportZip,
+  parseImportZip,
+  parseImportJson,
+  buildSelectionZip,
+  selectionFileName,
+} from './canvasExport'
+import JSZip from 'jszip'
 
 const PNG_1PX =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
@@ -85,5 +93,65 @@ describe('parseImportJson', () => {
   })
   it('坏格式报错', () => {
     expect(() => parseImportJson('{"x":1}')).toThrow('unrecognized')
+  })
+})
+
+// —— 节点级导出（P2）——
+describe('buildSelectionZip / selectionFileName（P2）', () => {
+  const PNG1x1 =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+  const mkImg = (id, extra = {}) => ({
+    id,
+    type: 'image',
+    persist: PNG1x1,
+    x: 0,
+    y: 0,
+    width: 10,
+    height: 10,
+    ...extra,
+  })
+
+  it('无 image 节点返回 null', async () => {
+    expect(await buildSelectionZip([])).toBeNull()
+    expect(await buildSelectionZip([{ id: 'a', type: 'note', text: 'x' }])).toBeNull()
+  })
+  it('打包 persist dataURL 为 zip（可被 parseImportZip 读回 base64）', async () => {
+    const blob = await buildSelectionZip([mkImg('a'), mkImg('b')])
+    expect(blob).toBeTruthy()
+    // blob → arrayBuffer → jszip 读条目
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer())
+    const names = Object.keys(zip.files)
+    expect(names).toHaveLength(2)
+    expect(names.every((n) => /\.(png|jpg)$/.test(n))).toBe(true)
+    const raw = await zip.file(names[0]).async('base64')
+    expect(raw.length).toBeGreaterThan(10)
+  })
+  it('无有效源的 image（persist 空 src 空）跳过', async () => {
+    const blob = await buildSelectionZip([mkImg('a', { persist: '', src: '' })])
+    expect(blob).toBeNull()
+  })
+  it('http 源走注入 fetcher', async () => {
+    const fakeBlob = new Uint8Array([1, 2, 3])
+    const blob = await buildSelectionZip([mkImg('h', { persist: '', src: 'https://x/y.png' })], {
+      fetcher: async () => fakeBlob,
+    })
+    expect(blob).toBeTruthy()
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer())
+    const entry = Object.values(zip.files)[0]
+    expect(await entry.async('uint8array')).toEqual(fakeBlob)
+  })
+  it('selectionFileName：prompt 净化 + mention 剥离 + 冲突序号', () => {
+    const used = new Map()
+    expect(selectionFileName(mkImg('a', { prompt: 'a cute cat' }), used)).toBe('a cute cat.png')
+    // 同名第二张 → 序号 2
+    expect(selectionFileName(mkImg('b', { prompt: 'a cute cat' }), used)).toBe('a cute cat-2.png')
+    // mention 标记剥离
+    const m = selectionFileName(mkImg('c', { prompt: '@[风格]{s1} sunset' }), new Map())
+    expect(m).toBe('sunset.png')
+    // 非法字符清洗
+    const dirty = selectionFileName(mkImg('d', { prompt: 'a/b:c*d?"e' }), new Map())
+    expect(dirty).toBe('a b c d e.png')
+    // 无 prompt → id 保底
+    expect(selectionFileName(mkImg('n9'), new Map())).toBe('canvas-n9.png')
   })
 })
