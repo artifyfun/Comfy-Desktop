@@ -2371,6 +2371,11 @@ function highlightStroke(o, defStroke = 'rgba(148,163,184,0.4)') {
 }
 /** 物件是否显示连接句柄：悬停/选中/连线拖拽中（起点与悬停目标，参考 isConnecting 全显） */
 function showHandles(o) {
+  // fix(拖动中桩消失): 被拖节点的句柄保持显现——此前仅 hover/选中/连线三态,
+  // 拖动路径上 hover 判定不更新(220ms 后被 scheduleHoverHide 清空),若点击
+  // 未建立选中(句柄热区拦截 mousedown 的时序窗口)句柄立即隐没,用户感知
+  // "连线桩不跟随拖动"。
+  if (drag.mode === 'item' && objects.value[drag.item]?.id === o.id) return true
   return (
     isHighlightedOf(o) ||
     selection.value.includes(o.id) ||
@@ -2392,6 +2397,8 @@ watch(
     selectedLinkId,
     () => [connectDrag.active, connectDrag.targetId],
     () => [reconnectDrag.active, reconnectDrag.targetId],
+    // fix: 被拖节点句柄显隐随 drag.mode 变化,热区开关需要同步重绘 hit graph
+    () => drag.mode,
   ],
   redrawHandleHits,
   {
@@ -2419,10 +2426,12 @@ function handleConfig(o, side) {
     opacity: showHandles(o) ? 1 : 0,
     cursor: 'crosshair',
     // hitFunc 读实时状态（不闭包 on）：hit graph 重绘时按当下显隐提供热区。
-    // ctx 已变换到 shape 本地坐标系，圆心取 (0,0)；24px 热区半径（参考 size-12 = 48px 热区）
+    // fix(热区劫持拖动): 原 24px 半径热区在 64px 级小图上盖满大半节点,
+    // mousedown 全被句柄吃掉进连线模式——节点本体拖不动、桩看似"不跟随"。
+    // 热区收敛到圆点视觉半径 2 倍(≈12px 屏距):句柄好点、图拖得动。
     hitFunc(ctx, shape) {
       if (!showHandles(o)) return
-      const r = 24 / viewport.value.scale
+      const r = 12 / viewport.value.scale
       ctx.beginPath()
       ctx.arc(0, 0, r, 0, Math.PI * 2, false)
       ctx.closePath()
