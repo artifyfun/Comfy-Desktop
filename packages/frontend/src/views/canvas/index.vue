@@ -16,7 +16,7 @@
       </aside>
       <div
         ref="wrapEl"
-        class="relative flex-1 min-w-0 overflow-hidden rounded-xl border border-[var(--wb-stroke)]"
+        class="relative flex-1 min-w-0 overflow-hidden rounded-xl border border-[var(--wb-stroke)] select-none"
         :class="dragOver ? 'ring-2 ring-[var(--wb-accent)]' : ''"
         @dragover.prevent="dragOver = true"
         @dragleave.prevent="dragOver = false"
@@ -3305,6 +3305,7 @@ function onResizeEnd() {
 }
 
 function onMouseDown(e) {
+  if (e.evt?.preventDefault) e.evt.preventDefault() // 平移/框选起手禁文本选择
   // 空地（没点到任何 shape）按下：
   //   普通拖 = 平移画布；Shift/中键 拖 = 框选；crop 工具 = 圈选裁剪
   // 物件按下（onItemDown 先触发，drag.mode='item'）时 stage 级事件直接跳过
@@ -3449,6 +3450,7 @@ function onNodeDragStartSnap(e) {
 
 function onNodeDrag(e) {
   // 物件拖拽中的吸附（e 为 Konva 原生事件对象）
+  e.evt?.preventDefault?.() // 抑制拖拽中浏览器原生文本选择
   const node = e.target
   if (!dragRecorded && !dragClone.armed) {
     beforeChange()
@@ -7226,6 +7228,13 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* 拖动画布/节点/框选时避免选中界面文本：包装层整体禁选（Tailwind select-none
+   已加在 wrapEl），输入类控件豁免恢复——note 就地编辑/项目名/画布重命名。 */
+input,
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
 .agent-ops-card {
   position: absolute;
   z-index: 35;
