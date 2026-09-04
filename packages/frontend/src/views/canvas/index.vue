@@ -685,8 +685,17 @@
               {{
                 promptTarget.kind === 'rewrite'
                   ? t('canvasPromptTargetRewrite')
-                  : t('canvasPromptTargetNote')
+                  : promptTarget.kind === 'gen'
+                    ? t('canvasPromptTargetGen')
+                    : t('canvasPromptTargetNote')
               }}
+            </span>
+            <span
+              v-else
+              class="text-xs px-2 py-0.5 rounded-full bg-[var(--wb-stroke)] text-[var(--wb-text-2)]"
+              :title="t('canvasPromptNoTargetHint')"
+            >
+              {{ t('canvasPromptNoTargetHint') }}
             </span>
             <div class="flex-1"></div>
             <button
@@ -4749,6 +4758,15 @@ function applyPrompt(text) {
     noteRewrite.instruction = noteRewrite.instruction ? noteRewrite.instruction + '；' + text : text
   } else if (target?.kind === 'gen' && genNode.value) {
     genNode.value.prompt = genNode.value.prompt ? genNode.value.prompt + '\n' + text : text
+  } else {
+    // fix(静默无操作): 无回填目标时点击词条此前什么都不发生——改为复制到
+    // 剪贴板 + toast，用户至少拿到词条内容（选中笔记/开生图对话框后回填）。
+    try {
+      navigator.clipboard.writeText(text)
+      message.info(t('canvasPromptCopied'))
+    } catch {
+      /* 剪贴板不可用（权限/非安全上下文）——只关面板 */
+    }
   }
   promptLib.open = false
 }
