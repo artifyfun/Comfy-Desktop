@@ -626,6 +626,51 @@ export function distributeObjects(objects, ids, axis) {
  * z 层级调整（front/forward/backward/back 四向）。
  * 返回重排后的完整对象数组（新数组，不改入参）。
  */
+/**
+ * 批量图片分组（P2）：选中 image 物件 → 网格整理参数。
+ * 统一缩放到目标格宽（保持纵横比），按列数排布，返回 id → {x, y, width, height}。
+ * cellW=0 时保持各图片原尺寸，仅重排位置。
+ */
+export function gridArrangeImages(objects, ids, opts = {}) {
+  const { originX = 0, originY = 0, cellW = 260, gapX = 24, gapY = 24, cols = 3 } = opts
+  const set = new Set(ids)
+  const picked = objects.filter((o) => set.has(o.id))
+  if (picked.length < 2) return new Map()
+  // 选中顺序保持（按 x 再 y 排序，视觉顺序稳定）
+  const sorted = [...picked].sort((a, b) => a.x - b.x || a.y - b.y)
+  const out = new Map()
+  // 统一格宽时先算等比高
+  const ratios = sorted.map((o) => (o.height || 1) / (o.width || 1))
+  const rowHs = []
+  if (cellW > 0) {
+    for (let r = 0; r < Math.ceil(sorted.length / cols); r++) {
+      const slice = ratios.slice(r * cols, (r + 1) * cols)
+      rowHs.push(Math.max(...slice.map((k) => k * cellW)))
+    }
+  }
+  let y = originY
+  for (let r = 0; r < Math.ceil(sorted.length / cols); r++) {
+    const rowH = rowHs[r] || 0
+    let x = originX
+    for (let c = 0; c < cols; c++) {
+      const i = r * cols + c
+      if (i >= sorted.length) break
+      const o = sorted[i]
+      if (cellW > 0) {
+        const w = cellW
+        const h = Math.round(cellW * ((o.height || 1) / (o.width || 1)))
+        out.set(o.id, { x, y, width: w, height: h })
+        x += w + gapX
+      } else {
+        out.set(o.id, { x, y })
+        x += (o.width || 0) + gapX
+      }
+    }
+    y += (rowH || 0) + gapY
+  }
+  return out
+}
+
 export function zShiftObjects(objects, ids, dir) {
   const set = new Set(ids)
   if (dir === 'front' || dir === 'back') {

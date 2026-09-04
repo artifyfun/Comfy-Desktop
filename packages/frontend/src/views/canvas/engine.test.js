@@ -41,6 +41,7 @@ import {
   alignObjects,
   distributeObjects,
   zShiftObjects,
+  gridArrangeImages,
   ratioResizeRect,
 } from './engine'
 
@@ -532,5 +533,50 @@ describe('多选对齐/分布/z 层级纯函数（P1）', () => {
   it('zShift forward 顶层不动', () => {
     const r = zShiftObjects(objs, ['c'], 'forward')
     expect(r.map((o) => o.id)).toEqual(['a', 'b', 'c'])
+  })
+})
+
+// —— 批量图片分组（P2 gridArrangeImages）——
+describe('gridArrangeImages（P2）', () => {
+  const mk = (id, x, y, w, h) => ({ id, type: 'image', x, y, width: w, height: h })
+  const objs = [
+    mk('a', 100, 50, 200, 100),
+    mk('b', 0, 300, 200, 200),
+    mk('c', 500, 10, 200, 100),
+    mk('d', 60, 90, 200, 300),
+    mk('e', 700, 400, 200, 100),
+  ]
+  it('少于 2 个返回空', () => {
+    expect(gridArrangeImages(objs, ['a'], {}).size).toBe(0)
+  })
+  it('默认 3 列网格 + 统一格宽等比', () => {
+    const m = gridArrangeImages(objs, ['a', 'b', 'c', 'd', 'e'])
+    expect(m.size).toBe(5)
+    const a = m.get('a')
+    const b = m.get('b')
+    const c = m.get('c')
+    const d = m.get('d')
+    // 排序按 x: c(500)>… 实际排序 a(100) d(60)?… x 升序: b(0) d(60) a(100) c(500) e(700)
+    // 行1: b d a；行2: c e
+    expect([b.x, d.x, a.x]).toEqual([0, 284, 568])
+    expect(b.y).toBe(0)
+    expect(c.y).toBeGreaterThan(0)
+    // 等比：b 原 1:1 → 260x260；d 原 200x300 → 260x390
+    expect(b.height).toBe(260)
+    expect(d.height).toBe(390)
+    // 同行 y 一致
+    expect(a.y).toBe(b.y)
+  })
+  it('cellW=0 只重排位置不改尺寸', () => {
+    const m = gridArrangeImages(objs, ['a', 'b', 'c'], { cellW: 0 })
+    const a = m.get('a')
+    expect(a.width).toBeUndefined()
+    expect(a.x).toBeGreaterThanOrEqual(0)
+  })
+  it('cols=2 两列排布', () => {
+    const m = gridArrangeImages(objs, ['a', 'b', 'c', 'd'], { cols: 2 })
+    // x 序: b(0) d(60) a(100) c(500) → 2 列：行1=b,d 行2=a,c
+    expect(m.get('a').y).toBeGreaterThan(m.get('b').y)
+    expect(m.get('c').y).toBe(m.get('a').y)
   })
 })

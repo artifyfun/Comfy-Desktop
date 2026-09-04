@@ -1675,6 +1675,7 @@ import {
   alignObjects,
   distributeObjects,
   zShiftObjects,
+  gridArrangeImages,
   freeResizeRect,
   ratioResizeRect,
 } from './engine'
@@ -3877,6 +3878,19 @@ const ctxItems = computed(() => {
       },
     })
   }
+  // P2: grid-arrange when 2+ images picked
+  const imgIds = ids.filter((id) => objects.value.find((o) => o.id === id)?.type === 'image')
+  if (imgIds.length >= 2) {
+    items.push({
+      key: 'gridImg',
+      icon: 'fa-table-cells',
+      label: t('canvasGridBtn'),
+      run: () => {
+        gridArrangeSelected()
+        closeCtxMenu()
+      },
+    })
+  }
   if (ids.length >= 2) {
     items.push(
       {
@@ -4012,6 +4026,41 @@ function zShift(ids, dir) {
   objects.value = zShiftObjects(objects.value, ids, dir)
   saveSoon()
 }
+/** 批量图片分组（P2）：选中 image 统一格宽网格重排 + 自动成组 */
+function gridArrangeSelected() {
+  const imgs = objects.value.filter((o) => selection.value.includes(o.id) && o.type === 'image')
+  if (imgs.length < 2) {
+    message.warning(t('canvasGridNeedImages'))
+    return
+  }
+  // 落点：当前选中包围盒左上角
+  const b = bboxOf(imgs)
+  const moves = gridArrangeImages(
+    objects.value,
+    imgs.map((o) => o.id),
+    {
+      originX: Math.round(b.x),
+      originY: Math.round(b.y),
+      cellW: 260,
+      cols: Math.min(3, Math.ceil(Math.sqrt(imgs.length)) || 1),
+    },
+  )
+  if (!moves.size) return
+  beforeChange()
+  for (const [id, pos] of moves) {
+    const o = objects.value.find((x) => x.id === id)
+    if (o) Object.assign(o, pos)
+  }
+  // 自动成组（已在组里的先移除，再统一入新组）
+  const members = imgs.map((o) => o.id)
+  groups.value = groups.value
+    .map((g) => ({ ...g, members: g.members.filter((m) => !members.includes(m)) }))
+    .filter((g) => g.members.length > 1)
+  groups.value.push({ id: 'g' + Date.now(), members })
+  message.success(t('canvasGridArranged').replace('{n}', String(members.length)))
+  saveSoon()
+}
+
 /** 多选对齐（左/右/上/下/水平居中/垂直居中）：应用坐标映射 */
 function alignSel(mode) {
   if (selection.value.length < 2) return
