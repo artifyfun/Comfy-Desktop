@@ -2335,8 +2335,17 @@ function isHighlightedOf(o) {
   return hoverNodeId.value === o.id || hoverFromPanel.value === o.id
 }
 /** 高亮描边（选中 > 高亮 > 默认）：面板行悬停时节点亮 accent 描边 */
+/** CSS 变量在 canvas 2D 无效（var(--wb-accent) 会被画成黑色）——解析成实际色值 */
+let accentColorCache = ''
+function accentColor() {
+  if (!accentColorCache) {
+    accentColorCache =
+      getComputedStyle(document.documentElement).getPropertyValue('--wb-accent').trim() || '#0b8ce9'
+  }
+  return accentColorCache
+}
 function highlightStroke(o, defStroke = 'rgba(148,163,184,0.4)') {
-  if (selection.value.includes(o.id)) return { stroke: 'var(--wb-accent)', strokeWidth: 2 }
+  if (selection.value.includes(o.id)) return { stroke: accentColor(), strokeWidth: 2 }
   if (isHighlightedOf(o)) return { stroke: '#38bdf8', strokeWidth: 2 }
   return { stroke: defStroke, strokeWidth: 1 }
 }
@@ -5218,13 +5227,15 @@ const frameObjects = computed(() => withCull((o) => o.type === 'frame'))
 function frameConfig(o) {
   // fix: rect 在 group 内须用相对坐标（group 已定位 o.x/o.y）；id 由 group 承载
   // （rect 再带同 id 会与 group 重复，findOne 命中 rect 而非 group）
+  // fix(选中无反馈): 同 shotRectConfig——补选中态分支（accent 实线盖虚线）
+  const sel = selection.value.includes(o.id)
   return {
     width: o.width,
     height: o.height,
     fill: 'rgba(99,102,241,0.05)',
-    stroke: 'rgba(129,140,248,0.5)',
-    strokeWidth: 1.5,
-    dash: [8, 6],
+    stroke: sel ? accentColor() : 'rgba(129,140,248,0.5)',
+    strokeWidth: sel ? 2 : 1.5,
+    ...(sel ? {} : { dash: [8, 6] }),
     cornerRadius: 10,
   }
 }
@@ -5243,13 +5254,14 @@ function frameLabelConfig(o) {
   }
 }
 function shotRectConfig(o) {
-  // fix: 相对坐标（同 frame/note——group 已定位）
+  // fix(选中无反馈): 此前无选中态分支——selection 已设置但卡片外观零变化,
+  // 用户感知"点不中/只能 hover"。沿用 highlightStroke 统一模式(选中=accent 2px)。
   return {
     width: o.width,
     height: o.height,
     fill: 'rgba(20,184,166,0.08)',
-    stroke: o.src ? 'rgba(45,212,191,0.7)' : 'rgba(20,184,166,0.45)',
-    strokeWidth: 1.5,
+    ...highlightStroke(o, o.src ? 'rgba(45,212,191,0.7)' : 'rgba(20,184,166,0.45)'),
+    strokeWidth: selection.value.includes(o.id) ? 2 : 1.5,
     cornerRadius: 8,
   }
 }
