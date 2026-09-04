@@ -2305,10 +2305,20 @@ function createNodeFromConnect(kind) {
 
 const selectedLinkId = ref(null) // 选中的连线 id（参考 selectedConnectionId）
 const hoverNodeId = ref(null) // 悬停物件 id（句柄显现条件，参考 hovered || isSelected || isConnecting）
+/** 高亮判定（含图层面板行悬停联动）：画布悬停或面板行悬停都算 */
+function isHighlightedOf(o) {
+  return hoverNodeId.value === o.id || hoverFromPanel.value === o.id
+}
+/** 高亮描边（选中 > 高亮 > 默认）：面板行悬停时节点亮 accent 描边 */
+function highlightStroke(o, defStroke = 'rgba(148,163,184,0.4)') {
+  if (selection.value.includes(o.id)) return { stroke: 'var(--wb-accent)', strokeWidth: 2 }
+  if (isHighlightedOf(o)) return { stroke: '#38bdf8', strokeWidth: 2 }
+  return { stroke: defStroke, strokeWidth: 1 }
+}
 /** 物件是否显示连接句柄：悬停/选中/连线拖拽中（起点与悬停目标，参考 isConnecting 全显） */
 function showHandles(o) {
   return (
-    hoverNodeId.value === o.id ||
+    isHighlightedOf(o) ||
     selection.value.includes(o.id) ||
     (connectDrag.active && (connectDrag.nodeId === o.id || connectDrag.targetId === o.id)) ||
     (reconnectDrag.active && reconnectDrag.targetId === o.id)
@@ -2324,6 +2334,7 @@ function redrawHandleHits() {
 watch(
   [
     hoverNodeId,
+    hoverFromPanel,
     selectedLinkId,
     () => [connectDrag.active, connectDrag.targetId],
     () => [reconnectDrag.active, reconnectDrag.targetId],
@@ -2515,6 +2526,7 @@ const cullIds = computed(() => {
   const ids = visibleIds(objects.value, viewport.value, size, 240)
   for (const id of selection.value) ids.add(id)
   if (hoverNodeId.value) ids.add(hoverNodeId.value)
+  if (hoverFromPanel.value) ids.add(hoverFromPanel.value)
   for (const l of links.value) {
     if (ids.has(l.from)) ids.add(l.to)
     if (ids.has(l.to)) ids.add(l.from)
@@ -2561,8 +2573,7 @@ function imageConfig(o) {
     image: loadImage(o.src),
     width: o.width,
     height: o.height,
-    stroke: selection.value.includes(o.id) ? 'var(--wb-accent)' : 'rgba(148,163,184,0.35)',
-    strokeWidth: selection.value.includes(o.id) ? 2 : 1,
+    ...highlightStroke(o, 'rgba(148,163,184,0.35)'),
     cornerRadius: 6,
   }
 }
@@ -2577,10 +2588,12 @@ function mediaRectConfig(o) {
     fill: o.type === 'video' ? 'rgba(14,165,233,0.10)' : 'rgba(168,85,247,0.10)',
     stroke: sel
       ? '#38bdf8'
-      : o.type === 'video'
-        ? 'rgba(56,189,248,0.55)'
-        : 'rgba(192,132,252,0.55)',
-    strokeWidth: sel ? 2 : 1.5,
+      : isHighlightedOf(o)
+        ? '#38bdf8'
+        : o.type === 'video'
+          ? 'rgba(56,189,248,0.55)'
+          : 'rgba(192,132,252,0.55)',
+    strokeWidth: sel || isHighlightedOf(o) ? 2 : 1.5,
     cornerRadius: 12,
   }
 }
@@ -2615,8 +2628,7 @@ function noteRectConfig(o) {
     fill: o.color || NOTE_DEFAULT_COLOR,
     opacity: 0.9,
     cornerRadius: 8,
-    stroke: selection.value.includes(o.id) ? '#38bdf8' : 'rgba(148,163,184,0.4)',
-    strokeWidth: selection.value.includes(o.id) ? 2 : 1,
+    ...highlightStroke(o),
   }
 }
 function noteTextConfig(o) {
@@ -5843,7 +5855,7 @@ function appNodeRectConfig(o) {
     width: o.width,
     height: o.height,
     fill: APP_CARD.fill,
-    stroke: sel ? APP_CARD.activeStroke : APP_CARD.stroke,
+    stroke: sel || isHighlightedOf(o) ? APP_CARD.activeStroke : APP_CARD.stroke,
     strokeWidth: sel ? 2 : 2,
     cornerRadius: 24, // rounded-3xl
     shadowColor: sel ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.25)',
