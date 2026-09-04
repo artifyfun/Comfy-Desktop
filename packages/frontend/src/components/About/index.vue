@@ -155,8 +155,15 @@ export default {
 <style lang="less" scoped>
 .about-modal {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  /* fix(画布全隐): 根节点原为 in-flow 块(min-height:100vh 无 position)——挂载在
+     header 内会把 header 撑到 100vh+,flex 布局里画布容器高度被挤到 0,
+     Konva stage 尺寸归零(cull 全裁=节点全隐、hit 全废=点击无响应)。
+     关闭后多数环境靠 ResizeObserver 回补恢复,但 resize 回调竞态/软渲染
+     下可能不自愈,须切路由重挂载。改 fixed 脱离文档流,布局零影响。 */
+  position: fixed;
+  inset: 0;
+  z-index: 100;
   background: rgba(0, 0, 0, 0.72);
-  min-height: 100vh;
   display: flex;
   justify-content: center;
   align-items: center;
