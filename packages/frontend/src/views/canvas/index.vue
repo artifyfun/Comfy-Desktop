@@ -258,10 +258,11 @@
                 @mousedown="onResizeStart(o.id, 'se', $event)"
               />
             </v-group>
-            <!-- 框选橡皮筋 -->
-            <v-rect v-if="rubber" :config="rubberConfig" />
-            <!-- 圈选裁剪橡皮筋 -->
-            <v-rect v-if="cropRect" :config="cropRectConfig" />
+            <!-- 框选橡皮筋（fix: 此前绑定函数引用而非调用，config 里 width 等
+                 全是 undefined → rect 宽高 0，橡皮筋拖拽全程不可见） -->
+            <v-rect v-if="rubber" :config="rubberConfig()" />
+            <!-- 圈选裁剪橡皮筋（同上） -->
+            <v-rect v-if="cropRect" :config="cropRectConfig()" />
           </v-layer>
         </v-stage>
 
@@ -3347,10 +3348,16 @@ function onMouseDown(e) {
   // 兜底：重连拖拽异常残留（未松手/未 Esc）时，点空白即取消
   if (reconnectDrag.active) cancelReconnectDrag()
   const st = stageEl.value.getStage()
-  if (e.target !== st) return // 物件由节点拖拽处理
+  // fix(圈选裁剪无反馈): crop 工具语义是"在图片上圈一块"，但下方
+  // `e.target !== st` 会把落在物件上的按下全部 return——图片上起圈
+  // 永远走不到 crop 分支，橡皮筋建不起来，用户看不到任何交互效果。
+  // crop 态判定提前：空地/物件上一律起圈（物件 Konva 拖拽已被
+  // syncDraggables 关闭，不会抢手势）。
+  const cropTool = tool.value === 'crop'
+  if (e.target !== st && !cropTool) return // 物件由节点拖拽处理
   const p = st.getPointerPosition()
   const w = screenToWorld(viewport.value, p.x, p.y)
-  if (tool.value === 'crop') {
+  if (cropTool) {
     drag.mode = 'crop'
     drag.last = { x: p.x, y: p.y }
     cropRect.value = { x: w.x, y: w.y, w: 0, h: 0 }
