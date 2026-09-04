@@ -1215,6 +1215,16 @@
           {{ Math.round(viewport.scale * 100) }}%
         </div>
 
+        <!-- 软件渲染降级提示（Win11 GPU黑名单机）：一次性告知 -->
+        <div
+          v-if="softRenderTip"
+          class="absolute z-20 left-1/2 top-3 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs text-amber-300"
+        >
+          <i class="fas fa-triangle-exclamation"></i>{{ t('canvasSoftRenderTip') }}
+          <button class="ml-1 text-amber-300/70 hover:text-amber-300" @click="dismissSoftRenderTip">
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
         <!-- E2 节点参考条（参考 canvas-node-reference-bar）：上游引用缩略图横排 -->
         <div
           v-if="nodeRefBar"
@@ -6633,6 +6643,19 @@ function nodeDeleteObj(id) {
 const TOOLBAR_H = 36
 /** 悬停节点 → 工具栏屏幕坐标 + 按类型装配动作 */
 /** E2：节点参考条 —— 悬停/选中节点的上游引用（缩略图横排 + 断开 + 预览 + 加引用） */
+/** 软渲提示条（一次性）：window.__SOFT_RENDER__ 由 main.js 检测写入 */
+const softRenderTip = ref(false)
+function dismissSoftRenderTip() {
+  softRenderTip.value = false
+  try {
+    localStorage.setItem('artify.canvas.softRenderTipDismissed', '1')
+  } catch {
+    /* 忽略 */
+  }
+}
+if (window.__SOFT_RENDER__ && !localStorage.getItem('artify.canvas.softRenderTipDismissed')) {
+  softRenderTip.value = true
+}
 const refBarPreview = reactive({ id: null, x: 0, y: 0 }) // 悬停预览大图
 const refBarHover = ref(null) // 锁定显示（防缩略图 hover 抖动）
 const nodeRefBar = computed(() => {

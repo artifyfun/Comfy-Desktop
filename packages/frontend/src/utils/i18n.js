@@ -545,6 +545,8 @@ const translations = {
     canvasAgentOpsReject: '忽略',
     canvasAgentOpsApplied: '指令已执行',
     canvasAgentOpsRun: '运行节点「{n}」',
+    canvasSoftRenderTip:
+      '检测到软件渲染（GPU 加速不可用），画布已自动降级以保证流畅；在系统设置更新显卡驱动后可恢复高清渲染',
     canvasAgentOpsAdd: '新建应用节点：{app}',
     canvasAgentOpsUpdate: '更新节点 {id}',
     canvasAgentOpsConnect: '连线 {f} → {to}',
@@ -1744,6 +1746,8 @@ const translations = {
     canvasAgentOpsReject: 'Dismiss',
     canvasAgentOpsApplied: 'Ops applied',
     canvasAgentOpsRun: 'Run node "{n}"',
+    canvasSoftRenderTip:
+      'Software rendering detected (GPU acceleration unavailable); canvas auto-degraded for smoothness. Update GPU drivers to restore HD rendering',
     canvasAgentOpsAdd: 'Add app node: {app}',
     canvasAgentOpsUpdate: 'Update node {id}',
     canvasAgentOpsConnect: 'Connect {f} → {to}',
