@@ -2114,7 +2114,18 @@ async function importCanvasFile(f) {
 function loadProjectIntoCanvas() {
   const p = activeProject.value
   if (!p) return
-  objects.value = p.doc.objects.map((o) => ({ ...o }))
+  let washed = false
+  objects.value = p.doc.objects.map((o) => {
+    // fix(重启后媒体死链): blob: URL 仅当前文档生命周期有效,刷新/重启必死;
+    // persist 快照(dataURL)在则回退——image 节点此前无回退(直接透明),
+    // video/audio 的 watch 只判空 src(死链非空不触发),一并在此统一洗。
+    if (typeof o.src === 'string' && o.src.startsWith('blob:') && o.persist) {
+      washed = true
+      return { ...o, src: o.persist }
+    }
+    return { ...o }
+  })
+  if (washed) saveSoon() // 洗过就写回 store,死链不再反复落盘（否则每次 boot 重洗）
   links.value = p.doc.links.map((l) => ({ ...l }))
   groups.value = p.doc.groups.map((g) => ({ ...g }))
   viewport.value = makeViewport(p.doc.viewport.scale, p.doc.viewport.x, p.doc.viewport.y)
