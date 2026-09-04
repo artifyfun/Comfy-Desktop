@@ -1,11 +1,7 @@
 <template>
   <div class="page-container bg-tech-dark flex flex-col h-screen overflow-hidden">
-    <AppHeader
-      class="shrink-0"
-      :first-nav-to="'/market'"
-      :first-nav-label="t('market')"
-      first-nav-icon="mr-2 fas fa-store"
-    />
+    <!-- 首导航用默认「应用中心」（/）；应用市场入口只在应用中心页自显示 -->
+    <AppHeader class="shrink-0" />
     <!-- 工作台侧边栏（左侧，可收起） + 画布 布局（flex 撑满视口剩余高度） -->
     <div class="flex flex-1 min-h-0 mx-4 mt-2 mb-2 gap-2">
       <aside
