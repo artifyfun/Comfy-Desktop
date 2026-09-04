@@ -6255,10 +6255,19 @@ watch(
 /** digest → 服务端（节流 2s；内容序列化一致时跳过；失败静默重试下轮） */
 let digestSnapLast = ''
 let digestSnapTimer = 0
+// fix(404 刷屏): 旧版 server（或路由未挂）对 /api/canvas/snapshot 回 404 时，
+// Chromium 每次请求都往控制台打一条黄色 Failed to load resource——digest
+// 一变就 POST，控制台被 404 淹没。失败（网络错/非 2xx）后冷却 60s，
+// 期间不重试；成功才恢复常态推送。
+let digestSnapCooldownUntil = 0
 function pushDigestSnapshot(d) {
   clearTimeout(digestSnapTimer)
   digestSnapTimer = setTimeout(() => {
-    const json = JSON.stringify(d)
+    if (Date.now() < digestSnapCooldownUntil) return
+    // fix(推送风暴): digest 含 ts:Date.now()，任何重算 JSON 必变——去重
+    // 形同虚设，每次 watch 触发都 POST。去重时剥离 ts（服务端不需要）。
+    const { ts: _ts, ...rest } = d
+    const json = JSON.stringify(rest)
     if (json === digestSnapLast) return
     digestSnapLast = json
     // A 画布页无注入桥全局：主窗 3008 同源代理 API server（ComfyUI iframe
@@ -6268,7 +6277,13 @@ function pushDigestSnapshot(d) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: json,
-    }).catch(() => {})
+    })
+      .then((r) => {
+        if (!r.ok) digestSnapCooldownUntil = Date.now() + 60_000
+      })
+      .catch(() => {
+        digestSnapCooldownUntil = Date.now() + 60_000
+      })
   }, 2000)
 }
 
