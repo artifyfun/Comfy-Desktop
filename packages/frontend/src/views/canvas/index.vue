@@ -2465,7 +2465,7 @@ function linkAnchorConfig(seg, side) {
 // 角柄画在节点四角外侧（RESIZE_ANCHOR_OFF）——媒体节点的 HTML overlay 播放器占满节点
 // 矩形，角柄外置才不被遮挡；App/分镜卡（固定布局）不支持；组内成员禁止
 // （组合语义由组拖动承载，防破坏成员相对位置）。
-const RESIZE_TYPES = ['image', 'note', 'frame', 'video', 'audio']
+const RESIZE_TYPES = ['image', 'note', 'frame', 'video', 'audio', 'shot']
 const RESIZE_MIN = 24 // 最小宽高（世界坐标）
 const resizeDrag = reactive({
   active: false,
