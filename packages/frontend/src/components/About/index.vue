@@ -99,7 +99,7 @@
             class="license-info"
             style="
               width: 100%;
-              color: #aaaaff;
+              color: var(--wb-accent-hover);
               font-size: 0.95rem;
               text-align: right;
               margin-top: 10px;
@@ -154,7 +154,7 @@ export default {
 
 <style lang="less" scoped>
 .about-modal {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: var(--wb-font);
   /* fix(画布全隐): 根节点原为 in-flow 块(min-height:100vh 无 position)——挂载在
      header 内会把 header 撑到 100vh+,flex 布局里画布容器高度被挤到 0,
      Konva stage 尺寸归零(cull 全裁=节点全隐、hit 全废=点击无响应)。
@@ -167,7 +167,7 @@ export default {
   display: flex;
   justify-content: center;
   align-items: center;
-  color: #e0e0ff;
+  color: var(--wb-text);
   padding: 20px;
 
   /* 弹窗样式 */
@@ -177,7 +177,7 @@ export default {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 20, 0.85);
+    background: rgba(0, 0, 0, 0.7);
     display: flex;
     justify-content: center;
     align-items: center;
@@ -197,40 +197,29 @@ export default {
     max-height: 100%;
   }
 
-  .modal-container::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 4px;
-    background: var(--wb-accent);
-  }
-
   .close-btn {
     position: absolute;
-    top: 20px;
-    right: 20px;
-    width: 40px;
-    height: 40px;
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(64, 224, 208, 0.3);
-    border-radius: 50%;
+    top: 14px;
+    right: 14px;
+    width: 32px;
+    height: 32px;
+    background: transparent;
+    border: none;
+    border-radius: var(--wb-r-ctrl);
     cursor: pointer;
     display: flex;
     justify-content: center;
     align-items: center;
-    color: var(--wb-accent-hover);
-    font-size: 1.2rem;
+    color: var(--wb-text-3);
+    font-size: 1rem;
     transition:
-      background 0.3s ease,
-      color 0.3s ease,
-      transform 0.3s ease;
+      background 0.15s ease,
+      color 0.15s ease;
   }
 
   .close-btn:hover {
-    background: rgba(255, 0, 85, 0.3);
-    transform: rotate(90deg);
+    background: var(--wb-surface-hover);
+    color: var(--wb-text);
   }
 
   .modal-content {
@@ -265,7 +254,7 @@ export default {
     line-height: 1.8;
     font-size: 1.1rem;
     color: var(--wb-text-2);
-    margin-bottom: 30px;
+    margin-bottom: 24px;
     position: relative;
     padding-left: 20px;
   }

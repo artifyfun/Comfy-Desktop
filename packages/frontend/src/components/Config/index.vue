@@ -6,12 +6,18 @@
         class="flex overflow-auto fixed inset-0 justify-center items-start p-4 z-500 bg-black/70"
       >
         <transition name="slide">
-          <div v-show="true" class="p-6 w-full max-w-md rounded-xl glass-card">
+          <div
+            v-show="true"
+            class="p-6 w-full max-w-md rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface-deep)] shadow-2xl"
+          >
             <div class="flex justify-between items-center mb-6">
               <h3 class="text-xl font-bold text-white">
                 {{ t('settings') }}
               </h3>
-              <button @click="handleClickCancel" class="text-slate-400 hover:text-white">
+              <button
+                @click="handleClickCancel"
+                class="text-[var(--wb-text-3)] hover:text-[var(--wb-text)]"
+              >
                 <i class="fas fa-times"></i>
               </button>
             </div>
@@ -25,8 +31,8 @@
                 :class="[
                   'px-4 py-2 rounded-t-lg font-medium transition',
                   activeTab === tab.key
-                    ? 'bg-tech-cyan/80 text-white'
-                    : 'bg-slate-700/60 text-slate-300 hover:bg-slate-600',
+                    ? 'bg-[var(--wb-accent)]/15 text-[var(--wb-accent-hover)] border-b-2 border-[var(--wb-accent)]'
+                    : 'text-[var(--wb-text-2)] hover:text-[var(--wb-text)] hover:bg-[var(--wb-surface-hover)]',
                 ]"
               >
                 {{ tab.label }}
@@ -38,15 +44,17 @@
               <div v-if="activeTab === 'base'">
                 <!-- 新增：供应商选择 - 图标按钮 -->
                 <div>
-                  <label class="block mb-3 text-slate-300">
+                  <label class="block mb-3 text-[var(--wb-text-2)]">
                     {{ t('provider') }}
                   </label>
                   <div class="flex space-x-3">
                     <button
                       @click="setProvider('deepseek')"
                       :class="{
-                        'bg-tech-blue/80': state.config.provider === 'deepseek',
-                        'bg-slate-700/60 hover:bg-slate-600': state.config.provider !== 'deepseek',
+                        'bg-[var(--wb-accent)]/20 border-[var(--wb-accent)] text-[var(--wb-accent-hover)]':
+                          state.config.provider === 'deepseek',
+                        'border-[var(--wb-stroke)] text-[var(--wb-text-2)] hover:bg-[var(--wb-surface-hover)]':
+                          state.config.provider !== 'deepseek',
                       }"
                       class="flex flex-col items-center p-3 w-full rounded-lg transition duration-300"
                     >
@@ -56,8 +64,10 @@
                     <button
                       @click="setProvider('openai')"
                       :class="{
-                        'bg-tech-cyan/80': state.config.provider === 'openai',
-                        'bg-slate-700/60 hover:bg-slate-600': state.config.provider !== 'openai',
+                        'bg-[var(--wb-accent)]/20 border-[var(--wb-accent)] text-[var(--wb-accent-hover)]':
+                          state.config.provider === 'openai',
+                        'border-[var(--wb-stroke)] text-[var(--wb-text-2)] hover:bg-[var(--wb-surface-hover)]':
+                          state.config.provider !== 'openai',
                       }"
                       class="flex flex-col items-center p-3 w-full rounded-lg transition duration-300"
                     >
@@ -69,7 +79,7 @@
 
                 <!-- Base URL 输入 -->
                 <div>
-                  <label class="block mb-2 text-slate-300">{{ t('baseUrl') }}</label>
+                  <label class="block mb-2 text-[var(--wb-text-2)]">{{ t('baseUrl') }}</label>
                   <input
                     v-model="state.config.base_url"
                     type="text"
@@ -80,7 +90,7 @@
 
                 <!-- API Key - 带可见性切换 -->
                 <div>
-                  <label class="block mb-2 text-slate-300">{{ t('apiKey') }}</label>
+                  <label class="block mb-2 text-[var(--wb-text-2)]">{{ t('apiKey') }}</label>
                   <div class="relative">
                     <input
                       v-model="state.config.api_key"
@@ -90,7 +100,7 @@
                     />
                     <button
                       @click="showApiKey = !showApiKey"
-                      class="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-white"
+                      class="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--wb-text-3)] hover:text-[var(--wb-text)]"
                     >
                       <i :class="showApiKey ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
                     </button>
@@ -105,7 +115,8 @@
                     class="flex justify-center items-center px-4 py-2.5 mt-3 w-full text-white rounded-lg transition duration-300"
                     :class="{
                       'btn-comfy-primary': !isTesting,
-                      'bg-slate-600 cursor-not-allowed': isTesting,
+                      'bg-[var(--wb-surface-hover)] text-[var(--wb-text-3)] cursor-not-allowed':
+                        isTesting,
                     }"
                   >
                     <i v-if="isTesting" class="mr-2 fas fa-spinner fa-spin"></i>
@@ -137,14 +148,14 @@
 
                 <!-- 模型选择 - 下拉菜单 + 自定义输入 -->
                 <div>
-                  <label class="block mb-2 text-slate-300">
+                  <label class="block mb-2 text-[var(--wb-text-2)]">
                     {{ t('model') }}
                   </label>
                   <div class="relative">
                     <select
                       v-model="selectedModelType"
                       @change="handleModelTypeChange"
-                      class="px-4 py-2.5 w-full text-white rounded-lg appearance-none tech-input focus:outline-none bg-slate-800/60"
+                      class="px-4 py-2.5 w-full text-white rounded-lg appearance-none tech-input focus:outline-none"
                     >
                       <option value="preset">{{ t('presetModels') }}</option>
                       <option value="custom">{{ t('customModel') }}</option>
@@ -152,7 +163,7 @@
                     <div
                       class="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none"
                     >
-                      <i class="fas fa-chevron-down text-slate-400"></i>
+                      <i class="fas fa-chevron-down text-[var(--wb-text-3)]"></i>
                     </div>
                   </div>
 
@@ -161,7 +172,7 @@
                     <div class="relative">
                       <select
                         v-model="state.config.model"
-                        class="px-4 py-2.5 w-full text-white rounded-lg appearance-none tech-input focus:outline-none bg-slate-800/60"
+                        class="px-4 py-2.5 w-full text-white rounded-lg appearance-none tech-input focus:outline-none"
                       >
                         <option v-for="model in getModelList()" :key="model" :value="model">
                           {{ model }}
@@ -170,7 +181,7 @@
                       <div
                         class="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none"
                       >
-                        <i class="fas fa-chevron-down text-slate-400"></i>
+                        <i class="fas fa-chevron-down text-[var(--wb-text-3)]"></i>
                       </div>
                     </div>
                   </div>
@@ -186,27 +197,30 @@
                   </div>
 
                   <!-- 构建应用模型（Codex agent） -->
-                  <div class="pt-4 mt-4 border-t border-slate-700">
-                    <label class="block mb-2 text-slate-300">{{ t('buildModel') }}</label>
+                  <div class="pt-4 mt-4 border-t border-[var(--wb-stroke)]">
+                    <label class="block mb-2 text-[var(--wb-text-2)]">{{ t('buildModel') }}</label>
                     <input
                       v-model="state.config.buildModel"
                       type="text"
                       class="px-4 py-2.5 w-full text-white rounded-lg tech-input focus:outline-none"
                       :placeholder="t('enterBuildModel')"
                     />
-                    <p class="mt-1.5 text-xs text-slate-400">{{ t('buildModelHint') }}</p>
+                    <p class="mt-1.5 text-xs text-[var(--wb-text-3)]">{{ t('buildModelHint') }}</p>
                   </div>
 
                   <!-- 工作台 agent 文件权限 -->
-                  <div class="pt-4 mt-4 border-t border-slate-700">
-                    <label class="block mb-2 text-slate-300">{{ t('workbenchAgentAccess') }}</label>
+                  <div class="pt-4 mt-4 border-t border-[var(--wb-stroke)]">
+                    <label class="block mb-2 text-[var(--wb-text-2)]">{{
+                      t('workbenchAgentAccess')
+                    }}</label>
                     <div class="flex space-x-3">
                       <button
                         type="button"
                         @click="state.config.workbenchAgentAccess = 'standard'"
                         :class="{
-                          'bg-tech-blue/80': state.config.workbenchAgentAccess !== 'full',
-                          'bg-slate-700/60 hover:bg-slate-600':
+                          'bg-[var(--wb-accent)]/20 border-[var(--wb-accent)] text-[var(--wb-accent-hover)]':
+                            state.config.workbenchAgentAccess !== 'full',
+                          'border-[var(--wb-stroke)] text-[var(--wb-text-2)] hover:bg-[var(--wb-surface-hover)]':
                             state.config.workbenchAgentAccess === 'full',
                         }"
                         class="flex-1 p-3 rounded-lg transition duration-300"
@@ -221,7 +235,7 @@
                         @click="state.config.workbenchAgentAccess = 'full'"
                         :class="{
                           'bg-red-500/70': state.config.workbenchAgentAccess === 'full',
-                          'bg-slate-700/60 hover:bg-slate-600':
+                          'border-[var(--wb-stroke)] text-[var(--wb-text-2)] hover:bg-[var(--wb-surface-hover)]':
                             state.config.workbenchAgentAccess !== 'full',
                         }"
                         class="flex-1 p-3 rounded-lg transition duration-300"
@@ -233,14 +247,16 @@
                         </div>
                       </button>
                     </div>
-                    <p class="mt-1.5 text-xs text-slate-400">{{ t('workbenchAgentAccessHint') }}</p>
+                    <p class="mt-1.5 text-xs text-[var(--wb-text-3)]">
+                      {{ t('workbenchAgentAccessHint') }}
+                    </p>
                   </div>
                 </div>
               </div>
 
               <!-- Tab3: AI 接入（MCP） -->
               <div v-if="activeTab === 'mcp'">
-                <div v-if="mcpLoading" class="py-4 text-slate-400">
+                <div v-if="mcpLoading" class="py-4 text-[var(--wb-text-3)]">
                   {{ t('loading') }}
                 </div>
                 <div
@@ -250,7 +266,7 @@
                   {{ mcpError }}
                 </div>
                 <template v-else-if="mcp">
-                  <p class="mb-4 text-xs leading-5 text-slate-400">
+                  <p class="mb-4 text-xs leading-5 text-[var(--wb-text-3)]">
                     {{ t('mcpIntro') }}
                   </p>
 
@@ -265,7 +281,7 @@
 
                   <!-- 端点 -->
                   <div class="mb-4">
-                    <label class="block mb-2 text-slate-300">{{ t('mcpEndpoint') }}</label>
+                    <label class="block mb-2 text-[var(--wb-text-2)]">{{ t('mcpEndpoint') }}</label>
                     <div class="flex items-center gap-2">
                       <code
                         class="flex-1 px-3 py-2 text-xs text-cyan-200 break-all rounded-lg bg-black/30"
@@ -282,7 +298,7 @@
 
                   <!-- Token -->
                   <div class="mb-4">
-                    <label class="block mb-2 text-slate-300">{{ t('mcpToken') }}</label>
+                    <label class="block mb-2 text-[var(--wb-text-2)]">{{ t('mcpToken') }}</label>
                     <div class="flex items-center gap-2">
                       <code
                         class="flex-1 px-3 py-2 text-xs text-cyan-200 break-all rounded-lg bg-black/30"
@@ -290,7 +306,7 @@
                       >
                       <button
                         @click="showMcpToken = !showMcpToken"
-                        class="px-3 py-2 text-xs text-slate-300 rounded-lg border border-slate-600 hover:text-white"
+                        class="px-3 py-2 text-xs text-[var(--wb-text-2)] rounded-lg border border-[var(--wb-stroke-strong)] hover:text-[var(--wb-text)] hover:border-[var(--wb-accent)]"
                       >
                         <i :class="showMcpToken ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
                       </button>
@@ -315,10 +331,12 @@
 
                   <!-- 客户端配置 snippet -->
                   <div class="mb-4">
-                    <label class="block mb-2 text-slate-300">{{ t('mcpClientSnippets') }}</label>
+                    <label class="block mb-2 text-[var(--wb-text-2)]">{{
+                      t('mcpClientSnippets')
+                    }}</label>
                     <div class="space-y-2">
                       <div v-for="snippet in mcpSnippets" :key="snippet.key">
-                        <div class="mb-1 text-xs text-slate-400">{{ snippet.label }}</div>
+                        <div class="mb-1 text-xs text-[var(--wb-text-3)]">{{ snippet.label }}</div>
                         <div class="relative">
                           <pre
                             class="pt-2 pr-14 pb-2 pl-3 text-[11px] leading-4 text-cyan-200 break-all whitespace-pre-wrap rounded-lg bg-black/30 max-h-28 overflow-y-auto"
@@ -336,11 +354,11 @@
                   </div>
 
                   <!-- 工具数说明 -->
-                  <div class="text-xs text-slate-400">
+                  <div class="text-xs text-[var(--wb-text-3)]">
                     <i class="mr-1 fas fa-circle-info"></i>
                     {{ t('mcpAppCount') }}:
-                    <span class="font-bold text-tech-cyan">{{ mcp.appCount }}</span>
-                    <span class="block mt-1 text-slate-500">{{ t('mcpAutoSync') }}</span>
+                    <span class="font-bold text-[var(--wb-accent-hover)]">{{ mcp.appCount }}</span>
+                    <span class="block mt-1 text-[var(--wb-text-3)]">{{ t('mcpAutoSync') }}</span>
                   </div>
                 </template>
               </div>
@@ -348,7 +366,9 @@
               <!-- Tab4: 分享配置 -->
               <div v-if="activeTab === 'share'">
                 <div>
-                  <label class="block mb-2 text-slate-300">{{ t('ngrokAuthtoken') }}</label>
+                  <label class="block mb-2 text-[var(--wb-text-2)]">{{
+                    t('ngrokAuthtoken')
+                  }}</label>
                   <div class="relative">
                     <input
                       v-model="state.config.ngrokAuthtoken"
@@ -358,7 +378,7 @@
                     />
                     <button
                       @click="showNgrokToken = !showNgrokToken"
-                      class="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-white"
+                      class="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--wb-text-3)] hover:text-[var(--wb-text)]"
                     >
                       <i :class="showNgrokToken ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
                     </button>
@@ -368,7 +388,9 @@
                     :disabled="ngrokTestLoading"
                     class="flex items-center px-4 py-2.5 mt-3 mb-2 w-full text-white rounded-lg transition duration-300"
                     :class="
-                      ngrokTestLoading ? 'bg-slate-600 cursor-not-allowed' : 'btn-comfy-primary'
+                      ngrokTestLoading
+                        ? 'bg-[var(--wb-surface-hover)] text-[var(--wb-text-3)] cursor-not-allowed'
+                        : 'btn-comfy-primary'
                     "
                   >
                     <i v-if="ngrokTestLoading" class="mr-2 fas fa-spinner fa-spin"></i>
@@ -438,7 +460,7 @@
                           />
                           <button
                             @click="showQr = false"
-                            class="absolute top-1 right-1.5 text-slate-400 hover:text-slate-700"
+                            class="absolute top-1 right-1.5 text-[var(--wb-text-3)] hover:text-[var(--wb-danger)]"
                           >
                             <i class="fas fa-times"></i>
                           </button>
@@ -1120,8 +1142,8 @@ onMounted(async () => {
   }
 
   .tech-input {
-    background: rgba(15, 23, 42, 0.4);
-    border: 1px solid rgba(56, 70, 102, 0.6);
+    background: var(--wb-bg-base);
+    border: 1px solid var(--wb-stroke-strong);
     transition:
       background 0.3s ease,
       border-color 0.3s ease,
@@ -1129,8 +1151,8 @@ onMounted(async () => {
   }
 
   .tech-input:focus {
-    border-color: #0ea5e9;
-    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+    border-color: var(--wb-accent);
+    box-shadow: 0 0 0 3px rgba(11, 140, 233, 0.15);
   }
 
   .fade-enter-active,
@@ -1250,8 +1272,8 @@ body {
 }
 
 .tech-input {
-  background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(56, 70, 102, 0.6);
+  background: var(--wb-bg-base);
+  border: 1px solid var(--wb-stroke-strong);
   transition:
     background 0.3s ease,
     border-color 0.3s ease,
@@ -1259,8 +1281,8 @@ body {
 }
 
 .tech-input:focus {
-  border-color: #0ea5e9;
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+  border-color: var(--wb-accent);
+  box-shadow: 0 0 0 3px rgba(11, 140, 233, 0.15);
 }
 
 .fade-enter-active,
