@@ -156,7 +156,7 @@ export async function handleArtifyMessage(data) {
           })
           .filter(Boolean)
         const items = (data.batch.items || []).map((it) => ({
-          ...(data.batch.sharedParams || {}),
+          ...data.batch.sharedParams,
           ...it,
         }))
         if (inputsMapping.length === 0 || items.length < 2)

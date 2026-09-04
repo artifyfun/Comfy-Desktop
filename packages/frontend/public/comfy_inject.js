@@ -1578,7 +1578,7 @@
             return m ? { id: m[1], key: m[2], valueMap: { key: k } } : null;
           }).filter(Boolean);
           const items = (data.batch.items || []).map((it) => ({
-            ...data.batch.sharedParams || {},
+            ...data.batch.sharedParams,
             ...it
           }));
           if (inputsMapping.length === 0 || items.length < 2)

@@ -1682,6 +1682,7 @@ import {
   gridArrangeImages,
   visibleIds,
   lodTextVisible,
+  lodNoteRectStyle,
   lodImageVisible,
   freeResizeRect,
   ratioResizeRect,
@@ -2634,13 +2635,16 @@ function noteTextColor(bg) {
 }
 
 function noteRectConfig(o) {
+  // LOD 二轮：缩略级降级样式（opacity 1 / 去圆角 / 去默认描边——
+  // perfectDraw 离屏中转是千件全览 draw 大头，纯函数 lodNoteRectStyle 单测锁定）
+  const lowLod = lodNoteRectStyle(viewport.value.scale)
   return {
     width: o.width,
     height: o.height,
     fill: o.color || NOTE_DEFAULT_COLOR,
-    opacity: 0.9,
-    cornerRadius: 8,
-    ...highlightStroke(o),
+    opacity: lowLod ? 1 : 0.9,
+    cornerRadius: lowLod ? 0 : 8,
+    ...(lowLod ? highlightStroke(o, '') : highlightStroke(o)),
   }
 }
 function noteTextConfig(o) {
@@ -4762,7 +4766,7 @@ async function runGenNode() {
   const g = genNode.value
   if (!g || g.running || !g.prompt.trim()) return
   g.running = true
-  lastSourceIds = [...g.refs.map((r) => r.__id || '')].filter(Boolean)
+  lastSourceIds = g.refs.map((r) => r.__id || '').filter(Boolean)
   // refs 是附件形态 {filename,...}；按物件 id 反查溯源
   emitPrompt(g.prompt, { autoSend: true, attachments: g.refs })
   genNode.value = null
@@ -6010,7 +6014,7 @@ function applyOneAgentOp(op) {
     if (!node || node.type !== 'app') return
     // params 覆写：{nodeId:{widget:value}} 直写 node.params
     if (op.params && typeof op.params === 'object') {
-      node.params = { ...(node.params || {}), ...op.params }
+      node.params = { ...node.params, ...op.params }
     }
     void runAppNode(node.id)
     return
@@ -6029,7 +6033,7 @@ function applyOneAgentOp(op) {
     if (!node) return
     const patch = op.patch || {}
     if (patch.params && typeof patch.params === 'object')
-      node.params = { ...(node.params || {}), ...patch.params }
+      node.params = { ...node.params, ...patch.params }
     if (typeof patch.x === 'number') node.x = patch.x
     if (typeof patch.y === 'number') node.y = patch.y
     if (typeof patch.name === 'string') node.name = patch.name

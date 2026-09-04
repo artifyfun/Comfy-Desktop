@@ -102,7 +102,7 @@ export function makeAppNode(appId, name, wx, wy, extra = {}) {
     status: 'idle', // idle | running | success | error
     statusText: '',
     lastRun: null, // { promptId, at }
-    ...(extra || {}),
+    ...extra,
   }
 }
 

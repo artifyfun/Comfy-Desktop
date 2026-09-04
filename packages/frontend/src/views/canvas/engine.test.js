@@ -45,6 +45,7 @@ import {
   visibleIds,
   lodTextVisible,
   lodImageVisible,
+  lodNoteRectStyle,
   ratioResizeRect,
 } from './engine'
 
@@ -639,6 +640,18 @@ describe('visibleIds（P2 视口裁剪）', () => {
 })
 
 // —— LOD 阈值（P3 全览优化）——
+describe('lodNoteRectStyle（LOD 二轮：缩略级 Rect 降级）', () => {
+  it('常规缩放（≥0.3）返回 null——走原有样式', () => {
+    expect(lodNoteRectStyle(1)).toBeNull()
+    expect(lodNoteRectStyle(0.3)).toBeNull()
+    expect(lodNoteRectStyle(undefined)).toBeNull()
+  })
+  it('缩略级（<0.3）返回降级样式：opacity 1（免 perfectDraw）+ 去圆角', () => {
+    expect(lodNoteRectStyle(0.29)).toEqual({ opacity: 1, cornerRadius: 0 })
+    expect(lodNoteRectStyle(0.05)).toEqual({ opacity: 1, cornerRadius: 0 })
+  })
+})
+
 describe('lodTextVisible / lodImageVisible', () => {
   it('文本 scale>=0.3 可见，低于隐藏', () => {
     expect(lodTextVisible(1)).toBe(true)

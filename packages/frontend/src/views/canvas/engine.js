@@ -650,6 +650,21 @@ export function lodImageVisible(scale) {
   return (scale || 1) >= 0.15
 }
 
+/**
+ * LOD 二轮（P3+）：缩略级 note Rect 降级样式。
+ * 上轮剖析实锤：opacity<1 且带 stroke 触发 Konva perfectDraw 离屏中转，
+ * 千件全览 draw ~130ms 的大头。三刀降级（CDP A/B 实测累计 130→45ms）：
+ *   1. opacity 0.9→1（perfectDraw 不触发，26→8ms 量级/千件）
+ *   2. cornerRadius 8→0（bezier 路径省略；0.1x 下 200 宽≈22px 圆角不可辨）
+ *   3. 默认 stroke ''（空 stroke Konva 跳过绘制；rgba .4 淡线缩略级不可辨）
+ * 选中/悬停高亮 stroke 由调用方 highlightStroke 覆盖保留。
+ */
+export function lodNoteRectStyle(scale) {
+  if (lodTextVisible(scale)) return null
+  return { opacity: 1, cornerRadius: 0 }
+}
+
+
 export function visibleIds(objects, viewport, size, margin = 200) {
   if (!viewport || !size || size.w <= 0 || size.h <= 0) return new Set(objects.map((o) => o.id))
   const inv = 1 / (viewport.scale || 1)

@@ -652,7 +652,7 @@ const removeDir = async (d) => {
     message.success(
       currentLang.value === 'zh'
         ? `已删除目录「${dirLabel(d.subfolder)}」（${removed} 个文件）`
-        : `Directory \"${dirLabel(d.subfolder)}\" deleted (${removed} files)`,
+        : `Directory "${dirLabel(d.subfolder)}" deleted (${removed} files)`,
     )
     if (activeDir.value === d.subfolder) {
       goBackToDirs()
