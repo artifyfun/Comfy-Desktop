@@ -637,6 +637,19 @@ export function distributeObjects(objects, ids, axis) {
  * margin：四周额外缓冲（世界单位），拖拽/动画中提前进画。
  * 空视口/零尺寸返回全量（降级安全）。
  */
+/**
+ * LOD（P3 全览优化）：低缩放级别跳过昂贵绘制。
+ * 文本布局是大头（每 note 一个 Konva Text 全量排版），缩略级视口
+ * 下文字不可读——scale < 0.3 隐藏文本；图片位图 < 0.15 隐藏（保留
+ * 描边框示意）。返回 visible 配置供 Konva shape 直用。
+ */
+export function lodTextVisible(scale) {
+  return (scale || 1) >= 0.3
+}
+export function lodImageVisible(scale) {
+  return (scale || 1) >= 0.15
+}
+
 export function visibleIds(objects, viewport, size, margin = 200) {
   if (!viewport || !size || size.w <= 0 || size.h <= 0) return new Set(objects.map((o) => o.id))
   const inv = 1 / (viewport.scale || 1)

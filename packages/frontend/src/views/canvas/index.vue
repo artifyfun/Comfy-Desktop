@@ -212,7 +212,11 @@
                  48px 热区 12px 圆点，hover 放大；左=target 右=source。
                  Konva 约束：v-if/动态 listening 会导致 hit graph 不刷新，故常驻渲染 +
                  opacity 控制可见 + hitFunc 动态开闭热区） -->
-            <v-group v-for="o in culledObjects" :key="'hd' + o.id" :config="{ x: o.x, y: o.y }">
+            <v-group
+              v-for="o in culledObjects"
+              :key="'hd' + o.id"
+              :config="{ x: o.x, y: o.y, visible: lodHandlesVisible }"
+            >
               <v-circle
                 :config="handleConfig(o, 'target')"
                 @mousedown="onConnectStart(o.id, 'target', $event)"
@@ -1677,6 +1681,8 @@ import {
   zShiftObjects,
   gridArrangeImages,
   visibleIds,
+  lodTextVisible,
+  lodImageVisible,
   freeResizeRect,
   ratioResizeRect,
 } from './engine'
@@ -2540,6 +2546,8 @@ function withCull(typePred) {
 
 const imageObjects = computed(() => withCull((o) => o.type === 'image'))
 /** 全类型裁剪集（连接句柄层用） */
+/** 句柄层 LOD：低缩放整组隐藏（全览 875 物件 1752 圆点无意义且是大头）；命中检测不受影响（hitFunc 本就仅悬停时开） */
+const lodHandlesVisible = computed(() => lodTextVisible(viewport.value.scale))
 const culledObjects = computed(() => withCull(() => true))
 const noteObjects = computed(() => withCull((o) => o.type === 'note'))
 
@@ -2569,6 +2577,10 @@ function groupConfig(o) {
   return { id: o.id, x: o.x, y: o.y, width: o.width, height: o.height, draggable: true }
 }
 function imageConfig(o) {
+  // LOD：极低缩放隐藏位图绘制（保留 rect 示意）
+  if (!lodImageVisible(viewport.value.scale)) {
+    return { width: o.width, height: o.height, cornerRadius: 6, fill: '#1f2937' }
+  }
   return {
     image: loadImage(o.src),
     width: o.width,
@@ -2632,6 +2644,8 @@ function noteRectConfig(o) {
   }
 }
 function noteTextConfig(o) {
+  // LOD：缩略级视口隐藏文本排版（全览 1000 物件 Text 布局是大头）
+  if (!lodTextVisible(viewport.value.scale)) return { visible: false, listening: false }
   return {
     // E3：显示态净化 @ 提及标记（@[名]{id} → @名）
     text: stripMentionMarks(o.text || ''),
@@ -5166,6 +5180,7 @@ function frameConfig(o) {
   }
 }
 function frameLabelConfig(o) {
+  if (!lodTextVisible(viewport.value.scale)) return { visible: false, listening: false }
   return {
     text: o.name || 'Frame',
     // 局部坐标（group 已定位在 o.x/o.y；此前误用绝对坐标 o.x/o.y-20 导致标签双重偏移）
@@ -5191,6 +5206,7 @@ function shotRectConfig(o) {
   }
 }
 function shotSeqConfig(o) {
+  if (!lodTextVisible(viewport.value.scale)) return { visible: false, listening: false }
   return {
     text: `#${o.seq || 1}`,
     x: o.x + 8,
@@ -5202,6 +5218,7 @@ function shotSeqConfig(o) {
   }
 }
 function shotTextConfig(o) {
+  if (!lodTextVisible(viewport.value.scale)) return { visible: false, listening: false }
   return {
     text: o.text || '',
     x: o.x + 8,
@@ -5865,6 +5882,7 @@ function appNodeRectConfig(o) {
   }
 }
 function appNodeTitleConfig(o) {
+  if (!lodTextVisible(viewport.value.scale)) return { visible: false, listening: false }
   return {
     text: o.name || o.appId,
     x: 16,
@@ -5880,6 +5898,7 @@ function appNodeTitleConfig(o) {
   }
 }
 function appNodeSubConfig(o) {
+  if (!lodTextVisible(viewport.value.scale)) return { visible: false, listening: false }
   const sub =
     o.status === 'running' ? o.statusText || '…' : o.statusText || t('canvasAppNodeSubDefault')
   return {

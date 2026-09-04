@@ -43,6 +43,8 @@ import {
   zShiftObjects,
   gridArrangeImages,
   visibleIds,
+  lodTextVisible,
+  lodImageVisible,
   ratioResizeRect,
 } from './engine'
 
@@ -633,5 +635,24 @@ describe('visibleIds（P2 视口裁剪）', () => {
       300,
     )
     expect(ids.has('far')).toBe(true) // 950 < 800+300
+  })
+})
+
+// —— LOD 阈值（P3 全览优化）——
+describe('lodTextVisible / lodImageVisible', () => {
+  it('文本 scale>=0.3 可见，低于隐藏', () => {
+    expect(lodTextVisible(1)).toBe(true)
+    expect(lodTextVisible(0.3)).toBe(true)
+    expect(lodTextVisible(0.29)).toBe(false)
+    expect(lodTextVisible(0.05)).toBe(false)
+  })
+  it('图片 scale>=0.15 可见，低于隐藏', () => {
+    expect(lodImageVisible(1)).toBe(true)
+    expect(lodImageVisible(0.15)).toBe(true)
+    expect(lodImageVisible(0.1)).toBe(false)
+  })
+  it('空 scale 降级可见（默认 1）', () => {
+    expect(lodTextVisible(null)).toBe(true)
+    expect(lodImageVisible(undefined)).toBe(true)
   })
 })
