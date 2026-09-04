@@ -41,6 +41,20 @@
             @close="layersOpen = false"
           />
         </div>
+        <!-- 素材库面板（P2）：左下浮动，点击/拖入画布 -->
+        <div
+          v-if="assetsOpen"
+          class="absolute bottom-3 left-3 z-20 w-[232px] max-h-[calc(100%-24px)] rounded-xl border border-[var(--wb-stroke)] shadow-xl overflow-hidden"
+        >
+          <CanvasAssetsPanel
+            ref="assetsPanelEl"
+            :assets="assets"
+            @insert="(a) => insertAsset(a, centerWorld().x, centerWorld().y)"
+            @added="assetAdded"
+            @remove="assetRemoved"
+            @close="assetsOpen = false"
+          />
+        </div>
         <v-stage
           ref="stageEl"
           :config="stageConfig"
@@ -1611,6 +1625,7 @@ import Workbench from '../workbench/index.vue'
 import AppHeader from '../apps/components/AppHeader.vue'
 import AppNodeCard from './AppNodeCard.vue'
 import CanvasSidePanel from './CanvasSidePanel.vue'
+import CanvasAssetsPanel from './CanvasAssetsPanel.vue'
 import MediaNodeCard from './MediaNodeCard.vue'
 import AppPickerModal from './AppPickerModal.vue'
 import {
@@ -1691,7 +1706,56 @@ import { buildExportPayload, packExportZip, parseImportZip, parseImportJson } fr
 import { importProject as psImportProject, cloneProject as psCloneProject } from './projectStore'
 const { onResult, emitAttachments, emitCanvasState, emitPrompt, onOps } = useCanvasMode()
 const wbOpen = ref(true) // 工作台侧边栏开合
-const layersOpen = ref(false) // 图层面板开合（P1：画布侧板）
+const layersOpen = ref(false)
+// —— 素材库（P2）：本地图片资产，点击/拖入画布复用 ——
+const ASSETS_KEY = 'artify.canvas.assets.v1'
+const assetsOpen = ref(false)
+const assets = ref(JSON.parse(localStorage.getItem(ASSETS_KEY) || '[]'))
+function saveAssets() {
+  // dataURL 较大，超限（~4MB）时丢弃最旧的并提示
+  try {
+    localStorage.setItem(ASSETS_KEY, JSON.stringify(assets.value))
+  } catch {
+    if (assets.value.length > 1) {
+      assets.value.shift()
+      saveAssets()
+    }
+  }
+}
+function assetAdded(a) {
+  assets.value.unshift({ id: 'a' + Date.now() + Math.random().toString(36).slice(2, 5), ...a })
+  saveAssets()
+}
+function assetRemoved(id) {
+  assets.value = assets.value.filter((x) => x.id !== id)
+  saveAssets()
+}
+/** 素材入画布：persist dataURL 直接建 image 节点（等比 ≤260px） */
+/** 视口中心的世界坐标（素材点击落点） */
+function centerWorld() {
+  return screenToWorld(viewport.value, size.w / 2, size.h / 2)
+}
+function insertAsset(a, wx, wy) {
+  const probe = new Image()
+  probe.onload = () => {
+    const scale = Math.min(1, 260 / probe.naturalWidth)
+    const o = {
+      id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+      type: 'image',
+      x: Math.round(wx),
+      y: Math.round(wy),
+      width: Math.round(probe.naturalWidth * scale),
+      height: Math.round(probe.naturalHeight * scale),
+      src: probe.src,
+      persist: probe.src,
+    }
+    beforeChange()
+    objects.value.push(o)
+    selection.value = [o.id]
+    saveSoon()
+  }
+  probe.src = a.persist
+} // 图层面板开合（P1：画布侧板）
 const hoverFromPanel = ref(null) // 面板悬停的物件 id（预留画布侧高亮联动）
 let layersFocusAnim = null // 图层定位的 rAF 句柄
 
@@ -3448,6 +3512,12 @@ const tools = computed(() => [
     title: t('canvasLayersBtn'),
     action: () => (layersOpen.value = !layersOpen.value),
     active: layersOpen.value,
+  },
+  {
+    icon: 'fas fa-photo-film',
+    title: t('canvasAssetsBtn'),
+    action: () => (assetsOpen.value = !assetsOpen.value),
+    active: assetsOpen.value,
   },
   {
     icon: 'fas fa-wand-magic-sparkles',
@@ -6781,6 +6851,18 @@ function filesToObjects(files, world) {
 }
 function onDrop(e) {
   dragOver.value = false
+  // 素材库拖出（P2）：优先于文件拖入
+  const assetId = e.dataTransfer?.getData('application/x-artify-asset')
+  if (assetId) {
+    const a = assets.value.find((x) => x.id === assetId)
+    if (a) {
+      const st = stageEl.value?.getStage?.()
+      const p = st.getPointerPosition() || { x: size.w / 2, y: size.h / 2 }
+      const w = screenToWorld(viewport.value, p.x, p.y)
+      insertAsset(a, w.x - 130, w.y - 90)
+    }
+    return
+  }
   const files = [...(e.dataTransfer?.files || [])]
   if (!files.length) return
   const st = stageEl.value?.getStage?.()
