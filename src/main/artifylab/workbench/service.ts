@@ -478,9 +478,47 @@ class WorkbenchService {
       // 实测；此处同步双写 X-Workbench-Session，接收侧未来透传 header 时同构生效）。
       // wb_* 工具按该身份精确路由回本会话，多会话并行 decide 不再串号。
       const mcpUrl = `http://127.0.0.1:${serverPort}/mcp?wb_session=${encodeURIComponent(sessionId)}`
+      // 模型目录注入（fallback metadata 根治）：codex 二进制内置模型表只有
+      // gpt-5.x/gpt-4.x 系；第三方网关模型（glm/deepseek/自定义）查不到时
+      // 退保守 fallback 元数据并刷屏警告（"Model metadata for ... not found"），
+      // 上下文窗口猜小会导致过早自动压缩。把用户实际配置的模型写进目录——
+      // slug 匹配 startThread 的 model 名即命中，上下文窗口取常见 128k。
+      const buildModel = cfg.buildModel || 'glm-5.3-flash'
+      // schema 经二进制 strings + 最小复现逐字段探明（codex 0.149.x ModelInfo）：
+      // visibility: list|hide|none；truncation_policy: {limit: i64, mode: bytes|tokens}；
+      // base_instructions 与 model_messages.instructions_template 二选一必填。
+      // 上下文窗口取 128k（常见第三方模型档位），截断阈值 90%。
+      const modelCatalog = {
+        models: [
+          {
+            slug: buildModel,
+            display_name: buildModel,
+            description: 'workbench decide/build model (user configured)',
+            visibility: 'list',
+            supported_in_api: true,
+            priority: 100,
+            supported_reasoning_levels: [
+              { effort: 'medium', description: 'default reasoning effort' }
+            ],
+            shell_type: 'unified_exec',
+            support_verbosity: true,
+            truncation_policy: { limit: 115200, mode: 'tokens' },
+            experimental_supported_tools: [],
+            base_instructions: 'You are a helpful assistant.',
+            context_window: 128000,
+            max_context_window: 128000,
+            max_output_tokens: 16384
+          }
+        ]
+      }
+      const catalogPath = join(tempHome, 'model_catalog.json')
+      writeFileSync(catalogPath, JSON.stringify(modelCatalog))
       writeFileSync(
         join(tempHome, 'config.toml'),
         [
+          // 顶层键必须在任何 [section] 前（TOML 语义）——模型目录注入
+          `model_catalog_json = ${JSON.stringify(catalogPath)}`,
+          ``,
           `[mcp_servers.workbench]`,
           `url = "${mcpUrl}"`,
           `bearer_token_env_var = "WORKBENCH_MCP_TOKEN"`,
