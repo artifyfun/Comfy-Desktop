@@ -480,10 +480,34 @@ describe('aguiBridge — 历史回放与实时序列同构', () => {
     let currentThread = 'th-old'
     api.getThreadId = () => currentThread
     const records = [
-      { runId: 'r-1', seq: 1, eventType: 'TEXT_MESSAGE_START', content: JSON.stringify({ type: 'TEXT_MESSAGE_START', messageId: 'm1', role: 'assistant' }) },
-      { runId: 'r-1', seq: 2, eventType: 'TEXT_MESSAGE_CONTENT', content: JSON.stringify({ type: 'TEXT_MESSAGE_CONTENT', messageId: 'm1', delta: '旧会话内容' }) },
-      { runId: 'r-1', seq: 3, eventType: 'TEXT_MESSAGE_END', content: JSON.stringify({ type: 'TEXT_MESSAGE_END', messageId: 'm1' }) },
-      { runId: 'r-1', seq: 4, eventType: 'RUN_FINISHED', content: JSON.stringify({ type: 'RUN_FINISHED' }) },
+      {
+        runId: 'r-1',
+        seq: 1,
+        eventType: 'TEXT_MESSAGE_START',
+        content: JSON.stringify({ type: 'TEXT_MESSAGE_START', messageId: 'm1', role: 'assistant' }),
+      },
+      {
+        runId: 'r-1',
+        seq: 2,
+        eventType: 'TEXT_MESSAGE_CONTENT',
+        content: JSON.stringify({
+          type: 'TEXT_MESSAGE_CONTENT',
+          messageId: 'm1',
+          delta: '旧会话内容',
+        }),
+      },
+      {
+        runId: 'r-1',
+        seq: 3,
+        eventType: 'TEXT_MESSAGE_END',
+        content: JSON.stringify({ type: 'TEXT_MESSAGE_END', messageId: 'm1' }),
+      },
+      {
+        runId: 'r-1',
+        seq: 4,
+        eventType: 'RUN_FINISHED',
+        content: JSON.stringify({ type: 'RUN_FINISHED' }),
+      },
     ]
     let calls = 0
     const spy = vi.stubGlobal(
@@ -510,15 +534,24 @@ describe('aguiBridge — 历史回放与实时序列同构', () => {
     let currentThread = 'th-old'
     api.getThreadId = () => currentThread
     const records = [
-      { runId: 'r-1', seq: 1, eventType: 'RUN_STARTED', content: JSON.stringify({ type: 'RUN_STARTED' }) },
+      {
+        runId: 'r-1',
+        seq: 1,
+        eventType: 'RUN_STARTED',
+        content: JSON.stringify({ type: 'RUN_STARTED' }),
+      },
     ]
     const spy = vi.stubGlobal(
       'fetch',
-      vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { records } }) })),
+      vi.fn(() =>
+        Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { records } }) }),
+      ),
     )
     // 在 json() resolve 后、messages 清空前切走——通过微任务注入
     const p = bridge_load(api, 'th-old')
-    queueMicrotask(() => { currentThread = 'th-new' })
+    queueMicrotask(() => {
+      currentThread = 'th-new'
+    })
     await p
     expect(api.messages.value.map((m) => m.text)).toEqual(['kept'])
     vi.unstubAllGlobals()
