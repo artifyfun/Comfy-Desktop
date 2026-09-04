@@ -42,6 +42,7 @@ import {
   distributeObjects,
   zShiftObjects,
   gridArrangeImages,
+  visibleIds,
   ratioResizeRect,
 } from './engine'
 
@@ -578,5 +579,59 @@ describe('gridArrangeImages（P2）', () => {
     // x 序: b(0) d(60) a(100) c(500) → 2 列：行1=b,d 行2=a,c
     expect(m.get('a').y).toBeGreaterThan(m.get('b').y)
     expect(m.get('c').y).toBe(m.get('a').y)
+  })
+})
+
+// —— 视口裁剪（P2 visibleIds）——
+describe('visibleIds（P2 视口裁剪）', () => {
+  const objs = [
+    { id: 'in1', x: 0, y: 0, width: 100, height: 100 },
+    { id: 'in2', x: 500, y: 300, width: 50, height: 50 },
+    { id: 'out', x: 5000, y: 5000, width: 100, height: 100 },
+    { id: 'edge', x: 780, y: 0, width: 100, height: 100 }, // 视口右缘相交
+  ]
+  it('默认视口 scale=1 只含可见+缓冲', () => {
+    const vp = { x: 0, y: 0, scale: 1 }
+    const ids = visibleIds(objs, vp, { w: 800, h: 600 })
+    expect(ids.has('in1')).toBe(true)
+    expect(ids.has('in2')).toBe(true)
+    expect(ids.has('out')).toBe(false)
+    expect(ids.has('edge')).toBe(true) // 780 < 800+200
+  })
+  it('缩放视口（scale=0.5 可见范围翻倍）', () => {
+    const vp = { x: 0, y: 0, scale: 0.5 }
+    const ids = visibleIds(objs, vp, { w: 800, h: 600 }, 0)
+    // 世界可见 1600x1200：out(5000) 仍不可见
+    expect(ids.has('out')).toBe(false)
+    expect(ids.has('in2')).toBe(true)
+  })
+  it('负偏移视口（向右平移看负区）', () => {
+    // vp.x=-400：世界 x=400 位于屏幕左缘 → 可见区 [400,1200]
+    const vp = { x: -400, y: 0, scale: 1 }
+    const ids = visibleIds(
+      [
+        { id: 'inneg', x: -350, y: 0, width: 50, height: 50 }, // 世界负区，屏幕外
+        { id: 'inpos', x: 500, y: 0, width: 50, height: 50 }, // 可见
+      ],
+      vp,
+      { w: 800, h: 600 },
+      0,
+    )
+    expect(ids.has('inneg')).toBe(false)
+    expect(ids.has('inpos')).toBe(true)
+  })
+  it('空视口/零尺寸降级全量', () => {
+    expect(visibleIds(objs, null, { w: 800, h: 600 }).size).toBe(4)
+    expect(visibleIds(objs, { x: 0, y: 0, scale: 1 }, { w: 0, h: 0 }).size).toBe(4)
+  })
+  it('margin 扩大可见范围', () => {
+    const vp = { x: 0, y: 0, scale: 1 }
+    const ids = visibleIds(
+      [{ id: 'far', x: 950, y: 0, width: 50, height: 50 }],
+      vp,
+      { w: 800, h: 600 },
+      300,
+    )
+    expect(ids.has('far')).toBe(true) // 950 < 800+300
   })
 })

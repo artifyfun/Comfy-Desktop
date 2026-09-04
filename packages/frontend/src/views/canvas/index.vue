@@ -212,7 +212,7 @@
                  48px 热区 12px 圆点，hover 放大；左=target 右=source。
                  Konva 约束：v-if/动态 listening 会导致 hit graph 不刷新，故常驻渲染 +
                  opacity 控制可见 + hitFunc 动态开闭热区） -->
-            <v-group v-for="o in objects" :key="'hd' + o.id" :config="{ x: o.x, y: o.y }">
+            <v-group v-for="o in culledObjects" :key="'hd' + o.id" :config="{ x: o.x, y: o.y }">
               <v-circle
                 :config="handleConfig(o, 'target')"
                 @mousedown="onConnectStart(o.id, 'target', $event)"
@@ -1676,6 +1676,7 @@ import {
   distributeObjects,
   zShiftObjects,
   gridArrangeImages,
+  visibleIds,
   freeResizeRect,
   ratioResizeRect,
 } from './engine'
@@ -2507,8 +2508,28 @@ const gridStyle = computed(() => {
   }
 })
 
-const imageObjects = computed(() => objects.value.filter((o) => o.type === 'image'))
-const noteObjects = computed(() => objects.value.filter((o) => o.type === 'note'))
+// —— 视口裁剪（P2 性能）：可见集 + 例外（选中/悬停/连线端点/拖拽中）
+// 例外保证交互不因裁剪丢失：选中的仍要渲染（框选/对齐线）、悬停的
+// 工具栏不消失、连线端点物件在场、拖拽中的物件及其组友保持
+const cullIds = computed(() => {
+  const ids = visibleIds(objects.value, viewport.value, size, 240)
+  for (const id of selection.value) ids.add(id)
+  if (hoverNodeId.value) ids.add(hoverNodeId.value)
+  for (const l of links.value) {
+    if (ids.has(l.from)) ids.add(l.to)
+    if (ids.has(l.to)) ids.add(l.from)
+  }
+  return ids
+})
+/** 类型过滤 + 裁剪（所有物件渲染 computed 统一入口） */
+function withCull(typePred) {
+  return objects.value.filter((o) => typePred(o) && cullIds.value.has(o.id))
+}
+
+const imageObjects = computed(() => withCull((o) => o.type === 'image'))
+/** 全类型裁剪集（连接句柄层用） */
+const culledObjects = computed(() => withCull(() => true))
+const noteObjects = computed(() => withCull((o) => o.type === 'note'))
 
 // Konva 图片缓存（记 naturalWidth/Height 供裁剪换算）
 const imgCache = new Map()
@@ -5117,7 +5138,7 @@ function addFrameAt(wx, wy) {
   closeCtxMenu()
   saveSoon()
 }
-const frameObjects = computed(() => objects.value.filter((o) => o.type === 'frame'))
+const frameObjects = computed(() => withCull((o) => o.type === 'frame'))
 function frameConfig(o) {
   return {
     id: o.id,
@@ -5202,7 +5223,7 @@ function shotSeqNext() {
   return objects.value.filter((o) => o.type === 'shot').length + 1
 }
 const shotObjects = computed(() =>
-  objects.value.filter((o) => o.type === 'shot').sort((a, b) => (a.seq || 0) - (b.seq || 0)),
+  withCull((o) => o.type === 'shot').sort((a, b) => (a.seq || 0) - (b.seq || 0)),
 )
 
 // —— A5 分镜批量：把 shot 的 text 逐条发工作台，产物按列网格落布 ——
@@ -5463,7 +5484,7 @@ function clamp(v, a, b) {
 }
 
 // —— App 节点（P1/P2：画布上的 A 应用实例，可随时运行） ——
-const appNodeObjects = computed(() => objects.value.filter((o) => o.type === 'app'))
+const appNodeObjects = computed(() => withCull((o) => o.type === 'app'))
 
 // app 详情缓存：appId → 完整 app（含 template；picker 拾取/详情接口回填）
 // cacheVer 是响应式触发器：Map.set 不触发 computed，靠版本号驱动面板刷新
@@ -6302,9 +6323,7 @@ function onKeyUp(e) {
 }
 
 // —— 媒体节点（S4b video/audio）：拖入/上传 + overlay 播放器 + 存档 ——
-const mediaObjects = computed(() =>
-  objects.value.filter((o) => o.type === 'video' || o.type === 'audio'),
-)
+const mediaObjects = computed(() => withCull((o) => o.type === 'video' || o.type === 'audio'))
 /** 媒体节点屏幕矩形（overlay 定位） */
 function mediaPosOf(o) {
   const tl = worldToScreen(viewport.value, o.x, o.y)

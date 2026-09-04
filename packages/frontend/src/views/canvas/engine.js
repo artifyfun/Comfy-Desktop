@@ -631,6 +631,30 @@ export function distributeObjects(objects, ids, axis) {
  * 统一缩放到目标格宽（保持纵横比），按列数排布，返回 id → {x, y, width, height}。
  * cellW=0 时保持各图片原尺寸，仅重排位置。
  */
+/**
+ * 视口裁剪（P2 性能）：返回与视口相交的物件 id 集。
+ * viewport {x, y, scale}（屏幕坐标 = 世界 * scale + 偏移），size 为画布像素尺寸。
+ * margin：四周额外缓冲（世界单位），拖拽/动画中提前进画。
+ * 空视口/零尺寸返回全量（降级安全）。
+ */
+export function visibleIds(objects, viewport, size, margin = 200) {
+  if (!viewport || !size || size.w <= 0 || size.h <= 0) return new Set(objects.map((o) => o.id))
+  const inv = 1 / (viewport.scale || 1)
+  // 视口世界包围盒（含 margin）
+  const minX = -viewport.x * inv - margin
+  const minY = -viewport.y * inv - margin
+  const maxX = (size.w - viewport.x) * inv + margin
+  const maxY = (size.h - viewport.y) * inv + margin
+  const out = new Set()
+  for (const o of objects) {
+    const w = o.width || 0
+    const h = o.height || 0
+    if (o.x + w < minX || o.x > maxX || o.y + h < minY || o.y > maxY) continue
+    out.add(o.id)
+  }
+  return out
+}
+
 export function gridArrangeImages(objects, ids, opts = {}) {
   const { originX = 0, originY = 0, cellW = 260, gapX = 24, gapY = 24, cols = 3 } = opts
   const set = new Set(ids)
