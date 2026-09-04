@@ -440,9 +440,9 @@ function applyTokenUsage(pageApi, delta) {
 export function createAguiBridge(pageApi) {
   let activeCtl = null // 当前轮 AbortController（单飞行轮，同 legacy chatReader）
   let lastState = null
-  function pushError(state, text) {
+  function pushError(state, text, extra = {}) {
     dismissProgress(pageApi, state)
-    pageApi.pushMsg({ role: 'agent', kind: 'error', text, createdAt: Date.now() })
+    pageApi.pushMsg({ role: 'agent', kind: 'error', text, createdAt: Date.now(), ...extra })
   }
 
   /** 一轮对话:POST /agent/run(threadId/runId/input/attachments)→ SSE → emit 映射 */
@@ -505,12 +505,14 @@ export function createAguiBridge(pageApi) {
       // 进度气泡会永久残留。对齐 legacy finally 的「流读完没 done」防线。
       if (!state.sawRunFinish && !state.sawRunError && !pageApi.stopping.value) {
         dismissProgress(pageApi, state)
-        pushError(state, pageApi.t('workbenchStreamInterrupted'))
+        // 断线重试（D 线）：中断气泡携带本轮原文，UI 提供「重试本轮」——后端断连
+        // 即杀 run（ac.abort），自动重发有双跑风险（本轮可能已提交执行），须用户触发
+        pushError(state, pageApi.t('workbenchStreamInterrupted'), { retryInput: inputText })
       }
     } catch (e) {
       // 停止导致的中断由 stopAgentRun 收尾；RUN_ERROR 已有错误气泡不重复推
       if (!pageApi.isStopCancelled(e) && !state.sawRunError) {
-        pushError(state, (e && e.message) || String(e))
+        pushError(state, (e && e.message) || String(e), { retryInput: inputText })
       }
     } finally {
       if (activeCtl === ctl) activeCtl = null

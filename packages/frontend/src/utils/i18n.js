@@ -689,6 +689,9 @@ const translations = {
     workbenchStop: '停止执行',
     workbenchStopped: '已停止',
     workbenchStreamInterrupted: '对话流中断，本轮未收到完成信号',
+    workbenchRetryRound: '重试本轮',
+    workbenchRetryRoundTip: '网络中断，重发本轮输入',
+    workbenchRetrying: '正在重试…',
     workbenchImportWorkflow: '导入工作流',
     workbenchImportNamePlaceholder: '工作流名称（可选）',
     workbenchImportJsonPlaceholder:
@@ -1870,6 +1873,9 @@ const translations = {
     workbenchStop: 'Stop',
     workbenchStopped: 'Stopped',
     workbenchStreamInterrupted: 'Stream interrupted — round did not complete',
+    workbenchRetryRound: 'Retry this round',
+    workbenchRetryRoundTip: 'Network dropped — resend this round',
+    workbenchRetrying: 'Retrying…',
     workbenchImportWorkflow: 'Import workflow',
     workbenchImportNamePlaceholder: 'Workflow name (optional)',
     workbenchImportJsonPlaceholder:

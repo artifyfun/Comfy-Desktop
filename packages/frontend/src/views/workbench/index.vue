@@ -467,6 +467,18 @@
                       >
                         <WbMarkdown :source="tm.text" :streaming="busy && tm._streaming" />
                       </div>
+                      <!-- 断线重试（D 线）：中断错误气泡携带原文时提供一键重发（用户触发，
+                           后端断连即杀 run，自动重发有双跑风险） -->
+                      <div v-if="tm.kind === 'error' && tm.retryInput && !busy" class="pt-1">
+                        <button
+                          class="text-xs px-2 py-1 rounded border border-red-400/40 text-red-300 hover:bg-red-400/10 flex items-center gap-1"
+                          :title="t('workbenchRetryRoundTip')"
+                          @click="retryRoundFrom(tm)"
+                        >
+                          <i class="fas fa-rotate-right"></i>
+                          {{ t('workbenchRetryRound') }}
+                        </button>
+                      </div>
                     </template>
                   </div>
                   <!-- 回合卡片操作行：组尾时间/token + 复制正文 -->
@@ -1640,6 +1652,18 @@ async function runChat(inputText, attachments, opts = {}) {
   // AG-UI 唯一管线(legacy /api/workbench/chat SSE 已删除):整轮走桥。
   // 附件下行与错误收尾语义由桥内实现。
   return aguiBridge.runAgentTurn(inputText, attachments, opts)
+}
+
+/** 断线重试（D 线）：从中断错误气泡重发本轮原文（去重：同一条只允许一次） */
+function retryRoundFrom(errMsg) {
+  if (busy.value || !errMsg?.retryInput) return
+  // 防重复点击：清掉该气泡的 retryInput（按钮随 v-if 消失）
+  const text = errMsg.retryInput
+  errMsg.retryInput = null
+  runChat(text, [], {
+    userBubble: null, // 原用户气泡还在，不重复
+    progressText: t('workbenchRetrying'),
+  })
 }
 
 /** 用户停止导致的流中断：reader.cancel() 的 TypeError / fetch 的 AbortError 都不算错误 */
