@@ -567,3 +567,105 @@ export function rectFromFixedCorner(fixed, corner, w, h) {
   const y = corner.startsWith('s') ? fixed.y : fixed.y - h
   return { x, y, w, h }
 }
+
+/**
+ * 多选对齐（P1：对齐参考线族——左/右/上/下/水平居中/垂直居中）。
+ * 返回 id → 新坐标映射；不动 z 顺序与尺寸。至少 2 个物件才有意义。
+ */
+export function alignObjects(objects, ids, mode) {
+  const set = new Set(ids)
+  const picked = objects.filter((o) => set.has(o.id))
+  if (picked.length < 2) return new Map()
+  const minX = Math.min(...picked.map((o) => o.x))
+  const maxX = Math.max(...picked.map((o) => o.x + o.width))
+  const minY = Math.min(...picked.map((o) => o.y))
+  const maxY = Math.max(...picked.map((o) => o.y + o.height))
+  const cx = (minX + maxX) / 2
+  const cy = (minY + maxY) / 2
+  const out = new Map()
+  for (const o of picked) {
+    let { x, y } = o
+    if (mode === 'left') x = minX
+    else if (mode === 'right') x = maxX - o.width
+    else if (mode === 'top') y = minY
+    else if (mode === 'bottom') y = maxY - o.height
+    else if (mode === 'hcenter') x = cx - o.width / 2
+    else if (mode === 'vcenter') y = cy - o.height / 2
+    out.set(o.id, { x, y })
+  }
+  return out
+}
+
+/**
+ * 多选等距分布（水平/垂直）。返回 id → 新坐标映射。
+ * 首尾物件不动，中间按等间距重排；间距不足时退化为首尾均分。
+ * 少于 3 个物件无意义（2 个时相当于对齐两端，直接返回空）。
+ */
+export function distributeObjects(objects, ids, axis) {
+  const set = new Set(ids)
+  const picked = objects.filter((o) => set.has(o.id))
+  if (picked.length < 3) return new Map()
+  const key = axis === 'x' ? 'x' : 'y'
+  const size = axis === 'x' ? 'width' : 'height'
+  const sorted = [...picked].sort((a, b) => a[key] - b[key])
+  const first = sorted[0]
+  const last = sorted[sorted.length - 1]
+  const span = last[key] + last[size] - first[key]
+  const totalSize = sorted.reduce((s, o) => s + o[size], 0)
+  const gap = (span - totalSize) / (sorted.length - 1)
+  const out = new Map()
+  let cursor = first[key]
+  for (const o of sorted) {
+    out.set(o.id, axis === 'x' ? { x: cursor, y: o.y } : { x: o.x, y: cursor })
+    cursor += o[size] + gap
+  }
+  return out
+}
+
+/**
+ * z 层级调整（front/forward/backward/back 四向）。
+ * 返回重排后的完整对象数组（新数组，不改入参）。
+ */
+export function zShiftObjects(objects, ids, dir) {
+  const set = new Set(ids)
+  if (dir === 'front' || dir === 'back') {
+    const picked = objects.filter((o) => set.has(o.id))
+    const rest = objects.filter((o) => !set.has(o.id))
+    return dir === 'front' ? [...rest, ...picked] : [...picked, ...rest]
+  }
+  // forward/backward：选中块整体上移/下移一层（保持块内相对顺序）。
+  // 找与选中块相邻的未选中物件，与其交换位置。
+  const n = objects.length
+  const idxOf = (i) => set.has(objects[i].id)
+  // 找选中块的所有连续区段
+  const blocks = []
+  let i = 0
+  while (i < n) {
+    if (idxOf(i)) {
+      const start = i
+      while (i < n && idxOf(i)) i++
+      blocks.push([start, i])
+    } else i++
+  }
+  if (!blocks.length) return objects
+  const next = [...objects]
+  if (dir === 'forward') {
+    // 每块与其上方紧邻的未选中物件交换（从最高块往下处理，避免互相干扰）
+    for (let b = blocks.length - 1; b >= 0; b--) {
+      const [s, e] = blocks[b]
+      if (e >= n) continue // 已在顶
+      const above = next[e]
+      next.splice(e, 1)
+      next.splice(s, 0, above)
+    }
+  } else {
+    for (let b = 0; b < blocks.length; b++) {
+      const [s, e] = blocks[b]
+      if (s <= 0) continue // 已在底
+      const below = next[s - 1]
+      next.splice(s - 1, 1)
+      next.splice(e - 1, 0, below)
+    }
+  }
+  return next
+}

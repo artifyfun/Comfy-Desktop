@@ -38,6 +38,9 @@ import {
   maskCanvasPoint,
   stripMentionMarks,
   freeResizeRect,
+  alignObjects,
+  distributeObjects,
+  zShiftObjects,
   ratioResizeRect,
 } from './engine'
 
@@ -439,5 +442,95 @@ describe('resize 矩形纯函数（E5fix：南向角高度坍塌回归）', () =
     const r = ratioResizeRect(fixed, { x: 100, y: 50 }, 'se', 2, 24)
     expect(r.w).toBeGreaterThanOrEqual(24)
     expect(r.h).toBeGreaterThanOrEqual(12)
+  })
+})
+
+// —— 多选对齐/分布/z 层级（P1）——
+describe('多选对齐/分布/z 层级纯函数（P1）', () => {
+  const A = { id: 'a', x: 0, y: 0, width: 100, height: 50 }
+  const B = { id: 'b', x: 200, y: 80, width: 80, height: 60 }
+  const C = { id: 'c', x: 400, y: 30, width: 60, height: 40 }
+  const objs = [A, B, C]
+
+  it('左对齐：全部 x 对齐最小 x', () => {
+    const m = alignObjects(objs, ['a', 'b', 'c'], 'left')
+    expect(m.get('a').x).toBe(0)
+    expect(m.get('b').x).toBe(0)
+    expect(m.get('c').x).toBe(0)
+    expect(m.get('b').y).toBe(80) // y 不动
+  })
+  it('右对齐：右边缘对齐最大右缘', () => {
+    const m = alignObjects(objs, ['a', 'b', 'c'], 'right')
+    const maxR = 460
+    expect(m.get('a').x).toBe(maxR - 100)
+    expect(m.get('b').x).toBe(maxR - 80)
+    expect(m.get('c').x).toBe(maxR - 60)
+  })
+  it('水平居中：中心对齐包围盒中心 230', () => {
+    const m = alignObjects(objs, ['a', 'b', 'c'], 'hcenter')
+    expect(m.get('a').x).toBe(230 - 50)
+    expect(m.get('b').x).toBe(230 - 40)
+    expect(m.get('c').x).toBe(230 - 30)
+  })
+  it('顶/底对齐', () => {
+    const t = alignObjects(objs, ['a', 'b', 'c'], 'top')
+    expect(t.get('b').y).toBe(0)
+    const bt = alignObjects(objs, ['a', 'b', 'c'], 'bottom')
+    expect(bt.get('a').y).toBe(140 - 50) // maxY=140
+    expect(bt.get('b').y).toBe(140 - 60)
+  })
+  it('垂直居中', () => {
+    const m = alignObjects(objs, ['a', 'b', 'c'], 'vcenter')
+    const cy = (0 + 140) / 2
+    expect(m.get('a').y).toBe(cy - 25)
+    expect(m.get('c').y).toBe(cy - 20)
+  })
+  it('少于 2 个返回空映射', () => {
+    expect(alignObjects(objs, ['a'], 'left').size).toBe(0)
+  })
+  it('水平等距分布：首尾不动，中间等距', () => {
+    // a: [0,100] c: [400,460]，b 宽 80 → gap = (460-0-100-80-60)/2
+    const objs2 = [
+      { id: 'a', x: 0, y: 0, width: 100, height: 50 },
+      { id: 'b', x: 120, y: 0, width: 80, height: 50 },
+      { id: 'c', x: 400, y: 0, width: 60, height: 50 },
+    ]
+    const m = distributeObjects(objs2, ['a', 'b', 'c'], 'x')
+    expect(m.get('a').x).toBe(0)
+    expect(m.get('c').x).toBe(400)
+    // span=460, totalSize=240, gap=(460-240)/2=110 → b.x = 100+110 = 210
+    expect(m.get('b').x).toBe(210)
+  })
+  it('分布少于 3 个返回空', () => {
+    expect(distributeObjects(objs, ['a', 'b'], 'x').size).toBe(0)
+  })
+  it('zShift front/back：选中块整体到顶/底', () => {
+    const r1 = zShiftObjects(objs, ['a'], 'front')
+    expect(r1.map((o) => o.id)).toEqual(['b', 'c', 'a'])
+    const r2 = zShiftObjects(objs, ['c'], 'back')
+    expect(r2.map((o) => o.id)).toEqual(['c', 'a', 'b'])
+  })
+  it('zShift forward/backward：与相邻层交换', () => {
+    // [a,b,c] 选 b → forward: [a,c,b]
+    const r1 = zShiftObjects(objs, ['b'], 'forward')
+    expect(r1.map((o) => o.id)).toEqual(['a', 'c', 'b'])
+    // backward: [b,a,c]
+    const r2 = zShiftObjects(objs, ['b'], 'backward')
+    expect(r2.map((o) => o.id)).toEqual(['b', 'a', 'c'])
+  })
+  it('zShift forward 连续块整体上移', () => {
+    const objs3 = [
+      { id: 'a', x: 0, y: 0, width: 1, height: 1 },
+      { id: 'b', x: 0, y: 0, width: 1, height: 1 },
+      { id: 'c', x: 0, y: 0, width: 1, height: 1 },
+      { id: 'd', x: 0, y: 0, width: 1, height: 1 },
+    ]
+    // [a, b, c, d] 选 a,b（连续块）→ forward: a,b 与 c 交换 → [c, a, b, d]
+    const r = zShiftObjects(objs3, ['a', 'b'], 'forward')
+    expect(r.map((o) => o.id)).toEqual(['c', 'a', 'b', 'd'])
+  })
+  it('zShift forward 顶层不动', () => {
+    const r = zShiftObjects(objs, ['c'], 'forward')
+    expect(r.map((o) => o.id)).toEqual(['a', 'b', 'c'])
   })
 })

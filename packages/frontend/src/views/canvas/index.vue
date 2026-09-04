@@ -1621,6 +1621,9 @@ import {
   gridLayout,
   subtreeOf,
   stripMentionMarks,
+  alignObjects,
+  distributeObjects,
+  zShiftObjects,
   freeResizeRect,
   ratioResizeRect,
 } from './engine'
@@ -3729,13 +3732,120 @@ const ctxItems = computed(() => {
       },
     )
   }
+  if (ids.length >= 2) {
+    items.push(
+      {
+        key: 'alignL',
+        icon: 'fa-align-left',
+        label: t('canvasAlignLeft'),
+        run: () => {
+          alignSel('left')
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'alignH',
+        icon: 'fa-align-center',
+        label: t('canvasAlignHCenter'),
+        run: () => {
+          alignSel('hcenter')
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'alignR',
+        icon: 'fa-align-right',
+        label: t('canvasAlignRight'),
+        run: () => {
+          alignSel('right')
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'alignT',
+        icon: 'fa-arrow-up-long',
+        label: t('canvasAlignTop'),
+        run: () => {
+          alignSel('top')
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'alignV',
+        icon: 'fa-arrows-up-down',
+        label: t('canvasAlignVCenter'),
+        run: () => {
+          alignSel('vcenter')
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'alignB',
+        icon: 'fa-arrow-down-long',
+        label: t('canvasAlignBottom'),
+        run: () => {
+          alignSel('bottom')
+          closeCtxMenu()
+        },
+      },
+    )
+  }
+  if (ids.length >= 3) {
+    items.push(
+      {
+        key: 'distH',
+        icon: 'fa-arrows-left-right-to-line',
+        label: t('canvasDistH'),
+        run: () => {
+          distributeSel('x')
+          closeCtxMenu()
+        },
+      },
+      {
+        key: 'distV',
+        icon: 'fa-arrows-up-down-up-down-line',
+        label: t('canvasDistV'),
+        run: () => {
+          distributeSel('y')
+          closeCtxMenu()
+        },
+      },
+    )
+  }
   items.push(
     {
       key: 'front',
-      icon: 'fa-arrow-up',
+      icon: 'fa-layer-group',
       label: t('canvasMenuFront'),
       run: () => {
-        bringToFront(ids)
+        zShift(ids, 'front')
+        closeCtxMenu()
+      },
+    },
+    {
+      key: 'forward',
+      icon: 'fa-arrow-up',
+      label: t('canvasMenuForward'),
+      run: () => {
+        zShift(ids, 'forward')
+        closeCtxMenu()
+      },
+    },
+    {
+      key: 'backward',
+      icon: 'fa-arrow-down',
+      label: t('canvasMenuBackward'),
+      run: () => {
+        zShift(ids, 'backward')
+        closeCtxMenu()
+      },
+    },
+    {
+      key: 'back',
+      icon: 'fa-layer-group',
+      label: t('canvasMenuBack'),
+      run: () => {
+        zShift(ids, 'back')
         closeCtxMenu()
       },
     },
@@ -3751,11 +3861,34 @@ const ctxItems = computed(() => {
   )
   return items
 })
-function bringToFront(ids) {
-  const set = new Set(ids)
+/** z 层级四向（front/forward/backward/back），选中块整体移动保持内部顺序 */
+function zShift(ids, dir) {
   beforeChange()
-  const picked = objects.value.filter((o) => set.has(o.id))
-  objects.value = [...objects.value.filter((o) => !set.has(o.id)), ...picked]
+  objects.value = zShiftObjects(objects.value, ids, dir)
+  saveSoon()
+}
+/** 多选对齐（左/右/上/下/水平居中/垂直居中）：应用坐标映射 */
+function alignSel(mode) {
+  if (selection.value.length < 2) return
+  const moves = alignObjects(objects.value, selection.value, mode)
+  if (!moves.size) return
+  beforeChange()
+  for (const [id, pos] of moves) {
+    const o = objects.value.find((x) => x.id === id)
+    if (o) Object.assign(o, pos)
+  }
+  saveSoon()
+}
+/** 多选等距分布（水平/垂直），≥3 个物件生效 */
+function distributeSel(axis) {
+  if (selection.value.length < 3) return
+  const moves = distributeObjects(objects.value, selection.value, axis)
+  if (!moves.size) return
+  beforeChange()
+  for (const [id, pos] of moves) {
+    const o = objects.value.find((x) => x.id === id)
+    if (o) Object.assign(o, pos)
+  }
   saveSoon()
 }
 function pasteAt(wx, wy) {
