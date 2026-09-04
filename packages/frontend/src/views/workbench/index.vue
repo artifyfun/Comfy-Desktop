@@ -278,7 +278,9 @@
             >
               <i class="fas fa-bug"></i>
             </a-button>
-            <a-button size="small" @click="panelOpen = !panelOpen">
+            <!-- 产物面板开关：仅独立工作台页显示（embed 画布侧栏 isNarrow 恒真，
+                 面板 v-if="panelOpen && !isNarrow" 永不渲染，按钮是死按钮） -->
+            <a-button v-if="!isNarrow" size="small" @click="panelOpen = !panelOpen">
               <i class="fas fa-table-columns"></i>
             </a-button>
           </div>
