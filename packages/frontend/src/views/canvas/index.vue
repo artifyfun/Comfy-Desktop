@@ -1256,7 +1256,7 @@
             class="grid size-11 shrink-0 place-items-center rounded-lg border border-dashed border-[var(--wb-stroke)] text-[var(--wb-text-2)] transition hover:border-[var(--wb-accent)] hover:text-[var(--wb-accent)]"
             :title="t('canvasRefBarAdd')"
             @mousedown.stop
-            @click.stop="refBarStartLink(nodeRefBar.id)"
+            @click.stop="refBarStartLink(nodeRefBar.id, $event)"
           >
             <i class="fas fa-plus text-xs"></i>
           </button>
@@ -6678,17 +6678,27 @@ function refBarLeave() {
   refBarPreview.id = null
 }
 /** E2：+ 按钮 → 以本节点为 target 发起连线拖拽（把新上游拉进来） */
-function refBarStartLink(toId) {
-  // 复用句柄连线手势：target 句柄语义（connectDrag 从本节点左侧起拉，
-  // 松手落在某物件上即建 from=落点 → to=本节点）
-  connectDrag.active = true
-  connectDrag.nodeId = toId
-  connectDrag.handleType = 'target'
-  connectDrag.targetId = null
+function refBarStartLink(toId, ev) {
+  // UX 诉求：点 + 直接弹「创建节点」菜单（选中类型即建 + 自动连线），
+  // 不再进入拖线手势（原行为要求拖到目标上，落空还得再点一次才见菜单）。
   const o = objects.value.find((x) => x.id === toId)
   if (!o) return
-  connectDrag.seg = { x1: o.x, y1: o.y + o.height / 2, x2: o.x, y2: o.y + o.height / 2 }
-  drag.mode = 'connect'
+  const src = ev?.currentTarget
+  const r = src?.getBoundingClientRect?.()
+  const wrap = wrapEl.value?.getBoundingClientRect?.()
+  // 屏幕坐标：优先按钮下方；取不到（键盘等无事件源）则节点左下角
+  const sx = r && wrap ? clamp(r.left - wrap.left, 8, Math.max(8, size.w - 180)) : 8
+  const sy = r && wrap ? clamp(r.bottom - wrap.top + 4, 8, Math.max(8, size.h - 210)) : 8
+  // 世界坐标：菜单里选类型后新节点落点（节点正下方一卡位）
+  const wx = o.x
+  const wy = o.y + o.height + 24
+  connectCreate.open = true
+  connectCreate.x = sx
+  connectCreate.y = sy
+  connectCreate.wx = wx
+  connectCreate.wy = wy
+  connectCreate.to = toId
+  connectCreate.from = null
 }
 
 /** E2：预览浮层对应的引用源物件 */

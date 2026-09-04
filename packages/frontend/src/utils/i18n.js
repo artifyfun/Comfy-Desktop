@@ -338,7 +338,7 @@ const translations = {
     canvasPrjBatchMode: '批量管理',
     canvasPrjCancel: '取消',
     canvasMenuAiGroup: 'AI 处理',
-    canvasRefBarAdd: '添加引用（拖到目标物件）',
+    canvasRefBarAdd: '添加引用',
     canvasMaskViewportHint: '滚轮缩放（指针锚定）· 空格/中键拖动平移 · 1x–4x 精修大图',
     canvasMaskBrush: '画笔',
     canvasMaskErase: '橡皮',
@@ -1526,7 +1526,7 @@ const translations = {
     canvasPrjBatchMode: 'Batch manage',
     canvasPrjCancel: 'Cancel',
     canvasMenuAiGroup: 'AI actions',
-    canvasRefBarAdd: 'Add reference (drag to a target)',
+    canvasRefBarAdd: 'Add reference',
     canvasMaskViewportHint:
       'Wheel to zoom (pointer-anchored) · Space/middle-drag to pan · 1x–4x for large images',
     canvasMaskBrush: 'Brush',
