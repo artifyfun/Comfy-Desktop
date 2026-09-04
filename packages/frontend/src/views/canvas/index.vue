@@ -1301,6 +1301,42 @@
           <span class="tb-bridge" aria-hidden="true"></span>
         </div>
 
+        <!-- 工具栏显隐设置浮层（P1：「…」按钮展开，勾选即时生效） -->
+        <div
+          v-if="tbSettings.open"
+          data-tb-settings
+          class="absolute z-30 w-52 rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] p-2 shadow-xl"
+          :style="{ left: tbSettings.x + 'px', top: tbSettings.y + 'px' }"
+          @mousedown.stop
+          @pointerdown.stop
+        >
+          <div class="mb-1 px-1 text-[10px] font-medium text-[var(--wb-text-2)]">
+            {{ t('canvasTbSettingsTitle') }}
+          </div>
+          <div class="max-h-56 overflow-y-auto">
+            <label
+              v-for="c in tbSettings.items"
+              :key="c.title"
+              class="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-xs text-[var(--wb-text-1)] hover:bg-black/15"
+            >
+              <input
+                type="checkbox"
+                class="accent-[var(--wb-accent)]"
+                :checked="!tbHidden.has(c.title)"
+                @change="tbToggleHidden(c.title)"
+              />
+              <i :class="c.icon" class="w-3.5 text-center text-[10px] text-[var(--wb-text-2)]"></i>
+              <span class="truncate">{{ c.title }}</span>
+            </label>
+          </div>
+          <button
+            class="mt-1 w-full rounded-md px-2 py-1 text-[10px] text-[var(--wb-text-2)] hover:bg-black/15 hover:text-[var(--wb-text-1)]"
+            @click="tbResetHidden"
+          >
+            {{ t('canvasTbReset') }}
+          </button>
+        </div>
+
         <!-- note 调色板（悬浮工具栏的调色按钮展开，位于工具栏下方） -->
         <div
           v-if="notePalette.open"
@@ -6389,18 +6425,26 @@ const refBarPreviewObj = computed(() => {
   return bar?.refs.find((r) => r.fromId === refBarPreview.id) ?? null
 })
 
-const hoverToolbar = computed(() => {
-  const id = hoverNodeId.value
-  if (!id) return { x: 0, y: 0, items: [], below: false }
-  const o = objects.value.find((x) => x.id === id)
-  if (!o) return { x: 0, y: 0, items: [], below: false }
-  const tl = worldToScreen(viewport.value, o.x, o.y)
-  const x = tl.x + (o.width * viewport.value.scale) / 2
-  // 顶部空间不足（工具栏会被容器 overflow 裁掉）→ 翻到节点下方。
-  // E5fix：下方态避让角柄（角柄外偏 10px + 20px 热区），否则工具栏盖住
-  // SE/SW 角柄，真实鼠标按下被 HTML 拦截、resize 无法启动
-  const below = tl.y - 10 < TOOLBAR_H + 12
-  const y = below ? tl.y + o.height * viewport.value.scale + 34 : tl.y - 10
+// —— 工具栏显隐自定义（P1：参考 image-quick-tools 设置弹窗）——
+// 偏好按「工具标题 key」隐藏（跨类型共享 title 自动同步，如「删除」）。
+// 存 localStorage artify.canvas.tbHidden.v1 = [title, ...]
+const TB_HIDDEN_KEY = 'artify.canvas.tbHidden.v1'
+const tbHidden = ref(new Set(JSON.parse(localStorage.getItem(TB_HIDDEN_KEY) || '[]')))
+const tbSettings = reactive({ open: false, x: 0, y: 0 })
+function tbResetHidden() {
+  tbHidden.value = new Set()
+  localStorage.setItem(TB_HIDDEN_KEY, '[]')
+}
+function tbToggleHidden(title) {
+  const next = new Set(tbHidden.value)
+  if (next.has(title)) next.delete(title)
+  else next.add(title)
+  tbHidden.value = next
+  localStorage.setItem(TB_HIDDEN_KEY, JSON.stringify([...next]))
+}
+
+/** 类型化装配悬浮工具栏动作（P1 重构：供 hoverToolbar 与 tbCandidates 共用） */
+function buildToolbarItems(o, id) {
   const items = []
   if (o.type === 'note') {
     items.push(
@@ -6551,7 +6595,45 @@ const hoverToolbar = computed(() => {
       action: () => nodeDeleteObj(id),
     },
   )
-  return { x, y, items, below }
+  return items
+}
+
+const hoverToolbar = computed(() => {
+  const id = hoverNodeId.value
+  if (!id) return { x: 0, y: 0, items: [], below: false }
+  const o = objects.value.find((x) => x.id === id)
+  if (!o) return { x: 0, y: 0, items: [], below: false }
+  const tl = worldToScreen(viewport.value, o.x, o.y)
+  const x = tl.x + (o.width * viewport.value.scale) / 2
+  const below = tl.y - 10 < TOOLBAR_H + 12
+  const y = below ? tl.y + o.height * viewport.value.scale + 34 : tl.y - 10
+  const all = buildToolbarItems(o, id)
+  // 用户偏好过滤（标题 key）+ 压缩多余分隔线 + 尾部「…」设置按钮
+  const vis = all.filter((b) => b.sep || !tbHidden.value.has(b.title))
+  const squeezed = []
+  for (const b of vis) {
+    if (b.sep && (squeezed.length === 0 || squeezed[squeezed.length - 1].sep)) continue
+    squeezed.push(b)
+  }
+  while (squeezed.length && squeezed[squeezed.length - 1].sep) squeezed.pop()
+  squeezed.push({
+    icon: 'fas fa-ellipsis',
+    title: t('canvasTbSettings'),
+    action: () => {
+      const el = document.querySelector('.node-hover-toolbar')
+      if (el) {
+        const r = el.getBoundingClientRect()
+        const wrap = wrapEl.value?.getBoundingClientRect()
+        tbSettings.x = r.left - (wrap?.left || 0) + r.width / 2
+        tbSettings.y = r.bottom - (wrap?.top || 0) + 8
+      }
+      // 打开时快照候选工具（popover 显示期间鼠标离开节点会让 hoverNodeId
+      // 清空，实时 computed 会变空列表）——快照保住列表
+      tbSettings.items = all.filter((b) => !b.sep).map((b) => ({ title: b.title, icon: b.icon }))
+      tbSettings.open = true
+    },
+  })
+  return { x, y, items: squeezed, below }
 })
 /** 工具栏被摘掉（节点删除/类型无动作）时 DOM 消失，mouseleave 不再触发 —— 兜底复位 keep，
  *  否则 toolbarKeep 残留 true 会让后续悬停永远收不起来 */
@@ -6634,6 +6716,12 @@ onMounted(() => {
     },
     { capture: true },
   )
+  // 工具栏显隐设置浮层：点外部关闭（浮层自身 mousedown.stop 不冒泡）
+  document.addEventListener('mousedown', (e) => {
+    if (!tbSettings.open) return
+    const pop = wrapEl.value?.querySelector?.('[data-tb-settings]')
+    if (pop && !pop.contains(e.target)) tbSettings.open = false
+  })
 })
 // blob 图持久化：降采样到最长边 640 转 JPEG dataURL 存进文档（画布显示用原 blob
 // URL 保持清晰；存档用 persist dataURL，刷新/重开仍在）。
