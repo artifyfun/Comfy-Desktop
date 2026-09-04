@@ -64,6 +64,36 @@ export function createWorkbenchRouter(): express.Router {
     res.json(createSuccessResponse(workbenchService.listSessions(archived)))
   })
 
+  // 会话导出：单会话完整 JSON 下载（schema 版本化，剥 debugLogs/batchJobId）
+  router.get('/api/workbench/sessions/:id/export', (req, res) => {
+    const file = workbenchService.exportSession(req.params.id ?? '')
+    if (!file) {
+      res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse('session not found'))
+      return
+    }
+    // filename*=RFC 5987：中文标题浏览器兼容（ASCII 回退名兜底）
+    const asciiName = 'workbench-session-' + file.session.id.slice(0, 8) + '.json'
+    const encoded = encodeURIComponent(
+      (file.session.title || 'session').replace(/[/:*?"<>|]/g, '_') + '.json'
+    )
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${asciiName}"; filename*=UTF-8''${encoded}`
+    )
+    res.json(file)
+  })
+
+  // 会话导入：JSON 体校验 + 新 UUID 落库
+  router.post('/api/workbench/sessions/import', (req, res) => {
+    const r = workbenchService.importSession(req.body)
+    if (!r.ok) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse(r.error ?? 'import failed'))
+      return
+    }
+    res.status(HTTP_STATUS.CREATED).json(createSuccessResponse(r.session))
+  })
+
   router.post('/api/workbench/sessions/create', (req, res) => {
     const { title, presetId } = (req.body as { title?: string; presetId?: string }) ?? {}
     res

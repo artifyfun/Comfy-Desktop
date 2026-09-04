@@ -26,6 +26,7 @@ import appStoreManager, { type App, type ComfyPrompt, type ParamNode } from '../
 import { type AppServerRuntime, createAppServerRuntime } from './appServerRun'
 import { logger } from '../utils/logger'
 import { templateLibrary } from './templates'
+import { exportSession, importSession as importSessionCore } from './sessionTransfer'
 import { toPseudoApp, type WorkflowTemplate } from './templateCore'
 import {
   checkVram,
@@ -763,6 +764,23 @@ class WorkbenchService {
         logger.warn('workbench: flush sessions failed', e)
       }
     }, FLUSH_DEBOUNCE_MS)
+  }
+
+  /** 导出会话（纯函数核心见 sessionTransfer.ts；剥 debugLogs/batchJobId） */
+  exportSession(id: string) {
+    const session = this.getSession(id)
+    if (!session) return null
+    return exportSession(session)
+  }
+
+  /** 导入会话：校验 + 新 UUID 落库（防 id 冲突）。失败返回错误码。 */
+  importSession(raw: unknown): { ok: boolean; session?: WorkbenchSession; error?: string } {
+    const existing = new Set(this.store.sessions.map((s) => s.id))
+    const r = importSessionCore(raw, existing)
+    if (!r.ok || !r.session) return { ok: false, error: r.error }
+    this.store.sessions.unshift(r.session)
+    this.flush()
+    return { ok: true, session: r.session }
   }
 
   listSessions(archived?: boolean): WorkbenchSession[] {

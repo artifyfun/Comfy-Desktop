@@ -103,6 +103,13 @@
               class="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5"
             >
               <button
+                class="w-6 h-6 rounded text-slate-400 hover:text-white hover:bg-slate-600 flex items-center justify-center"
+                :title="t('workbenchExportSession')"
+                @click.stop="$emit('export-session', s)"
+              >
+                <i class="fas fa-file-export text-xs"></i>
+              </button>
+              <button
                 v-if="!s.archived"
                 class="w-6 h-6 rounded text-slate-400 hover:text-white hover:bg-slate-600 flex items-center justify-center"
                 :title="t('workbenchRename')"
@@ -139,6 +146,15 @@
       </div>
 
       <!-- 底部：设置 + 技能管理 -->
+      <div class="px-2 pb-1 pt-1">
+        <button
+          class="w-full text-left px-2 py-1.5 rounded text-xs text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)] flex items-center gap-2"
+          :title="t('workbenchImportSessionTip')"
+          @click="$emit('import-session')"
+        >
+          <i class="fas fa-file-import"></i>{{ t('workbenchImportSession') }}
+        </button>
+      </div>
       <div class="p-2 border-t border-[var(--wb-stroke)] space-y-0.5">
         <button
           class="w-full text-left px-2 py-1.5 rounded text-sm text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)] flex items-center gap-2"
@@ -194,6 +210,8 @@ const emit = defineEmits([
   'archive',
   'unarchive',
   'rename',
+  'export-session',
+  'import-session',
   'update:showArchived',
   'manage-presets',
   'show-env',

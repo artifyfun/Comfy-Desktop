@@ -138,6 +138,8 @@
           @collapse="sidebarCollapsed = !sidebarCollapsed"
           @rename="onRename"
           @archive="(s) => setArchived(s, true)"
+          @export-session="exportSession"
+          @import-session="importSession"
           @unarchive="(s) => setArchived(s, false)"
           @delete="onDelete"
           @update:show-archived="(v) => (showArchived = v)"
@@ -168,6 +170,8 @@
             @collapse="sidebarCollapsed = !sidebarCollapsed"
             @rename="onRename"
             @archive="(s) => setArchived(s, true)"
+            @export-session="exportSession"
+            @import-session="importSession"
             @unarchive="(s) => setArchived(s, false)"
             @delete="onDelete"
             @update:show-archived="(v) => (showArchived = v)"
@@ -1464,6 +1468,46 @@ async function onRename({ id, title }) {
 }
 
 // 归档走确认弹窗（dsh/Codex 惯例：破坏性视图操作需二次确认；单会话级操作）
+// 会话导出：走浏览器原生下载（Content-Disposition 附件）
+function exportSession(s) {
+  const a = document.createElement('a')
+  a.href = `${origin.value}/api/workbench/sessions/${s.id}/export`
+  a.download = ''
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+// 会话导入：文件选择 → JSON 解析 → POST → 成功后刷新列表并选中新会话
+async function importSession() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'application/json,.json'
+  input.onchange = async () => {
+    const file = input.files?.[0]
+    if (!file) return
+    try {
+      const text = await file.text()
+      const body = JSON.parse(text)
+      const res = await fetch(`${origin.value}/api/workbench/sessions/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error('import http ' + res.status)
+      const j = await res.json()
+      const imported = j?.data
+      await loadSessions()
+      if (imported?.id) selectSession(imported.id)
+      message.success(t('workbenchImportSuccess'))
+    } catch (e) {
+      console.warn('workbench import failed', e)
+      message.error(t('workbenchImportFailed'))
+    }
+  }
+  input.click()
+}
+
 function setArchived(s, archived) {
   if (!archived) return doSetArchived(s, false)
   const running = (s.executions ?? []).some((e) => e.status === 'queued' || e.status === 'running')
