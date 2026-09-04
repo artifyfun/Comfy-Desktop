@@ -18,8 +18,8 @@ function sess(): WorkbenchSession {
         kind: 'artifact',
         text: '',
         outputFiles: [{ filename: 'art.png', subfolder: 'run1' }],
-        createdAt: 3,
-      },
+        createdAt: 3
+      }
     ],
     executions: [
       {
@@ -28,9 +28,9 @@ function sess(): WorkbenchSession {
         params: {},
         outputs: [{ filename: 'art.png', subfolder: 'run1', type: 'output' }, 'plain.png'],
         status: 'success',
-        startedAt: 4,
-      },
-    ],
+        startedAt: 4
+      }
+    ]
   } as unknown as WorkbenchSession
 }
 
@@ -74,7 +74,7 @@ describe('restoreBundleFiles', () => {
     const written: string[] = []
     const entries = new Map<string, Buffer>([
       ['outputs/0-art.png', Buffer.from('PNG')],
-      ['session.json', Buffer.from('{}')], // 非产物条目跳过
+      ['session.json', Buffer.from('{}')] // 非产物条目跳过
     ])
     const rr = restoreBundleFiles(
       s,
@@ -92,20 +92,27 @@ describe('restoreBundleFiles', () => {
     expect(ex.outputs[0]).toEqual({
       filename: 'art.png',
       subfolder: 'wb-import-a1b2c3d4/run1',
-      type: 'output',
+      type: 'output'
     })
     expect(ex.outputs[1]).toBe('plain.png')
     // messages.outputFiles 同步回填
     expect(s.messages[0]!.outputFiles![0]).toEqual({
       filename: 'art.png',
       subfolder: 'wb-import-a1b2c3d4/run1',
-      type: 'output',
+      type: 'output'
     })
   })
   it('manifest 无对应条目（孤儿产物文件）：entryName 兜底命名仍写回', () => {
     const s = sess()
     const entries = new Map([['outputs/9-orphan.png', Buffer.from('O')]])
-    const rr = restoreBundleFiles(s, '/out', [], entries, () => {}, () => {})
+    const rr = restoreBundleFiles(
+      s,
+      '/out',
+      [],
+      entries,
+      () => {},
+      () => {}
+    )
     expect(rr.restored).toHaveLength(1)
     expect(rr.restored[0]!.filename).toBe('orphan.png')
   })
@@ -113,14 +120,14 @@ describe('restoreBundleFiles', () => {
     const s = sess()
     const entries = new Map([
       ['outputs/0-a.png', Buffer.from('A')],
-      ['outputs/1-b.png', Buffer.from('B')],
+      ['outputs/1-b.png', Buffer.from('B')]
     ])
     const rr = restoreBundleFiles(
       s,
       '/out',
       [
         { path: 'outputs/0-a.png', filename: 'a.png' },
-        { path: 'outputs/1-b.png', filename: 'b.png' },
+        { path: 'outputs/1-b.png', filename: 'b.png' }
       ],
       entries,
       () => {

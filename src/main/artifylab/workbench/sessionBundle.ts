@@ -12,12 +12,8 @@
 import { createHash } from 'crypto'
 import { statSync, readFileSync } from 'fs'
 import type { WorkbenchSession, WorkbenchOutputFile } from './service'
-import type {
-  SESSION_EXPORT_SCHEMA_VERSION} from './sessionTransfer';
-import {
-  exportSession,
-  type SessionExportFile
-} from './sessionTransfer'
+import type { SESSION_EXPORT_SCHEMA_VERSION } from './sessionTransfer'
+import { exportSession, type SessionExportFile } from './sessionTransfer'
 
 // ---------- CRC32（IEEE，查表） ----------
 const CRC_TABLE = (() => {

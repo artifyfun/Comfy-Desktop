@@ -86,7 +86,7 @@ export function restoreBundleFiles(
     restored.push({
       filename: r.target.filename,
       subfolder: r.target.subfolder ?? '',
-      target: r.target,
+      target: r.target
     })
   }
   return { restored, skipped }
