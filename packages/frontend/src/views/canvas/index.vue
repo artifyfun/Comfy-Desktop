@@ -1344,6 +1344,8 @@
           :style="{ left: tbSettings.x + 'px', top: tbSettings.y + 'px' }"
           @mousedown.stop
           @pointerdown.stop
+          @mouseenter="keepToolbar(true)"
+          @mouseleave="keepToolbar(false)"
         >
           <div class="mb-1 px-1 text-[10px] font-medium text-[var(--wb-text-2)]">
             {{ t('canvasTbSettingsTitle') }}
@@ -3396,8 +3398,13 @@ function onMouseMove(e) {
       // 命中物件：立即切换（节点间移动无延迟），撤销待收起
       cancelHoverHide()
       if (id !== hoverNodeId.value) hoverNodeId.value = id
-    } else if (!toolbarKeep.value) {
-      // 空白：延时收起，给鼠标移入工具栏的时间（间隙已由桥接热区兜住）
+    } else {
+      // 空白：延时收起，给鼠标移入工具栏的时间（间隙已由桥接热区兜住）。
+      // 不看 toolbarKeep：能走到这里说明事件落在画布内容上，指针必然已不在
+      // 工具栏/弹层（它们是盖在 content 之上的 HTML，会截获命中）——keep
+      // 仍为 true 只能是 mouseleave 丢失（元素被重建/移位不触发边界事件），
+      // 视为过期直接排收起，否则工具栏常驻不消失。
+      toolbarKeep.value = false
       scheduleHoverHide()
     }
   }
@@ -6607,6 +6614,8 @@ function scheduleHoverHide(delay = HOVER_HIDE_DELAY) {
     hoverHideTimer = null
     toolbarKeep.value = false
     hoverNodeId.value = null
+    // 弹层挂在 hoverToolbar 内部（v-if 于工具栏节点树中），工具栏收起即成孤儿
+    if (tbSettings.open) tbSettings.open = false
   }
   if (delay > 0) hoverHideTimer = setTimeout(hide, delay)
   else hide()
