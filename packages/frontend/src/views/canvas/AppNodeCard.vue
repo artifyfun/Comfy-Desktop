@@ -22,6 +22,32 @@
       </button>
     </div>
 
+    <!-- 参数预设条（P2：保存/应用/删除，按 appId 分桶存 localStorage） -->
+    <div v-if="fields.length" class="mb-2 flex items-center gap-1">
+      <select
+        class="field-input flex-1 min-w-0"
+        :value="appliedPreset"
+        :title="t('canvasAppPresetPick')"
+        @change="applyPreset($event.target.value)"
+      >
+        <option value="">{{ t('canvasAppPresetNone') }}</option>
+        <option v-for="pz in presets" :key="pz.id" :value="pz.id">
+          {{ pz.name }}
+        </option>
+      </select>
+      <button class="pick-btn" :title="t('canvasAppPresetSave')" @click="savePresetFromCurrent()">
+        <i class="fas fa-bookmark"></i>
+      </button>
+      <button
+        v-if="appliedPreset"
+        class="pick-btn text-red-400 hover:text-red-300"
+        :title="t('canvasAppPresetDelete')"
+        @click="removePreset(appliedPreset)"
+      >
+        <i class="fas fa-trash"></i>
+      </button>
+    </div>
+
     <!-- 参数表单（paramsNodes 派生；空模板提示） -->
     <div v-if="fields.length" class="fields">
       <div v-for="f in fields" :key="f.nodeId + '.' + f.key" class="field">
@@ -132,9 +158,62 @@
  * App 节点展开面板（HTML overlay；锚定世界坐标节点，由父级换算屏幕坐标）。
  * 参数写回 node.params（响应式对象直写）；运行/关闭/拾取画布图 emit 给宿主。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from '@/utils/i18n'
 import { paramFieldsFromTemplate } from './appNode'
+
+const PRESET_KEY = 'artify.canvas.appPresets.v1'
+
+/** 当前 appId 的预设列表（localStorage 分桶） */
+function loadPresets() {
+  try {
+    const all = JSON.parse(localStorage.getItem(PRESET_KEY) || '{}')
+    return Array.isArray(all[props.node.appId]) ? all[props.node.appId] : []
+  } catch {
+    return []
+  }
+}
+const presets = ref(loadPresets())
+const appliedPreset = ref('')
+function persistPresets(next) {
+  presets.value = next
+  const all = JSON.parse(localStorage.getItem(PRESET_KEY) || '{}')
+  if (next.length) all[props.node.appId] = next
+  else delete all[props.node.appId]
+  localStorage.setItem(PRESET_KEY, JSON.stringify(all))
+}
+/** 把面板当前参数值快照存为命名预设 */
+function savePresetFromCurrent() {
+  const name = prompt(t('canvasAppPresetNamePrompt'))
+  if (!name || !name.trim()) return
+  const snapshot = {}
+  for (const f of fields.value) {
+    const v = paramValue(f)
+    if (v !== undefined && v !== null && v !== '') {
+      snapshot[f.nodeId + '.' + f.key] = v
+    }
+  }
+  persistPresets([
+    ...presets.value,
+    { id: 'pz' + Date.now().toString(36), name: name.trim(), params: snapshot },
+  ])
+}
+/** 应用预设：逐字段写回（空快照字段跳过=保持默认） */
+function applyPreset(id) {
+  appliedPreset.value = id
+  const pz = presets.value.find((x) => x.id === id)
+  if (!pz) return
+  for (const [path, v] of Object.entries(pz.params)) {
+    const dot = path.indexOf('.')
+    const nodeId = path.slice(0, dot)
+    const key = path.slice(dot + 1)
+    emit('update-param', { nodeId, key, value: v })
+  }
+}
+function removePreset(id) {
+  persistPresets(presets.value.filter((x) => x.id !== id))
+  if (appliedPreset.value === id) appliedPreset.value = ''
+}
 
 const props = defineProps({
   node: { type: Object, required: true },
