@@ -7,18 +7,50 @@
 <script setup>
 import { useI18n } from '@/utils/i18n'
 const { t } = useI18n()
-defineProps({
-  node: { type: Object, required: true }, // {id,type:'video'|'audio',x,y,width,height,src,persist,name}
-  pos: { type: Object, required: true }, // {x,y,w,h} 屏幕坐标（含缩放）
-})
+
 const emit = defineEmits(['upload'])
+
+/**
+ * fix(媒体节点不可拖): overlay 全覆盖在 Konva 之上且 mousedown.stop,
+ * 拖拽起点永远到不了 Konva 占位 group —— 媒体节点只能靠边缘细缝拖动,
+ * 且拖动时 overlay(Vue 调度)滞后 Konva(同帧)一拍 → "两个区块"。
+ * 现将非控件区域的 mousedown 转发给 Konva group 手动 startDrag:
+ *  - video/audio 控件自身的点击(播放/进度条/音量)不触发拖拽;
+ *  - 边框 padding/空白区域按下即拖,与 Konva 原生拖拽体验一致;
+ *  - Konva dragmove 由宿主 onNodeDrag 写回数据 + 直写 overlay 位置(同帧对齐)。
+ */
+const props = defineProps({
+  node: { type: Object, required: true },
+  pos: { type: Object, required: true },
+})
+function onOverlayDown(e) {
+  const t = e.target
+  // 控件自身（video 播放器/上传按钮）的交互不劫持
+  if (t && (t.tagName === 'VIDEO' || t.tagName === 'AUDIO' || t.closest?.('button'))) return
+  // 把 mousedown 原样转发给 Konva 画布层（同坐标）：Konva 内部走完整
+  // onItemDown（选中/平移意图/hover）→ dragmove 链——与原生拖拽完全一致。
+  // overlay 不再吃掉事件（原先 mousedown.stop 导致媒体节点只能从边缘拖）。
+  const content = document.querySelector('.konvajs-content')
+  if (content) {
+    e.stopPropagation()
+    content.dispatchEvent(
+      new MouseEvent('mousedown', {
+        bubbles: true,
+        cancelable: true,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        button: e.button,
+        buttons: e.buttons,
+      }),
+    )
+  }
+}
 </script>
 
 <template>
   <div
     class="absolute inset-0 rounded-xl overflow-hidden border border-[var(--wb-stroke)] bg-black/80 shadow-xl"
-    @mousedown.stop
-    @pointerdown.stop
+    @mousedown="onOverlayDown"
     @dblclick.stop
   >
     <!-- video：播放器或空占位上传 -->

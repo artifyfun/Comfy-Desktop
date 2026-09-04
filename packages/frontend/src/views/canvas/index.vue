@@ -1141,6 +1141,7 @@
         <template v-for="o in mediaObjects" :key="'media-' + o.id">
           <div
             class="absolute z-[15]"
+            :data-media-overlay="o.id"
             :style="{
               left: mediaPosOf(o).x + 'px',
               top: mediaPosOf(o).y + 'px',
@@ -1997,8 +1998,13 @@ function deleteProjectById(id) {
     cancelText: t('cancel'),
     okButtonProps: { danger: true },
     onOk: () => {
+      // fix: 删唯一项目时 psDeleteProject 兜底新建"未命名画布"（新 id），
+      // 旧条件比较的是 computed 重算后的 activeProject（已指向新项目）→ 永假
+      // → 画布残留旧节点，且后续 syncActiveDocToStore 把旧内容写进新项目。
+      // 改为记录删除前的项目 id：变了就无条件重装载。
+      const beforeId = projectStore.activeId
       Object.assign(projectStore, psDeleteProject({ ...projectStore }, id))
-      if (projectStore.activeId !== activeProject.value?.id) loadProjectIntoCanvas()
+      if (projectStore.activeId !== beforeId) loadProjectIntoCanvas()
       persistProjects()
     },
   })
@@ -2021,11 +2027,12 @@ function deleteCheckedProjects() {
     cancelText: t('cancel'),
     okButtonProps: { danger: true },
     onOk: () => {
+      // fix: 同单卡删除——先记删除前 activeId，避免 computed 已重算导致漏装载
+      const beforeId = projectStore.activeId
       let store = { ...projectStore }
       for (const id of ids) store = psDeleteProject(store, id)
       Object.assign(projectStore, store)
-      if (!projectStore.projects.some((p) => p.id === activeProject.value?.id))
-        loadProjectIntoCanvas()
+      if (!projectStore.projects.some((p) => p.id === beforeId)) loadProjectIntoCanvas()
       persistProjects()
       prjChecked.clear()
       prjBatchMode.value = false
@@ -2593,9 +2600,10 @@ function imageConfig(o) {
 /** 媒体节点占位框（overlay 播放器下的 Konva 热区/选中框） */
 function mediaRectConfig(o) {
   const sel = selection.value.includes(o.id)
+  // fix(视频双影): rect 位于 group 内，坐标须相对 group(0,0)——此前误带 o.x/o.y
+  // 世界坐标，占位框被画到 2 倍偏移处（group.x + rect.x），与 HTML overlay
+  // 播放器(世界坐标定位)分离成"两个区块"，且 hit graph 落空导致拖拽失效。
   return {
-    x: o.x,
-    y: o.y,
     width: o.width,
     height: o.height,
     fill: o.type === 'video' ? 'rgba(14,165,233,0.10)' : 'rgba(168,85,247,0.10)',
@@ -3442,6 +3450,18 @@ function onNodeDrag(e) {
   // 拽实时跟随，而非 dragend 才更新（原实现数据 lag 一拍）
   o.x = node.x()
   o.y = node.y()
+  // fix(媒体双影): video/audio 的 HTML overlay 走 Vue 调度（晚 Konva 同步
+  // transform 一拍），拖动中 Konva 占位框与播放器卡错位成"两个区块"。
+  // 拖动帧内直写 overlay 的 left/top，与 Konva 同帧对齐；dragend 后 Vue
+  // 重渲染接管（style 绑定重算，数值一致无跳变）。
+  if (o.type === 'video' || o.type === 'audio') {
+    const el = wrapEl.value?.querySelector?.('[data-media-overlay="' + o.id + '"]')
+    if (el) {
+      const tl = worldToScreen(viewport.value, o.x, o.y)
+      el.style.left = tl.x + 'px'
+      el.style.top = tl.y + 'px'
+    }
+  }
   const others = objects.value.filter((_, i) => i !== idx)
   if (!others.length) return
   const moving = { x: node.x(), y: node.y(), width: o.width, height: o.height }
@@ -5183,10 +5203,9 @@ function addFrameAt(wx, wy) {
 }
 const frameObjects = computed(() => withCull((o) => o.type === 'frame'))
 function frameConfig(o) {
+  // fix: rect 在 group 内须用相对坐标（group 已定位 o.x/o.y）；id 由 group 承载
+  // （rect 再带同 id 会与 group 重复，findOne 命中 rect 而非 group）
   return {
-    id: o.id,
-    x: o.x,
-    y: o.y,
     width: o.width,
     height: o.height,
     fill: 'rgba(99,102,241,0.05)',
@@ -5211,9 +5230,8 @@ function frameLabelConfig(o) {
   }
 }
 function shotRectConfig(o) {
+  // fix: 相对坐标（同 frame/note——group 已定位）
   return {
-    x: o.x,
-    y: o.y,
     width: o.width,
     height: o.height,
     fill: 'rgba(20,184,166,0.08)',
@@ -5226,8 +5244,8 @@ function shotSeqConfig(o) {
   if (!lodTextVisible(viewport.value.scale)) return { visible: false, listening: false }
   return {
     text: `#${o.seq || 1}`,
-    x: o.x + 8,
-    y: o.y + 6,
+    x: 8,
+    y: 6,
     fontSize: 12,
     fontStyle: 'bold',
     fill: '#2dd4bf',
@@ -5238,8 +5256,8 @@ function shotTextConfig(o) {
   if (!lodTextVisible(viewport.value.scale)) return { visible: false, listening: false }
   return {
     text: o.text || '',
-    x: o.x + 8,
-    y: o.y + 24,
+    x: 8,
+    y: 24,
     width: o.width - 16,
     height: o.height - 32,
     fontSize: 11,
