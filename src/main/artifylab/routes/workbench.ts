@@ -28,6 +28,8 @@ import { createErrorResponse, createSuccessResponse } from '../utils/errorHandle
 import { templateLibrary } from '../workbench/templates'
 import { workbenchService } from '../workbench/service'
 import { buildSessionBundle } from '../workbench/sessionBundle'
+import { scanOutputDir } from '../gallery/scanner'
+import { restoreBundleFiles } from '../workbench/importRestore'
 import { validateNodeOverridesLocal } from '../workbench/plan'
 import type { ComfyPrompt } from '../appStore'
 import { readFileSync } from 'fs'
@@ -216,44 +218,20 @@ export function createWorkbenchRouter(): express.Router {
       let filesSkipped = 0
       if (outputDir) {
         const { mkdirSync, writeFileSync: wf } = await import('fs')
-        const { join, resolve: rs, sep: sSep } = await import('path')
-        for (const [name, data] of entries) {
-          if (!name.startsWith('outputs/')) continue
-          const mf = manifest.files?.find?.((f) => f.path === name) ?? null
-          const subfolder = mf?.subfolder
-            ? `wb-import-${r.session.id.slice(0, 8)}/${mf.subfolder}`
-            : `wb-import-${r.session.id.slice(0, 8)}`
-          const base = mf?.filename || name.split('/').pop() || 'file'
-          const segs = `${subfolder}/${base}`.split('/').filter(Boolean)
-          if (segs.includes('..')) {
-            filesSkipped++
-            continue
-          }
-          const full = rs(outputDir, ...segs)
-          if (full !== outputDir && !full.startsWith(outputDir + sSep)) {
-            filesSkipped++
-            continue
-          }
-          try {
-            mkdirSync(join(full, '..'), { recursive: true })
-            wf(full, data)
-            // 回填会话引用：executions.outputs / messages.outputFiles 指向新位置
-            const target = { filename: base, subfolder, type: 'output' }
-            for (const ex of r.session.executions ?? []) {
-              ex.outputs = ex.outputs.map((o) =>
-                typeof o === 'string'
-                  ? o
-                  : o.filename === mf?.filename && o.subfolder === mf?.subfolder
-                    ? target
-                    : o
-              )
-            }
-            filesRestored++
-          } catch {
-            filesSkipped++
-          }
+        const rr = restoreBundleFiles(
+          r.session,
+          outputDir,
+          manifest.files ?? [],
+          entries,
+          (full, data) => wf(full, data),
+          (dir) => mkdirSync(dir, { recursive: true })
+        )
+        filesRestored = rr.restored.length
+        filesSkipped = rr.skipped
+        if (filesRestored > 0) {
+          workbenchService.touchSession(r.session.id)
+          void scanOutputDir().catch((e) => logger.warn('gallery scan after import failed', e))
         }
-        if (filesRestored > 0) workbenchService.touchSession(r.session.id)
       }
       res
         .status(HTTP_STATUS.CREATED)
