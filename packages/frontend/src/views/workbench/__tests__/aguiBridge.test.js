@@ -393,6 +393,12 @@ describe('aguiBridge — 停止与错误收尾', () => {
   })
 })
 
+async function bridge_load(api, tid) {
+  const { createAguiBridge } = await import('../aguiBridge')
+  const b = createAguiBridge(api)
+  return b.loadHistoryIntoPage(tid)
+}
+
 describe('aguiBridge — 历史回放与实时序列同构', () => {
   it('records → replayToMessages → 同一映射层，输出与实时 emit 序列逐条一致', async () => {
     const { createAguiBridge } = await import('../aguiBridge')
@@ -462,6 +468,59 @@ describe('aguiBridge — 历史回放与实时序列同构', () => {
         : null,
     }))
     expect(hist).toEqual(live)
+    vi.unstubAllGlobals()
+    void spy
+  })
+
+  it('竞态守卫：分页拉取期间切换会话（getThreadId 变了）→ 旧会话回放整体弃，messages 不被覆盖', async () => {
+    const { createAguiBridge } = await import('../aguiBridge')
+    const api = makePageApi()
+    // 页面已有新会话的消息（模拟先完成的那次切换）
+    api.pushMsg({ role: 'user', kind: 'chat', text: 'new session msg', createdAt: 1 })
+    let currentThread = 'th-old'
+    api.getThreadId = () => currentThread
+    const records = [
+      { runId: 'r-1', seq: 1, eventType: 'TEXT_MESSAGE_START', content: JSON.stringify({ type: 'TEXT_MESSAGE_START', messageId: 'm1', role: 'assistant' }) },
+      { runId: 'r-1', seq: 2, eventType: 'TEXT_MESSAGE_CONTENT', content: JSON.stringify({ type: 'TEXT_MESSAGE_CONTENT', messageId: 'm1', delta: '旧会话内容' }) },
+      { runId: 'r-1', seq: 3, eventType: 'TEXT_MESSAGE_END', content: JSON.stringify({ type: 'TEXT_MESSAGE_END', messageId: 'm1' }) },
+      { runId: 'r-1', seq: 4, eventType: 'RUN_FINISHED', content: JSON.stringify({ type: 'RUN_FINISHED' }) },
+    ]
+    let calls = 0
+    const spy = vi.stubGlobal(
+      'fetch',
+      vi.fn(() => {
+        calls++
+        // 首页返回途中用户切走：getThreadId 变成 th-new
+        currentThread = 'th-new'
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { records } }) })
+      }),
+    )
+    await bridge_load(api, 'th-old')
+    // 守卫生效：旧回放整体弃，页面仍只有新会话消息
+    expect(api.messages.value.map((m) => m.text)).toEqual(['new session msg'])
+    expect(calls).toBe(1)
+    vi.unstubAllGlobals()
+    void spy
+  })
+
+  it('竞态守卫：fetch 全部返回后才切走（终检路径）→ 同样弃', async () => {
+    const { createAguiBridge } = await import('../aguiBridge')
+    const api = makePageApi()
+    api.pushMsg({ role: 'user', kind: 'chat', text: 'kept', createdAt: 1 })
+    let currentThread = 'th-old'
+    api.getThreadId = () => currentThread
+    const records = [
+      { runId: 'r-1', seq: 1, eventType: 'RUN_STARTED', content: JSON.stringify({ type: 'RUN_STARTED' }) },
+    ]
+    const spy = vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { records } }) })),
+    )
+    // 在 json() resolve 后、messages 清空前切走——通过微任务注入
+    const p = bridge_load(api, 'th-old')
+    queueMicrotask(() => { currentThread = 'th-new' })
+    await p
+    expect(api.messages.value.map((m) => m.text)).toEqual(['kept'])
     vi.unstubAllGlobals()
     void spy
   })

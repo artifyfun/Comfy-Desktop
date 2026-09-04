@@ -1398,6 +1398,8 @@ async function selectSession(s) {
   const res = await fetch(`${origin.value}/api/workbench/session/${s.id}`)
   const json = await res.json()
   if (!res.ok || !json?.success) return
+  // 竞态守卫：await 期间又切了会话 → 本次结果弃（旧 session 数据覆盖新会话）
+  if (sessionId.value !== s.id) return
   const session = json.data
   curSession.value = session
   // 服务端消息补稳定 key（存储序下标作 key 种子，切会话重载时保持稳定）
@@ -1405,6 +1407,8 @@ async function selectSession(s) {
   // AG-UI 回放：该会话有管线记录则回放覆盖（session.messages 清空），记录为
   // 空/回放失败时静默降级到 session.messages 历史展示
   await aguiBridge.loadHistoryIntoPage(sessionId.value)
+  // 回放后又切走 → 后续 turnSeq/artifacts 写入全是旧会话的，弃
+  if (sessionId.value !== s.id) return
   // 回合序号对齐历史最大 turnId：新回合编号继续递增，避免与旧消息误合并
   turnSeq = messages.value.reduce((mx, m) => Math.max(mx, m.turnId ?? 0), 0)
   artifacts.value = [...(session.executions ?? [])].reverse().map((e) => ({

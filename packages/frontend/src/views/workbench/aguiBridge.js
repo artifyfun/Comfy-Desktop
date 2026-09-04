@@ -575,6 +575,9 @@ export function createAguiBridge(pageApi) {
     try {
       const pageSize = 500
       for (let offset = 0; offset < 20; offset++) {
+        // 竞态守卫：分页拉取期间用户再切会话（getThreadId 变了）即弃——
+        // 旧会话回放覆盖新会话消息是真实竞态（20 页 await 窗口不短）
+        if (typeof pageApi.getThreadId === 'function' && pageApi.getThreadId() !== threadId) return
         const res = await fetch(`${pageApi.origin.value}/api/workbench/agent/threads/messages`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -589,6 +592,8 @@ export function createAguiBridge(pageApi) {
       return
     }
     if (!Array.isArray(records) || records.length === 0) return
+    // 终检：全部页返回后、清空 messages 前再校验（最后一页到清空间仍可能切走）
+    if (typeof pageApi.getThreadId === 'function' && pageApi.getThreadId() !== threadId) return
     const state = freshRunState()
     // 审查修复 m5:回放态不写入 lastState(那是运行态,stopAgentRun 的
     // dismissProgress 消费对象)——回放期间在途 run 的收尾不受回放干扰
