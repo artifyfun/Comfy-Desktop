@@ -207,3 +207,128 @@ export async function modelKnowledgeDetail(
   }
   return detail
 }
+
+/* ------------------------------------------------------------------ */
+/* civitai 在线搜索（wb_query_models action=civitai）                   */
+/* ------------------------------------------------------------------ */
+
+export interface CivitaiSearchItem {
+  model_id: number
+  model_name: string
+  type: string
+  creator?: string
+  base_models: string[]
+  downloads?: number
+  thumbs_up?: number
+  nsfw_level?: number
+  version_id: number
+  version_name?: string
+  trigger_words: string[]
+  page_url: string
+}
+
+export interface CivitaiSearchResult {
+  ok: boolean
+  source: string
+  query?: string
+  total: number
+  items: CivitaiSearchItem[]
+  error?: string
+}
+
+interface CivitaiModelResp {
+  id: number
+  name?: string
+  type?: string
+  nsfwLevel?: number
+  creator?: { username?: string }
+  stats?: { downloadCount?: number; thumbsUpCount?: number }
+  modelVersions?: Array<{
+    id: number
+    name?: string
+    baseModel?: string
+    trainedWords?: string[]
+  }>
+}
+
+/** 搜索结果缓存：key=完整查询串，60s TTL，防同轮多 agent 重复打 API */
+const civitaiSearchCache = new Map<string, { at: number; data: CivitaiSearchResult }>()
+const CIVITAI_CACHE_TTL = 60_000
+
+/** civitai API key（复用 LoRA Manager settings 的 civitai_api_key，60s 缓存同源） */
+export function getCivitaiApiKey(): string {
+  return lmSettings().apiKey
+}
+
+/** civitai 在线搜索：REST /api/v1/models（query+types 官方检索，2026-09 实测可用）。 */
+export async function searchCivitaiModels(opts: {
+  query: string
+  type?: string
+  baseModels?: string[]
+  sort?: string
+  nsfw?: boolean
+  limit?: number
+  page?: number
+}): Promise<CivitaiSearchResult> {
+  const { apiKey, host } = lmSettings()
+  const params = new URLSearchParams()
+  params.set('query', opts.query)
+  if (opts.type) params.set('types', opts.type)
+  for (const bm of opts.baseModels ?? []) params.append('baseModels', bm)
+  if (opts.sort) params.set('sort', opts.sort)
+  // nsfw 分级过滤：X=全量（需 API key）；缺省走 API 默认（SFW）
+  if (opts.nsfw !== false) params.set('nsfw', 'X')
+  params.set('limit', String(Math.max(1, Math.min(opts.limit ?? 10, 20))))
+  if (opts.page && opts.page > 1) params.set('page', String(opts.page))
+  const url = `https://${host}/api/v1/models?${params.toString()}`
+
+  const cached = civitaiSearchCache.get(url)
+  if (cached && Date.now() - cached.at < CIVITAI_CACHE_TTL) return cached.data
+
+  try {
+    const headers: Record<string, string> = {}
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(12000) })
+    if (!res.ok) throw new Error(`civitai API ${res.status}`)
+    const json = (await res.json()) as {
+      items?: CivitaiModelResp[]
+      metadata?: { totalItems?: number }
+    }
+    const items: CivitaiSearchItem[] = (json.items ?? []).map((m) => {
+      const v = m.modelVersions?.[0]
+      return {
+        model_id: m.id,
+        model_name: m.name ?? '',
+        type: m.type ?? '',
+        creator: m.creator?.username,
+        base_models: v?.baseModel ? [v.baseModel] : [],
+        downloads: m.stats?.downloadCount,
+        thumbs_up: m.stats?.thumbsUpCount,
+        nsfw_level: m.nsfwLevel,
+        version_id: v?.id ?? 0,
+        version_name: v?.name,
+        trigger_words: v?.trainedWords ?? [],
+        page_url: `https://${host}/models/${m.id}`
+      }
+    })
+    const data: CivitaiSearchResult = {
+      ok: true,
+      source: host,
+      query: opts.query,
+      total: json.metadata?.totalItems ?? items.length,
+      items
+    }
+    if (civitaiSearchCache.size > 40) civitaiSearchCache.clear()
+    civitaiSearchCache.set(url, { at: Date.now(), data })
+    return data
+  } catch (e) {
+    return {
+      ok: false,
+      source: host,
+      query: opts.query,
+      total: 0,
+      items: [],
+      error: e instanceof Error ? e.message : String(e)
+    }
+  }
+}

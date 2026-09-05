@@ -45,6 +45,63 @@ import {
 import { renderEnvSnapshot, SELF_KNOWLEDGE_TEXT, type WorkbenchEnvSnapshot } from './selfKnowledge'
 import { defaultSkillLibrary, type SkillInfo } from './skillStore'
 import { extractDocText, isDocumentAttachment, renderDocContext } from './docContext'
+import { spawn, spawnSync } from 'node:child_process'
+import { getCivitaiApiKey } from './modelKnowledge'
+
+/* ------------------------------------------------------------------ */
+/* civitai MCP（civitai-mcp-ultimate，uvx 托管）                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * uvx 可用性探测（进程内缓存一次）。uvx 缺失/超时 → config.toml 不写该段
+ * （降级：wb_query_models action=civitai 走主进程 fetch，仍可在线搜索）。
+ */
+let uvxCached: boolean | null = null
+function uvxAvailable(): boolean {
+  if (uvxCached !== null) return uvxCached
+  try {
+    const r = spawnSync('uvx', ['--version'], { timeout: 5000, encoding: 'utf8' })
+    uvxCached = r.status === 0
+  } catch {
+    uvxCached = false
+  }
+  if (!uvxCached) logger.info('workbench: uvx 不可用，civitai MCP 跳过挂载')
+  return uvxCached
+}
+
+let civitaiMcpPreWarmed = false
+/** fire-and-forget 预热 uvx 包缓存：首次运行要拉 PyPI 包（秒级下载），
+ * 不预热则 codex 起 MCP 握手可能超时。失败静默——后续会话创建会重试。 */
+function preWarmCivitaiMcp(): void {
+  if (civitaiMcpPreWarmed || !uvxAvailable()) return
+  civitaiMcpPreWarmed = true
+  try {
+    const child = spawn('uvx', ['civitai-mcp-ultimate', '--help'], {
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env }
+    })
+    child.on('error', () => {
+      civitaiMcpPreWarmed = false
+    })
+    child.unref()
+  } catch {
+    civitaiMcpPreWarmed = false
+  }
+}
+
+function civitaiMcpTomlLines(): string[] {
+  // key 复用 LoRA Manager settings（civitai_api_key）：无 key 也能搜（NSFW 受限）
+  const envPairs = [`"CIVITAI_API_KEY" = ${JSON.stringify(getCivitaiApiKey())}`]
+  const proxy = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY
+  if (proxy) envPairs.push(`"HTTPS_PROXY" = ${JSON.stringify(proxy)}`)
+  return [
+    `[mcp_servers.civitai]`,
+    `command = "uvx"`,
+    `args = ["civitai-mcp-ultimate"]`,
+    `env = { ${envPairs.join(', ')} }`
+  ]
+}
 
 /** 画布当前状态快照（/api/canvas/state 的 digest 投影，供 spec 注入） */
 interface CanvasStateSnapshot {
@@ -493,6 +550,12 @@ class WorkbenchService {
           // wb_* 全部经 validatePlanLocal 白名单校验、上下文绑会话，安全面可控。
           `default_tools_approval_mode = "approve"`,
           ``,
+          // civitai MCP：uvx 可用时挂载 civitai-mcp-ultimate（在线搜 LoRA/
+          // checkpoint、触发词、示例图生成参数、NSFW 分级；只读工具）。
+          // 不可用时整段省略——wb_query_models action=civitai（主进程
+          // fetch，零依赖）兜底，两条通路不互斥。
+          ...(uvxAvailable() ? civitaiMcpTomlLines() : []),
+          ``,
           // workspace-write 沙箱默认禁网 —— MCP(streamable HTTP) 属 executor 侧
           // 网络，不放行则每次工具调用被 sandbox network proxy 拦截（探针实测
           // "MCP tool call failed"，模型只能放弃编排）。仅放行回环 MCP 端点。
@@ -501,6 +564,7 @@ class WorkbenchService {
           ``
         ].join('\n')
       )
+      preWarmCivitaiMcp()
     }
     // 渐进式加载（skill 机制）：codex 0.149.x 原生扫描 $CODEX_HOME/skills/
     // 下每个 <name>/SKILL.md（frontmatter name/description），把「name+description

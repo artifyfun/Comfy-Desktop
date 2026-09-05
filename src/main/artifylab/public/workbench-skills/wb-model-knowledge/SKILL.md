@@ -1,18 +1,27 @@
 ---
 name: wb-model-knowledge
-description: 本机模型知识查询规范——用 wb_query_models 获取 lora/checkpoint 的 civitai 触发词、用法提示与官方示例提示词，用于模型选型决策与提示词撰写。当用户提到某个 lora/模型、需求涉及风格化生成但不知该用哪个模型、或需要为选中的 lora 写触发词提示词时使用。
+description: 模型知识查询与 civitai 在线搜索——用 wb_query_models 获取 lora/checkpoint 的 civitai 触发词、用法提示、官方示例提示词，或在线搜索 civitai 模型（触发词/热度/基模兼容性）。当用户提到某个 lora/模型、需求涉及风格化生成但不知该用哪个模型、要找本机没有的模型、或需要为选中的 lora 写触发词提示词时使用。
 ---
 
-# 本机模型知识查询（wb_query_models）
+# 模型知识查询与 civitai 搜索（wb_query_models）
 
-数据源是本机 LoRA Manager（ComfyUI-Lora-Manager 插件）同步的 civitai 元数据。
-LoRA Manager 未运行时该工具不可用——此时按环境快照的模型文件名保守决策并告知用户。
+三个 action，数据源不同：
+
+- `search` / `detail`：本机清单（LoRA Manager 同步的 civitai 元数据）。LoRA Manager 未运行时不可用
+- `civitai`：civitai 在线搜索（走官方 API，需网络；无 key 时 NSFW 结果受限）——本机没有的模型用它找
 
 ## 何时查
 
 1. 用户点名某个 lora/模型 → `action=detail` 拿触发词与示例
-2. 需求涉及风格化（电影感/动漫风/特定画风）但用户没说用哪个模型 → `action=search` 按风格关键词搜（匹配文件名/模型名/触发词/标签），从清单里挑
-3. 要为选中模型写提示词 → **先看 trigger_words**，把它放进正向提示词（Anima 标签式提示词里触发词放最前）
+2. 需求涉及风格化但用户没说用哪个模型 → 先 `action=search` 搜本机清单；本机没有 → `action=civitai` 在线找（候选给用户挑，不要擅自下载）
+3. 要为选中模型写提示词 → **先看 trigger_words**，放进正向提示词（Anima 标签式提示词里触发词放最前）
+
+## civitai 在线搜索要点
+
+- **务必带 `base_model` 过滤**（如模板是 Illustrious 就传 `"Illustrious,NoobAI"`）——Flux 的 lora 装不进 SDXL checkpoint，基模不兼容的候选没有意义
+- 返回字段：`trigger_words`（训练触发词）、`version_id`、`downloads/thumbs_up`（热度参考）、`page_url`（给用户看的页面链接）
+- 用户选中候选后：模型需下载安装才能用——告知用户去 page_url 下载（或装进 LoRA Manager），不要假装本机已有
+- 优先 `sort=Most Downloaded`；`nsfw` 默认 true，用户要求健康内容时传 false
 
 ## 怎么用返回值
 
@@ -34,3 +43,4 @@ LoRA Manager 未运行时该工具不可用——此时按环境快照的模型�
 
 - `example_prompts` 是 civitai 官方示例，仅作风格与结构参考，不要原样照抄长 prompt
 - 查询结果较大，search 先拿清单挑定目标，再 detail 看详情，不要批量 detail
+- civitai 在线搜索每轮最多 1-2 次（有 60s 缓存，同词重搜无意义）
