@@ -177,6 +177,7 @@
             @delete="onDelete"
             @update:show-archived="(v) => (showArchived = v)"
             @manage-presets="presetMgrOpen = true"
+            @manage-skills="skillMgrOpen = true"
             @show-env="showEnvDialog"
           />
         </div>
@@ -1380,7 +1381,12 @@ onMounted(async () => {
   if (sid && sessions.value.some((s) => s.id === sid)) {
     await selectSession({ id: sid })
   } else {
-    await createSession({ presetId: defaultPresetId.value })
+    // 首次自动建会话失败不打断初始化：无会话时预设 chip 会引导用所选预设开会话
+    try {
+      await createSession({ presetId: defaultPresetId.value })
+    } catch (e) {
+      console.error('[workbench] auto create session failed', e)
+    }
   }
   document.addEventListener('keydown', onGlobalKey)
 })
@@ -3271,7 +3277,14 @@ function presetIcon(p) {
 
 // 预设点击切换（dsh 模式）：会话级 presetId 立即生效
 async function onPresetMenu({ key }) {
-  if (!sessionId.value || sessionId.value === key) return
+  // 无会话（首次进入自动建会话未完成的兜底）：点击预设 = 用它开会话，
+  // 避免会话头预设 chip 成为死区
+  if (!sessionId.value) {
+    await createSession({ presetId: key })
+    return
+  }
+  // 已选中同一预设则不重复写回
+  if (currentSession.value?.presetId === key) return
   await fetch(`${origin.value}/api/workbench/sessions/update`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
