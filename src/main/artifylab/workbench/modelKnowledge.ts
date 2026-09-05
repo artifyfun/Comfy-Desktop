@@ -251,9 +251,12 @@ interface CivitaiModelResp {
   }>
 }
 
-/** 搜索结果缓存：key=完整查询串，60s TTL，防同轮多 agent 重复打 API */
+/** 搜索结果缓存：key=完整查询串，60s TTL + LRU 淘汰（上限 40），防同轮多 agent 重复打 API */
 const civitaiSearchCache = new Map<string, { at: number; data: CivitaiSearchResult }>()
 const CIVITAI_CACHE_TTL = 60_000
+const CIVITAI_CACHE_MAX = 40
+/** in-flight 去重：并发同 URL 查询只打一次 API（Promise 共享） */
+const civitaiSearchInFlight = new Map<string, Promise<CivitaiSearchResult>>()
 
 /** civitai API key（复用 LoRA Manager settings 的 civitai_api_key，60s 缓存同源） */
 export function getCivitaiApiKey(): string {
@@ -283,52 +286,72 @@ export async function searchCivitaiModels(opts: {
   const url = `https://${host}/api/v1/models?${params.toString()}`
 
   const cached = civitaiSearchCache.get(url)
-  if (cached && Date.now() - cached.at < CIVITAI_CACHE_TTL) return cached.data
+  if (cached) {
+    if (Date.now() - cached.at < CIVITAI_CACHE_TTL) {
+      // LRU 触碰：重插保持「最近使用在尾」
+      civitaiSearchCache.delete(url)
+      civitaiSearchCache.set(url, cached)
+      return cached.data
+    }
+    civitaiSearchCache.delete(url)
+  }
+  // in-flight 去重：并发同 URL 只发一次请求
+  const pending = civitaiSearchInFlight.get(url)
+  if (pending) return pending
+  const req = doSearch().finally(() => civitaiSearchInFlight.delete(url))
+  civitaiSearchInFlight.set(url, req)
+  return req
 
-  try {
-    const headers: Record<string, string> = {}
-    if (apiKey) headers.Authorization = `Bearer ${apiKey}`
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(12000) })
-    if (!res.ok) throw new Error(`civitai API ${res.status}`)
-    const json = (await res.json()) as {
-      items?: CivitaiModelResp[]
-      metadata?: { totalItems?: number }
-    }
-    const items: CivitaiSearchItem[] = (json.items ?? []).map((m) => {
-      const v = m.modelVersions?.[0]
-      return {
-        model_id: m.id,
-        model_name: m.name ?? '',
-        type: m.type ?? '',
-        creator: m.creator?.username,
-        base_models: v?.baseModel ? [v.baseModel] : [],
-        downloads: m.stats?.downloadCount,
-        thumbs_up: m.stats?.thumbsUpCount,
-        nsfw_level: m.nsfwLevel,
-        version_id: v?.id ?? 0,
-        version_name: v?.name,
-        trigger_words: v?.trainedWords ?? [],
-        page_url: `https://${host}/models/${m.id}`
+  async function doSearch(): Promise<CivitaiSearchResult> {
+    try {
+      const headers: Record<string, string> = {}
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(12000) })
+      if (!res.ok) throw new Error(`civitai API ${res.status}`)
+      const json = (await res.json()) as {
+        items?: CivitaiModelResp[]
+        metadata?: { totalItems?: number }
       }
-    })
-    const data: CivitaiSearchResult = {
-      ok: true,
-      source: host,
-      query: opts.query,
-      total: json.metadata?.totalItems ?? items.length,
-      items
-    }
-    if (civitaiSearchCache.size > 40) civitaiSearchCache.clear()
-    civitaiSearchCache.set(url, { at: Date.now(), data })
-    return data
-  } catch (e) {
-    return {
-      ok: false,
-      source: host,
-      query: opts.query,
-      total: 0,
-      items: [],
-      error: e instanceof Error ? e.message : String(e)
+      const items: CivitaiSearchItem[] = (json.items ?? []).map((m) => {
+        const v = m.modelVersions?.[0]
+        return {
+          model_id: m.id,
+          model_name: m.name ?? '',
+          type: m.type ?? '',
+          creator: m.creator?.username,
+          base_models: v?.baseModel ? [v.baseModel] : [],
+          downloads: m.stats?.downloadCount,
+          thumbs_up: m.stats?.thumbsUpCount,
+          nsfw_level: m.nsfwLevel,
+          version_id: v?.id ?? 0,
+          version_name: v?.name,
+          trigger_words: v?.trainedWords ?? [],
+          page_url: `https://${host}/models/${m.id}`
+        }
+      })
+      const data: CivitaiSearchResult = {
+        ok: true,
+        source: host,
+        query: opts.query,
+        total: json.metadata?.totalItems ?? items.length,
+        items
+      }
+      // LRU 淘汰：超限只删最旧一条（Map 插入序首元素），不清全表
+      if (civitaiSearchCache.size >= CIVITAI_CACHE_MAX) {
+        const oldest = civitaiSearchCache.keys().next().value
+        if (oldest !== undefined) civitaiSearchCache.delete(oldest)
+      }
+      civitaiSearchCache.set(url, { at: Date.now(), data })
+      return data
+    } catch (e) {
+      return {
+        ok: false,
+        source: host,
+        query: opts.query,
+        total: 0,
+        items: [],
+        error: e instanceof Error ? e.message : String(e)
+      }
     }
   }
 }

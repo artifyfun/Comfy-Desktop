@@ -261,10 +261,24 @@ export function createWorkbenchRouter(): express.Router {
   })
 
   router.post('/api/workbench/sessions/create', (req, res) => {
-    const { title, presetId } = (req.body as { title?: string; presetId?: string }) ?? {}
-    res
-      .status(HTTP_STATUS.CREATED)
-      .json(createSuccessResponse(workbenchService.createSession({ title, presetId })))
+    const { title, presetId, entry } =
+      (req.body as {
+        title?: string
+        presetId?: string
+        entry?: string
+      }) ?? {}
+    res.status(HTTP_STATUS.CREATED).json(
+      createSuccessResponse(
+        workbenchService.createSession({
+          title: typeof title === 'string' ? title.slice(0, 120) : undefined,
+          presetId,
+          entry:
+            entry === 'workbench' || entry === 'comfy-sidebar' || entry === 'a-canvas'
+              ? entry
+              : undefined
+        })
+      )
+    )
   })
 
   router.post('/api/workbench/sessions/update', (req, res) => {
@@ -482,9 +496,9 @@ export function createWorkbenchRouter(): express.Router {
   })
 
   router.post('/api/workbench/skills/update', (req, res) => {
-    const { name, ...patch } = req.body as {
+    const { name } = req.body as {
       name?: string
-      name_?: never
+      newName?: string
       description?: string
       body?: string
     }
@@ -492,13 +506,12 @@ export function createWorkbenchRouter(): express.Router {
       res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('name required'))
       return
     }
+    const body = req.body as { newName?: string; description?: string; body?: string }
     const r = defaultSkillLibrary().update(name, {
-      name:
-        (patch as { name?: string }).name === name
-          ? undefined
-          : (req.body as { newName?: string }).newName,
-      description: (req.body as { description?: string }).description,
-      body: (req.body as { body?: string }).body
+      // 改名走 newName 字段（body.name 是定位键，不是新名字）
+      name: body.newName,
+      description: body.description,
+      body: body.body
     })
     if (!r.ok) {
       res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse(r.error ?? 'update failed'))

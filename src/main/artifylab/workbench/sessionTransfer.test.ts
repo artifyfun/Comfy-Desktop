@@ -192,4 +192,13 @@ describe('importSession', () => {
   it('非法输入 → not_session_file，不落库', () => {
     expect(importSession({ nonsense: true }, new Set()).error).toBe('not_session_file')
   })
+
+  it('导入剥离 entry：入口随宿主而非文件走（防跨机导入后 spec 谎报界面）', () => {
+    const src = buildSession()
+    ;(src as unknown as { entry: string }).entry = 'a-canvas'
+    const file = exportSession(src)
+    const r = importSession(file, new Set())
+    expect(r.ok).toBe(true)
+    expect(r.session?.entry).toBeUndefined()
+  })
 })

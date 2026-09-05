@@ -117,6 +117,11 @@ export function clonePreset(
     id,
     name: { zh: nameZh || src.name.zh, en: nameZh || src.name.en },
     description: { ...src.description },
+    // 数组/对象字段必须深拷贝：浅拷贝会让副本与 BUILTIN_PRESETS 共享引用，
+    // 副本上改 skillIds/templateIds/defaultParams 会污染内置预设
+    skillIds: [...(src.skillIds ?? [])],
+    templateIds: [...(src.templateIds ?? [])],
+    defaultParams: { ...(src.defaultParams ?? {}) },
     builtin: false,
     // 自定义预设紧跟源预设之后（dsh order 语义）
     order: (src.order ?? 100) + 0.5

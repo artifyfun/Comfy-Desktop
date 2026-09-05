@@ -7,7 +7,16 @@ import { describe, expect, it, vi } from 'vitest'
  * electron 被 mock（模块顶层 import app，测试直接构造 SkillLibrary 实例），
  * fs 走真实实现（tmpdir 内操作）——零 flaky、无网络。
  */
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  rmSync,
+  existsSync,
+  statSync,
+  utimesSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { zipSync, strToU8 } from 'fflate'
@@ -248,6 +257,102 @@ describe('SkillLibrary 导入', () => {
       })
       const r2 = lib.importFromZip(Buffer.from(z2), 'github', 'skip')
       expect(r2.imported).toEqual(['shell-skill'])
+    } finally {
+      cleanup()
+    }
+  })
+})
+
+describe('SkillLibrary.deployTo 残留清理与增量跳过', () => {
+  it('源集合外的残留目录被删除（禁用/改名/删除不遗留旧副本）', () => {
+    const { lib, root, userRoot, cleanup } = makeLib()
+    try {
+      mkdirSync(join(userRoot, 'tmp-skill'), { recursive: true })
+      writeFileSync(join(userRoot, 'tmp-skill', 'SKILL.md'), SKILL('tmp-skill'))
+      const codexHome = join(root, 'codex-home')
+      lib.deployTo(codexHome)
+      expect(existsSync(join(codexHome, 'skills', 'tmp-skill'))).toBe(true)
+      // 手放的陌生目录也要清
+      mkdirSync(join(codexHome, 'skills', 'stray-skill'), { recursive: true })
+      // 禁用后再部署 → dest 残留被清
+      lib.setEnabled('tmp-skill', false)
+      lib.deployTo(codexHome)
+      expect(existsSync(join(codexHome, 'skills', 'tmp-skill'))).toBe(false)
+      expect(existsSync(join(codexHome, 'skills', 'stray-skill'))).toBe(false)
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('增量跳过：src 未变不重拷（dest mtime 不动），src 变更后重拷生效', () => {
+    const { lib, root, userRoot, cleanup } = makeLib()
+    try {
+      mkdirSync(join(userRoot, 'inc-skill'), { recursive: true })
+      writeFileSync(join(userRoot, 'inc-skill', 'SKILL.md'), SKILL('inc-skill'))
+      const codexHome = join(root, 'codex-home')
+      lib.deployTo(codexHome)
+      const destMd = join(codexHome, 'skills', 'inc-skill', 'SKILL.md')
+      const before = statSync(destMd).mtimeMs
+      lib.deployTo(codexHome)
+      expect(statSync(destMd).mtimeMs).toBe(before)
+      // src 变更（内容+强制 mtime 前移）→ 重拷
+      writeFileSync(join(userRoot, 'inc-skill', 'SKILL.md'), SKILL('inc-skill', 'Changed.'))
+      utimesSync(join(userRoot, 'inc-skill', 'SKILL.md'), new Date(), new Date(Date.now() + 5000))
+      lib.deployTo(codexHome)
+      expect(readFileSync(destMd, 'utf8')).toContain('Changed.')
+    } finally {
+      cleanup()
+    }
+  })
+})
+
+describe('SkillLibrary 导入防护', () => {
+  it('importFromZip：`../` 逃逸路径 → 整技能导入失败，不落任何逃逸文件', () => {
+    const { lib, userRoot, cleanup } = makeLib()
+    try {
+      const z = zipSync({
+        'evil-skill/SKILL.md': strToU8(SKILL('evil-skill')),
+        'evil-skill/../../escaped.txt': strToU8('pwn')
+      })
+      const r = lib.importFromZip(Buffer.from(z), 'github', 'skip')
+      expect(r.imported).toEqual([])
+      expect(r.failed).toHaveLength(1)
+      expect(r.failed[0]!.error).toContain('非法路径')
+      expect(existsSync(join(userRoot, '..', 'escaped.txt'))).toBe(false)
+      expect(existsSync(join(userRoot, '..', 'evil-skill'))).toBe(false)
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('importFromZip：单条目超 10MB → 显式报「超出限制」，不静默丢弃', () => {
+    const { lib, userRoot, cleanup } = makeLib()
+    try {
+      const big = new Uint8Array(10 * 1024 * 1024 + 1)
+      const z = zipSync({
+        'big-skill/SKILL.md': strToU8(SKILL('big-skill')),
+        'big-skill/data.bin': big
+      })
+      const r = lib.importFromZip(Buffer.from(z), 'github', 'skip')
+      expect(r.imported).toEqual([])
+      expect(r.failed[0]!.error).toContain('超出限制')
+      expect(existsSync(join(userRoot, 'big-skill'))).toBe(false)
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('importFromDir：源为用户技能库自身或其内部 → 拒绝（防无限递归拷贝）', () => {
+    const { lib, userRoot, cleanup } = makeLib()
+    try {
+      mkdirSync(join(userRoot, 'inner'), { recursive: true })
+      writeFileSync(join(userRoot, 'inner', 'SKILL.md'), SKILL('inner'))
+      const r1 = lib.importFromDir(userRoot, 'claude', 'skip')
+      expect(r1.failed).toHaveLength(1)
+      expect(r1.failed[0]!.error).toContain('源目录不能是用户技能库')
+      const r2 = lib.importFromDir(join(userRoot, 'inner'), 'claude', 'skip')
+      expect(r2.failed).toHaveLength(1)
+      expect(r2.failed[0]!.error).toContain('源目录不能是用户技能库')
     } finally {
       cleanup()
     }

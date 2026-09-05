@@ -126,6 +126,8 @@ export class SkillLibrary {
   private stateCache: Record<string, SkillState> | null = null
   /** 内置技能分类清单（builtinRoot/catalog.json），name → category id */
   private catalogCache: Record<string, string> | null = null
+  /** 部署签名缓存：destRoot:name → src SKILL.md「size:mtime」，增量跳过全量 cpSync */
+  private deploySignatures = new Map<string, string>()
 
   constructor(opts: SkillLibraryOptions) {
     this.opts = opts
@@ -428,19 +430,48 @@ export class SkillLibrary {
     const destRoot = join(codexHome, 'skills')
     mkdirSync(destRoot, { recursive: true })
     let count = 0
+    let copied = 0
+    const deployedNames = new Set<string>()
     for (const info of this.list()) {
       if (!info.valid || !info.enabled) continue
       const srcDir = this.dirOf(info.name, info.builtin)
       const dest = this.safeJoin(destRoot, info.name)
       if (!dest) continue
+      deployedNames.add(info.name)
       try {
+        // 增量跳过：src SKILL.md 的 size+mtime 未变且目标已部署 → 不再 cpSync。
+        // 所有变更路径（导入/更新/改名重写）都会触碰 SKILL.md，足以作为失效信号；
+        // 每轮 decide 的热刷新因此从 36 目录全量拷贝降为 36 次 stat。
+        const srcMd = join(srcDir, 'SKILL.md')
+        const sig = statSync(srcMd)
+        const sigKey = `${sig.size}:${Math.round(sig.mtimeMs)}`
+        if (
+          this.deploySignatures.get(`${destRoot}:${info.name}`) === sigKey &&
+          existsSync(join(dest, 'SKILL.md'))
+        ) {
+          count++
+          continue
+        }
         cpSync(srcDir, dest, { recursive: true })
+        this.deploySignatures.set(`${destRoot}:${info.name}`, sigKey)
         count++
+        copied++
       } catch (e) {
         logger.warn(`deploy skill ${info.name} failed`, e)
       }
     }
-    if (count > 0) logger.debug(`deployed ${count} skills to ${destRoot}`)
+    // 源集合外的残留全删：禁用/改名/删除后旧副本不再被 codex 扫描
+    try {
+      for (const entry of readdirSync(destRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory() || deployedNames.has(entry.name)) continue
+        if (!this.safeJoin(destRoot, entry.name)) continue
+        rmSync(join(destRoot, entry.name), { recursive: true, force: true })
+        this.deploySignatures.delete(`${destRoot}:${entry.name}`)
+      }
+    } catch (e) {
+      logger.warn('clean stale deployed skills failed', e)
+    }
+    if (copied > 0) logger.debug(`deployed ${count} skills (${copied} copied) to ${destRoot}`)
   }
 
   // ---------------- 本机 agent 目录扫描 ----------------
@@ -480,6 +511,14 @@ export class SkillLibrary {
    */
   importFromDir(srcDir: string, source: SkillSource, mode: ImportMode): ImportResult {
     const abs = resolve(srcDir)
+    // 自包含防护：源在用户技能库内部（含库自身/其祖先）时拒绝——
+    // cpSync 目标在源内部会无限递归，库内自拷也没有意义
+    const userRoot = resolve(this.userRoot())
+    if (abs === userRoot || userRoot.startsWith(abs + sep) || abs.startsWith(userRoot + sep)) {
+      const result: ImportResult = { imported: [], skipped: [], failed: [] }
+      result.failed.push({ name: basename(srcDir), error: '源目录不能是用户技能库自身或其内部' })
+      return result
+    }
     if (!existsSync(join(abs, 'SKILL.md'))) {
       // 父目录模式：逐子目录导入，结果聚合
       const result: ImportResult = { imported: [], skipped: [], failed: [] }
@@ -577,15 +616,32 @@ export class SkillLibrary {
    */
   importFromZip(buf: Buffer, source: SkillSource, mode: ImportMode): ImportResult {
     const result: ImportResult = { imported: [], skipped: [], failed: [] }
+    // 预检（fflate 解压每条目前先过 filter）：按中央目录声明的原大小累计，
+    // 超 50MB / 条目数超限即拒绝，不等全量解压进内存才发现
+    let preTotal = 0
+    let entryCount = 0
     let entries: Record<string, Uint8Array>
     try {
       entries = unzipSync(new Uint8Array(buf), {
-        filter: (f) => f.size <= MAX_ZIP_ENTRY_BYTES
+        filter: (f) => {
+          if (entryCount++ > 2000) return false
+          // fflate 的 f.size 是压缩后大小——必须用 originalSize（原大小）预检
+          preTotal += f.originalSize
+          return preTotal <= MAX_ZIP_TOTAL_BYTES && f.originalSize <= MAX_ZIP_ENTRY_BYTES
+        }
       })
     } catch (e) {
       result.failed.push({
         name: '(zip)',
         error: `解压失败: ${e instanceof Error ? e.message : String(e)}`
+      })
+      return result
+    }
+    // filter 拒掉的条目不会出现在 entries 里——条目数对不上即触发上限，显式报错
+    if (entryCount > Object.keys(entries).length) {
+      result.failed.push({
+        name: '(zip)',
+        error: 'zip 超出限制（总量 50MB / 单条目 10MB / 条目数 2000）'
       })
       return result
     }

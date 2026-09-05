@@ -45,7 +45,7 @@ import {
 import { renderEnvSnapshot, SELF_KNOWLEDGE_TEXT, type WorkbenchEnvSnapshot } from './selfKnowledge'
 import { defaultSkillLibrary, type SkillInfo } from './skillStore'
 import { extractDocText, isDocumentAttachment, renderDocContext } from './docContext'
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { getCivitaiApiKey } from './modelKnowledge'
 
 /* ------------------------------------------------------------------ */
@@ -53,25 +53,72 @@ import { getCivitaiApiKey } from './modelKnowledge'
 /* ------------------------------------------------------------------ */
 
 /**
- * uvx 可用性探测（进程内缓存一次）。uvx 缺失/超时 → config.toml 不写该段
+ * uvx 可用性探测（异步探测 + TTL 缓存）。uvx 缺失/超时 → config.toml 不写该段
  * （降级：wb_query_models action=civitai 走主进程 fetch，仍可在线搜索）。
+ * 设计红线：主进程不做 spawnSync 阻塞探测（首次会话创建卡主进程 5s 不可接受）——
+ * 启动时异步预热一次，同步读取只看缓存；缓存过期时后台刷新、先用旧值。
  */
-let uvxCached: boolean | null = null
-function uvxAvailable(): boolean {
-  if (uvxCached !== null) return uvxCached
+const UVX_TTL_MS = 10 * 60 * 1000
+let uvxCached: { value: boolean; at: number } | null = null
+let uvxProbing = false
+
+async function probeUvxAsync(): Promise<boolean> {
+  if (uvxProbing) return uvxCached?.value ?? false
+  uvxProbing = true
   try {
-    const r = spawnSync('uvx', ['--version'], { timeout: 5000, encoding: 'utf8' })
-    uvxCached = r.status === 0
-  } catch {
-    uvxCached = false
+    const value = await new Promise<boolean>((resolve) => {
+      let settled = false
+      const done = (v: boolean) => {
+        if (!settled) {
+          settled = true
+          resolve(v)
+        }
+      }
+      try {
+        const child = spawn('uvx', ['--version'], { stdio: 'ignore' })
+        const timer = setTimeout(() => {
+          try {
+            child.kill()
+          } catch {
+            /* ignore */
+          }
+          done(false)
+        }, 5000)
+        timer.unref?.()
+        child.on('error', () => {
+          clearTimeout(timer)
+          done(false)
+        })
+        child.on('exit', (code) => {
+          clearTimeout(timer)
+          done(code === 0)
+        })
+      } catch {
+        done(false)
+      }
+    })
+    uvxCached = { value, at: Date.now() }
+    if (!value) logger.info('workbench: uvx 不可用，civitai MCP 跳过挂载')
+    return value
+  } finally {
+    uvxProbing = false
   }
-  if (!uvxCached) logger.info('workbench: uvx 不可用，civitai MCP 跳过挂载')
-  return uvxCached
+}
+
+/** 启动预热：会话创建前缓存就绪，避免同步路径空转 */
+void probeUvxAsync().catch(() => {})
+
+function uvxAvailable(): boolean {
+  if (uvxCached && Date.now() - uvxCached.at < UVX_TTL_MS) return uvxCached.value
+  // 过期/未就绪：后台刷新，本次先用旧值（首次=按不可用降级，下个会话生效）
+  void probeUvxAsync().catch(() => {})
+  return uvxCached?.value ?? false
 }
 
 let civitaiMcpPreWarmed = false
 /** fire-and-forget 预热 uvx 包缓存：首次运行要拉 PyPI 包（秒级下载），
- * 不预热则 codex 起 MCP 握手可能超时。失败静默——后续会话创建会重试。 */
+ * 不预热则 codex 起 MCP 握手可能超时。spawn error 或异常退出都复位标记，
+ * 后续会话创建重试；成功退出（--help 帮助即退出）不复位。 */
 function preWarmCivitaiMcp(): void {
   if (civitaiMcpPreWarmed || !uvxAvailable()) return
   civitaiMcpPreWarmed = true
@@ -83,6 +130,10 @@ function preWarmCivitaiMcp(): void {
     })
     child.on('error', () => {
       civitaiMcpPreWarmed = false
+    })
+    // 非 0 退出（拉包失败/网络错误）也复位重试；0 = 预热成功
+    child.on('exit', (code) => {
+      if (code !== 0) civitaiMcpPreWarmed = false
     })
     child.unref()
   } catch {
@@ -276,6 +327,8 @@ export interface WorkbenchSession {
   turnSeq?: number
   /** 导入溯源：源会话 UUID（重复导入检测锚点；原生会话无此字段） */
   importedFrom?: string
+  /** 会话入口（创建时由前端标记）：workbench=独立工作台 / comfy-sidebar=C 界面侧栏 / a-canvas=无限画布 AI 侧栏 */
+  entry?: 'workbench' | 'comfy-sidebar' | 'a-canvas'
 }
 
 /**
@@ -396,6 +449,8 @@ interface AgentSession {
   reasoningEffort?: ReasoningEffort
   /** startThread 入参引用（exec 通道）：E1 强度变更直接改引用字段，下轮 run 生效 */
   threadOptions?: ThreadOptions
+  /** decide 流式执行中（reap 空闲回收必须跳过，防长轮中途销毁 tempHome/通道） */
+  inFlight?: boolean
 }
 
 /** agent session 空闲回收：超过该时长无活动即销毁（线程/代理/tempHome） */
@@ -741,6 +796,9 @@ class WorkbenchService {
     this.agentIdleTimer = setInterval(() => {
       const now = Date.now()
       for (const [id, agent] of this.agentSessions) {
+        // decide 流式执行中不回收：SSE 总超时（15min）可超过 AGENT_IDLE_MS，
+        // 此时 lastActiveAt 停留在轮起——不跳过会销毁活跃会话的 tempHome/通道
+        if (agent.inFlight) continue
         if (now - agent.lastActiveAt > AGENT_IDLE_MS) this.disposeAgentSession(id)
       }
       if (this.agentSessions.size === 0 && this.agentIdleTimer) {
@@ -849,7 +907,9 @@ class WorkbenchService {
     return this.store.sessions.find((s) => s.id === id) ?? null
   }
 
-  createSession(opts: { title?: string; presetId?: string } = {}): WorkbenchSession {
+  createSession(
+    opts: { title?: string; presetId?: string; entry?: WorkbenchSession['entry'] } = {}
+  ): WorkbenchSession {
     const session: WorkbenchSession = {
       id: randomUUID(),
       title: opts.title || '新会话',
@@ -859,7 +919,8 @@ class WorkbenchService {
       updatedAt: Date.now(),
       messages: [],
       executions: [],
-      presetId: opts.presetId
+      presetId: opts.presetId,
+      entry: opts.entry
     }
     this.store.sessions.unshift(session)
     this.flush()
@@ -1146,7 +1207,13 @@ class WorkbenchService {
       logger.debug('workbench env snapshot: comfy probe failed', e)
     }
 
-    return { appNames, modelsByType, vramGb, customNodes: customNodes.slice(0, 60) }
+    return {
+      appNames,
+      modelsByType,
+      vramGb,
+      customNodes: customNodes.slice(0, 60),
+      modelDirs: (getSetting('modelsDirs') as string[] | undefined) ?? []
+    }
   }
 
   private async buildDecisionSpec(
@@ -1330,7 +1397,20 @@ batch 字段格式与 wb_execute_template 的 batch_items/batch_shared_params �
   「画布当前状态」段的 appNodes 清单是可用节点台账（id/name/status/params）；指令经用户画布确认卡人审后执行。
 `
         : ''
-    return `${SELF_KNOWLEDGE_TEXT}${envSection}${canvasSection}
+    // P1 会话入口感知：agent 明确「我在哪个模式」——旧会话无 entry 时不注入，
+    // 由画布段标题兜底。画布操作可用性以「画布当前状态」段是否出现为准。
+    const entryLabel =
+      session.entry === 'a-canvas'
+        ? '无限画布 AI 侧栏'
+        : session.entry === 'comfy-sidebar'
+          ? 'ComfyUI 界面侧栏'
+          : session.entry === 'workbench'
+            ? '独立工作台'
+            : ''
+    const entrySection = entryLabel
+      ? `\n## 当前入口\n${entryLabel}。画布协同操作（规则 3.x）仅在后文出现「画布当前状态」段时可用；该段缺失时不要假装操作了画布——改用 wb_* 自组工作流执行，或提示用户切到 ComfyUI 界面/无限画布。\n`
+      : ''
+    return `${SELF_KNOWLEDGE_TEXT}${entrySection}${envSection}${canvasSection}
 根据用户需求从模板库选择模板并填参数，输出**只含一个 JSON 对象**（无 markdown 代码块、无解释文字）：
 {"intent":"image|video|audio|text|chat|memory|workflow|canvas-run|canvas-ops","templateId":"...","params":{...},"canvasOps":[{"type":"run_node","nodeId":"..."}],"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text/memory 时直接给用户的回复","memory":{"action":"remember|forget","key":"...","value":"remember 时必填"},"title":"仅首条消息时提供"}
 
@@ -1351,6 +1431,11 @@ batch 字段格式与 wb_execute_template 的 batch_items/batch_shared_params �
    - 组图骨架（API 格式）：文生图 = UNETLoader/CheckpointLoader → CLIPTextEncode
      (正向/负向) → KSampler → VAEDecode → SaveImage；图生图 = 前面加
      LoadImage → VAEEncode；放大/ControlNet/多模型按需追加；
+     负向提示词**按模型族区分**：FLUX / Krea2 系（Qwen3-VL 自然语言编码器）
+     无负向通道——负向 CLIPTextEncode 传空串或直接省略，写了也不生效；
+     Anima / SD 系（标签式编码器）必须写负向。模型族判定看加载器组合
+     （UNETLoader+CLIPLoader=分离系走各自规则；CheckpointLoader 按
+     「环境快照」模型清单里的家族名）。
    - 校验执行：wb_validate_workflow → wb_run_workflow(workflow, wait=true)；产物自动落会话；
    - 效果好可 wb_publish_workflow 固化供复用。
    自组才是「根据需求建工作流」，宁可多调几次工具，也别为了省事硬套不合适的固化模板。
@@ -1427,6 +1512,9 @@ ${userInput}`
     // E1:opts.reasoningEffort(路由层已枚举校验;非法值折叠为 undefined,auto 显式
     // 透传=撤销具名档位)随创建透传,exec 通道下轮即时生效。
     const agent = await this.getOrCreateAgentSession(sessionId, onProgress, opts.reasoningEffort)
+    // 技能热刷新：每轮重部署（内置全量+用户 enabled，36 目录 cpSync 开销可忽略）
+    // ——会话中途导入/启停的技能本轮即生效，不等新会话。
+    deployWorkbenchSkills(agent.tempHome)
     if (agent.turns >= MAX_AGENT_TURNS) {
       throw new Error(`本会话 agent 轮次已达上限（${MAX_AGENT_TURNS} 轮），请新建会话继续`)
     }
@@ -1440,6 +1528,8 @@ ${userInput}`
     })
     // codex exec 的 JSONL 原始行（string 形态）——parsePlanFromCodex 容错解析用
     const rawLines: string[] = []
+    // 流式窗口标记 inFlight：reap 空闲回收跳过本会话（finally 保证任何出口复位）
+    agent.inFlight = true
     try {
       if (agent.appServer) {
         // C16 appserver 通道:token 级 delta 经 thread_event 旁路 + stream_delta
@@ -1509,6 +1599,8 @@ ${userInput}`
         })
       }
       throw e
+    } finally {
+      agent.inFlight = false
     }
     const raw = rawLines.join('\n')
     // harness：会话保持（不关代理/不删 tempHome/不失效工具上下文）——

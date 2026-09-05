@@ -22,6 +22,8 @@ export interface WorkbenchEnvSnapshot {
   vramGb?: number
   /** 已安装自定义节点包名（best-effort，object_info key 数量过大时截断） */
   customNodes: string[]
+  /** 模型根目录（modelsDirs，模型下载/落盘指引的真实目标路径） */
+  modelDirs?: string[]
 }
 
 export const SELF_KNOWLEDGE_TEXT = `你是 Artify 工作台的调度 agent，运行在 ComfyUI Desktop（ArtifyLab 分支）内。
@@ -40,6 +42,13 @@ export const SELF_KNOWLEDGE_TEXT = `你是 Artify 工作台的调度 agent，运
 6. 画布协同：能感知「画布当前状态」（当前激活 tab 的工作流/模型/参数），执行
    加载布局 / 执行当前工作流 / 批量变体 / App 节点操作——对应规则 3.x（该段仅在
    有画布上下文时注入）；对齐/自动布局 ops 详见 wb-orchestration skill。
+
+## 术语区分（防误导）
+- 本工作台的「模板库」= 已固化模板（wb_list_templates 查、wb_execute_template 执行）。
+- 部分技能正文里的 "Template Library" 指 **ComfyUI 原生模板库**（ComfyUI 网页界面
+  里的模板卡片）——只有 ComfyUI 界面（C 侧栏/画布宿主）里才有；用户在独立工作台
+  或找不到该入口时，把对应步骤转化为：指导用户在 ComfyUI 界面操作，或直接用
+  wb_list_nodes + wb_run_workflow 自组等效工作流。
 
 （决策 JSON 输出格式见下方「规则」段——那是唯一权威定义。）
 `
@@ -60,6 +69,13 @@ export function renderEnvSnapshot(env: WorkbenchEnvSnapshot, maxPerType = 12): s
   }
   if (typeof env.vramGb === 'number' && env.vramGb > 0) {
     lines.push(`显存：约 ${Math.round(env.vramGb)}GB`)
+  }
+  if (env.modelDirs?.length) {
+    // 模型落盘的真实目标路径：model-registry/troubleshooting 类技能指导
+    // 下载模型时必须知道往哪个目录放（models/<type>/）
+    lines.push(
+      `模型根目录（下载模型放 <目录>/<checkpoints|loras|...>/）：${env.modelDirs.join('；')}`
+    )
   }
   if (env.customNodes.length) {
     const shown = env.customNodes.slice(0, 20)

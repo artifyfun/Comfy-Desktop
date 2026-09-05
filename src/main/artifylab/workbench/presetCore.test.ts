@@ -238,3 +238,20 @@ describe('presetCore', () => {
     })
   })
 })
+
+describe('clonePreset 深拷贝', () => {
+  it('副本的 skillIds/templateIds/defaultParams 与 BUILTIN_PRESETS 不共享引用', () => {
+    const src = BUILTIN_PRESETS.find((p) => (p.skillIds?.length ?? 0) > 0) ?? BUILTIN_PRESETS[0]!
+    const copy = clonePreset(src.id, 'my-copy', '我的副本', new Set())
+    expect(copy).not.toBeNull()
+    expect(copy!.skillIds).toEqual(src.skillIds ?? [])
+    copy!.skillIds!.push('polluted')
+    copy!.templateIds!.push('polluted-t')
+    ;(copy!.defaultParams as Record<string, unknown>).polluted = true
+    copy!.name.zh = '篡改'
+    expect(src.skillIds).toEqual(BUILTIN_PRESETS.find((p) => p.id === src.id)!.skillIds)
+    expect(src.templateIds).toEqual(BUILTIN_PRESETS.find((p) => p.id === src.id)!.templateIds)
+    expect(src.defaultParams).toEqual(BUILTIN_PRESETS.find((p) => p.id === src.id)!.defaultParams)
+    expect(src.name.zh).not.toBe('篡改')
+  })
+})

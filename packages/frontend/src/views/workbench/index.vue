@@ -1469,10 +1469,12 @@ async function selectSession(s) {
 }
 
 async function createSession({ presetId, title }) {
+  // 会话入口标记（P1 感知）：画布侧栏组件嵌入 > C 宿主 iframe > 独立工作台
+  const entry = isCanvasEmbedded.value ? 'a-canvas' : isEmbed.value ? 'comfy-sidebar' : 'workbench'
   const res = await fetch(`${origin.value}/api/workbench/sessions/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ presetId, title }),
+    body: JSON.stringify({ presetId, title, entry }),
   })
   const json = await res.json()
   await loadSessions()

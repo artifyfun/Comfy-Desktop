@@ -95,7 +95,8 @@ export function importSession(
   s.updatedAt = Date.now()
   s.debugLogs = undefined
   s.importedFrom = file.originId
-  s.importedFrom = file.originId
+  // 入口随宿主而非文件走：跨机/跨入口导入后旧 entry 只会误导 spec（谎报当前界面）
+  s.entry = undefined
   for (const ex of s.executions ?? []) delete ex.batchJobId
   // 基本面兜底（老导出件缺字段不至于 NaN）
   s.createdAt = typeof s.createdAt === 'number' ? s.createdAt : Date.now()
