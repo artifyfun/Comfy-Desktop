@@ -29,14 +29,13 @@
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-1.5">
             <span class="text-sm text-white font-mono truncate">{{ s.name }}</span>
+            <a-tag v-if="s.category" color="geekblue" class="!m-0 !text-[10px] !leading-4 !px-1">
+              {{ categoryLabel(s.category) }}
+            </a-tag>
             <a-tag v-if="!s.valid" color="red" class="!m-0 !text-[10px] !leading-4 !px-1">
               {{ t('workbenchSkillInvalid') }}
             </a-tag>
-            <a-tag
-              v-for="e in s.extras"
-              :key="e"
-              class="!m-0 !text-[10px] !leading-4 !px-1"
-            >
+            <a-tag v-for="e in s.extras" :key="e" class="!m-0 !text-[10px] !leading-4 !px-1">
               {{ e }}
             </a-tag>
           </div>
@@ -46,7 +45,9 @@
         </div>
 
         <!-- 来源 -->
-        <span class="text-[10px] text-[var(--wb-text-3)] shrink-0">{{ sourceLabel(s.source) }}</span>
+        <span class="text-[10px] text-[var(--wb-text-3)] shrink-0">{{
+          sourceLabel(s.source)
+        }}</span>
         <!-- token -->
         <span class="text-[10px] text-[var(--wb-text-3)] font-mono shrink-0 w-16 text-right">
           {{ s.tokens.toLocaleString() }}t
@@ -104,8 +105,18 @@ defineEmits(['toggle', 'view', 'edit', 'remove', 'open-folder'])
 const { t } = useI18n()
 
 function sourceLabel(source) {
-  const key = `workbenchSkillSource${String(source || 'manual').charAt(0).toUpperCase()}${String(source || 'manual').slice(1)}`
+  const key = `workbenchSkillSource${String(source || 'manual')
+    .charAt(0)
+    .toUpperCase()}${String(source || 'manual').slice(1)}`
   const label = t(key)
   return label === key ? source : label
+}
+
+function categoryLabel(id) {
+  const key = `workbenchSkillCat${String(id || 'other')
+    .charAt(0)
+    .toUpperCase()}${String(id).slice(1)}`
+  const label = t(key)
+  return label === key ? id : label
 }
 </script>

@@ -34,8 +34,8 @@
                 intent: {{ p.intentHint || 'free'
                 }}<template v-if="p.order != null"> · order: {{ p.order }}</template>
               </div>
-              <!-- 捆绑模板 + 捆绑技能 -->
-              <div v-if="!p.builtin" class="mt-2 space-y-1">
+              <!-- 捆绑模板 + 捆绑技能（内置预设的种子组合只读展示） -->
+              <div class="mt-2 space-y-1">
                 <div class="flex items-center gap-1 flex-wrap">
                   <span class="text-[11px] text-[var(--wb-text-3)]"
                     >{{ t('workbenchPresetTemplates') }}:</span
@@ -58,6 +58,7 @@
                     >—</span
                   >
                   <button
+                    v-if="!p.builtin"
                     class="text-[11px] text-[var(--wb-accent)] hover:underline ml-1"
                     @click="openEditBindings(p)"
                   >
@@ -97,10 +98,7 @@
       >
         <!-- 模板组 -->
         <div class="text-xs text-[var(--wb-text-2)] mb-1">{{ t('workbenchPresetTemplates') }}</div>
-        <div
-          v-if="templateList.length === 0"
-          class="text-xs text-[var(--wb-text-3)] py-2"
-        >
+        <div v-if="templateList.length === 0" class="text-xs text-[var(--wb-text-3)] py-2">
           {{ t('workbenchTemplatesEmptyLib') }}
         </div>
         <div v-else class="space-y-1 max-h-40 overflow-y-auto mb-3">
@@ -118,30 +116,63 @@
           </label>
         </div>
 
-        <!-- 技能组 -->
-        <div class="text-xs text-[var(--wb-text-2)] mb-1">{{ t('workbenchPresetSkills') }}</div>
-        <div
-          v-if="skillsList.length === 0"
-          class="text-xs text-[var(--wb-text-3)] py-2"
-        >
+        <!-- 技能组（按分类分组，可分组全选/全部勾选） -->
+        <div class="flex items-center justify-between mb-1">
+          <div class="text-xs text-[var(--wb-text-2)]">{{ t('workbenchPresetSkills') }}</div>
+          <div v-if="skillsList.length" class="flex gap-2">
+            <button
+              class="text-[11px] text-[var(--wb-accent)] hover:underline"
+              @click="selectAllSkills"
+            >
+              {{ t('workbenchSkillSelectAll') }}
+            </button>
+            <button
+              class="text-[11px] text-[var(--wb-text-2)] hover:underline"
+              @click="checkedSkills = []"
+            >
+              {{ t('workbenchSkillClearAll') }}
+            </button>
+          </div>
+        </div>
+        <div v-if="skillsList.length === 0" class="text-xs text-[var(--wb-text-3)] py-2">
           {{ t('workbenchSkillsEmptyLib') }}
         </div>
-        <div v-else class="space-y-1 max-h-40 overflow-y-auto">
-          <label
-            v-for="s in skillsList"
-            :key="s.name"
-            class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--wb-surface-hover)] cursor-pointer"
-          >
-            <input type="checkbox" :value="s.name" v-model="checkedSkills" class="wb-tech-check" />
-            <span class="text-sm text-white font-mono">{{ s.name }}</span>
-            <span
-              v-if="!s.valid"
-              class="text-[10px] text-red-400"
-            >{{ t('workbenchSkillInvalid') }}</span>
-            <span class="text-[11px] text-[var(--wb-text-2)] truncate ml-auto">{{
-              s.description
-            }}</span>
-          </label>
+        <div v-else class="max-h-56 overflow-y-auto space-y-2">
+          <div v-for="g in groupedSkills" :key="g.id">
+            <div
+              class="flex items-center justify-between px-2 py-1 sticky top-0 z-10"
+              style="background: var(--wb-surface)"
+            >
+              <span class="text-[11px] text-[var(--wb-text-3)] font-medium"
+                >{{ g.label }} ({{ g.skills.length }})</span
+              >
+              <button
+                class="text-[11px] text-[var(--wb-accent)] hover:underline"
+                @click="toggleGroup(g)"
+              >
+                {{ groupAllOn(g) ? t('workbenchSkillGroupNone') : t('workbenchSkillGroupAll') }}
+              </button>
+            </div>
+            <label
+              v-for="s in g.skills"
+              :key="s.name"
+              class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--wb-surface-hover)] cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                :value="s.name"
+                v-model="checkedSkills"
+                class="wb-tech-check"
+              />
+              <span class="text-sm text-white font-mono">{{ s.name }}</span>
+              <span v-if="!s.valid" class="text-[10px] text-red-400">{{
+                t('workbenchSkillInvalid')
+              }}</span>
+              <span class="text-[11px] text-[var(--wb-text-2)] truncate ml-auto">{{
+                s.description
+              }}</span>
+            </label>
+          </div>
         </div>
       </a-modal>
 
@@ -171,7 +202,12 @@
                 :key="tk.id"
                 class="flex items-center gap-2 text-sm text-[var(--wb-text-2)] cursor-pointer"
               >
-                <input v-model="copyTemplates" type="checkbox" :value="tk.id" class="wb-tech-check" />
+                <input
+                  v-model="copyTemplates"
+                  type="checkbox"
+                  :value="tk.id"
+                  class="wb-tech-check"
+                />
                 <span class="truncate">{{ tk.name }}</span>
               </label>
               <div v-if="!templateList.length" class="text-xs text-[var(--wb-text-3)]">
@@ -180,17 +216,41 @@
             </div>
           </a-form-item>
           <a-form-item :label="t('workbenchPresetSkills')">
-            <div
-              class="max-h-32 overflow-y-auto space-y-1.5 p-2 rounded-lg border border-[var(--wb-stroke)]"
-            >
-              <label
-                v-for="sk in skillsList"
-                :key="sk.name"
-                class="flex items-center gap-2 text-sm text-[var(--wb-text-2)] cursor-pointer"
+            <div class="flex gap-2 mb-1">
+              <button
+                class="text-[11px] text-[var(--wb-accent)] hover:underline"
+                @click="copySkills = skillsList.map((s) => s.name)"
               >
-                <input v-model="copySkills" type="checkbox" :value="sk.name" class="wb-tech-check" />
-                <span class="truncate font-mono">{{ sk.name }}</span>
-              </label>
+                {{ t('workbenchSkillSelectAll') }}
+              </button>
+              <button
+                class="text-[11px] text-[var(--wb-text-2)] hover:underline"
+                @click="copySkills = []"
+              >
+                {{ t('workbenchSkillClearAll') }}
+              </button>
+            </div>
+            <div
+              class="max-h-40 overflow-y-auto space-y-2 p-2 rounded-lg border border-[var(--wb-stroke)]"
+            >
+              <div v-for="g in groupedSkills" :key="g.id">
+                <div class="text-[11px] text-[var(--wb-text-3)] font-medium px-1 py-0.5">
+                  {{ g.label }} ({{ g.skills.length }})
+                </div>
+                <label
+                  v-for="sk in g.skills"
+                  :key="sk.name"
+                  class="flex items-center gap-2 text-sm text-[var(--wb-text-2)] cursor-pointer px-1"
+                >
+                  <input
+                    v-model="copySkills"
+                    type="checkbox"
+                    :value="sk.name"
+                    class="wb-tech-check"
+                  />
+                  <span class="truncate font-mono">{{ sk.name }}</span>
+                </label>
+              </div>
               <div v-if="!skillsList.length" class="text-xs text-[var(--wb-text-3)]">
                 {{ t('workbenchNoSkillsYet') }}
               </div>
@@ -245,6 +305,47 @@ function templateName(id) {
 
 function skillName(id) {
   return skillsList.value.find((s) => s.name === id)?.name || id
+}
+
+// ---------- 技能分类分组（catalog.json 的 category id，固定序） ----------
+const CATEGORY_ORDER = ['core', 'image', 'prompt', 'video', 'creative', 'training', 'ops', 'other']
+
+function categoryLabel(id) {
+  const key = `workbenchSkillCat${String(id || 'other')
+    .charAt(0)
+    .toUpperCase()}${String(id).slice(1)}`
+  const label = t(key)
+  return label === key ? t('workbenchSkillCatOther') : label
+}
+
+const groupedSkills = computed(() => {
+  const groups = new Map()
+  for (const s of skillsList.value) {
+    const cat = s.category || 'other'
+    if (!groups.has(cat)) groups.set(cat, [])
+    groups.get(cat).push(s)
+  }
+  return CATEGORY_ORDER.filter((c) => groups.has(c)).map((c) => ({
+    id: c,
+    label: categoryLabel(c),
+    skills: groups.get(c),
+  }))
+})
+
+function groupAllOn(g) {
+  return g.skills.every((s) => checkedSkills.value.includes(s.name))
+}
+
+function toggleGroup(g) {
+  const names = g.skills.map((s) => s.name)
+  const allOn = names.every((n) => checkedSkills.value.includes(n))
+  checkedSkills.value = allOn
+    ? checkedSkills.value.filter((n) => !names.includes(n))
+    : [...new Set([...checkedSkills.value, ...names])]
+}
+
+function selectAllSkills() {
+  checkedSkills.value = skillsList.value.map((s) => s.name)
 }
 
 async function openEditBindings(p) {

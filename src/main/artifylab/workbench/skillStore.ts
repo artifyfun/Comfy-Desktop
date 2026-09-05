@@ -70,6 +70,8 @@ export interface SkillInfo {
   importedAt?: number
   /** 附加资源目录（scripts/references/assets 是否存在，UI 展示用） */
   extras: string[]
+  /** 分类 id（内置技能来自 catalog.json；用户技能无分类） */
+  category?: string
 }
 
 export interface SkillContent {
@@ -122,9 +124,24 @@ const SOURCE_LABELS: Array<{ label: string; sub: string; source: SkillSource }> 
 export class SkillLibrary {
   private opts: SkillLibraryOptions
   private stateCache: Record<string, SkillState> | null = null
+  /** 内置技能分类清单（builtinRoot/catalog.json），name → category id */
+  private catalogCache: Record<string, string> | null = null
 
   constructor(opts: SkillLibraryOptions) {
     this.opts = opts
+  }
+
+  /** 分类清单：只认内置根目录下的 catalog.json；缺失/损坏时返回空映射 */
+  private catalog(): Record<string, string> {
+    if (this.catalogCache) return this.catalogCache
+    const file = join(this.opts.builtinRoot ?? '', 'catalog.json')
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf8'))
+      this.catalogCache = parsed?.skills && typeof parsed.skills === 'object' ? parsed.skills : {}
+    } catch {
+      this.catalogCache = {}
+    }
+    return this.catalogCache!
   }
 
   // ---------------- 状态（userData/workbench-skills.json） ----------------
@@ -227,7 +244,8 @@ export class SkillLibrary {
       issues,
       license,
       importedAt: st.importedAt,
-      extras
+      extras,
+      category: builtin ? this.catalog()[name] : undefined
     }
   }
 

@@ -50,7 +50,9 @@ export const BUILTIN_PRESETS: WorkbenchPreset[] = [
     builtin: true,
     order: 2,
     intentHint: 'image',
-    promptTemplate: '{input}'
+    promptTemplate: '{input}',
+    // 默认技能组合（复制预设即继承，可在捆绑编辑里增删）
+    skillIds: ['anima-base', 'krea2-txt2img', 'flux-image-best-practices', 'prompt-engineering']
   },
   {
     id: 'image-to-image',
@@ -62,7 +64,13 @@ export const BUILTIN_PRESETS: WorkbenchPreset[] = [
     builtin: true,
     order: 3,
     intentHint: 'image',
-    promptTemplate: '以我上传的图片为参考：{input}'
+    promptTemplate: '以我上传的图片为参考：{input}',
+    skillIds: [
+      'krea2-identity-edit',
+      'krea2-txt2img',
+      'flux-image-best-practices',
+      'prompt-engineering'
+    ]
   },
   {
     id: 'video-gen',
@@ -74,7 +82,15 @@ export const BUILTIN_PRESETS: WorkbenchPreset[] = [
     builtin: true,
     order: 4,
     intentHint: 'video',
-    promptTemplate: '{input}'
+    promptTemplate: '{input}',
+    skillIds: [
+      'h3-prompt-writing',
+      'minimax-h3-video',
+      'wan-t2v-video',
+      'wan-flf-video',
+      'ltxv2-video',
+      'director'
+    ]
   }
 ]
 
