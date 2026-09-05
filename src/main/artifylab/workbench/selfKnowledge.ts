@@ -14,7 +14,7 @@
 
 /** 环境快照（由 service 从 appStore/models/object_info 聚合） */
 export interface WorkbenchEnvSnapshot {
-  /** 已固化应用（每个 = 一个可用模板/技能） */
+  /** 已固化应用（每个 = 一个可用模板） */
   appNames: string[]
   /** 本地模型文件名（按类型分组，截断到前 N 个防 prompt 膨胀） */
   modelsByType: Record<string, string[]>
@@ -28,28 +28,18 @@ export const SELF_KNOWLEDGE_TEXT = `你是 Artify 工作台的调度 agent，运
 
 ## 你能做什么
 1. 模板执行：从模板库选模板填参执行（image/video/audio），产物自动入库。
-   模板必须与需求**严格匹配**（能力/风格/模型）才执行；模板库无真正匹配时，
-   **自组工作流**（wb_list_nodes 查节点 + 环境快照选模型 → wb_validate_workflow
-   → wb_run_workflow），不要硬套名称相似但能力不符的固化模板。
+   匹配判断与自组工作流的完整规则见下方「规则」1/1.1——那是唯一权威定义，不在此重复。
 2. 文本生成：intent=text 时直接产出文案（回复放 reply 字段）。
 3. 澄清对话：intent=chat 追问澄清或闲聊。
 4. 联网检索：当用户需求涉及「最佳实践/最新模型用法/提示词优化/community 模板」时，
-   你可以联网搜索（如 Civitai/Civitai articles、comfy.org examples、r/StableDiffusion、
+   你可以联网搜索（如 Civitai articles、comfy.org examples、r/StableDiffusion、
    GitHub awesome-comfyui 等社区源），把结论落到参数选择上。不要编造具体 checksum/
    版本号；搜不到就按保守经验值决策并说明。
 5. 环境适配：结合「环境快照」里的已装模型与自定义节点推荐可行的工作流设置；
    用户点名的模型/节点不在列表里时，先给 chat 说明缺什么、建议怎么装。
-6. 画布协同（C 界面 AI 侧边栏主场景）：你能感知「画布当前状态」段里当前激活 tab 的
-   工作流（节点清单/模型/关键参数），并执行三类画布操作：
-   - intent=workflow + templateId：把模板布局加载到画布（新 tab；当前 tab 已是
-     同一工作流则复用，不重复开）
-   - intent=canvas-run（+nodeOverrides）：执行画布当前工作流（可覆盖节点参数）
-   - intent=canvas-run + batch：对画布当前工作流批量执行（多变体）
-   注意：intent=image/video/audio 执行模板时系统**自动**先把该模板工作流加载到画布
-   （新 tab，已激活则复用），无需你额外指定。
-   节点 id 用「画布当前状态」节点清单里的 #id；batch 行键用「节点id.widget名」。
-   画布结构修改后可用画布整理 ops 排版：{"type":"align","mode":"left|hcenter|hdist|..."}
-   对齐/均匀分布，{"type":"autoLayout"} 按拓扑分层自动布局（详见 wb-orchestration skill）。
+6. 画布协同：能感知「画布当前状态」（当前激活 tab 的工作流/模型/参数），执行
+   加载布局 / 执行当前工作流 / 批量变体 / App 节点操作——对应规则 3.x（该段仅在
+   有画布上下文时注入）；对齐/自动布局 ops 详见 wb-orchestration skill。
 
 （决策 JSON 输出格式见下方「规则」段——那是唯一权威定义。）
 `
@@ -58,7 +48,7 @@ export const SELF_KNOWLEDGE_TEXT = `你是 Artify 工作台的调度 agent，运
 export function renderEnvSnapshot(env: WorkbenchEnvSnapshot, maxPerType = 12): string {
   const lines: string[] = []
   if (env.appNames.length) {
-    lines.push(`已固化技能（可作为模板直接使用）：${env.appNames.join('、')}`)
+    lines.push(`已固化模板（可直接执行）：${env.appNames.join('、')}`)
   }
   const modelTypes = Object.entries(env.modelsByType).filter(([, v]) => v.length > 0)
   if (modelTypes.length) {

@@ -144,6 +144,7 @@
           @delete="onDelete"
           @update:show-archived="(v) => (showArchived = v)"
           @manage-presets="presetMgrOpen = true"
+          @manage-skills="skillMgrOpen = true"
           @show-env="showEnvDialog"
         />
 
@@ -761,7 +762,7 @@
             :stopping="stopping"
             :uploading="uploading"
             :attachments="draftAttachments"
-            :skills="skills"
+            :templates="advTemplates"
             :model-override="modelOverride"
             :approval-mode="approvalMode"
             :reasoning-effort="reasoningEffort"
@@ -979,6 +980,9 @@
       :default-id="defaultPresetId"
       @changed="loadPresets"
     />
+
+    <!-- 技能库（SKILL.md 知识技能管理） -->
+    <SkillManager v-model:open="skillMgrOpen" />
 
     <!-- 工作台能力/环境说明（自我认知可视化） -->
     <a-modal v-model:open="envOpen" :title="t('workbenchEnvInfo')" :footer="null" width="560px">
@@ -1221,6 +1225,7 @@ import ProgressCard from './components/ProgressCard.vue'
 import Composer from './components/Composer.vue'
 import NewSessionDialog from './components/NewSessionDialog.vue'
 import PresetManager from './components/PresetManager.vue'
+import SkillManager from './components/SkillManager.vue'
 import { canApplyFix } from './diagnosis'
 import { pushFiles, drainAttachments, drainFiles } from '@/utils/canvasBridge'
 import { useCanvasMode } from '@/utils/canvasMode'
@@ -1338,7 +1343,6 @@ function pushMsg(m) {
 // 执行中计数（响应式）：SSE 结束后 ComfyUI 仍在跑（轮询阶段），停止按钮要持续显示
 const executingCount = ref(0)
 const draftAttachments = ref([])
-const skills = ref([])
 const presets = ref([])
 const defaultPresetId = ref('standard')
 const modelOverride = ref({})
@@ -1351,6 +1355,7 @@ const composerEl = ref(null)
 const pollTimers = new Map()
 const newDialogOpen = ref(false)
 const presetMgrOpen = ref(false)
+const skillMgrOpen = ref(false)
 
 const currentSession = computed(() => sessions.value.find((s) => s.id === sessionId.value))
 const sessionPreset = computed(() =>
@@ -1410,13 +1415,7 @@ async function loadPresets() {
   defaultPresetId.value = json?.data?.default ?? 'standard'
 }
 
-async function loadSkills() {
-  const res = await fetch(`${origin.value}/api/workbench/skills`)
-  const json = await res.json()
-  skills.value = json?.data ?? []
-}
-
-// 模板清单（高级参数抽屉的模板选择数据源；onMounted 拉一次）
+// 模板清单（高级参数抽屉的模板选择 + Composer「/」模板快捷方式数据源）
 const advTemplates = ref([])
 async function loadAdvTemplates() {
   const res = await fetch(`${origin.value}/api/workbench/templates`)

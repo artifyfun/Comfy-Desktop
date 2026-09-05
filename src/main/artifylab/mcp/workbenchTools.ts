@@ -812,6 +812,19 @@ const WB_TOOLS: Array<{ tool: Tool; fn: WBToolFn }> = [
  * 保持单槽回退语义（最外层 decide 会话），与 C7 之前行为一致。
  * base registry 转发不携带身份（外部工具无 wb 会话语义）。
  */
+/**
+ * 仅外部 MCP 客户端可见的 app 工具：与 wb_* 功能重叠（list_apps≈wb_list_templates、
+ * upload_image≈附件 HTTP 上传），对 decide agent 是 ~830 tok 的常驻噪音——带会话
+ * 身份的 ListTools 会过滤掉它们（CallTool 不拦，误调也能得到明确错误）。
+ */
+export const EXTERNAL_ONLY_TOOL_NAMES = new Set([
+  'list_apps',
+  'get_app_details',
+  'get_execution_status',
+  'stop_execution',
+  'upload_image'
+])
+
 export function createWorkbenchAugmentedRegistry(base: ToolRegistry): ToolRegistry {
   return {
     list: () => [...base.list(), ...WB_TOOLS.map((w) => w.tool)],

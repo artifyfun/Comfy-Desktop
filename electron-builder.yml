@@ -69,6 +69,8 @@ asarUnpack:
   # 且 pnpm 下 optionalDependencies 不会自动进产物，需显式依赖 + 解包
   - node_modules/@ngrok/ngrok-win32-x64-msvc/**/*
 afterPack: ./scripts/afterPack.mjs
+# 注：打包前的历史产物清理走 npm 脚本 clean:dist-resources（见 package.json 的 build:unpack/build:win 等），
+# 不用 beforeBuild 钩子——钩子的输出会被打包日志吞掉，成败不可见。
 publish:
   provider: github
   owner: artifyfun

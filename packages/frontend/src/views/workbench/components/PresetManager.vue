@@ -34,8 +34,19 @@
                 intent: {{ p.intentHint || 'free'
                 }}<template v-if="p.order != null"> · order: {{ p.order }}</template>
               </div>
-              <!-- 捆绑技能（dsh preset skills/ 语义） -->
-              <div v-if="!p.builtin" class="mt-2">
+              <!-- 捆绑模板 + 捆绑技能 -->
+              <div v-if="!p.builtin" class="mt-2 space-y-1">
+                <div class="flex items-center gap-1 flex-wrap">
+                  <span class="text-[11px] text-[var(--wb-text-3)]"
+                    >{{ t('workbenchPresetTemplates') }}:</span
+                  >
+                  <a-tag v-for="s in p.templateIds ?? []" :key="s" class="!m-0 !text-[11px]">
+                    {{ templateName(s) }}
+                  </a-tag>
+                  <span v-if="!p.templateIds?.length" class="text-[11px] text-[var(--wb-text-3)]"
+                    >—</span
+                  >
+                </div>
                 <div class="flex items-center gap-1 flex-wrap">
                   <span class="text-[11px] text-[var(--wb-text-3)]"
                     >{{ t('workbenchPresetSkills') }}:</span
@@ -48,7 +59,7 @@
                   >
                   <button
                     class="text-[11px] text-[var(--wb-accent)] hover:underline ml-1"
-                    @click="openSkills(p)"
+                    @click="openEditBindings(p)"
                   >
                     {{ t('workbenchPresetEditSkills') }}
                   </button>
@@ -74,31 +85,59 @@
         </div>
       </div>
 
-      <!-- 技能勾选弹层（预设捆绑技能） -->
+      <!-- 捆绑编辑弹层（模板 + 技能） -->
       <a-modal
-        :open="skillsOpen"
+        :open="bindingsOpen"
         :title="`${t('workbenchPresetEditSkills')} — ${editingPreset?.name?.[lang] || editingPreset?.id || ''}`"
         :ok-text="t('confirm')"
         :cancel-text="t('cancel')"
-        :ok-button-props="{ loading: savingSkills }"
-        @ok="saveSkills"
-        @cancel="skillsOpen = false"
+        :ok-button-props="{ loading: savingBindings }"
+        @ok="saveBindings"
+        @cancel="bindingsOpen = false"
       >
+        <!-- 模板组 -->
+        <div class="text-xs text-[var(--wb-text-2)] mb-1">{{ t('workbenchPresetTemplates') }}</div>
         <div
-          v-if="skillsList.length === 0"
-          class="text-sm text-[var(--wb-text-2)] py-4 text-center"
+          v-if="templateList.length === 0"
+          class="text-xs text-[var(--wb-text-3)] py-2"
         >
-          {{ t('workbenchSkillsEmptyLib') }}
+          {{ t('workbenchTemplatesEmptyLib') }}
         </div>
-        <div v-else class="space-y-1 max-h-80 overflow-y-auto">
+        <div v-else class="space-y-1 max-h-40 overflow-y-auto mb-3">
           <label
-            v-for="s in skillsList"
+            v-for="s in templateList"
             :key="s.id"
             class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--wb-surface-hover)] cursor-pointer"
           >
-            <input type="checkbox" :value="s.id" v-model="checkedSkills" class="wb-tech-check" />
+            <input type="checkbox" :value="s.id" v-model="checkedTemplates" class="wb-tech-check" />
             <span class="text-sm text-white">{{ s.name }}</span>
             <span class="text-[11px] text-[var(--wb-text-3)] font-mono">/{{ s.id }}</span>
+            <span class="text-[11px] text-[var(--wb-text-2)] truncate ml-auto">{{
+              s.description
+            }}</span>
+          </label>
+        </div>
+
+        <!-- 技能组 -->
+        <div class="text-xs text-[var(--wb-text-2)] mb-1">{{ t('workbenchPresetSkills') }}</div>
+        <div
+          v-if="skillsList.length === 0"
+          class="text-xs text-[var(--wb-text-3)] py-2"
+        >
+          {{ t('workbenchSkillsEmptyLib') }}
+        </div>
+        <div v-else class="space-y-1 max-h-40 overflow-y-auto">
+          <label
+            v-for="s in skillsList"
+            :key="s.name"
+            class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--wb-surface-hover)] cursor-pointer"
+          >
+            <input type="checkbox" :value="s.name" v-model="checkedSkills" class="wb-tech-check" />
+            <span class="text-sm text-white font-mono">{{ s.name }}</span>
+            <span
+              v-if="!s.valid"
+              class="text-[10px] text-red-400"
+            >{{ t('workbenchSkillInvalid') }}</span>
             <span class="text-[11px] text-[var(--wb-text-2)] truncate ml-auto">{{
               s.description
             }}</span>
@@ -123,17 +162,34 @@
           <a-form-item :label="t('appName')">
             <a-input v-model:value="copyName" class="wb-tech-input" />
           </a-form-item>
+          <a-form-item :label="t('workbenchPresetTemplates')">
+            <div
+              class="max-h-32 overflow-y-auto space-y-1.5 p-2 rounded-lg border border-[var(--wb-stroke)]"
+            >
+              <label
+                v-for="tk in templateList"
+                :key="tk.id"
+                class="flex items-center gap-2 text-sm text-[var(--wb-text-2)] cursor-pointer"
+              >
+                <input v-model="copyTemplates" type="checkbox" :value="tk.id" class="wb-tech-check" />
+                <span class="truncate">{{ tk.name }}</span>
+              </label>
+              <div v-if="!templateList.length" class="text-xs text-[var(--wb-text-3)]">
+                {{ t('workbenchTemplatesEmptyLib') }}
+              </div>
+            </div>
+          </a-form-item>
           <a-form-item :label="t('workbenchPresetSkills')">
             <div
-              class="max-h-40 overflow-y-auto space-y-1.5 p-2 rounded-lg border border-[var(--wb-stroke)]"
+              class="max-h-32 overflow-y-auto space-y-1.5 p-2 rounded-lg border border-[var(--wb-stroke)]"
             >
               <label
                 v-for="sk in skillsList"
-                :key="sk.id"
+                :key="sk.name"
                 class="flex items-center gap-2 text-sm text-[var(--wb-text-2)] cursor-pointer"
               >
-                <input v-model="copySkills" type="checkbox" :value="sk.id" class="wb-tech-check" />
-                <span class="truncate">{{ sk.name }}</span>
+                <input v-model="copySkills" type="checkbox" :value="sk.name" class="wb-tech-check" />
+                <span class="truncate font-mono">{{ sk.name }}</span>
               </label>
               <div v-if="!skillsList.length" class="text-xs text-[var(--wb-text-3)]">
                 {{ t('workbenchNoSkillsYet') }}
@@ -162,12 +218,20 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:open', 'changed'])
 
-// ---------- 技能捆绑编辑（dsh preset skills/ 语义） ----------
-const skillsOpen = ref(false)
+// ---------- 预设捆绑编辑（模板=可执行推荐池 / 技能=SKILL.md 知识技能） ----------
+const bindingsOpen = ref(false)
 const editingPreset = ref(null)
+const checkedTemplates = ref([])
 const checkedSkills = ref([])
-const savingSkills = ref(false)
+const savingBindings = ref(false)
+const templateList = ref([])
 const skillsList = ref([])
+
+async function loadTemplateList() {
+  const res = await fetch(`${origin.value}/api/workbench/templates`)
+  const json = await res.json()
+  templateList.value = json?.data ?? []
+}
 
 async function loadSkillsList() {
   const res = await fetch(`${origin.value}/api/workbench/skills`)
@@ -175,34 +239,49 @@ async function loadSkillsList() {
   skillsList.value = json?.data ?? []
 }
 
+function templateName(id) {
+  return templateList.value.find((s) => s.id === id)?.name || id
+}
+
 function skillName(id) {
-  return skillsList.value.find((s) => s.id === id)?.name || id
+  return skillsList.value.find((s) => s.name === id)?.name || id
 }
 
-async function openSkills(p) {
+async function openEditBindings(p) {
   editingPreset.value = p
+  checkedTemplates.value = [...(p.templateIds ?? [])]
   checkedSkills.value = [...(p.skillIds ?? [])]
-  if (skillsList.value.length === 0) await loadSkillsList()
-  skillsOpen.value = true
+  await Promise.all([
+    templateList.value.length === 0 ? loadTemplateList() : Promise.resolve(),
+    skillsList.value.length === 0 ? loadSkillsList() : Promise.resolve(),
+  ])
+  bindingsOpen.value = true
 }
 
-async function saveSkills() {
-  savingSkills.value = true
+async function saveBindings() {
+  savingBindings.value = true
   try {
-    const res = await fetch(`${origin.value}/api/workbench/presets/skills`, {
+    const res = await fetch(`${origin.value}/api/workbench/presets/templates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: editingPreset.value.id, templateIds: checkedTemplates.value }),
+    })
+    const json = await res.json()
+    if (!res.ok || !json?.success) throw new Error(json?.message || 'save failed')
+    const res2 = await fetch(`${origin.value}/api/workbench/presets/skills`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: editingPreset.value.id, skillIds: checkedSkills.value }),
     })
-    const json = await res.json()
-    if (!res.ok || !json?.success) throw new Error(json?.message || 'save failed')
-    skillsOpen.value = false
+    const json2 = await res2.json()
+    if (!res2.ok || !json2?.success) throw new Error(json2?.message || 'save failed')
+    bindingsOpen.value = false
     message.success(t('workbenchSaved'))
     emit('changed')
   } catch (e) {
     message.error(e.message)
   } finally {
-    savingSkills.value = false
+    savingBindings.value = false
   }
 }
 
@@ -248,7 +327,12 @@ async function doCopy() {
     })
     const json = await res.json()
     if (!res.ok || !json?.success) throw new Error(json?.message || 'create failed')
-    // 一步到位:勾了技能就写入新预设(与编辑技能同一端点)
+    // 一步到位:勾了模板/技能就写入新预设(与编辑绑定同一组端点)
+    await fetch(`${origin.value}/api/workbench/presets/templates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: copyId.value, templateIds: copyTemplates.value }),
+    })
     if (copySkills.value.length > 0) {
       await fetch(`${origin.value}/api/workbench/presets/skills`, {
         method: 'POST',

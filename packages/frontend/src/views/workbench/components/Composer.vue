@@ -44,7 +44,7 @@
       <!-- 技能菜单（浮层锚在卡片上方） -->
       <SkillMenu
         :open="slashOpen"
-        :items="filteredSkills"
+        :items="filteredTemplates"
         :active-index="activeIndex"
         @pick="onSkillPick"
         @active="(i) => (activeIndex = i)"
@@ -150,7 +150,7 @@ const props = defineProps({
   stopping: { type: Boolean, default: false },
   uploading: { type: Boolean, default: false },
   attachments: { type: Array, default: () => [] },
-  skills: { type: Array, default: () => [] },
+  templates: { type: Array, default: () => [] },
   modelOverride: { type: Object, default: null },
   /** B1 审批模式:'standard' | 'conservative'(默认 standard=只读+本地写自动放行) */
   approvalMode: { type: String, default: 'standard' },
@@ -191,10 +191,10 @@ const canSend = computed(
 )
 
 // 本地过滤（键盘导航在 Composer 统一处理，SkillMenu 纯展示）
-const filteredSkills = computed(() => {
+const filteredTemplates = computed(() => {
   const q = slashQuery.value.toLowerCase()
-  if (!q) return props.skills
-  return props.skills.filter(
+  if (!q) return props.templates
+  return props.templates.filter(
     (s) => s.id.toLowerCase().includes(q) || s.name.toLowerCase().includes(q),
   )
 })

@@ -117,6 +117,19 @@ describe('presetCore', () => {
       expect(s).toContain('app:flux')
       expect(s).toContain('steps')
     })
+    it('捆绑模板与技能分别注入软约束', () => {
+      const p = {
+        id: 't',
+        builtin: false,
+        name: { zh: '', en: '' },
+        description: { zh: '', en: '' },
+        templateIds: ['app:flux'],
+        skillIds: ['my-style']
+      }
+      const s = presetConstraintText(p)
+      expect(s).toContain('prefer templates [app:flux] when suitable')
+      expect(s).toContain('prefer skills [my-style] when suitable')
+    })
   })
 
   describe('parseSlashToken', () => {

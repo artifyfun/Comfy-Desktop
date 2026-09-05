@@ -12,15 +12,7 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import type { Server as HttpServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeFileSync
-} from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import appStoreManager, { type App, type ComfyPrompt, type ParamNode } from '../appStore'
 import { type AppServerRuntime, createAppServerRuntime } from './appServerRun'
@@ -51,6 +43,7 @@ import {
   type WorkbenchPreset
 } from './presetCore'
 import { renderEnvSnapshot, SELF_KNOWLEDGE_TEXT, type WorkbenchEnvSnapshot } from './selfKnowledge'
+import { defaultSkillLibrary, type SkillInfo } from './skillStore'
 import { extractDocText, isDocumentAttachment, renderDocContext } from './docContext'
 
 /** 画布当前状态快照（/api/canvas/state 的 digest 投影，供 spec 注入） */
@@ -306,54 +299,22 @@ function sessionsPath(): string {
 }
 
 /**
- * 部署工作台 skill 到 codex 的 $CODEX_HOME/skills/（渐进式加载）。
+ * 部署工作台技能到 codex 的 $CODEX_HOME/skills/（渐进式加载）。
  *
- * skill 源码随包发布（src/main/artifylab/public/workbench-skills/<name>/SKILL.md，
- * extraResources 复制到 resources/workbench-skills——与 design-system/codex-bin
- * 同一套打包模式），每次会话创建时复制到临时 CODEX_HOME——codex 0.149.x 启动
- * 时扫描该目录，把「name + description + SKILL.md 路径」注入系统提示
- * （## Skills 段），SKILL.md 正文由模型按需完整读取。决策提示词只保留触发
- * 提示，长规则（编排/媒体参数/批量与记忆）下沉到 skill，常驻 token 大幅下降。
+ * 内置（resources/workbench-skills，随包发布）+ 用户（userData/artify-skills，
+ * 仅 enabled 且校验通过）整目录复制——技能目录是纯 Agent Skills 开放标准
+ * （可带 scripts/references/assets）。codex 0.149.x 启动时扫描该目录，把
+ * 「name + description + SKILL.md 路径」注入系统提示（## Skills 段），
+ * SKILL.md 正文由模型按需完整读取。
  *
  * 不可用时（打包路径变化/复制失败）静默降级：决策提示词内的最小触发提示
  * 仍能让模型走对路径，只是少了详细指南。
  */
 function deployWorkbenchSkills(codexHome: string): void {
-  // 生产：electron-builder extraResources → resources/workbench-skills；
-  // 开发：源码目录原位（app.getAppPath() = 仓库根）。
-  const candidates = [
-    process.resourcesPath ? join(process.resourcesPath, 'workbench-skills') : '',
-    join(app.getAppPath(), 'src/main/artifylab/public/workbench-skills')
-  ].filter(Boolean)
-  const srcRoot = candidates.find((p) => existsSync(p))
-  if (!srcRoot) {
-    logger.debug('workbench skills source not found; skip deploy')
-    return
-  }
-  const destRoot = join(codexHome, 'skills')
-  mkdirSync(destRoot, { recursive: true })
-  for (const entry of readdirSync(srcRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const skillMd = join(srcRoot, entry.name, 'SKILL.md')
-    if (!existsSync(skillMd)) continue
-    const destDir = join(destRoot, entry.name)
-    mkdirSync(destDir, { recursive: true })
-    writeFileSync(join(destDir, 'SKILL.md'), readFileSync(skillMd))
-  }
-}
-
-/** 测试入口：绕过 electron app 路径探测，直接指定 skill 源目录 */
-export function deployWorkbenchSkillsForTest(codexHome: string, srcRoot: string): void {
-  if (!existsSync(srcRoot)) return
-  const destRoot = join(codexHome, 'skills')
-  mkdirSync(destRoot, { recursive: true })
-  for (const entry of readdirSync(srcRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const skillMd = join(srcRoot, entry.name, 'SKILL.md')
-    if (!existsSync(skillMd)) continue
-    const destDir = join(destRoot, entry.name)
-    mkdirSync(destDir, { recursive: true })
-    writeFileSync(join(destDir, 'SKILL.md'), readFileSync(skillMd))
+  try {
+    defaultSkillLibrary().deployTo(codexHome)
+  } catch (e) {
+    logger.warn('workbench skills deploy failed', e)
   }
 }
 
@@ -1196,8 +1157,8 @@ class WorkbenchService {
     const batchRule = `
 ## 批量 / 记忆
 用户需要多条产出（列出行/表格/N 个变体）→ batch 计划；用户表达跨会话偏好/事实 → intent=memory。
-**批量 PLAN JSON 合法字段**（顶层 schema 补充）：{"intent":"...","templateId":"...","params":{...},"batch":{"items":[{参数名:值},...],"sharedParams":{全行共享参数，可选}},"reason":"..."}——items 2~200 行，每行键=模板参数名；行内值优先于 params/sharedParams。
-详细格式见 wb-batch-memory skill（可用时先读 SKILL.md 再输出）。
+batch 字段格式与 wb_execute_template 的 batch_items/batch_shared_params 一致（items 2~200 行，行键=模板参数名，行内值优先于 params/sharedParams）。
+详细规则见 wb-batch-memory skill（可用时先读 SKILL.md 再输出）。
 `
     const titleRule = `
 ## 标题（可选）
@@ -1232,8 +1193,9 @@ class WorkbenchService {
     // agent 据此知道画布当前 tab 是什么工作流、有哪些节点，才能产出可执行的
     // nodeOverrides / batch 变体（键=节点id.widget名）。
     let canvasSection = ''
+    let canvasState: CanvasStateSnapshot | null = null
     try {
-      const canvasState = await this.fetchCanvasState()
+      canvasState = await this.fetchCanvasState()
       if (canvasState) {
         const nodesLine = (canvasState.nodes ?? [])
           .slice(0, 25)
@@ -1284,6 +1246,26 @@ class WorkbenchService {
     } catch (e) {
       logger.debug('workbench canvas state render failed', e)
     }
+    // 画布规则按上下文条件注入（无画布状态=桥未连/非画布界面时整段省略，省 ~350 tok）；
+    // A 画布专属的 App 节点操作（3.4）只在 surface=a-canvas 时注入。
+    const canvasRunRules = canvasSection
+      ? `3.1 **把工作流加载到画布**（用户说「把工作流同步到画布 / 加载工作流 / 打开某模板的画布布局」）→ intent=workflow + templateId 选目标模板（模板库清单里的 id）。画布会自动开新 tab 加载该模板的布局（当前 tab 已是同一工作流时复用，不重复开）；模板未保存布局时系统会从模板参数自动生成节点布局（无连线，可手动整理）。
+3.1b **模板执行自动加载画布**：intent=image/video/audio 执行模板时，系统**自动**先把该模板工作流加载到画布（新 tab；当前 tab 已是同一工作流则复用）再执行——无需额外字段。（兼容：显式带 "syncCanvasBeforeExec":true 同样生效。）
+3.2 **执行画布当前工作流**（用户说「执行画布上的工作流 / 跑一下当前图 / 按画布参数生成 / 用当前画布出图」）→ intent=canvas-run（**不指定 templateId**；可带 nodeOverrides 按节点 id 覆盖 widget，如 {"16":{"widgetOverrides":{"steps":40}}}）。
+3.3 **画布批量执行**（对当前画布多变体/多参数组合批量出图）→ intent=canvas-run + batch.items（每行=一组变体）。行内键用「节点id.widget名」格式（如 "16.steps":40、"9.text":"新提示词"），值=该 widget 新值；共有的固定变体放 sharedParams（同格式）。系统按行逐条执行画布当前工作流。
+`
+      : ''
+    const canvasOpsRules =
+      canvasSection && (canvasState as { surface?: string }).surface === 'a-canvas'
+        ? `3.4 **A 画布 App 节点操作**（用户在 A 画布侧栏工作台说「跑一下节点 X / 新建一个 XX 应用节点 / 把节点 X 参数改成… / 连一下 A→B」）→ intent=canvas-ops + canvasOps 指令数组：
+  - {"type":"run_node","nodeId":"a17…"} 触发某 App 节点运行（params 可选覆盖 {"节点id":{"widget":值}}）
+  - {"type":"add_app_node","appId":"模板id","name":"…","x":…,"y":…} 在画布新建 App 节点
+  - {"type":"update_node","id":"节点id","patch":{"params":{…}}} 改节点参数/位置
+  - {"type":"connect_nodes","from":"上游物件id","to":"节点id"} 建数据管道（上游产物/便签喂下游）
+  - {"type":"select_nodes","ids":["…"]} 选中若干节点
+  「画布当前状态」段的 appNodes 清单是可用节点台账（id/name/status/params）；指令经用户画布确认卡人审后执行。
+`
+        : ''
     return `${SELF_KNOWLEDGE_TEXT}${envSection}${canvasSection}
 根据用户需求从模板库选择模板并填参数，输出**只含一个 JSON 对象**（无 markdown 代码块、无解释文字）：
 {"intent":"image|video|audio|text|chat|memory|workflow|canvas-run|canvas-ops","templateId":"...","params":{...},"canvasOps":[{"type":"run_node","nodeId":"..."}],"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text/memory 时直接给用户的回复","memory":{"action":"remember|forget","key":"...","value":"remember 时必填"},"title":"仅首条消息时提供"}
@@ -1310,18 +1292,7 @@ class WorkbenchService {
    自组才是「根据需求建工作流」，宁可多调几次工具，也别为了省事硬套不合适的固化模板。
 2. intent=text 走纯文本生成（文案/起名/总结等），把生成结果放 reply。
 3. intent=chat 用于追问澄清或闲聊，回复放 reply。
-3.1 **把工作流加载到画布**（用户说「把工作流同步到画布 / 加载工作流 / 打开某模板的画布布局」）→ intent=workflow + templateId 选目标模板（模板库清单里的 id）。画布会自动开新 tab 加载该模板的布局（当前 tab 已是同一工作流时复用，不重复开）；模板未保存布局时系统会从模板参数自动生成节点布局（无连线，可手动整理）。
-3.1b **模板执行自动加载画布**：intent=image/video/audio 执行模板时，系统**自动**先把该模板工作流加载到画布（新 tab；当前 tab 已是同一工作流则复用）再执行——无需额外字段。（兼容：显式带 "syncCanvasBeforeExec":true 同样生效。）
-3.2 **执行画布当前工作流**（用户说「执行画布上的工作流 / 跑一下当前图 / 按画布参数生成 / 用当前画布出图」）→ intent=canvas-run（**不指定 templateId**；可带 nodeOverrides 按节点 id 覆盖 widget，如 {"16":{"widgetOverrides":{"steps":40}}}）。
-3.3 **画布批量执行**（对当前画布多变体/多参数组合批量出图）→ intent=canvas-run + batch.items（每行=一组变体）。行内键用「节点id.widget名」格式（如 "16.steps":40、"9.text":"新提示词"），值=该 widget 新值；共有的固定变体放 sharedParams（同格式）。系统按行逐条执行画布当前工作流。
-3.4 **A 画布 App 节点操作**（用户在 A 画布侧栏工作台说「跑一下节点 X / 新建一个 XX 应用节点 / 把节点 X 参数改成… / 连一下 A→B」）→ intent=canvas-ops + canvasOps 指令数组：
-  - {"type":"run_node","nodeId":"a17…"} 触发某 App 节点运行（params 可选覆盖 {"节点id":{"widget":值}}）
-  - {"type":"add_app_node","appId":"模板id","name":"…","x":…,"y":…} 在画布新建 App 节点
-  - {"type":"update_node","id":"节点id","patch":{"params":{…}}} 改节点参数/位置
-  - {"type":"connect_nodes","from":"上游物件id","to":"节点id"} 建数据管道（上游产物/便签喂下游）
-  - {"type":"select_nodes","ids":["…"]} 选中若干节点
-  「画布当前状态」段的 appNodes 清单是可用节点台账（id/name/status/params）；指令经用户画布确认卡人审后执行。
-4. 模板库为空或不匹配时选 chat 并说明。可跨会话保留的偏好/事实用 intent=memory（见「长期记忆」段）。
+${canvasRunRules}${canvasOpsRules}4. 模板库为空或不匹配时选 chat 并说明。可跨会话保留的偏好/事实用 intent=memory（见「长期记忆」段）。
 5. 用户上传了素材时，倾向选择带媒体输入参数的模板（图生图/视频驱动），参数值填素材文件名（已上传）。
 5.1 **参数类型**：模板参数里的 rc（renderComponent）为 *-uploader 的是**素材文件槽**——只能传已上传素材的文件名或 data:/http(s): URL，不能传提示词文本（会导致 ComfyUI 报 No such file or directory）。参数名带「路径/文件/图片」描述或参数说明里标注了「路径」的同样视为素材槽。只有 rc=textarea/select/slider/number（或无 rc 的文本型）参数才收提示词/数值。catalog 里素材槽会显示为「参数名（素材路径）」。
 5.2 **模板不合适就变通，不要盲目重试**：关键参数全是素材槽而用户要文生图时，先复盘本会话此前的工具调用与执行结果（基于事实修正而非凭空重试），然后读 wb-media-params skill（可用时）按变通路径处理：node_overrides 改节点参数 → wb_run_workflow 自组工作流 → wb_clone_template 派生变体。重试同参数只会重复同样的失败。
@@ -2188,19 +2159,59 @@ ${userInput}`
     return preset
   }
 
-  /** 预设挂技能（dsh preset skills/ 语义）。内置预设不可改，返回更新后预设。 */
+  /**
+   * 预设捆绑模板（可执行推荐池）。内置预设不可改，返回更新后预设。
+   */
+  updatePresetTemplates(id: string, templateIds: string[]): WorkbenchPreset {
+    if (BUILTIN_PRESETS.some((p) => p.id === id)) throw new Error('builtin preset is readonly')
+    const list = this.store.presets ?? []
+    const idx = list.findIndex((p) => p.id === id)
+    if (idx === -1) throw new Error(`preset not found: ${id}`)
+    // 只保留真实存在的模板 id
+    const valid = new Set(templateLibrary.list().map((t) => t.id))
+    const next = [...new Set(templateIds)].filter((s) => valid.has(s))
+    const updated = { ...list[idx]!, templateIds: next }
+    this.store.presets = list.with(idx, updated)
+    this.flush()
+    return updated
+  }
+
+  /**
+   * 预设捆绑技能（SKILL.md 知识技能 name 清单）。内置预设不可改。
+   */
   updatePresetSkills(id: string, skillIds: string[]): WorkbenchPreset {
     if (BUILTIN_PRESETS.some((p) => p.id === id)) throw new Error('builtin preset is readonly')
     const list = this.store.presets ?? []
     const idx = list.findIndex((p) => p.id === id)
     if (idx === -1) throw new Error(`preset not found: ${id}`)
-    // 只保留真实存在的模板 id（技能=模板快捷方式）
-    const valid = new Set(templateLibrary.list().map((t) => t.id))
+    const valid = new Set(
+      defaultSkillLibrary()
+        .list()
+        .map((s) => s.name)
+    )
     const next = [...new Set(skillIds)].filter((s) => valid.has(s))
     const updated = { ...list[idx]!, skillIds: next }
     this.store.presets = list.with(idx, updated)
     this.flush()
     return updated
+  }
+
+  /** 技能改名后修正所有预设的捆绑引用（改名不失效）；供路由层在 update 改名后调用 */
+  fixPresetSkillRefs(oldName: string, newName: string): number {
+    let changed = 0
+    this.store.presets = (this.store.presets ?? []).map((p) => {
+      if (!p.skillIds?.includes(oldName)) return p
+      changed++
+      return { ...p, skillIds: p.skillIds.map((s) => (s === oldName ? newName : s)) }
+    })
+    if (changed) this.flush()
+    return changed
+  }
+
+  // ---------------- 技能库（Agent Skills 开放标准，SKILL.md 知识文档） ----------------
+
+  listSkills(): SkillInfo[] {
+    return defaultSkillLibrary().list()
   }
 
   deletePreset(id: string): boolean {
@@ -2225,28 +2236,11 @@ ${userInput}`
     return this.store.presetDefault ?? BUILTIN_PRESETS[0]!.id
   }
 
-  // ---------------- 技能清单（/ 触发器用：模板快捷方式；预设是点击选择的不参与） ----------------
+  // ---------------- 环境快照（前端「能力说明」可视化用，与决策注入同源） ----------------
 
   /** 环境快照（前端「能力说明」可视化用，与决策注入同源） */
   async getEnvSnapshot(): Promise<WorkbenchEnvSnapshot> {
     return this.collectEnvSnapshot()
-  }
-
-  listSkills(): Array<{
-    id: string
-    kind: 'template'
-    name: string
-    description: string
-    mediaType?: string
-  }> {
-    const templates = templateLibrary.list().map((t) => ({
-      id: t.id,
-      kind: 'template' as const,
-      name: t.name,
-      description: t.description,
-      mediaType: t.mediaType
-    }))
-    return templates
   }
 
   // ---------------- 可选模型派生（config + 网关常见模型） ----------------

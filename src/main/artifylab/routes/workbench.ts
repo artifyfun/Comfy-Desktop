@@ -8,7 +8,8 @@
  * - POST /api/workbench/sessions/delete  删会话
  * - GET  /api/workbench/presets          预设清单 + 默认预设
  * - POST /api/workbench/presets/*        预设 CRUD（copy-dialog 语义）
- * - GET  /api/workbench/skills           技能清单（/ 触发器：模板快捷方式，预设点击选择不参与）
+ * - GET  /api/workbench/skills           技能库清单（Agent Skills 开放标准：内置+用户，CRUD/导入/启停见下）
+ * - GET  /api/workbench/templates        模板清单（/ 触发器：模板快捷方式，预设点击选择不参与）
  * - GET  /api/workbench/models           可选模型
  * - POST /api/workbench/upload           附件上传（多素材：图/视频/音频）
  * - POST /api/workbench/agent/run        AG-UI SSE 决策→执行（routes/agui.ts，唯一管线）
@@ -22,18 +23,20 @@
 import express from 'express'
 import multer from 'multer'
 import type { Request } from 'express'
+import { app, shell } from 'electron'
 import { CONFIG, HTTP_STATUS } from '../config/constants'
 import { logger } from '../utils/logger'
 import { createErrorResponse, createSuccessResponse } from '../utils/errorHandler'
 import { templateLibrary } from '../workbench/templates'
 import { workbenchService } from '../workbench/service'
+import { defaultSkillLibrary, type SkillSource, type ImportMode } from '../workbench/skillStore'
 import { buildSessionBundle } from '../workbench/sessionBundle'
 import { scanOutputDir } from '../gallery/scanner'
 import { restoreBundleFiles } from '../workbench/importRestore'
 import { validateNodeOverridesLocal } from '../workbench/plan'
 import type { ComfyPrompt } from '../appStore'
-import { readFileSync } from 'fs'
-import { resolve, sep } from 'path'
+import { existsSync, mkdirSync, readFileSync } from 'fs'
+import { join, resolve, sep } from 'path'
 import { get as getSetting } from '../../settings'
 import { buildAppCode } from '../agentDriver'
 import appStoreManager from '../appStore'
@@ -409,7 +412,23 @@ export function createWorkbenchRouter(): express.Router {
     res.json(createSuccessResponse({ default: id }))
   })
 
-  // 预设挂技能（dsh preset skills/ 目录语义：捆绑模板推荐池）
+  // 预设捆绑模板（可执行推荐池）
+  router.post('/api/workbench/presets/templates', (req, res) => {
+    const { id, templateIds } = req.body as { id?: string; templateIds?: string[] }
+    if (!id || !Array.isArray(templateIds)) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('id and templateIds required'))
+      return
+    }
+    try {
+      res.json(createSuccessResponse(workbenchService.updatePresetTemplates(id, templateIds)))
+    } catch (e) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(createErrorResponse(e instanceof Error ? e.message : 'update failed'))
+    }
+  })
+
+  // 预设捆绑技能（SKILL.md 知识技能 name 清单）
   router.post('/api/workbench/presets/skills', (req, res) => {
     const { id, skillIds } = req.body as { id?: string; skillIds?: string[] }
     if (!id || !Array.isArray(skillIds)) {
@@ -425,10 +444,168 @@ export function createWorkbenchRouter(): express.Router {
     }
   })
 
-  // ---------------- 技能清单（/ 触发器）与模型 ----------------
+  // ---------------- 技能库（Agent Skills 开放标准）与模型 ----------------
 
+  // 技能清单（内置 + 用户，含 token/enabled/source/valid）
   router.get('/api/workbench/skills', (_req, res) => {
     res.json(createSuccessResponse(workbenchService.listSkills()))
+  })
+
+  router.get('/api/workbench/skills/read', (req, res) => {
+    const name = (req.query as { name?: string }).name ?? ''
+    const content = defaultSkillLibrary().read(name)
+    if (!content) {
+      res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse('skill not found'))
+      return
+    }
+    res.json(createSuccessResponse(content))
+  })
+
+  router.post('/api/workbench/skills/create', (req, res) => {
+    const { name, description, body } = req.body as {
+      name?: string
+      description?: string
+      body?: string
+    }
+    if (!name || description === undefined || body === undefined) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(createErrorResponse('name, description and body required'))
+      return
+    }
+    const r = defaultSkillLibrary().create({ name, description, body })
+    if (!r.ok) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse(r.error ?? 'create failed'))
+      return
+    }
+    res.json(createSuccessResponse({ created: true }))
+  })
+
+  router.post('/api/workbench/skills/update', (req, res) => {
+    const { name, ...patch } = req.body as {
+      name?: string
+      name_?: never
+      description?: string
+      body?: string
+    }
+    if (!name) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('name required'))
+      return
+    }
+    const r = defaultSkillLibrary().update(name, {
+      name:
+        (patch as { name?: string }).name === name
+          ? undefined
+          : (req.body as { newName?: string }).newName,
+      description: (req.body as { description?: string }).description,
+      body: (req.body as { body?: string }).body
+    })
+    if (!r.ok) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse(r.error ?? 'update failed'))
+      return
+    }
+    // 改名联动：修正所有预设里的捆绑引用（改名不失效）
+    let presetsFixed = 0
+    if (r.renamedTo) presetsFixed = workbenchService.fixPresetSkillRefs(name, r.renamedTo)
+    res.json(createSuccessResponse({ updated: true, renamedTo: r.renamedTo, presetsFixed }))
+  })
+
+  router.post('/api/workbench/skills/remove', (req, res) => {
+    const { name } = req.body as { name?: string }
+    if (!name || !defaultSkillLibrary().remove(name)) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('unknown or builtin skill'))
+      return
+    }
+    res.json(createSuccessResponse({ deleted: true }))
+  })
+
+  router.post('/api/workbench/skills/toggle', (req, res) => {
+    const { name, enabled } = req.body as { name?: string; enabled?: boolean }
+    if (!name || typeof enabled !== 'boolean') {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('name and enabled required'))
+      return
+    }
+    try {
+      res.json(createSuccessResponse(defaultSkillLibrary().setEnabled(name, enabled)))
+    } catch (e) {
+      res
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .json(createErrorResponse(e instanceof Error ? e.message : 'toggle failed'))
+    }
+  })
+
+  // 在文件管理器中打开（技能目录 / 库根目录）
+  router.post('/api/workbench/skills/open-folder', (req, res) => {
+    const { name } = req.body as { name?: string }
+    const lib = defaultSkillLibrary()
+    const info = name ? lib.list().find((s) => s.name === name) : null
+    if (name && !info) {
+      res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse('skill not found'))
+      return
+    }
+    const dir = info
+      ? join(app.getPath('userData'), 'artify-skills', name!)
+      : join(app.getPath('userData'), 'artify-skills')
+    const target = info?.builtin
+      ? [
+          process.resourcesPath ? join(process.resourcesPath, 'workbench-skills', name!) : '',
+          join(app.getAppPath(), 'src/main/artifylab/public/workbench-skills', name!)
+        ].find((p) => p && existsSync(p))
+      : dir
+    if (!target || !existsSync(target)) {
+      // 根目录不存在时先建（首次打开给用户一个空目录）
+      if (!name) mkdirSync(dir, { recursive: true })
+      else {
+        res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse('skill folder missing'))
+        return
+      }
+    }
+    void shell.openPath(name ? target! : dir)
+    res.json(createSuccessResponse({ opened: true }))
+  })
+
+  // 扫描本机其它 agent 的技能目录（~/.claude/skills 等）
+  router.get('/api/workbench/skills/scan-local', (_req, res) => {
+    res.json(createSuccessResponse(defaultSkillLibrary().scanLocalAgents()))
+  })
+
+  // 从本机路径导入（扫描勾选 / 手填路径），srcDir 可为技能目录或其父目录
+  router.post('/api/workbench/skills/import-dir', (req, res) => {
+    const { srcPath, source, mode } = req.body as {
+      srcPath?: string
+      source?: string
+      mode?: string
+    }
+    if (!srcPath) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('srcPath required'))
+      return
+    }
+    const r = defaultSkillLibrary().importFromDir(
+      srcPath,
+      (source as SkillSource) || 'local',
+      (mode as ImportMode) || 'skip'
+    )
+    res.json(createSuccessResponse(r))
+  })
+
+  // 文件导入：.md（单技能全文）或 .zip（标准 <name>/SKILL.md 结构）
+  router.post('/api/workbench/skills/import', upload.single('file'), (req, res) => {
+    const file = req.file
+    if (!file?.buffer?.length) {
+      res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('file required'))
+      return
+    }
+    const buf = file.buffer
+    const source = ((req.body as { source?: string }).source || 'manual') as SkillSource
+    const mode = ((req.body as { mode?: string }).mode || 'skip') as ImportMode
+    const isZip =
+      file.mimetype === 'application/zip' ||
+      file.mimetype === 'application/x-zip-compressed' ||
+      (file.originalname ?? '').toLowerCase().endsWith('.zip')
+    const r = isZip
+      ? defaultSkillLibrary().importFromZip(buf, source, mode)
+      : defaultSkillLibrary().importFromText(buf.toString('utf8'), source, mode)
+    res.json(createSuccessResponse(r))
   })
 
   router.get('/api/workbench/models', (_req, res) => {

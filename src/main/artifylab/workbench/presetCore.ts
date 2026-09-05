@@ -21,7 +21,9 @@ export interface WorkbenchPreset {
   intentHint?: WorkbenchIntent
   /** 预推荐模板 id（codex 优先选它） */
   preferredTemplateId?: string
-  /** 预设捆绑的技能（模板 id 清单，dsh preset 的 skills/ 目录语义） */
+  /** 捆绑模板（可执行工作流模板 id 清单，codex 优先选用的推荐池） */
+  templateIds?: string[]
+  /** 捆绑技能（SKILL.md 知识技能 name 清单，软约束提示 agent 适用时参考） */
   skillIds?: string[]
   /** 默认参数（决策时作为 params 基线） */
   defaultParams?: Record<string, unknown>
@@ -128,9 +130,15 @@ export function presetConstraintText(preset: WorkbenchPreset | undefined): strin
   if (preset.preferredTemplateId) {
     parts.push(`prefer template "${preset.preferredTemplateId}" unless clearly unusable`)
   }
+  if (preset.templateIds?.length) {
+    // 捆绑模板=可执行推荐池（软约束，非强制唯一）
+    parts.push(`prefer templates [${preset.templateIds.join(', ')}] when suitable`)
+  }
   if (preset.skillIds?.length) {
-    // dsh preset skills 语义：捆绑技能=推荐池（软约束，非强制唯一）
-    parts.push(`prefer skills (templates) [${preset.skillIds.join(', ')}] when suitable`)
+    // 捆绑技能=知识文档（SKILL.md，已部署到 $CODEX_HOME/skills/），软约束
+    parts.push(
+      `prefer skills [${preset.skillIds.join(', ')}] when suitable (read the SKILL.md first)`
+    )
   }
   if (preset.defaultParams && Object.keys(preset.defaultParams).length > 0) {
     parts.push(`default params baseline: ${JSON.stringify(preset.defaultParams)}`)
@@ -154,7 +162,7 @@ export interface SlashToken {
  * 未命中返回 null。
  */
 /**
- * 解析斜杠 token（dsh skill 语义：仅技能=模板快捷方式，单选）。
+ * 解析斜杠 token（模板快捷方式语义，单选）。
  *
  * 预设不参与斜杠——预设是点击选择的（会话级），见 NewSessionDialog/
  * 会话头 chip。模板 id 含冒号（app:xxx），字符类需含 ':'；仍要求

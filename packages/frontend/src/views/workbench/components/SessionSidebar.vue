@@ -92,52 +92,64 @@
               :class="statusDot(s)"
             ></span>
             <div
-              class="pl-2 pr-10 text-sm truncate"
+              class="pl-2 pr-8 text-sm truncate"
               :class="s.id === currentId ? 'text-white' : 'text-slate-300'"
             >
               {{ s.title }}
             </div>
-            <!-- 行操作 -->
+            <!-- 行操作:单入口「⋯」dropdown,避免平铺 5 个按钮挤占标题宽度 -->
+            <!-- 受控 open:菜单展开时保持按钮可见(鼠标移入菜单会离开 item,hover 失效) -->
             <div
               v-if="!showArchived"
-              class="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex gap-0.5"
+              class="absolute right-1 top-1/2 -translate-y-1/2"
+              :class="menuOpenId === s.id ? 'block' : 'hidden group-hover:block'"
             >
-              <button
-                class="w-6 h-6 rounded text-slate-400 hover:text-white hover:bg-slate-600 flex items-center justify-center"
-                :title="t('workbenchExportSession')"
-                @click.stop="$emit('export-session', s, 'json')"
+              <a-dropdown
+                :trigger="['click']"
+                placement="bottomRight"
+                :open="menuOpenId === s.id"
+                @open-change="(o) => (menuOpenId = o ? s.id : '')"
               >
-                <i class="fas fa-file-export text-xs"></i>
-              </button>
-              <button
-                class="w-6 h-6 rounded text-slate-400 hover:text-white hover:bg-slate-600 flex items-center justify-center"
-                :title="t('workbenchExportBundle')"
-                @click.stop="$emit('export-session', s, 'bundle')"
-              >
-                <i class="fas fa-box-archive text-xs"></i>
-              </button>
-              <button
-                v-if="!s.archived"
-                class="w-6 h-6 rounded text-slate-400 hover:text-white hover:bg-slate-600 flex items-center justify-center"
-                :title="t('workbenchRename')"
-                @click.stop="startRename(s)"
-              >
-                <i class="fas fa-pen text-xs"></i>
-              </button>
-              <button
-                class="w-6 h-6 rounded text-slate-400 hover:text-white hover:bg-slate-600 flex items-center justify-center"
-                :title="t('workbenchArchive')"
-                @click.stop="$emit('archive', s)"
-              >
-                <i class="fas fa-box-archive text-xs"></i>
-              </button>
-              <button
-                class="w-6 h-6 rounded text-slate-400 hover:text-red-400 hover:bg-slate-600 flex items-center justify-center"
-                :title="t('delete')"
-                @click.stop="$emit('delete', s)"
-              >
-                <i class="fas fa-trash text-xs"></i>
-              </button>
+                <button
+                  class="w-6 h-6 rounded text-slate-400 hover:text-white hover:bg-slate-600 flex items-center justify-center"
+                  :title="t('workbenchSessionActions')"
+                  @click.stop
+                >
+                  <i class="fas fa-ellipsis-h text-xs"></i>
+                </button>
+                <template #overlay>
+                  <a-menu @click="({ key }) => onSessionAction(key, s)">
+                    <a-menu-item key="export-json">
+                      <span class="flex items-center gap-2"
+                        ><i class="fas fa-file-export w-4"></i
+                        >{{ t('workbenchExportSession') }}</span
+                      >
+                    </a-menu-item>
+                    <a-menu-item key="export-bundle">
+                      <span class="flex items-center gap-2"
+                        ><i class="fas fa-file-zipper w-4"></i
+                        >{{ t('workbenchExportBundle') }}</span
+                      >
+                    </a-menu-item>
+                    <a-menu-item key="rename" v-if="!s.archived">
+                      <span class="flex items-center gap-2"
+                        ><i class="fas fa-pen w-4"></i>{{ t('workbenchRename') }}</span
+                      >
+                    </a-menu-item>
+                    <a-menu-item key="archive">
+                      <span class="flex items-center gap-2"
+                        ><i class="fas fa-box-archive w-4"></i>{{ t('workbenchArchive') }}</span
+                      >
+                    </a-menu-item>
+                    <a-menu-divider />
+                    <a-menu-item key="delete" danger>
+                      <span class="flex items-center gap-2"
+                        ><i class="fas fa-trash w-4"></i>{{ t('delete') }}</span
+                      >
+                    </a-menu-item>
+                  </a-menu>
+                </template>
+              </a-dropdown>
             </div>
             <!-- 归档恢复 -->
             <button
@@ -168,6 +180,12 @@
           @click="$emit('manage-presets')"
         >
           <i class="fas fa-bolt w-4"></i>{{ t('workbenchManagePresets') }}
+        </button>
+        <button
+          class="w-full text-left px-2 py-1.5 rounded text-sm text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)] flex items-center gap-2"
+          @click="$emit('manage-skills')"
+        >
+          <i class="fas fa-book-open w-4"></i>{{ t('workbenchSkillLib') }}
         </button>
         <button
           class="w-full text-left px-2 py-1.5 rounded text-sm text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)] flex items-center gap-2"
@@ -221,6 +239,7 @@ const emit = defineEmits([
   'import-session',
   'update:showArchived',
   'manage-presets',
+  'manage-skills',
   'show-env',
 ])
 
@@ -245,6 +264,18 @@ const groups = computed(() => {
   }
   return [...byLabel.entries()].map(([label, sessions]) => ({ label, sessions }))
 })
+
+// 会话行「⋯」菜单：受控 open，展开时钉住触发按钮（否则鼠标移入菜单即 hover 失效按钮消失）
+const menuOpenId = ref('')
+
+function onSessionAction(key, s) {
+  menuOpenId.value = ''
+  if (key === 'export-json') emit('export-session', s, 'json')
+  else if (key === 'export-bundle') emit('export-session', s, 'bundle')
+  else if (key === 'rename') startRename(s)
+  else if (key === 'archive') emit('archive', s)
+  else if (key === 'delete') emit('delete', s)
+}
 
 function statusDot(s) {
   // dsh workspace 状态点：running 蓝 / 待处理琥珀

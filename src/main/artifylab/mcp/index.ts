@@ -15,7 +15,8 @@ import appStoreManager from '../appStore'
 import { createToolRegistry } from './tools'
 import {
   createWorkbenchAugmentedRegistry,
-  resolveWorkbenchSessionFromRequest
+  resolveWorkbenchSessionFromRequest,
+  EXTERNAL_ONLY_TOOL_NAMES
 } from './workbenchTools'
 import {
   createApprovalGatedRegistry,
@@ -48,7 +49,15 @@ export function createMcpRouter(): Router {
       { name: 'artify-apps', version: '1.0.0' },
       { capabilities: { tools: { listChanged: true } } }
     )
-    s.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: registry.list() }))
+    s.setRequestHandler(ListToolsRequestSchema, async () => {
+      // decide agent（带会话身份）只暴露 wb_* 编排工具：app 工具是给外部 MCP
+      // 客户端的，对决策线程是纯常驻噪音。无身份（外部）返回全量清单。
+      const identity = mcpIdentityStorage.getStore()
+      const tools = identity
+        ? registry.list().filter((t) => !EXTERNAL_ONLY_TOOL_NAMES.has(t.name))
+        : registry.list()
+      return { tools }
+    })
     s.setRequestHandler(CallToolRequestSchema, async (req) => {
       const { name, arguments: args } = req.params
       try {
