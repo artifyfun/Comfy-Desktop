@@ -192,7 +192,45 @@ export function startWorkbenchProxy(
           return sendJson(res, 200, responses)
         }
 
-        // 流式：先回 SSE 头 + keepalive，再接上游流翻译为 responses SSE
+        // 流式：**先请求上游、就绪后再回 SSE 头**。若上游直接失败（429 余额不足 /
+        // 401 / 超时等，UpstreamError），此时 headers 未发送 → 可回干净 HTTP JSON 错误，
+        // codex HTTP 层能直接看到 message（含余额不足原文）并立即报错退出；
+        // 反之若先 writeHead(200, SSE) 再请求上游，错误只能以 error SSE 呈现，
+        // codex 不把它当终局 → 误判「stream disconnected」重连 5 次，每次重发超长
+        // 请求，最后只剩一句 "Codex Exec exited with code 1"（用户实测）。
+        let upstreamRes
+        try {
+          upstreamRes = await callOpenAICompat(
+            {
+              baseUrl: config.upstreamBaseUrl,
+              apiKey: config.upstreamApiKey,
+              contextOverflowMode: 'passthrough',
+              modelInfo: { id: upstreamModel }
+            },
+            chat,
+            ac.signal
+          )
+        } catch (err) {
+          // AbortError = 客户端已断开（取消/超时），无需回包
+          if (err instanceof Error && err.name === 'AbortError') {
+            if (!res.writableEnded) res.end()
+            return
+          }
+          const isUpstream = err instanceof UpstreamError
+          const status = isUpstream ? err.status : 500
+          const code = isUpstream ? err.code : 'internal_error'
+          if (!res.headersSent && !res.writableEnded) {
+            sendJson(
+              res,
+              status,
+              errorEnvelope(status, code, String((err as Error).message ?? err))
+            )
+          } else if (!res.writableEnded) {
+            res.end()
+          }
+          return
+        }
+
         res.writeHead(200, {
           'Content-Type': 'text/event-stream; charset=utf-8',
           'Cache-Control': 'no-cache, no-transform',
@@ -208,27 +246,6 @@ export function startWorkbenchProxy(
         }, KEEPALIVE_MS)
         res.on('close', () => clearInterval(keepalive))
 
-        let upstreamRes
-        try {
-          upstreamRes = await callOpenAICompat(
-            {
-              baseUrl: config.upstreamBaseUrl,
-              apiKey: config.upstreamApiKey,
-              contextOverflowMode: 'passthrough',
-              modelInfo: { id: upstreamModel }
-            },
-            chat,
-            ac.signal
-          )
-        } catch (err) {
-          clearInterval(keepalive)
-          const code = err instanceof UpstreamError ? err.code : 'internal_error'
-          if (!res.writableEnded && !res.destroyed) {
-            write('error', { type: 'error', code, message: String(err), sequence_number: 9999 })
-            res.end()
-          }
-          return
-        }
         try {
           const chunks = iterChatStreamChunks(upstreamRes)
           await pipeChatStreamToResponses(

@@ -1,13 +1,7 @@
 <template>
   <aside
     class="session-sidebar flex flex-col bg-[var(--wb-bg-base)] border-r border-[var(--wb-stroke)] transition-all duration-300 shrink-0"
-    :class="
-      collapsed
-        ? 'w-0 overflow-hidden border-r-0'
-        : float
-          ? 'w-64 h-full'
-          : 'w-60 h-[calc(100vh-160px)]'
-    "
+    :class="collapsed ? 'w-0 overflow-hidden border-r-0' : float ? 'w-64 h-full' : 'w-60'"
   >
     <!-- 品牌行 + 折叠 -->
     <div class="flex items-center justify-between px-2 h-12 border-b border-[var(--wb-stroke)]">
@@ -177,6 +171,12 @@
       <div class="p-2 border-t border-[var(--wb-stroke)] space-y-0.5">
         <button
           class="w-full text-left px-2 py-1.5 rounded text-sm text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)] flex items-center gap-2"
+          @click="$emit('show-guide')"
+        >
+          <i class="fas fa-circle-question w-4"></i>{{ t('workbenchUsageGuide') }}
+        </button>
+        <button
+          class="w-full text-left px-2 py-1.5 rounded text-sm text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)] flex items-center gap-2"
           @click="$emit('manage-presets')"
         >
           <i class="fas fa-bolt w-4"></i>{{ t('workbenchManagePresets') }}
@@ -241,6 +241,7 @@ const emit = defineEmits([
   'manage-presets',
   'manage-skills',
   'show-env',
+  'show-guide',
 ])
 
 const { t } = useI18n()

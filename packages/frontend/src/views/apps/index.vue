@@ -1,14 +1,8 @@
 <template>
   <div class="page-container bg-tech-dark">
-    <div id="app" class="pb-20 min-h-screen">
-      <!-- 顶部导航：应用中心页自己展示「应用市场」入口，避免自指 -->
-      <AppHeader
-        :first-nav-to="'/market'"
-        :first-nav-label="t('market')"
-        first-nav-icon="mr-2 fas fa-store"
-      />
-
+    <div id="app" class="pb-20">
       <!-- 主内容区 -->
+      <!-- 顶导航由 AppLayout 统一挂载（应用中心页经路由 meta 指向市场入口，避免自指） -->
       <main class="relative px-4 mx-auto mt-4 max-w-7xl sm:px-6 lg:px-8">
         <!-- 标题区域 -->
         <!-- <div class="mb-10 text-center">
@@ -19,16 +13,7 @@
             {{ t('exploreFrontierAI') }}
           </p>
         </div> -->
-        <div class="flex items-center mb-2 space-x-4">
-          <div class="flex items-center space-x-2">
-            <div class="w-8 h-8 text-2xl text-[var(--wb-accent)]">
-              <i class="fas fa-home"></i>
-            </div>
-            <h1 class="text-2xl font-bold text-white">{{ t('app') }}{{ t('center') }}</h1>
-          </div>
-        </div>
-
-        <!-- 操作区域 -->
+        <!-- 标题 + 操作同一行：标题居左，搜索/按钮居右（与资产库页头一致） -->
         <AppActions
           :apps="appStore.apps"
           :search-query="searchQuery"
@@ -45,7 +30,16 @@
           @delete-history-item="deleteHistoryItem"
           @create-new="handleShowAppForm"
           @import-app="handleAppUploadChange"
-        />
+        >
+          <template #title>
+            <div class="flex items-center space-x-2">
+              <div class="w-8 h-8 text-2xl text-[var(--wb-accent)]">
+                <i class="fas fa-home"></i>
+              </div>
+              <h1 class="text-2xl font-bold text-white">{{ t('app') }}{{ t('center') }}</h1>
+            </div>
+          </template>
+        </AppActions>
 
         <!-- 应用网格 -->
         <div class="h-[calc(100vh-270px)]">
@@ -88,7 +82,6 @@ import { uuidv4, showError, showSuccess, showInfo } from '@/utils'
 import { useAppStore } from '@/stores/appStore'
 import { useViewStore } from '@/stores/viewStore'
 import { t } from '@/utils/i18n'
-import AppHeader from './components/AppHeader.vue'
 import AppActions from './components/AppActions.vue'
 import AppGrid from './components/AppGrid.vue'
 import AppForm from './components/AppForm.vue'
@@ -290,7 +283,6 @@ function deleteHistoryItem(index) {
   width: 100%;
   font-family: var(--wb-font);
   background: var(--wb-bg-base);
-  min-height: 100vh;
   color: var(--wb-text);
   overflow-x: hidden;
 

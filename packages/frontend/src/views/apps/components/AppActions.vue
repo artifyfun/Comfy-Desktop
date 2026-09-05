@@ -3,6 +3,9 @@
     <div
       class="flex flex-col space-y-4 lg:flex-row lg:justify-between lg:items-center lg:space-y-0"
     >
+      <!-- 最左：页面标题插槽（与资产库/gallery 页头布局对齐：标题左，操作右） -->
+      <slot name="title"></slot>
+
       <!-- 左侧：新增应用按钮 -->
       <div class="flex items-center space-x-4" v-if="isElectron && props.showCreate">
         <a-dropdown :trigger="['click']">

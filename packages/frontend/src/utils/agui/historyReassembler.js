@@ -60,11 +60,13 @@ export function reassemble(records, emit) {
  * replayToMessages — 便捷封装：重放 records 并把 emit 序列折叠成结构化消息数组
  * （与实时流同构的扁平时间线）。
  *
- * 产出形状：
+ * 产出形状（每条带 __runId = 来源 run；ts = 聚合首帧的落库时间戳 createdAt，
+ * 供回放侧与 legacy 用户消息做时间序归并——详见 aguiBridge.loadHistoryIntoPage）：
  *   { kind:'text',      id, role, text }                          text:start/delta/end 聚合
  *   { kind:'reasoning', id, role, text }                          reasoning:* 聚合
  *   { kind:'tool',      toolCallId, name, args, result, status }  tool:start/args/result 聚合
  *   { kind:'custom',    name, value }                             CUSTOM（keepalive 已被 handler 过滤）
+ *   { kind:'error',     text }                                    RUN_ERROR（run 终态错误，页面对应 error 气泡）
  *
  * 防御：历史行缺边界事件（delta/end 先于 start 到达）时按 messageId/toolCallId 懒创建，
  * 与 waa「重组器必须容忍边界缺失」的教训一致。
@@ -77,13 +79,16 @@ export function replayToMessages(records) {
   const messages = []
   const textById = new Map() // messageId → text/reasoning message
   const toolById = new Map() // toolCallId → tool message
-  // 审查修复 M2:消息携带来源 runId,回放侧按 run 边界重建回合
+  const runErrByRun = new Map() // runId → 该 run 的 RUN_ERROR 聚合（同 run 只留最后一条）
+  // 审查修复 M2:消息携带来源 runId,回放侧按 run 边界重建回合;
+  // currentTs = 最近一条记录的行级 createdAt(聚合消息建行时取首帧时间做归并锚)
   let currentRunId = null
+  let currentTs = undefined
 
   function ensureText(kind, messageId, role) {
     let m = textById.get(messageId)
     if (!m) {
-      m = { kind, id: messageId, role: role || (kind === 'reasoning' ? 'reasoning' : 'assistant'), text: '', __runId: currentRunId }
+      m = { kind, id: messageId, role: role || (kind === 'reasoning' ? 'reasoning' : 'assistant'), text: '', __runId: currentRunId, ts: currentTs }
       textById.set(messageId, m)
       messages.push(m)
     }
@@ -93,7 +98,7 @@ export function replayToMessages(records) {
   function ensureTool(toolCallId, name) {
     let m = toolById.get(toolCallId)
     if (!m) {
-      m = { kind: 'tool', toolCallId, name: name || '', args: '', result: null, status: 'running', __runId: currentRunId }
+      m = { kind: 'tool', toolCallId, name: name || '', args: '', result: null, status: 'running', __runId: currentRunId, ts: currentTs }
       toolById.set(toolCallId, m)
       messages.push(m)
     }
@@ -133,9 +138,27 @@ export function replayToMessages(records) {
         break
       }
       case 'custom':
-        messages.push({ kind: 'custom', name: payload.name, value: payload.value, __runId: currentRunId })
+        messages.push({ kind: 'custom', name: payload.name, value: payload.value, __runId: currentRunId, ts: currentTs })
         break
-      // run:* / state:delta / event：时间线不消费（store 侧各自处理）
+      case 'run:error': {
+        // RUN_ERROR 终帧(业务失败/上游断连收尾):历史侧也要可见——
+        // 缺它时错误轮回放只剩用户消息,报错气泡在 records 非空场景会静默丢失。
+        // 同一 run 可落多条 RUN_ERROR(如断线重连 5/5 的重连失败帧),原位去重
+        // 只留最后一条终态错误(重连提示帧无历史价值,刷屏反而干扰阅读)。
+        const text = payload.message || 'unknown error'
+        const key = currentRunId ?? ''
+        let em = runErrByRun.get(key)
+        if (!em) {
+          em = { kind: 'error', text, __runId: currentRunId, ts: currentTs }
+          runErrByRun.set(key, em)
+          messages.push(em)
+        } else {
+          em.text = text
+          em.ts = currentTs
+        }
+        break
+      }
+      // run:start/run:finish / state:delta / event：时间线不消费（store 侧各自处理）
       default:
         break
     }
@@ -148,6 +171,7 @@ export function replayToMessages(records) {
   const ctx = createHandlerContext(emit)
   for (const rec of records) {
     if (rec && rec.runId) currentRunId = rec.runId
+    if (rec && rec.createdAt !== undefined && rec.createdAt !== null) currentTs = rec.createdAt
     const ev = rec && parseEvent(rec.content)
     if (!ev || !ev.type) continue
     dispatch(ctx, ev)

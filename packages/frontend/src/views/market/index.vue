@@ -1,23 +1,10 @@
 <template>
   <div class="page-container bg-tech-dark">
-    <div id="app" class="pb-20 min-h-screen">
-      <!-- 顶部导航 -->
-      <MarketAppHeader />
-
+    <div id="app" class="pb-20">
       <!-- 主内容区 -->
+      <!-- 顶导航由 AppLayout 统一挂载（市场页首导航回应用中心） -->
       <main class="relative px-4 mx-auto mt-4 max-w-7xl sm:px-6 lg:px-8">
-        <div class="flex items-center mb-2 space-x-4">
-          <div class="flex items-center space-x-2">
-            <div class="w-8 h-8 text-2xl text-tech-blue">
-              <i class="fas fa-store"></i>
-            </div>
-            <h1 class="text-2xl font-bold text-white">
-              {{ t('market') }}
-            </h1>
-          </div>
-        </div>
-
-        <!-- 操作区域 -->
+        <!-- 标题 + 操作同一行：标题居左，搜索/按钮居右（与资产库页头一致） -->
         <AppActions
           :show-create="false"
           :apps="appStore.marketApps"
@@ -33,7 +20,18 @@
           @suggestion-click="handleSuggestionClick"
           @clear-history="clearAllHistory"
           @delete-history-item="deleteHistoryItem"
-        />
+        >
+          <template #title>
+            <div class="flex items-center space-x-2">
+              <div class="w-8 h-8 text-2xl text-tech-blue">
+                <i class="fas fa-store"></i>
+              </div>
+              <h1 class="text-2xl font-bold text-white">
+                {{ t('market') }}
+              </h1>
+            </div>
+          </template>
+        </AppActions>
 
         <!-- 应用网格 -->
         <div class="h-[calc(100vh-300px)]">
@@ -72,7 +70,7 @@ import { showError, showSuccess, showInfo } from '@/utils'
 import { useAppStore } from '@/stores/appStore'
 import { useViewStore } from '@/stores/viewStore'
 import { t } from '@/utils/i18n'
-import { MarketAppHeader, MarketAppGrid, MarketAppDetail } from './components'
+import { MarketAppGrid, MarketAppDetail } from './components'
 import { AppActions } from '../apps/components'
 
 const router = useRouter()
@@ -192,7 +190,6 @@ onMounted(() => {
   width: 100%;
   font-family: var(--wb-font);
   background: var(--wb-bg-base);
-  min-height: 100vh;
   color: #e2e8f0;
   overflow-x: hidden;
 

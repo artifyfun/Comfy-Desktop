@@ -1,7 +1,7 @@
 <template>
-  <div class="page-container bg-tech-dark flex flex-col h-screen overflow-hidden">
-    <!-- 首导航用默认「应用中心」（/）；应用市场入口只在应用中心页自显示 -->
-    <AppHeader class="shrink-0" />
+  <!-- 顶导航由 AppLayout 统一挂载；本页自管交互区，layout wrapper 不滚（meta.scrollable=false），
+       根高度用 h-full 撑满 wrapper 而非 h-screen（header 已在外层占位） -->
+  <div class="page-container bg-tech-dark flex flex-col h-full overflow-hidden">
     <!-- 工作台侧边栏（左侧，可收起） + 画布 布局（flex 撑满视口剩余高度） -->
     <div class="flex flex-1 min-h-0 mx-4 mt-2 mb-2 gap-2">
       <aside
@@ -1645,7 +1645,6 @@ import { drainFiles, pushAttachments } from '@/utils/canvasBridge'
 import { useCanvasMode } from '@/utils/canvasMode'
 import { message, Modal } from 'ant-design-vue'
 import Workbench from '../workbench/index.vue'
-import AppHeader from '../apps/components/AppHeader.vue'
 import AppNodeCard from './AppNodeCard.vue'
 import CanvasSidePanel from './CanvasSidePanel.vue'
 import CanvasAssetsPanel from './CanvasAssetsPanel.vue'
@@ -7163,6 +7162,15 @@ function onDrop(e) {
       const w = screenToWorld(viewport.value, p.x, p.y)
       insertAsset(a, w.x - 130, w.y - 90)
     }
+    return
+  }
+  // 资产库拖出：携带完整图 URL，直接按 URL 建节点（insertAsset 内部 probe 探尺寸）
+  const assetUrl = e.dataTransfer?.getData('application/x-artify-asset-url')
+  if (assetUrl) {
+    const st = stageEl.value?.getStage?.()
+    const p = st.getPointerPosition() || { x: size.w / 2, y: size.h / 2 }
+    const w = screenToWorld(viewport.value, p.x, p.y)
+    insertAsset({ persist: assetUrl }, w.x - 130, w.y - 90)
     return
   }
   const files = [...(e.dataTransfer?.files || [])]

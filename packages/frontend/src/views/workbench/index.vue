@@ -1,21 +1,14 @@
 <template>
   <div
-    class="page-container"
-    :class="isCanvasEmbedded ? 'h-full flex flex-col min-w-0 overflow-hidden' : ''"
+    class="page-container h-full flex flex-col min-w-0 overflow-hidden"
     style="background: var(--wb-bg-base)"
   >
     <div
       id="app"
-      class="flex flex-col"
-      :class="isCanvasEmbedded ? 'flex-1 min-h-0 min-w-0 overflow-hidden' : 'pb-4 min-h-screen'"
+      class="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden"
       :style="isCanvasEmbedded ? 'width:100%;max-width:100%' : ''"
     >
-      <AppHeader
-        v-if="isStandalone"
-        :first-nav-to="'/'"
-        :first-nav-label="t('appCenter')"
-        first-nav-icon="mr-2 fas fa-home"
-      />
+      <!-- 顶导航由 AppLayout 统一挂载：独立窗口路由形态才显示（iframe/query 嵌入时隐藏） -->
       <!-- embed 回填提示条（画布卡片 → 工作台） -->
       <div
         v-if="canvasAttachNotice"
@@ -146,6 +139,7 @@
           @manage-presets="presetMgrOpen = true"
           @manage-skills="skillMgrOpen = true"
           @show-env="showEnvDialog"
+          @show-guide="guideOpen = true"
         />
 
         <!-- 窄容器（embed 画布侧栏）会话历史浮层：会话头「展开」按钮唤出，覆盖对话区左上 -->
@@ -179,19 +173,14 @@
             @manage-presets="presetMgrOpen = true"
             @manage-skills="skillMgrOpen = true"
             @show-env="showEnvDialog"
+            @show-guide="guideOpen = true"
           />
         </div>
 
-        <!-- 中：会话区（embed 模式占满 iframe 高度；顶部还有感知条 mt-2+行高≈36px） -->
+        <!-- 中：会话区（三种形态统一 flex 内滚：外层布局壳已按 meta scrollable:false
+             锁高 overflow-hidden，这里占满剩余高度，消息列表在内部滚动，杜绝双重滚动条） -->
         <section
-          class="flex-1 min-w-0 flex flex-col"
-          :class="
-            isCanvasEmbedded
-              ? 'flex-1 min-h-0'
-              : isEmbed
-                ? 'h-[calc(100vh-52px)]'
-                : 'h-[calc(100vh-96px)]'
-          "
+          class="flex-1 min-w-0 min-h-0 flex flex-col"
           style="border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-card)"
         >
           <!-- 会话头 -->
@@ -778,10 +767,10 @@
           />
         </section>
 
-        <!-- 右：产物面板（可折叠；embed 模式产物自动上墙，右栏收起） -->
+        <!-- 右：产物面板（可折叠；embed 模式产物自动上墙，右栏收起；高度由主列 flex stretch 撑满） -->
         <section
           v-if="panelOpen && !isNarrow"
-          class="w-72 shrink-0 flex flex-col h-[calc(100vh-96px)]"
+          class="w-72 shrink-0 flex flex-col min-h-0"
           style="border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-card)"
         >
           <div
@@ -984,6 +973,9 @@
 
     <!-- 技能库（SKILL.md 知识技能管理） -->
     <SkillManager v-model:open="skillMgrOpen" />
+
+    <!-- 使用指南（场景速览/模式/预设/模板/技能/提示词与素材库） -->
+    <UsageGuide v-model:open="guideOpen" @start="startScenario" />
 
     <!-- 工作台能力/环境说明（自我认知可视化） -->
     <a-modal v-model:open="envOpen" :title="t('workbenchEnvInfo')" :footer="null" width="560px">
@@ -1218,7 +1210,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import { useI18n } from '@/utils/i18n'
 import { useAppStore } from '@/stores/appStore'
-import AppHeader from '@/views/apps/components/AppHeader.vue'
 import SessionSidebar from './components/SessionSidebar.vue'
 import WbMarkdown from './components/WbMarkdown.vue'
 import InteractionApprovalCard from './components/InteractionApprovalCard.vue'
@@ -1227,6 +1218,8 @@ import Composer from './components/Composer.vue'
 import NewSessionDialog from './components/NewSessionDialog.vue'
 import PresetManager from './components/PresetManager.vue'
 import SkillManager from './components/SkillManager.vue'
+import UsageGuide from './components/UsageGuide.vue'
+import { scenarioByPreset } from './demoScenarios'
 import { canApplyFix } from './diagnosis'
 import { pushFiles, drainAttachments, drainFiles } from '@/utils/canvasBridge'
 import { useCanvasMode } from '@/utils/canvasMode'
@@ -1357,6 +1350,9 @@ const pollTimers = new Map()
 const newDialogOpen = ref(false)
 const presetMgrOpen = ref(false)
 const skillMgrOpen = ref(false)
+const guideOpen = ref(false)
+// 首次进入自动弹出使用指南（只弹一次；localStorage 标记）
+const GUIDE_SEEN_KEY = 'artify.workbench.guideSeen.v1'
 
 const currentSession = computed(() => sessions.value.find((s) => s.id === sessionId.value))
 const sessionPreset = computed(() =>
@@ -1376,10 +1372,20 @@ onMounted(async () => {
   // 窄容器（embed 画布侧栏）会话栏默认收起，点会话头「展开」按钮唤出浮层
   if (isNarrow.value) sidebarCollapsed.value = true
   await Promise.all([loadSessions(), loadPresets(), loadSkills(), loadAdvTemplates()])
-  // 恢复优先级：URL 显式 session > 上次会话（embed iframe 重建后 URL 丢失，靠它找回）
+  // 恢复优先级：URL 显式 session > 上次会话（localStorage，embed iframe 重建后 URL 丢失靠它找回）
+  // > 最近活跃会话（服务端兜底）。**恢复失败绝不无条件新建**：canvas 侧栏每次打开 AI 面板都
+  // 重挂本组件（v-if 切换 → onMounted 重跑），而 localStorage 在多窗口/多宿主（ComfyUI 侧栏
+  // iframe、独立窗口、画布页）间并非总是同域共享，一旦 key 失效/会话被删，旧逻辑就会每次
+  // 进入都叠一个空会话（实测单日堆积 6 个）。只有列表真空（首次使用/全部归档）才自动建。
   const sid = route.query.session || localStorage.getItem(LAST_SESSION_KEY)
-  if (sid && sessions.value.some((s) => s.id === sid)) {
-    await selectSession({ id: sid })
+  const target =
+    (sid && sessions.value.find((s) => s.id === sid)) ||
+    // loadSessions 服务端已按 updatedAt 倒序且只含未归档 → 首项即最近活跃会话
+    sessions.value[0]
+  if (target) {
+    // 兜底命中时顺手回写 localStorage，修复域失效/竞态导致的 key 空洞
+    localStorage.setItem(LAST_SESSION_KEY, target.id)
+    await selectSession({ id: target.id })
   } else {
     // 首次自动建会话失败不打断初始化：无会话时预设 chip 会引导用所选预设开会话
     try {
@@ -1389,6 +1395,11 @@ onMounted(async () => {
     }
   }
   document.addEventListener('keydown', onGlobalKey)
+  // 开箱引导：首次进入自动展开使用指南（创建会话等初始化完成后再弹，避免打断）
+  if (!localStorage.getItem(GUIDE_SEEN_KEY)) {
+    localStorage.setItem(GUIDE_SEEN_KEY, '1')
+    guideOpen.value = true
+  }
 })
 
 onBeforeUnmount(() => {
@@ -1485,6 +1496,39 @@ async function createSession({ presetId, title }) {
   const json = await res.json()
   await loadSessions()
   await selectSession({ id: json.data.id })
+}
+
+/**
+ * 使用指南「一键开始」：建对应预设的会话 + 预填示例提示词。
+ * 图生图场景（seedImage）自动把内置示例参考图转 File 走 uploadFiles 附上。
+ * 传入 presetId 而无匹配场景（如 standard）时仅开一个该预设的空会话。
+ */
+async function startScenario(sc) {
+  guideOpen.value = false
+  try {
+    const presetId = sc?.presetId || 'standard'
+    await createSession({ presetId })
+    const demo = sc?.prompt ? sc : scenarioByPreset(presetId)
+    if (demo?.seedImage) {
+      try {
+        const res = await fetch(demo.seedImage)
+        if (res.ok) {
+          const blob = await res.blob()
+          await uploadFiles([new File([blob], 'demo-reference.jpg', { type: 'image/jpeg' })])
+        }
+      } catch (e) {
+        console.warn('[workbench] scenario seed image attach failed', e)
+      }
+    }
+    if (demo?.prompt) {
+      // prompt 是 {zh,en} 字典（UsageGuide 渲染时取 [lang]），这里必须同样按语言取串——
+      // 直接把对象赋给输入框会污染 v-model 并打挂后续渲染
+      input.value =
+        typeof demo.prompt === 'string' ? demo.prompt : (demo.prompt[lang.value] ?? demo.prompt.zh)
+    }
+  } catch (e) {
+    console.error('[workbench] start scenario failed', e)
+  }
 }
 
 async function onRename({ id, title }) {
@@ -2625,7 +2669,6 @@ const props = defineProps({ canvasEmbedded: { type: Boolean, default: false } })
 const isCanvasEmbedded = computed(() => props.canvasEmbedded || route.query.canvas === '1')
 // 窄栏布局：C 宿主 iframe 与画布侧边栏共用（收会话侧栏/产物右栏、紧凑高度）
 const isNarrow = computed(() => isEmbed.value || isCanvasEmbedded.value)
-const isStandalone = computed(() => !isNarrow.value)
 
 /** 把产物文件引用发给注入脚本（父窗口），由它铺成画布陈列卡片；
  *  画布侧栏模式直接经 canvasMode 推给宿主画布自动落布；

@@ -601,7 +601,15 @@ export function createAguiBridge(pageApi) {
     // dismissProgress 消费对象)——回放期间在途 run 的收尾不受回放干扰
     pageApi.messages.value = []
 
-    // M2:agent 消息按 run 边界重建回合;用户消息按 createdAt 归并到对应 run 前
+    // M2 修订：agent 消息按 run 边界重建回合；用户消息按消息 ts 做**时间序归并**。
+    // 归并根因（2026-09-05 真实数据实证）：服务端每轮先落 RUN_STARTED
+    // （routes/agui.ts emit(runStarted) 在 decide 调用之前），decide 内才
+    // appendMessage 用户消息（service.ts 1522）——user.createdAt **恒晚于**
+    // 该 run 首条记录的落库时间（实测 +33ms）。旧实现以「createdAt ≤ run
+    // 首事件时间」判定归属，条件恒不满足 → 用户消息被推到轮尾/沉底
+    // （表现：历史会话第一条是 AI 报错气泡、用户消息排第二）。
+    // 新实现：用户消息只与其「之后首条 agent 内容」比时间（该内容必然晚于
+    // 同轮用户消息 append），时间戳比较从 run 边界解耦，ms 级先后不再影响归属。
     let currentRunId = null
     const legacyMsgs =
       (pageApi.curSession && pageApi.curSession.value && pageApi.curSession.value.messages) || []
@@ -623,21 +631,16 @@ export function createAguiBridge(pageApi) {
         })
       }
     }
-    // 各 run 的首条落库时间(用户消息归并锚点:run 开始前的用户消息属于该轮输入)
-    const runStartTsById = new Map()
-    for (const rec of records) {
-      if (rec.runId && rec.createdAt && !runStartTsById.has(rec.runId)) {
-        runStartTsById.set(rec.runId, rec.createdAt)
-      }
-    }
 
     for (const m of replayToMessages(records)) {
-      // 新 run 的第一条消息前:翻回合 + 归并该轮的用户输入
+      // 新 run 的第一条消息前翻回合（agent 消息按 run 分组共享 turnId）
       if (m.__runId && m.__runId !== currentRunId) {
         currentRunId = m.__runId
-        flushUsersBefore(runStartTsById.get(m.__runId) || Date.now())
         pageApi.nextTurn()
       }
+      // 时间序归并：任何「早于本条 agent 内容」的用户输入都先上屏。
+      // m.ts 缺失（测试桩/极端旧数据）按 0 处理，用户消息由尾部兜底统一上屏。
+      flushUsersBefore(m.ts ?? 0)
       if (m.kind === 'text') {
         pageApi.pushMsg({ role: 'agent', kind: 'chat', text: m.text || '', createdAt: Date.now() })
       } else if (m.kind === 'reasoning') {
@@ -656,12 +659,15 @@ export function createAguiBridge(pageApi) {
           toolItem: synthToolItem(m.toolCallId, m.name, m.args, m.result, m.status === 'done'),
           createdAt: Date.now(),
         })
+      } else if (m.kind === 'error') {
+        // RUN_ERROR 终帧回放：错误轮回放不再只剩用户消息
+        pageApi.pushMsg({ role: 'agent', kind: 'error', text: m.text || '', createdAt: Date.now() })
       } else if (m.kind === 'custom') {
         applyCustom(pageApi, state, m.name, m.value)
       }
     }
     // 尾部剩余用户消息(最后一轮 run 之后发的)
-    flushUsersBefore(Date.now() + 1)
+    flushUsersBefore(Number.MAX_SAFE_INTEGER)
     pageApi.scrollToBottom()
   }
 

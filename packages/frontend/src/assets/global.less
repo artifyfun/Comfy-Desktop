@@ -220,3 +220,14 @@ select::placeholder {
 .text-slate-400 {
   color: #a5b4c8 !important;
 }
+
+/* 超长代码/文本横溢兜底：布局壳内容区 overflow-x-hidden 后，不换行的 pre/code 会造成
+   内容被横向裁剪或页面级横向滚动条；pre-wrap + break-word 在保持代码可读的同时防溢出 */
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+code {
+  white-space: pre-wrap;
+  word-break: break-all;
+}

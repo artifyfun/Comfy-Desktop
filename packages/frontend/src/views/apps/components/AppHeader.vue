@@ -1,89 +1,90 @@
 <template>
+  <!-- 通栏顶栏：不随页面内容限宽居中（去掉 mx-auto max-w-7xl），logo 与主导航同组靠左、
+       工具按钮靠右铺满整行；高度钉 40px（--wb-topbar-h），与布局壳内容区精确衔接 -->
   <header
-    class="relative px-4 py-3 mx-auto max-w-7xl sm:px-6 lg:px-8"
-    style="min-height: var(--wb-topbar-h)"
+    class="relative z-20 flex items-center w-full px-4 py-1.5 border-b sm:px-6 lg:px-8 shrink-0"
+    style="min-height: var(--wb-topbar-h); border-color: var(--wb-stroke)"
   >
-    <div
-      class="flex flex-col space-y-4 md:flex-row md:items-center md:justify-between md:space-y-0"
-    >
-      <!-- 左侧标题 -->
-      <div class="flex items-center space-x-4">
-        <div class="flex items-center space-x-3 cursor-pointer" @click="toggleAboutModal">
-          <div class="flex justify-center items-center w-7 h-7 rounded-md brand-mark">A</div>
-          <h1 class="text-lg font-semibold text-white">
-            Artify<span class="text-slate-400 font-medium">{{
-              currentLang === 'zh' ? '工坊' : 'Lab'
-            }}</span>
-          </h1>
-        </div>
+    <!-- 左：Logo + 桌面端主导航（同一组，导航紧贴 logo，中间不留空） -->
+    <div class="flex flex-wrap items-center min-w-0 gap-x-1">
+      <div class="flex items-center gap-2.5 shrink-0 pr-2 cursor-pointer" @click="toggleAboutModal">
+        <div class="flex justify-center items-center w-7 h-7 rounded-md brand-mark">A</div>
+        <h1 class="text-lg font-semibold leading-none text-white">
+          Artify<span class="text-slate-400 font-medium">{{
+            currentLang === 'zh' ? '工坊' : 'Lab'
+          }}</span>
+        </h1>
       </div>
-
-      <!-- 右侧操作 -->
-      <div class="flex items-center space-x-4">
-        <!-- 桌面端导航 -->
-        <nav class="flex space-x-4" v-if="isElectron">
-          <router-link
-            :to="firstNavTo"
-            class="nav-tab"
-            :class="{ 'nav-tab-on': $route.path === firstNavTo }"
-          >
-            <i :class="firstNavIcon"></i>
-            {{ firstNavLabel || t('appCenter') }}
-          </router-link>
-          <router-link
-            to="/canvas"
-            class="nav-tab"
-            :class="{ 'nav-tab-on': $route.path === '/canvas' }"
-          >
-            <i class="mr-2 fas fa-shapes"></i>
-            {{ t('canvas') }}
-          </router-link>
-          <router-link
-            to="/gallery"
-            class="nav-tab"
-            :class="{ 'nav-tab-on': $route.path === '/gallery' }"
-          >
-            <i class="mr-2 fas fa-images"></i>
-            {{ t('gallery') }}
-          </router-link>
-          <router-link
-            to="/workbench"
-            class="nav-tab"
-            :class="{ 'nav-tab-on': $route.path === '/workbench' }"
-          >
-            <i class="mr-2 fas fa-wand-magic-sparkles"></i>
-            {{ t('workbench') }}
-          </router-link>
-        </nav>
-        <!-- 语言切换 -->
-        <button
-          v-if="isElectron"
-          @click="toggleLanguage"
-          class="px-3 py-1.5 text-sm font-medium rounded-md transition duration-150 text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]"
+      <nav
+        v-if="isElectron"
+        class="flex items-center pl-1 gap-1 border-l"
+        style="border-color: var(--wb-stroke)"
+      >
+        <router-link
+          :to="firstNavTo"
+          class="nav-tab"
+          :class="{ 'nav-tab-on': $route.path === firstNavTo }"
         >
-          <i class="mr-2 fas fa-globe"></i>
-          {{ currentLang === 'zh' ? 'EN' : '中文' }}
-        </button>
-
-        <!-- 关于按钮 -->
-        <button
-          @click="toggleAboutModal"
-          class="px-3 py-1.5 text-sm font-medium rounded-md transition duration-150 text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]"
+          <i :class="firstNavIcon"></i>
+          {{ firstNavLabel || t('appCenter') }}
+        </router-link>
+        <router-link
+          to="/canvas"
+          class="nav-tab"
+          :class="{ 'nav-tab-on': $route.path === '/canvas' }"
         >
-          <i class="mr-2 fas fa-info-circle"></i>
-          {{ t('about') }}
-        </button>
-
-        <!-- 设置按钮 -->
-        <button
-          v-if="isElectron"
-          @click="toggleConfigModal"
-          class="px-3 py-1.5 text-sm font-medium rounded-md transition duration-150 text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]"
+          <i class="mr-2 fas fa-shapes"></i>
+          {{ t('canvas') }}
+        </router-link>
+        <router-link
+          to="/gallery"
+          class="nav-tab"
+          :class="{ 'nav-tab-on': $route.path === '/gallery' }"
         >
-          <i class="mr-2 fas fa-cog"></i>
-          {{ t('settings') }}
-        </button>
-      </div>
+          <i class="mr-2 fas fa-images"></i>
+          {{ t('gallery') }}
+        </router-link>
+        <router-link
+          to="/workbench"
+          class="nav-tab"
+          :class="{ 'nav-tab-on': $route.path === '/workbench' }"
+        >
+          <i class="mr-2 fas fa-wand-magic-sparkles"></i>
+          {{ t('workbench') }}
+        </router-link>
+      </nav>
+    </div>
+
+    <!-- 右：工具按钮组（ml-auto 靠右） -->
+    <div class="flex items-center gap-1 ml-auto shrink-0">
+      <!-- 语言切换 -->
+      <button
+        v-if="isElectron"
+        @click="toggleLanguage"
+        class="px-3 py-1.5 text-sm font-medium rounded-md transition duration-150 text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]"
+      >
+        <i class="mr-2 fas fa-globe"></i>
+        {{ currentLang === 'zh' ? 'EN' : '中文' }}
+      </button>
+
+      <!-- 关于按钮 -->
+      <button
+        @click="toggleAboutModal"
+        class="px-3 py-1.5 text-sm font-medium rounded-md transition duration-150 text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]"
+      >
+        <i class="mr-2 fas fa-info-circle"></i>
+        {{ t('about') }}
+      </button>
+
+      <!-- 设置按钮 -->
+      <button
+        v-if="isElectron"
+        @click="toggleConfigModal"
+        class="px-3 py-1.5 text-sm font-medium rounded-md transition duration-150 text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]"
+      >
+        <i class="mr-2 fas fa-cog"></i>
+        {{ t('settings') }}
+      </button>
     </div>
 
     <!-- About 组件 -->

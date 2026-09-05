@@ -574,6 +574,124 @@ describe('aguiBridge — 历史回放与实时序列同构', () => {
     expect(pageApi.messages.value[0].text).toBe('legacy 历史消息')
     vi.unstubAllGlobals()
   })
+
+  it('用户消息 createdAt 晚于 run 首条记录（服务端先落 RUN_STARTED 后 append user）→ 仍归位本轮前，不沉底', async () => {
+    // 回归：2026-09-05 实测时序 RUN_STARTED 落库 18:05:05.849 → user.append
+    // 18:05:05.882（晚 33ms）。旧归并以 createdAt ≤ run 首事件判定 → 恒不满足
+    // → 历史回放显示 [AI 报错气泡, 用户消息] 倒序。新实现按消息 ts 时间序归并。
+    const { createAguiBridge } = await import('../aguiBridge')
+    const pageApi = makePageApi()
+    // legacy 用户消息由服务端 decide append（createdAt 晚于 run 首条记录）
+    pageApi.curSession = {
+      value: {
+        messages: [{ role: 'user', kind: 'chat', text: '帮我画一只猫', createdAt: 1033 }],
+      },
+    }
+    const bridge = createAguiBridge(pageApi)
+    const records = [
+      {
+        runId: 'r-1',
+        seq: 1,
+        eventType: 'RUN_STARTED',
+        createdAt: 1000,
+        content: JSON.stringify({ type: 'RUN_STARTED' }),
+      },
+      {
+        runId: 'r-1',
+        seq: 2,
+        eventType: 'CUSTOM',
+        createdAt: 2900,
+        content: JSON.stringify({ type: 'CUSTOM', name: 'wb_error', value: { message: 'boom' } }),
+      },
+    ]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { records } }) }),
+      ),
+    )
+    await bridge.loadHistoryIntoPage('th-1')
+    const seq = pageApi.messages.value.map((m) => ({ role: m.role, kind: m.kind, text: m.text }))
+    // 用户消息必须在 AI 报错气泡之前（先用户后回复），不得沉底到报错之后
+    expect(seq).toEqual([
+      { role: 'user', kind: 'chat', text: '帮我画一只猫' },
+      { role: 'agent', kind: 'error', text: 'boom' },
+    ])
+    vi.unstubAllGlobals()
+  })
+
+  it('RUN_ERROR 终帧在历史回放中产出 error 气泡（此前被 replayToMessages 丢弃）', async () => {
+    const { createAguiBridge } = await import('../aguiBridge')
+    const pageApi = makePageApi()
+    pageApi.curSession = { value: { messages: [] } }
+    const bridge = createAguiBridge(pageApi)
+    const records = [
+      {
+        runId: 'r-1',
+        seq: 1,
+        eventType: 'RUN_STARTED',
+        createdAt: 1000,
+        content: JSON.stringify({ type: 'RUN_STARTED' }),
+      },
+      {
+        runId: 'r-1',
+        seq: 2,
+        eventType: 'TEXT_MESSAGE_START',
+        createdAt: 2000,
+        content: JSON.stringify({ type: 'TEXT_MESSAGE_START', messageId: 'm1', role: 'assistant' }),
+      },
+      {
+        runId: 'r-1',
+        seq: 3,
+        eventType: 'TEXT_MESSAGE_CONTENT',
+        createdAt: 2010,
+        content: JSON.stringify({ type: 'TEXT_MESSAGE_CONTENT', messageId: 'm1', delta: '你好' }),
+      },
+      {
+        runId: 'r-1',
+        seq: 4,
+        eventType: 'TEXT_MESSAGE_END',
+        createdAt: 2020,
+        content: JSON.stringify({ type: 'TEXT_MESSAGE_END', messageId: 'm1' }),
+      },
+      {
+        runId: 'r-1',
+        seq: 5,
+        eventType: 'RUN_ERROR',
+        createdAt: 5000,
+        content: JSON.stringify({
+          type: 'RUN_ERROR',
+          message: 'Codex Exec exited with code 1',
+          code: 'exec_failed',
+        }),
+      },
+      // 同 run 第二条 RUN_ERROR（如断线重连终帧）：原位去重，只留最后一条
+      {
+        runId: 'r-1',
+        seq: 6,
+        eventType: 'RUN_ERROR',
+        createdAt: 5001,
+        content: JSON.stringify({
+          type: 'RUN_ERROR',
+          message: 'Reading prompt from stdin...',
+          code: 'exec_failed',
+        }),
+      },
+    ]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { records } }) }),
+      ),
+    )
+    await bridge.loadHistoryIntoPage('th-1')
+    const seq = pageApi.messages.value.map((m) => ({ kind: m.kind, text: m.text }))
+    expect(seq).toEqual([
+      { kind: 'chat', text: '你好' },
+      { kind: 'error', text: 'Reading prompt from stdin...' },
+    ])
+    vi.unstubAllGlobals()
+  })
 })
 
 describe('aguiBridge — HITL 审批卡（C15 集成）', () => {

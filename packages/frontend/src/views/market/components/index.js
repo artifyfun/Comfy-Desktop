@@ -1,5 +1,3 @@
-export { default as MarketAppHeader } from './MarketAppHeader.vue'
-export { default as MarketAppActions } from './MarketAppActions.vue'
 export { default as MarketAppGrid } from './MarketAppGrid.vue'
 export { default as MarketAppCard } from './MarketAppCard.vue'
 export { default as MarketAppDetail } from './MarketAppDetail.vue'

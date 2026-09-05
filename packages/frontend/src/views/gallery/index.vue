@@ -1,9 +1,7 @@
 <template>
   <div class="page-container bg-tech-dark">
-    <div id="app" class="pb-20 min-h-screen">
+    <div id="app" class="pb-20">
       <div class="fixed inset-0 grid-lines"></div>
-      <AppHeader />
-
       <main class="relative px-4 mx-auto mt-4 max-w-7xl sm:px-6 lg:px-8">
         <div class="flex flex-wrap gap-3 items-center justify-between mb-6">
           <div class="flex items-center space-x-2">
@@ -292,7 +290,6 @@ import { useRouter, useRoute } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import Viewer from 'viewerjs'
 import 'viewerjs/dist/viewer.css'
-import AppHeader from '../apps/components/AppHeader.vue'
 import GalleryVirtualMasonry from './components/GalleryVirtualMasonry.vue'
 import { useAppStore } from '@/stores/appStore'
 import { useI18nInComponent } from '@/utils/i18n'

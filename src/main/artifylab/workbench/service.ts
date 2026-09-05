@@ -1603,21 +1603,35 @@ ${userInput}`
         }
       }
     } catch (e) {
-      // 中断/异常也留调试日志（用户停止后「复制 debug」仍有内容可看）；
-      // 仅 abort 场景记录（其他异常由上层统一处理）
+      // 中断/异常都留调试日志（用户停止或失败后「复制 debug」仍有内容可看）。
+      // 历史上只记 abort；普通执行异常（如上游 429/超时导致 codex exit 1）不记，
+      // 前端「复制调试信息」在失败轮恒报 no debug log yet → 统一补记。
       const aborted =
         !!opts.signal?.aborted || (e instanceof Error && /abort|cancel/i.test(e.message))
-      if (aborted) {
-        this.recordDebug(sessionId, {
-          effectiveInput,
-          presetId,
-          templateShortcut,
-          spec,
-          rawOutput: rawLines.join('\n'),
-          plan: null,
-          issues: [{ field: 'abort', message: '用户中断（未产出 PLAN）' }],
-          model: appStoreManager.getConfig().buildModel
-        })
+      const errMsg = e instanceof Error ? e.message : String(e)
+      this.recordDebug(sessionId, {
+        effectiveInput,
+        presetId,
+        templateShortcut,
+        spec,
+        rawOutput: rawLines.join('\n'),
+        plan: null,
+        issues: aborted
+          ? [{ field: 'abort', message: '用户中断（未产出 PLAN）' }]
+          : [{ field: 'exec', message: errMsg.slice(0, 2000) }],
+        model: appStoreManager.getConfig().buildModel
+      })
+      // 错误消息增强：codex CLI 上游失败（HTTP 429/401 等）时 stdout JSONL 会打
+      // {"type":"error","message":"exceeded retry limit, last status: 429 ..."}，
+      // 而 stderr 只有 "Reading prompt from stdin..."——SDK 抛错消息对用户无意义。
+      // 从已采集的 rawLines 反向取最后一条 error 事件，替代 err.message 上抛，
+      // 让失败气泡/RUN_ERROR/note 呈现可读原因（429→用户自查余额/配额）。
+      const enhanced =
+        !aborted && e instanceof Error ? this.enhanceExecError(rawLines.join('\n')) : null
+      if (enhanced) {
+        const wrapped = new Error(enhanced, { cause: e })
+        wrapped.name = e instanceof Error ? e.name : 'Error'
+        throw wrapped
       }
       throw e
     } finally {
@@ -2079,6 +2093,34 @@ ${userInput}`
       this.flush()
     }
     return { ...result, outputsText }
+  }
+
+  /** 从 codex exec JSONL raw 里提取最后一条可读错误（codex CLI 上游失败时
+   *  stdout 打 {"type":"error","message":"exceeded retry limit, last status: 429..."}，
+   *  stderr 却只有无意义的 "Reading prompt from stdin..."。找不到返回 null，
+   *  调用方保持原 err.message 上抛） */
+  private enhanceExecError(raw: string): string | null {
+    if (!raw) return null
+    for (const line of raw.split('\n').reverse()) {
+      const t = line.trim()
+      if (!t.startsWith('{')) continue
+      try {
+        const obj = JSON.parse(t) as { type?: string; message?: string; item?: unknown }
+        if (obj.type === 'error' && typeof obj.message === 'string' && obj.message.trim()) {
+          const m = obj.message
+          if (/429|Too Many Requests/i.test(m)) {
+            return `${m}（上游限流或账号余额不足：请检查 API 设置里的 Key/余额，或稍后重试）`
+          }
+          if (/401|Unauthorized|authentication/i.test(m)) {
+            return `${m}（上游认证失败：请检查 API 设置里的 Key 是否正确/有效）`
+          }
+          return m.slice(0, 2000)
+        }
+      } catch {
+        /* 非 JSON 行跳过 */
+      }
+    }
+    return null
   }
 
   /** 记录一轮 decide 的调试快照（cap MAX_DEBUG_LOGS 条，字段截断保护） */
