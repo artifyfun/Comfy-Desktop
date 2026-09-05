@@ -810,6 +810,8 @@ const translations = {
     workbenchPrevVariant: '上一个分支',
     workbenchNoSkillsYet: '还没有技能：可在技能库新建或导入',
     workbenchCopySkillsHint: '已预勾源预设的技能，可当场增删',
+    workbenchUniversalSkillsHint:
+      '通用技能（wb-* 编排/媒体参数/批次记忆/模型知识、模型兼容/注册/排障、工作流布局/渲染调试、提示词工程）所有预设自动附带，无需勾选。',
     today: '今天',
     yesterday: '昨天',
     workbenchNextVariant: '下一个分支',
@@ -2076,6 +2078,8 @@ const translations = {
     workbenchPrevVariant: 'Previous variant',
     workbenchNoSkillsYet: 'No skills yet — create or import in the Skill Library',
     workbenchCopySkillsHint: 'Pre-checked from the source preset; adjust freely',
+    workbenchUniversalSkillsHint:
+      'Universal skills (wb-* orchestration / media params / batch memory / model knowledge, model compatibility / registry / troubleshooting, workflow layout / render debug, prompt engineering) are auto-included in every preset; no need to check them.',
     today: 'Today',
     yesterday: 'Yesterday',
     workbenchNextVariant: 'Next variant',

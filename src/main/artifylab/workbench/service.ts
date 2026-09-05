@@ -428,6 +428,27 @@ function deployWorkbenchSkills(codexHome: string): void {
   }
 }
 
+/**
+ * 预设 skillIds 失效过滤：指向已删除/禁用/校验失败的技能时，从决策约束
+ * 中剔除（运行期过滤，不落盘）。约束里提示 "read the SKILL.md first" 而
+ * 目标不存在，会引导模型做无效读取浪费轮次。库不可用时原样返回。
+ */
+function effectivePreset(preset: WorkbenchPreset | undefined): WorkbenchPreset | undefined {
+  if (!preset?.skillIds?.length) return preset
+  try {
+    const active = new Set(
+      defaultSkillLibrary()
+        .list()
+        .filter((s) => s.valid && s.enabled)
+        .map((s) => s.name)
+    )
+    if (preset.skillIds.every((id) => active.has(id))) return preset
+    return { ...preset, skillIds: preset.skillIds.filter((id) => active.has(id)) }
+  } catch {
+    return preset
+  }
+}
+
 /** 会话级 agent 运行时状态（harness P1）：codex+thread 跨消息复用 */
 interface AgentSession {
   codex: Codex
@@ -1493,7 +1514,7 @@ ${userInput}`
       templateShortcut = slash.id
       userInput = slash.rest
     }
-    const preset = (presetId ? this.getPreset(presetId) : undefined) ?? undefined
+    const preset = effectivePreset((presetId ? this.getPreset(presetId) : undefined) ?? undefined)
     // 预设提示词模板展开（{input} 占位）；附件-only 输入给默认占位提示
     const baseInput = userInput.trim() || '按我上传的素材生成'
     const effectiveInput = applyPromptTemplate(preset, baseInput)

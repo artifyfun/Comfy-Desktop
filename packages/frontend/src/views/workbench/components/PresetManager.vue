@@ -137,43 +137,48 @@
         <div v-if="skillsList.length === 0" class="text-xs text-[var(--wb-text-3)] py-2">
           {{ t('workbenchSkillsEmptyLib') }}
         </div>
-        <div v-else class="max-h-56 overflow-y-auto space-y-2">
-          <div v-for="g in groupedSkills" :key="g.id">
-            <div
-              class="flex items-center justify-between px-2 py-1 sticky top-0 z-10"
-              style="background: var(--wb-surface)"
-            >
-              <span class="text-[11px] text-[var(--wb-text-3)] font-medium"
-                >{{ g.label }} ({{ g.skills.length }})</span
-              >
-              <button
-                class="text-[11px] text-[var(--wb-accent)] hover:underline"
-                @click="toggleGroup(g)"
-              >
-                {{ groupAllOn(g) ? t('workbenchSkillGroupNone') : t('workbenchSkillGroupAll') }}
-              </button>
-            </div>
-            <label
-              v-for="s in g.skills"
-              :key="s.name"
-              class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--wb-surface-hover)] cursor-pointer"
-            >
-              <input
-                type="checkbox"
-                :value="s.name"
-                v-model="checkedSkills"
-                class="wb-tech-check"
-              />
-              <span class="text-sm text-white font-mono">{{ s.name }}</span>
-              <span v-if="!s.valid" class="text-[10px] text-red-400">{{
-                t('workbenchSkillInvalid')
-              }}</span>
-              <span class="text-[11px] text-[var(--wb-text-2)] truncate ml-auto">{{
-                s.description
-              }}</span>
-            </label>
+        <template v-else>
+          <div class="text-[11px] text-[var(--wb-text-3)] mb-1">
+            {{ t('workbenchUniversalSkillsHint') }}
           </div>
-        </div>
+          <div class="max-h-56 overflow-y-auto space-y-2">
+            <div v-for="g in groupedSkills" :key="g.id">
+              <div
+                class="flex items-center justify-between px-2 py-1 sticky top-0 z-10"
+                style="background: var(--wb-surface)"
+              >
+                <span class="text-[11px] text-[var(--wb-text-3)] font-medium"
+                  >{{ g.label }} ({{ g.skills.length }})</span
+                >
+                <button
+                  class="text-[11px] text-[var(--wb-accent)] hover:underline"
+                  @click="toggleGroup(g)"
+                >
+                  {{ groupAllOn(g) ? t('workbenchSkillGroupNone') : t('workbenchSkillGroupAll') }}
+                </button>
+              </div>
+              <label
+                v-for="s in g.skills"
+                :key="s.name"
+                class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--wb-surface-hover)] cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  :value="s.name"
+                  v-model="checkedSkills"
+                  class="wb-tech-check"
+                />
+                <span class="text-sm text-white font-mono">{{ s.name }}</span>
+                <span v-if="!s.valid" class="text-[10px] text-red-400">{{
+                  t('workbenchSkillInvalid')
+                }}</span>
+                <span class="text-[11px] text-[var(--wb-text-2)] truncate ml-auto">{{
+                  s.description
+                }}</span>
+              </label>
+            </div>
+          </div>
+        </template>
       </a-modal>
 
       <!-- 复制对话框 -->
@@ -256,6 +261,7 @@
               </div>
             </div>
             <div class="text-[11px] text-[var(--wb-text-3)] mt-1">
+              {{ t('workbenchUniversalSkillsHint') }}
               {{ t('workbenchCopySkillsHint') }}
             </div>
           </a-form-item>

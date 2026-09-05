@@ -29,6 +29,35 @@ export interface WorkbenchPreset {
   defaultParams?: Record<string, unknown>
 }
 
+/**
+ * 通用技能层：与意图（image/video/chat）无关的跨领域能力，所有预设
+ * （含自定义副本）在生成决策约束时自动并入软偏好，无需各预设显式列出。
+ * 覆盖：编排/媒体参数/批次记忆/模型知识（wb-* core）、模型兼容/注册/排障/
+ * 工作流布局/渲染调试（ops）、提示词工程（prompt）。
+ */
+export const UNIVERSAL_SKILL_IDS: readonly string[] = [
+  'wb-orchestration',
+  'wb-media-params',
+  'wb-batch-memory',
+  'wb-model-knowledge',
+  'model-compatibility',
+  'model-registry',
+  'troubleshooting',
+  'workflow-layout',
+  'debug-render',
+  'prompt-engineering'
+]
+
+/**
+ * 通用技能并入预设 skillIds（通用在前，去重）。
+ * skillIds 为空/缺省时返回通用层副本。
+ */
+export function mergeUniversalSkills(skillIds?: readonly string[]): string[] {
+  const merged = [...UNIVERSAL_SKILL_IDS]
+  if (skillIds) for (const id of skillIds) if (!merged.includes(id)) merged.push(id)
+  return merged
+}
+
 export const BUILTIN_PRESETS: WorkbenchPreset[] = [
   {
     id: 'standard',
@@ -84,6 +113,31 @@ export const BUILTIN_PRESETS: WorkbenchPreset[] = [
     intentHint: 'video',
     promptTemplate: '{input}',
     skillIds: [
+      'h3-prompt-writing',
+      'minimax-h3-video',
+      'wan-t2v-video',
+      'wan-flf-video',
+      'ltxv2-video',
+      'director'
+    ]
+  },
+  {
+    id: 'omni',
+    name: { zh: '全能', en: 'Omni' },
+    description: {
+      zh: '不锁意图；图像/视频全模型覆盖，通用能力自动附带',
+      en: 'No intent lock; full image/video model coverage, universal skills auto-included'
+    },
+    builtin: true,
+    order: 5,
+    promptTemplate: '{input}',
+    // 只列领域代表技能；通用层（wb-* 编排/模型知识/提示词工程等）由
+    // presetConstraintText 自动并入，不在存储列表中重复
+    skillIds: [
+      'krea2-txt2img',
+      'krea2-identity-edit',
+      'anima-base',
+      'flux-image-best-practices',
       'h3-prompt-writing',
       'minimax-h3-video',
       'wan-t2v-video',
@@ -155,12 +209,10 @@ export function presetConstraintText(preset: WorkbenchPreset | undefined): strin
     // 捆绑模板=可执行推荐池（软约束，非强制唯一）
     parts.push(`prefer templates [${preset.templateIds.join(', ')}] when suitable`)
   }
-  if (preset.skillIds?.length) {
-    // 捆绑技能=知识文档（SKILL.md，已部署到 $CODEX_HOME/skills/），软约束
-    parts.push(
-      `prefer skills [${preset.skillIds.join(', ')}] when suitable (read the SKILL.md first)`
-    )
-  }
+  // 捆绑技能=知识文档（SKILL.md，已部署到 $CODEX_HOME/skills/），软约束；
+  // 通用技能层始终并入（所有预设都应具备编排/模型知识/提示词工程等跨领域能力）
+  const skillIds = mergeUniversalSkills(preset.skillIds)
+  parts.push(`prefer skills [${skillIds.join(', ')}] when suitable (read the SKILL.md first)`)
   if (preset.defaultParams && Object.keys(preset.defaultParams).length > 0) {
     parts.push(`default params baseline: ${JSON.stringify(preset.defaultParams)}`)
   }

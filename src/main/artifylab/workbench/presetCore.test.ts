@@ -1,24 +1,27 @@
 import { describe, it, expect } from 'vitest'
 import {
   BUILTIN_PRESETS,
+  UNIVERSAL_SKILL_IDS,
   applyPromptTemplate,
   assignAttachmentsToSlots,
   attachmentSummary,
   clonePreset,
   deriveAttachmentKind,
   isValidPresetId,
+  mergeUniversalSkills,
   parseSlashToken,
   presetConstraintText
 } from './presetCore'
 
 describe('presetCore', () => {
   describe('内置预设', () => {
-    it('4 个内置，standard 无约束', () => {
+    it('5 个内置，standard 无约束', () => {
       expect(BUILTIN_PRESETS.map((p) => p.id)).toEqual([
         'standard',
         'text-to-image',
         'image-to-image',
-        'video-gen'
+        'video-gen',
+        'omni'
       ])
       expect(BUILTIN_PRESETS[0]!.builtin).toBe(true)
       expect(BUILTIN_PRESETS[0]!.intentHint).toBeUndefined()
@@ -27,6 +30,59 @@ describe('presetCore', () => {
     it('意图约束各自正确', () => {
       expect(BUILTIN_PRESETS[1]!.intentHint).toBe('image')
       expect(BUILTIN_PRESETS[3]!.intentHint).toBe('video')
+    })
+  })
+
+  describe('通用技能层', () => {
+    it('UNIVERSAL_SKILL_IDS 覆盖 wb-* core + ops + 提示词工程', () => {
+      expect(UNIVERSAL_SKILL_IDS).toContain('wb-orchestration')
+      expect(UNIVERSAL_SKILL_IDS).toContain('wb-model-knowledge')
+      expect(UNIVERSAL_SKILL_IDS).toContain('prompt-engineering')
+      expect(UNIVERSAL_SKILL_IDS).toContain('troubleshooting')
+    })
+
+    it('mergeUniversalSkills 通用在前并去重', () => {
+      expect(mergeUniversalSkills()).toEqual([...UNIVERSAL_SKILL_IDS])
+      expect(mergeUniversalSkills(undefined)).toEqual([...UNIVERSAL_SKILL_IDS])
+      const merged = mergeUniversalSkills(['prompt-engineering', 'my-style'])
+      expect(merged.filter((id) => id === 'prompt-engineering')).toHaveLength(1)
+      expect(merged[0]).toBe(UNIVERSAL_SKILL_IDS[0])
+      expect(merged[merged.length - 1]).toBe('my-style')
+    })
+
+    it('无 skillIds 的预设（standard）也附带通用技能偏好', () => {
+      const standard = BUILTIN_PRESETS.find((p) => p.id === 'standard')!
+      const s = presetConstraintText(standard)
+      expect(s).toContain('prefer skills [')
+      for (const id of UNIVERSAL_SKILL_IDS) expect(s).toContain(id)
+    })
+
+    it('领域技能与通用技能合并注入且不重复', () => {
+      const t2i = BUILTIN_PRESETS.find((p) => p.id === 'text-to-image')!
+      const s = presetConstraintText(t2i)
+      expect(s).toContain('krea2-txt2img')
+      expect(s).toContain('prompt-engineering')
+      const list = s.match(/prefer skills \[([^\]]+)\]/)![1]!.split(', ')
+      expect(new Set(list).size).toBe(list.length)
+      expect(list.slice(0, UNIVERSAL_SKILL_IDS.length)).toEqual([...UNIVERSAL_SKILL_IDS])
+    })
+  })
+
+  describe('全能预设 omni', () => {
+    const omni = BUILTIN_PRESETS.find((p) => p.id === 'omni')!
+    it('不锁意图，领域代表技能齐备', () => {
+      expect(omni.builtin).toBe(true)
+      expect(omni.intentHint).toBeUndefined()
+      expect(omni.skillIds).toContain('krea2-txt2img')
+      expect(omni.skillIds).toContain('minimax-h3-video')
+      expect(omni.skillIds).toContain('director')
+      // 存储列表只含领域技能，通用层靠约束合并，不在存储里重复
+      for (const id of UNIVERSAL_SKILL_IDS) expect(omni.skillIds).not.toContain(id)
+    })
+    it('约束文本包含通用层 + 领域技能', () => {
+      const s = presetConstraintText(omni)
+      expect(s).toContain('wb-orchestration')
+      expect(s).toContain('krea2-txt2img')
     })
   })
 
@@ -47,7 +103,7 @@ describe('presetCore', () => {
     const ids = new Set(['standard'])
     it('内置预设带 order 排序值（dsh preset.yml 语义）', () => {
       const orders = BUILTIN_PRESETS.map((p) => p.order)
-      expect(orders).toEqual([1, 2, 3, 4])
+      expect(orders).toEqual([1, 2, 3, 4, 5])
     })
     it('复制内置生成自定义', () => {
       const p = clonePreset('text-to-image', 'my-t2i', '我的文生图', ids)
@@ -128,7 +184,9 @@ describe('presetCore', () => {
       }
       const s = presetConstraintText(p)
       expect(s).toContain('prefer templates [app:flux] when suitable')
-      expect(s).toContain('prefer skills [my-style] when suitable')
+      // 通用技能层并入在前，领域技能追加在后
+      expect(s).toContain('my-style] when suitable')
+      expect(s).toContain('(read the SKILL.md first)')
     })
   })
 
