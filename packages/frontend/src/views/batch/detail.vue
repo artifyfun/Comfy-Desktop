@@ -397,10 +397,10 @@ onBeforeUnmount(() => {
 <style lang="less" scoped>
 .page-container {
   width: 100%;
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  background: var(--wb-bg-base);
   min-height: 100vh;
   padding: 24px;
-  color: #e2e8f0;
+  color: var(--wb-text);
 }
 
 .page-header {
@@ -417,7 +417,7 @@ onBeforeUnmount(() => {
       font-size: 1.8rem;
       font-weight: 700;
       margin: 0;
-      background: linear-gradient(135deg, #0ea5e9 0%, #8b5cf6 100%);
+      background: var(--wb-accent);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
@@ -429,7 +429,7 @@ onBeforeUnmount(() => {
   }
   .page-description {
     font-size: 0.95rem;
-    color: #94a3b8;
+    color: var(--wb-text-2);
     margin: 8px 0 0 0;
   }
 }
@@ -444,19 +444,19 @@ onBeforeUnmount(() => {
 
 /* 队列设置卡片 */
 .config-card {
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(56, 70, 102, 0.4);
+  background: var(--wb-surface-deep);
+  border: 1px solid var(--wb-stroke);
   border-radius: 16px;
   padding: 20px 24px;
   .card-title {
     font-size: 1.1rem;
     font-weight: 600;
-    color: #e2e8f0;
+    color: var(--wb-text);
     margin-bottom: 4px;
   }
   .config-note-text {
     font-size: 0.8rem;
-    color: #64748b;
+    color: var(--wb-text-3);
     margin-bottom: 14px;
   }
   .config-row {
@@ -464,17 +464,17 @@ onBeforeUnmount(() => {
     align-items: flex-start;
     gap: 14px;
     padding: 10px 0;
-    border-top: 1px solid rgba(56, 70, 102, 0.3);
+    border-top: 1px solid var(--wb-stroke);
     .config-info {
       flex: 1;
       .config-label {
         font-weight: 600;
-        color: #e2e8f0;
+        color: var(--wb-text);
         margin-bottom: 2px;
       }
       .config-desc {
         font-size: 0.85rem;
-        color: #94a3b8;
+        color: var(--wb-text-2);
       }
       .notify-input {
         margin-top: 6px;
@@ -485,18 +485,18 @@ onBeforeUnmount(() => {
   .shutdown-switch {
     margin-top: 2px;
     :deep(.ant-switch) {
-      background: rgba(56, 70, 102, 0.6);
-      border-color: rgba(56, 70, 102, 0.8);
+      background: var(--wb-stroke-strong);
+      border-color: var(--wb-stroke-strong);
     }
     :deep(.ant-switch-checked) {
-      background: linear-gradient(90deg, #10b981 0%, #059669 100%);
-      border-color: #10b981;
+      background: var(--wb-success);
+      border-color: var(--wb-success);
     }
   }
   .config-saved {
     margin-top: 10px;
     font-size: 0.85rem;
-    color: #10b981;
+    color: var(--wb-success);
   }
 }
 
@@ -508,10 +508,10 @@ onBeforeUnmount(() => {
   gap: 12px;
   padding: 10px 12px;
   border-radius: 8px;
-  background: rgba(251, 191, 36, 0.12);
-  border: 1px solid rgba(251, 191, 36, 0.4);
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.4);
   .queue-paused-text {
-    color: #fbbf24;
+    color: #f59e0b;
     font-size: 13px;
   }
 }
@@ -530,21 +530,21 @@ onBeforeUnmount(() => {
     .stat-chip {
       padding: 3px 10px;
       border-radius: 12px;
-      background: rgba(30, 41, 59, 0.7);
-      border: 1px solid rgba(56, 70, 102, 0.5);
+      background: var(--wb-surface);
+      border: 1px solid var(--wb-stroke);
       font-size: 12px;
-      color: #cbd5e1;
+      color: var(--wb-text);
       &.queued {
-        color: #fbbf24;
+        color: #f59e0b;
       }
       &.running {
-        color: #7dd3fc;
+        color: var(--wb-accent-hover);
       }
       &.paused {
-        color: #fbbf24;
+        color: #f59e0b;
       }
       &.done {
-        color: #94a3b8;
+        color: var(--wb-text-2);
       }
     }
   }
@@ -558,10 +558,10 @@ onBeforeUnmount(() => {
   text-align: center;
   padding: 60px 0;
   border-radius: 16px;
-  background: rgba(15, 23, 42, 0.4);
-  border: 1px dashed rgba(56, 70, 102, 0.5);
+  background: var(--wb-surface-deep);
+  border: 1px dashed var(--wb-stroke);
   .empty-text {
-    color: #64748b;
+    color: var(--wb-text-3);
     margin-bottom: 16px;
   }
 }
@@ -575,13 +575,13 @@ onBeforeUnmount(() => {
 .job-card {
   padding: 14px 16px;
   border-radius: 12px;
-  background: rgba(30, 41, 59, 0.6);
-  border: 1px solid rgba(56, 70, 102, 0.5);
+  background: var(--wb-surface);
+  border: 1px solid var(--wb-stroke);
   &.running {
-    border-color: rgba(14, 165, 233, 0.55);
+    border-color: var(--wb-accent);
   }
   &.paused {
-    border-color: rgba(251, 191, 36, 0.55);
+    border-color: rgba(245, 158, 11, 0.55);
   }
   &.completed {
     border-color: rgba(16, 185, 129, 0.4);
@@ -602,19 +602,19 @@ onBeforeUnmount(() => {
       border-radius: 10px;
       font-size: 11px;
       line-height: 18px;
-      color: #94a3b8;
-      background: rgba(100, 116, 139, 0.2);
+      color: var(--wb-text-2);
+      background: var(--wb-surface);
       &.queued {
-        color: #fbbf24;
-        background: rgba(251, 191, 36, 0.15);
+        color: #f59e0b;
+        background: rgba(245, 158, 11, 0.15);
       }
       &.running {
-        color: #7dd3fc;
-        background: rgba(14, 165, 233, 0.15);
+        color: var(--wb-accent-hover);
+        background: var(--wb-accent-bg);
       }
       &.paused {
-        color: #fbbf24;
-        background: rgba(251, 191, 36, 0.15);
+        color: #f59e0b;
+        background: rgba(245, 158, 11, 0.15);
       }
       &.completed {
         color: #6ee7b7;
@@ -627,7 +627,7 @@ onBeforeUnmount(() => {
       }
     }
     .job-app {
-      color: #e2e8f0;
+      color: var(--wb-text);
       font-size: 13px;
       font-weight: 500;
       max-width: 240px;
@@ -648,14 +648,14 @@ onBeforeUnmount(() => {
           border: 1px solid rgba(239, 68, 68, 0.3);
         }
         &.notify {
-          color: #7dd3fc;
-          background: rgba(14, 165, 233, 0.12);
-          border: 1px solid rgba(14, 165, 233, 0.3);
+          color: var(--wb-accent-hover);
+          background: var(--wb-accent-bg);
+          border: 1px solid var(--wb-accent);
         }
       }
     }
     .job-time {
-      color: #64748b;
+      color: var(--wb-text-3);
       font-size: 11px;
     }
     .job-spacer {
@@ -668,22 +668,22 @@ onBeforeUnmount(() => {
     height: 6px;
     margin: 10px 0 8px;
     border-radius: 3px;
-    background: rgba(51, 65, 85, 0.6);
+    background: var(--wb-surface-deep);
     overflow: hidden;
     .job-progress-fill {
       height: 100%;
       border-radius: 3px;
-      background: #0ea5e9;
+      background: var(--wb-accent);
       transition: width 0.35s ease;
       &.paused {
-        background: #fbbf24;
+        background: #f59e0b;
       }
       &.completed {
-        background: #10b981;
+        background: var(--wb-success);
       }
       &.stopped,
       &.failed {
-        background: #ef4444;
+        background: var(--wb-danger);
       }
     }
     .job-progress-text {
@@ -691,7 +691,7 @@ onBeforeUnmount(() => {
       right: 6px;
       top: -16px;
       font-size: 11px;
-      color: #94a3b8;
+      color: var(--wb-text-2);
     }
   }
 
@@ -702,7 +702,7 @@ onBeforeUnmount(() => {
     gap: 8px;
     .job-preview {
       flex: 1;
-      color: #64748b;
+      color: var(--wb-text-3);
       font-size: 11px;
       white-space: nowrap;
       overflow: hidden;
@@ -710,7 +710,7 @@ onBeforeUnmount(() => {
     }
     .job-stats {
       flex-shrink: 0;
-      color: #94a3b8;
+      color: var(--wb-text-2);
       font-size: 11px;
     }
   }
@@ -718,27 +718,27 @@ onBeforeUnmount(() => {
   .job-expand {
     margin-top: 8px;
     .expand-btn {
-      color: #38bdf8;
+      color: var(--wb-accent-hover);
       font-size: 12px;
       padding: 0;
     }
     .job-detail {
       margin-top: 8px;
-      border-top: 1px solid rgba(56, 70, 102, 0.3);
+      border-top: 1px solid var(--wb-stroke);
       padding-top: 8px;
       .detail-section {
         margin-bottom: 10px;
         .detail-title {
           font-size: 12px;
           font-weight: 600;
-          color: #94a3b8;
+          color: var(--wb-text-2);
           margin-bottom: 6px;
         }
       }
       .log-list {
         max-height: 180px;
         overflow-y: auto;
-        background: rgba(15, 23, 42, 0.45);
+        background: var(--wb-surface-deep);
         border-radius: 6px;
         padding: 6px 10px;
         .log-line {
@@ -747,28 +747,28 @@ onBeforeUnmount(() => {
           font-size: 11px;
           line-height: 1.7;
           .log-time {
-            color: #64748b;
+            color: var(--wb-text-3);
             flex-shrink: 0;
           }
           .log-msg {
-            color: #94a3b8;
+            color: var(--wb-text-2);
             word-break: break-all;
           }
           &.success .log-msg {
-            color: #10b981;
+            color: var(--wb-success);
           }
           &.error .log-msg {
-            color: #ef4444;
+            color: var(--wb-danger);
           }
           &.info .log-msg {
-            color: #38bdf8;
+            color: var(--wb-accent-hover);
           }
         }
       }
       .result-list {
         max-height: 180px;
         overflow-y: auto;
-        background: rgba(15, 23, 42, 0.45);
+        background: var(--wb-surface-deep);
         border-radius: 6px;
         padding: 6px 10px;
         .result-line {
@@ -777,7 +777,7 @@ onBeforeUnmount(() => {
           font-size: 11px;
           line-height: 1.7;
           .result-index {
-            color: #64748b;
+            color: var(--wb-text-3);
             flex-shrink: 0;
             font-family: monospace;
           }
@@ -790,21 +790,21 @@ onBeforeUnmount(() => {
             flex: 1;
           }
           .result-ms {
-            color: #64748b;
+            color: var(--wb-text-3);
             flex-shrink: 0;
             font-family: monospace;
           }
           &.ok .result-status {
-            color: #10b981;
+            color: var(--wb-success);
           }
           &.fail .result-status {
-            color: #ef4444;
+            color: var(--wb-danger);
           }
         }
       }
       .log-more {
         font-size: 11px;
-        color: #64748b;
+        color: var(--wb-text-3);
         font-style: italic;
       }
     }

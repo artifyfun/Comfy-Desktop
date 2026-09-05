@@ -49,7 +49,7 @@ function onOverlayDown(e) {
 
 <template>
   <div
-    class="absolute inset-0 rounded-xl overflow-hidden border border-[var(--wb-stroke)] bg-black/80 shadow-xl"
+    class="absolute inset-0 rounded-xl overflow-hidden border border-[var(--wb-stroke)] bg-black/80 shadow-lg"
     @mousedown="onOverlayDown"
     @dblclick.stop
   >

@@ -6,6 +6,7 @@
       :apps="apps"
       :search-query="searchQuery"
       :selected-category="selectedCategory"
+      :loading="loading"
       @view-detail="$emit('view-detail', $event)"
       @install="$emit('install', $event)"
       @clear-search="$emit('clear-search')"

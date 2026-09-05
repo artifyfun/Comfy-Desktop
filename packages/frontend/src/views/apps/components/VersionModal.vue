@@ -7,20 +7,20 @@
     @cancel="$emit('cancel')"
   >
     <a-spin v-if="loading" class="flex justify-center py-8" />
-    <div v-else-if="!versions.length" class="py-8 text-center text-slate-400">
+    <div v-else-if="!versions.length" class="py-8 text-center text-[var(--wb-text-2)]">
       {{ t('noVersions') }}
     </div>
     <div v-else class="max-h-96 overflow-auto">
       <div
         v-for="v in versions"
         :key="v.version"
-        class="flex justify-between items-center py-3 border-b border-slate-700 last:border-0"
+        class="flex justify-between items-center py-3 border-b border-[var(--wb-stroke)] last:border-0"
       >
         <div>
           <div class="font-medium text-white">
-            v{{ v.version }} <span class="ml-2 text-xs text-slate-400">{{ v.name }}</span>
+            v{{ v.version }} <span class="ml-2 text-xs text-[var(--wb-text-2)]">{{ v.name }}</span>
           </div>
-          <div class="text-xs text-slate-500">{{ formatTime(v.created_at) }}</div>
+          <div class="text-xs text-[var(--wb-text-2)]">{{ formatTime(v.created_at) }}</div>
         </div>
         <a-button size="small" @click="restore(v)">
           <i class="mr-1 fas fa-clock-rotate-left"></i>{{ t('restore') }}

@@ -19,11 +19,15 @@ export const constantRoutes = [
           headerFirstNav: '/market',
           headerFirstNavKey: 'market',
           headerFirstNavIcon: 'mr-2 fas fa-store',
+          // 页面内部 flex 内滚（网格虚拟滚动自滚），布局壳锁高不产生外层滚动条
+          scrollable: false,
         },
       },
       {
         path: 'market',
         component: () => import('@/views/market/index.vue'),
+        // 同应用中心：内容区 flex 内滚，避免 calc(100vh-*) 折算 header 差值致恒滚动条
+        meta: { scrollable: false },
       },
       {
         path: 'workbench',
@@ -41,6 +45,8 @@ export const constantRoutes = [
       {
         path: 'gallery',
         component: () => import('@/views/gallery/index.vue'),
+        // 页面内部 flex 内滚（目录流/瀑布流各自滚动），布局壳锁高
+        meta: { scrollable: false },
       },
     ],
   },

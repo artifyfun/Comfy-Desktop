@@ -30,22 +30,17 @@
     class="approval-card rounded-md border text-xs"
     :class="
       isPending
-        ? 'border-amber-500/40 bg-amber-500/5'
-        : 'border-[var(--wb-stroke)] bg-black/20'
+        ? 'border-[var(--wb-accent)]/40 bg-[var(--wb-accent)]/5'
+        : 'border-[var(--wb-stroke)] bg-[var(--wb-surface)]'
     "
   >
     <!-- ==================== pending:待审批 ==================== -->
     <template v-if="isPending">
-      <!-- header:呼吸点 + 状态 + 工具名 + 倒计时 -->
+      <!-- header:状态点 + 工具名 + 倒计时 -->
       <header class="flex items-center gap-2 px-2 py-1.5">
-        <span class="relative flex h-2 w-2 shrink-0" aria-hidden="true">
-          <span
-            class="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-60"
-          ></span>
-          <span class="relative inline-flex h-2 w-2 rounded-full bg-amber-400"></span>
-        </span>
-        <span class="shrink-0 text-amber-300">等待审批</span>
-        <i class="fas fa-shield-halved shrink-0 text-amber-400/80" aria-hidden="true"></i>
+        <span class="inline-flex h-2 w-2 shrink-0 rounded-full bg-[var(--wb-accent)]" aria-hidden="true"></span>
+        <span class="shrink-0 text-[var(--wb-accent)]">等待审批</span>
+        <i class="fas fa-shield-halved shrink-0 text-[var(--wb-accent)]/80" aria-hidden="true"></i>
         <span
           data-testid="approval-tool-name"
           class="max-w-[40%] shrink-0 truncate font-mono text-[var(--wb-text-1)]"
@@ -56,7 +51,7 @@
         <span
           data-testid="approval-countdown"
           class="shrink-0 text-[11px] tabular-nums"
-          :class="countdownUrgent ? 'text-red-300' : 'text-amber-300'"
+          :class="countdownUrgent ? 'text-[var(--wb-danger)]' : 'text-[var(--wb-text-2)]'"
           :aria-label="`剩余 ${countdownLabel}`"
           >{{ countdownLabel }}</span
         >
@@ -81,7 +76,7 @@
         <pre
           v-if="argsOpen"
           data-testid="approval-args"
-          class="approval-card__scroll m-0 mt-1 max-h-48 overflow-y-auto rounded border border-[var(--wb-stroke)] bg-black/40 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-[var(--wb-text-2)]"
+          class="approval-card__scroll m-0 mt-1 max-h-48 overflow-y-auto rounded border border-[var(--wb-stroke)] bg-[var(--wb-surface-deep)] p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-[var(--wb-text-2)]"
           >{{ prettyArgs }}</pre
         >
       </div>
@@ -90,7 +85,7 @@
       <div
         v-if="timedOut"
         data-testid="approval-expired"
-        class="mx-2 mb-1 flex items-center gap-1.5 rounded bg-amber-500/10 px-2 py-1 text-amber-300"
+        class="mx-2 mb-1 flex items-center gap-1.5 rounded bg-[var(--wb-surface-hover)] px-2 py-1 text-[var(--wb-text-2)]"
       >
         <i class="fas fa-hourglass-end shrink-0" aria-hidden="true"></i>
         <span>已超时,等待后端兜底</span>
@@ -102,13 +97,13 @@
           v-model="editText"
           data-testid="approval-edit-textarea"
           rows="6"
-          class="approval-card__scroll w-full resize-y rounded border border-[var(--wb-stroke)] bg-black/40 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-[var(--wb-text-1)] outline-none focus:border-amber-400/60"
+          class="approval-card__scroll w-full resize-y rounded border border-[var(--wb-stroke)] bg-[var(--wb-surface-deep)] p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-[var(--wb-text-1)] outline-none focus:border-[var(--wb-accent)]"
           aria-label="修改工具参数(JSON)"
         ></textarea>
         <p
           v-if="editError"
           data-testid="approval-error"
-          class="m-0 text-[10px] text-red-400"
+          class="m-0 text-[10px] text-[var(--wb-danger)]"
           role="alert"
           >{{ editError }}</p
         >
@@ -116,7 +111,7 @@
           <button
             type="button"
             data-testid="approval-edit-submit"
-            class="rounded border border-amber-500/50 px-2 py-1 text-amber-300 transition hover:bg-amber-500/10"
+            class="rounded border border-[var(--wb-accent)]/50 px-2 py-1 text-[var(--wb-accent)] transition hover:bg-[var(--wb-accent)]/10"
             @click="submitEdit"
           >
             确认修改
@@ -138,7 +133,7 @@
           type="button"
           data-testid="approval-approve"
           :disabled="timedOut || inFlight"
-          class="rounded border border-emerald-500/50 px-2 py-1 text-emerald-300 transition hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+          class="rounded border border-[var(--wb-success)]/50 px-2 py-1 text-[var(--wb-success)] transition hover:bg-[var(--wb-success)]/10 disabled:cursor-not-allowed disabled:opacity-40"
           @click="respond('approve')"
         >
           批准
@@ -147,7 +142,7 @@
           type="button"
           data-testid="approval-reject"
           :disabled="timedOut || inFlight"
-          class="rounded border border-red-500/50 px-2 py-1 text-red-300 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+          class="rounded border border-[var(--wb-danger)]/50 px-2 py-1 text-[var(--wb-danger)] transition hover:bg-[var(--wb-danger)]/10 disabled:cursor-not-allowed disabled:opacity-40"
           @click="respond('reject')"
         >
           拒绝
@@ -319,19 +314,19 @@ function respond(action) {
 // ---------- 终态单行结果条 ----------
 const TERMINAL_META = {
   approved: {
-    icon: 'fas fa-circle-check text-emerald-400/80 shrink-0',
+    icon: 'fas fa-circle-check text-[var(--wb-success)]/80 shrink-0',
     label: '已批准',
-    textClass: 'text-emerald-300',
+    textClass: 'text-[var(--wb-success)]',
   },
   rejected: {
-    icon: 'fas fa-ban text-red-400/80 shrink-0',
+    icon: 'fas fa-ban text-[var(--wb-danger)]/80 shrink-0',
     label: '已拒绝',
-    textClass: 'text-red-300',
+    textClass: 'text-[var(--wb-danger)]',
   },
   expired: {
-    icon: 'fas fa-hourglass-end text-amber-400/80 shrink-0',
+    icon: 'fas fa-hourglass-end text-[var(--wb-text-2)]/80 shrink-0',
     label: '已超时',
-    textClass: 'text-amber-300',
+    textClass: 'text-[var(--wb-text-2)]',
   },
 }
 

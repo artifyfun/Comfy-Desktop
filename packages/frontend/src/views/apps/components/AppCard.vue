@@ -4,15 +4,15 @@
     style="border-radius: var(--wb-r-card)"
     @click="$emit('view-detail', app)"
   >
-    <!-- 卡片光效 -->
-
     <!-- 封面图片 -->
     <div class="overflow-hidden relative mb-4 h-48 rounded-lg app-imageUrl">
-      <div class="absolute inset-0 z-10 bg-gradient-to-t to-transparent from-[#171718]"></div>
+      <div class="absolute inset-0 z-10 bg-[#171718]/40"></div>
 
       <!-- 市场安装标记 -->
       <div v-if="app.isFromMarket" class="absolute top-3 left-3 z-20">
-        <div class="flex items-center px-2 py-1 text-xs font-medium text-white rounded">
+        <div
+          class="flex items-center px-2 py-1 text-xs font-medium text-white rounded-md bg-[var(--wb-surface)] border border-[var(--wb-stroke)]"
+        >
           <i class="fas fa-store"></i>
         </div>
       </div>
@@ -34,17 +34,17 @@
         </span>
       </div>
 
-      <p class="overflow-hidden mb-3 h-12 text-sm text-slate-300">
+      <p class="overflow-hidden mb-3 h-12 text-sm text-[var(--wb-text)]">
         {{ app.description }}
       </p>
 
-      <div class="flex justify-between items-center text-sm text-slate-400">
+      <div class="flex justify-between items-center text-sm text-[var(--wb-text-2)]">
         <div class="flex items-center">
           <i class="mr-2 far fa-clock"></i>
           <span>{{ formatDate(app.createdAt) }}</span>
         </div>
         <div class="flex items-center space-x-1">
-          <i class="fas fa-bolt text-tech-blue"></i>
+          <i class="fas fa-bolt text-[var(--wb-text-2)]"></i>
           <span>{{ t(app.powerLevel) }}</span>
         </div>
       </div>

@@ -96,25 +96,25 @@ const handleSave = async () => {
     min-height: calc(100vh);
     width: 100%;
     height: 100%;
-    background: rgba(15, 23, 42, 0.95);
-    border: 1px solid rgba(56, 70, 102, 0.4);
-    border-radius: 16px;
-    box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
+    background: var(--wb-bg-base);
+    border: 1px solid var(--wb-stroke);
+    border-radius: var(--wb-r-modal);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   }
   .ant-modal-header {
     background: transparent;
-    border-bottom: 1px solid rgba(56, 70, 102, 0.4);
+    border-bottom: 1px solid var(--wb-stroke);
     padding: 20px 24px;
   }
   .ant-modal-title {
-    color: #e2e8f0;
+    color: var(--wb-text);
     font-family: var(--wb-font);
     font-weight: 600;
   }
   .ant-modal-body {
     flex: 1;
     background: transparent;
-    color: #e2e8f0;
+    color: var(--wb-text);
     .editor-box {
       width: 100%;
       height: 100%;
@@ -128,7 +128,7 @@ const handleSave = async () => {
   }
   .ant-modal-footer {
     background: transparent;
-    border-top: 1px solid rgba(56, 70, 102, 0.4);
+    border-top: 1px solid var(--wb-stroke);
     padding: 16px 24px;
   }
 }

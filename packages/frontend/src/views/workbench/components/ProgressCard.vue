@@ -25,7 +25,7 @@
 <template>
   <div
     data-testid="progress-card"
-    class="progress-card rounded-md border border-[var(--wb-stroke)] bg-black/20 text-xs"
+    class="progress-card rounded-md border border-[var(--wb-stroke)] bg-[var(--wb-surface)] text-xs"
     :class="mode === 'todo' ? 'progress-card--todo' : 'progress-card--activity'"
   >
     <!-- header:状态 + 标题 + done/total + 折叠箭头 -->
@@ -48,7 +48,7 @@
           aria-label="运行中"
         ></span>
       </span>
-      <span v-else-if="allDone" class="text-emerald-400/80" aria-label="已完成">
+      <span v-else-if="allDone" class="text-[var(--wb-success)]" aria-label="已完成">
         <i class="fas fa-check"></i>
       </span>
       <span v-else class="flex-1"></span>
@@ -80,7 +80,7 @@
             class="shrink-0 text-[11px]"
             :class="
               isTodoDone(it)
-                ? 'fas fa-circle-check text-emerald-400/90'
+                ? 'fas fa-circle-check text-[var(--wb-success)]'
                 : 'far fa-circle text-[var(--wb-text-3)]'
             "
             aria-hidden="true"
@@ -120,7 +120,7 @@
             ></span>
             <i
               v-else
-              class="fas fa-circle-check text-emerald-400/80 text-[11px]"
+              class="fas fa-circle-check text-[var(--wb-success)] text-[11px]"
               aria-hidden="true"
             ></i>
           </span>
@@ -146,7 +146,7 @@
           v-for="k in expandedStepKeys"
           :key="'d' + k"
           data-testid="progress-step-detail"
-          class="mt-0.5 max-h-48 overflow-y-auto rounded bg-black/40 border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono text-[11px] leading-relaxed"
+          class="mt-0.5 max-h-48 overflow-y-auto rounded bg-[var(--wb-surface-deep)] border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono text-[11px] leading-relaxed"
           >{{ steps[k].detail }}</pre
         >
       </div>

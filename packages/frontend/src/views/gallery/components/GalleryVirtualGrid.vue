@@ -17,7 +17,7 @@
           <div
             v-for="item in rows[row.index]"
             :key="item.id"
-            class="group relative overflow-hidden rounded-lg cursor-pointer bg-slate-800/60"
+            class="group relative overflow-hidden rounded-lg cursor-pointer bg-[var(--wb-surface-hover)]"
             @click="$emit('open', item)"
           >
             <img
@@ -29,19 +29,19 @@
               @error="$emit('img-error', $event, item)"
             />
             <div
-              class="absolute inset-x-0 bottom-0 p-2 text-xs text-white bg-gradient-to-t from-black/80 to-transparent opacity-0 transition-opacity group-hover:opacity-100"
+              class="absolute inset-x-0 bottom-0 p-2 text-xs text-white bg-black/60 opacity-0 transition-opacity group-hover:opacity-100"
             >
               <div class="truncate">{{ item.filename }}</div>
-              <div class="flex justify-between text-slate-300">
+              <div class="flex justify-between text-[var(--wb-text)]">
                 <span class="truncate">{{ item.app_name || formatTime(item.created_at) }}</span>
                 <span class="flex items-center gap-1">
                   <i
                     class="cursor-pointer"
-                    :class="item.starred ? 'fas fa-star text-yellow-400' : 'far fa-star'"
+                    :class="item.starred ? 'fas fa-star text-[var(--wb-accent)]' : 'far fa-star'"
                     @click.stop="$emit('star', item)"
                   ></i>
                   <i
-                    class="ml-1 cursor-pointer far fa-trash-alt hover:text-red-400"
+                    class="ml-1 cursor-pointer far fa-trash-alt hover:text-[var(--wb-danger)]"
                     @click.stop="$emit('remove', item)"
                   ></i>
                 </span>
@@ -52,7 +52,7 @@
       </div>
     </div>
 
-    <div v-if="loading" class="py-10 text-center text-slate-400">
+    <div v-if="loading" class="py-10 text-center text-[var(--wb-text-2)]">
       <a-spin size="large" />
     </div>
   </div>

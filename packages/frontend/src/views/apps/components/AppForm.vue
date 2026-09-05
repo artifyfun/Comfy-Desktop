@@ -7,33 +7,33 @@
             {{ currentApp.id ? t('editApp') : t('addNewAppTitle') }}
           </h3>
         </div>
-        <button @click="handleClose" class="text-slate-400 hover:text-white">
+        <button @click="handleClose" class="text-[var(--wb-text-2)] hover:text-white">
           <i class="fas fa-times"></i>
         </button>
       </div>
 
       <div class="space-y-4">
         <div>
-          <label class="block mb-2 text-slate-300">{{ t('appName') }}</label>
+          <label class="block mb-2 text-[var(--wb-text)]">{{ t('appName') }}</label>
           <input
             v-model="currentApp.name"
             type="text"
-            class="px-4 py-2.5 w-full text-white rounded-lg tech-input focus:outline-none"
+            class="px-4 py-2.5 w-full text-white tech-input focus:outline-none"
             :placeholder="t('appNamePlaceholder')"
           />
         </div>
 
         <div>
-          <label class="block mb-2 text-slate-300">{{ t('appDescription') }}</label>
+          <label class="block mb-2 text-[var(--wb-text)]">{{ t('appDescription') }}</label>
           <textarea
             v-model="currentApp.description"
-            class="px-4 py-2.5 w-full h-24 text-white rounded-lg tech-input focus:outline-none"
+            class="px-4 py-2.5 w-full h-24 text-white tech-input focus:outline-none"
             :placeholder="t('appDescriptionPlaceholder')"
           ></textarea>
         </div>
 
         <div>
-          <label class="block mb-2 text-slate-300">{{ t('coverImageUrl') }}</label>
+          <label class="block mb-2 text-[var(--wb-text)]">{{ t('coverImageUrl') }}</label>
           <div v-if="currentApp.imageUrl" class="relative mb-2 group">
             <img
               :src="currentApp.imageUrl"
@@ -60,10 +60,10 @@
         </div>
 
         <div>
-          <label class="block mb-2 text-slate-300">{{ t('appCategory') }}</label>
+          <label class="block mb-2 text-[var(--wb-text)]">{{ t('appCategory') }}</label>
           <select
             v-model="currentApp.category"
-            class="px-4 py-2.5 w-full text-white rounded-lg tech-input focus:outline-none"
+            class="px-4 py-2.5 w-full text-white tech-input focus:outline-none"
           >
             <option value="imageGeneration">{{ t('imageGeneration') }}</option>
             <option value="videoGeneration">{{ t('videoGeneration') }}</option>
@@ -75,7 +75,7 @@
         </div>
 
         <div>
-          <label class="block mb-2 text-slate-300">{{ t('workflow') }}</label>
+          <label class="block mb-2 text-[var(--wb-text)]">{{ t('workflow') }}</label>
           <template v-if="currentApp.template.workflow">
             <a-button class="mr-2" type="primary" @click="handleEditWorkflow">
               {{ t('editWorkflow') }}
@@ -98,7 +98,7 @@
         </div>
 
         <div v-if="currentApp.code">
-          <label class="block mb-2 text-slate-300">{{ t('sourceCode') }}</label>
+          <label class="block mb-2 text-[var(--wb-text)]">{{ t('sourceCode') }}</label>
           <a-button type="primary" @click="handleEditCode">{{ t('editSourceCode') }}</a-button>
           <a-button class="ml-2" @click="handleRebuild">{{ t('rebuildApp') }}</a-button>
         </div>
@@ -321,6 +321,27 @@ function compressImageToBase64(file, quality = 0.7, maxSize = 512) {
 </script>
 
 <style scoped>
+.tech-input {
+  background: var(--wb-surface);
+  border: 1px solid var(--wb-stroke);
+  border-radius: 6px;
+  color: #fff;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.tech-input:focus {
+  border-color: var(--wb-accent);
+  box-shadow: 0 0 0 2px var(--wb-accent-bg);
+  outline: none;
+}
+
+select.tech-input option {
+  background: var(--wb-surface);
+  color: #fff;
+}
+
 .glass-card {
   background: var(--wb-surface-deep);
   border: 1px solid var(--wb-stroke);

@@ -26,8 +26,8 @@
 <template>
   <div
     data-testid="tool-call-card"
-    class="tool-card rounded-md border bg-black/20 text-xs"
-    :class="isError ? 'border-red-500/40' : 'border-[var(--wb-stroke)]'"
+    class="tool-card rounded-md border bg-[var(--wb-surface)] text-xs"
+    :class="isError ? 'border-[var(--wb-danger)]/40' : 'border-[var(--wb-stroke)]'"
   >
     <!-- header:状态 + 图标 + 名称 + 预览 + 时长 + 折叠箭头 -->
     <header
@@ -46,13 +46,13 @@
       <i
         v-else-if="isError"
         data-testid="tool-card-status-error"
-        class="fas fa-triangle-exclamation text-red-400 shrink-0"
+        class="fas fa-triangle-exclamation text-[var(--wb-danger)] shrink-0"
         aria-label="失败"
       ></i>
       <i
         v-else
         data-testid="tool-card-status-done"
-        class="fas fa-check text-emerald-400/70 shrink-0"
+        class="fas fa-check text-[var(--wb-success)] shrink-0"
         aria-label="完成"
       ></i>
 
@@ -60,7 +60,7 @@
       <span
         data-testid="tool-card-name"
         class="font-mono shrink-0 max-w-[40%] truncate"
-        :class="isError ? 'text-red-300' : 'text-[var(--wb-text-1)]'"
+        :class="isError ? 'text-[var(--wb-danger)]' : 'text-[var(--wb-text-1)]'"
         :title="name"
       >{{ toolMeta.label }}</span>
       <span
@@ -89,7 +89,7 @@
         <div class="text-[10px] text-[var(--wb-text-2)] opacity-70 mb-0.5">参数</div>
         <pre
           data-testid="tool-card-args"
-          class="tool-card__scroll max-h-48 overflow-y-auto m-0 p-2 rounded bg-black/40 border border-[var(--wb-stroke)] font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-[var(--wb-text-2)]"
+          class="tool-card__scroll max-h-48 overflow-y-auto m-0 p-2 rounded bg-[var(--wb-surface-deep)] border border-[var(--wb-stroke)] font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-[var(--wb-text-2)]"
           >{{ prettyArgs }}</pre
         >
       </div>
@@ -101,13 +101,13 @@
           <pre
             v-if="!resultExpanded"
             data-testid="tool-card-result"
-            class="m-0 p-2 rounded bg-black/40 border border-[var(--wb-stroke)] font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-[var(--wb-text-2)]"
+            class="m-0 p-2 rounded bg-[var(--wb-surface-deep)] border border-[var(--wb-stroke)] font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-[var(--wb-text-2)]"
             >{{ resultTruncated }}</pre
           >
           <pre
             v-else
             data-testid="tool-card-result-full"
-            class="tool-card__scroll max-h-64 overflow-y-auto m-0 p-2 rounded bg-black/40 border border-[var(--wb-stroke)] font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-[var(--wb-text-2)]"
+            class="tool-card__scroll max-h-64 overflow-y-auto m-0 p-2 rounded bg-[var(--wb-surface-deep)] border border-[var(--wb-stroke)] font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all text-[var(--wb-text-2)]"
             >{{ resultText }}</pre
           >
           <button

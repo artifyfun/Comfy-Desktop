@@ -6,13 +6,13 @@
     <div class="flex flex-1 min-h-0 mx-4 mt-2 mb-2 gap-2">
       <aside
         v-if="wbOpen"
-        class="w-[400px] shrink-0 flex flex-col rounded-xl border border-[var(--wb-stroke)] overflow-hidden bg-[var(--wb-bg-base)]"
+        class="w-[400px] shrink-0 flex flex-col rounded-[10px] border border-[var(--wb-stroke)] overflow-hidden bg-[var(--wb-bg-base)]"
       >
         <Workbench class="flex-1 min-h-0" :canvas-embedded="true" />
       </aside>
       <div
         ref="wrapEl"
-        class="relative flex-1 min-w-0 overflow-hidden rounded-xl border border-[var(--wb-stroke)] select-none"
+        class="relative flex-1 min-w-0 overflow-hidden rounded-[10px] border border-[var(--wb-stroke)] select-none"
         :class="dragOver ? 'ring-2 ring-[var(--wb-accent)]' : ''"
         @dragover.prevent="dragOver = true"
         @dragleave.prevent="dragOver = false"
@@ -25,7 +25,7 @@
         <!-- 图层面板（P1：画布右侧，参考 side-panel Canvas tab；宽 232px 可浮层收起） -->
         <div
           v-if="layersOpen"
-          class="absolute right-3 top-3 z-20 w-[232px] max-h-[calc(100%-24px)] rounded-xl border border-[var(--wb-stroke)] shadow-xl overflow-hidden"
+          class="absolute right-3 top-3 z-20 w-[232px] max-h-[calc(100%-24px)] rounded-[10px] border border-[var(--wb-stroke)] shadow-lg overflow-hidden"
         >
           <CanvasSidePanel
             :objects="objects"
@@ -40,7 +40,7 @@
         <!-- 素材库面板（P2）：左下浮动，点击/拖入画布 -->
         <div
           v-if="assetsOpen"
-          class="absolute bottom-3 left-3 z-20 w-[232px] max-h-[calc(100%-24px)] rounded-xl border border-[var(--wb-stroke)] shadow-xl overflow-hidden"
+          class="absolute bottom-3 left-3 z-20 w-[232px] max-h-[calc(100%-24px)] rounded-[10px] border border-[var(--wb-stroke)] shadow-lg overflow-hidden"
         >
           <CanvasAssetsPanel
             ref="assetsPanelEl"
@@ -78,7 +78,7 @@
               <v-path
                 :config="{
                   data: bezierLinkPath(seg.x1, seg.y1, seg.x2, seg.y2),
-                  stroke: selectedLinkId === seg.id ? '#fafaf9' : 'rgba(214,211,206,0.82)',
+                  stroke: selectedLinkId === seg.id ? '#ffffff' : 'rgba(160,160,160,0.6)',
                   strokeWidth: (selectedLinkId === seg.id ? 3 : 2) / viewport.scale,
                   opacity: reconnectDrag.active && reconnectDrag.linkId === seg.id ? 0.25 : 1,
                   listening: false,
@@ -95,7 +95,7 @@
                   connectDrag.seg.x2,
                   connectDrag.seg.y2,
                 ),
-                stroke: '#fafaf9',
+                stroke: '#ffffff',
                 strokeWidth: 2 / viewport.scale,
                 dash: [5 / viewport.scale, 5 / viewport.scale],
                 listening: false,
@@ -111,7 +111,7 @@
                   reconnectDrag.seg.x2,
                   reconnectDrag.seg.y2,
                 ),
-                stroke: '#fafaf9',
+                stroke: '#ffffff',
                 strokeWidth: 2.5 / viewport.scale,
                 dash: [5 / viewport.scale, 5 / viewport.scale],
                 listening: false,
@@ -149,7 +149,7 @@
                   width: o.width,
                   align: 'center',
                   fontSize: 12,
-                  fill: '#94a3b8',
+                  fill: '#a0a0a0',
                 }"
               />
             </v-group>
@@ -297,7 +297,7 @@
           <!-- E4 画布列表下拉：卡片网格（统计/hover 操作/内联重命名/批量删除） -->
           <div
             v-if="projectMenuOpen"
-            class="absolute top-12 left-0 w-[420px] rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl overflow-hidden z-20"
+            class="absolute top-12 left-0 w-[420px] rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg overflow-hidden z-20"
             @mousedown.stop
           >
             <div
@@ -316,7 +316,7 @@
                 </button>
                 <template v-else>
                   <button
-                    class="rounded px-2 py-1 text-[11px] text-red-400 hover:bg-red-400/10 disabled:opacity-40"
+                    class="rounded px-2 py-1 text-[11px] text-[var(--wb-danger)] hover:bg-[var(--wb-danger)]/10 disabled:opacity-40"
                     :disabled="!prjChecked.size"
                     @click="deleteCheckedProjects"
                   >
@@ -416,7 +416,7 @@
                     <i class="fas fa-file-export"></i>
                   </button>
                   <button
-                    class="grid size-5 place-items-center rounded text-[9px] text-[var(--wb-text-2)] hover:bg-red-400/20 hover:text-red-400"
+                    class="grid size-5 place-items-center rounded text-[9px] text-[var(--wb-text-2)] hover:bg-[var(--wb-danger)]/20 hover:text-[var(--wb-danger)]"
                     :title="t('canvasProjectDelete')"
                     @click.stop="deleteProjectById(pr.id)"
                   >
@@ -458,12 +458,12 @@
         <!-- 模式提示条（裁剪工具激活时） -->
         <div
           v-if="tool"
-          class="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur text-xs text-slate-200 flex items-center gap-2 z-10"
+          class="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-[var(--wb-surface-hover)] text-xs text-[var(--wb-text)] flex items-center gap-2 z-10 border border-[var(--wb-stroke)]"
         >
-          <i class="fas fa-vector-square text-sky-400"></i>
+          <i class="fas fa-vector-square text-[var(--wb-accent)]"></i>
           <span>{{ t('canvasCropHint') }}</span>
           <button
-            class="text-slate-400 hover:text-white"
+            class="text-[var(--wb-text-2)] hover:text-white"
             :title="t('canvasToolCancel')"
             @click.stop="setTool(null)"
           >
@@ -475,12 +475,12 @@
         <div
           v-if="connectCreate.open"
           id="connect-create-menu"
-          class="absolute z-30 min-w-[170px] py-1 rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl text-xs"
+          class="absolute z-30 min-w-[170px] py-1 rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg text-xs"
           :style="{ left: connectCreate.x + 'px', top: connectCreate.y + 'px' }"
           @contextmenu.prevent
           @mousedown.stop
         >
-          <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-500">
+          <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-[var(--wb-text-2)]">
             {{ t('canvasCreateMenuTitle') }}
           </div>
           <button
@@ -495,7 +495,7 @@
             class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
             @click="createNodeFromConnect(opt.k)"
           >
-            <i class="fas w-4 text-center text-slate-400" :class="opt.icon"></i>{{ opt.label }}
+            <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="opt.icon"></i>{{ opt.label }}
           </button>
         </div>
 
@@ -503,7 +503,7 @@
         <div
           v-if="ctxMenu"
           id="canvas-ctx-menu"
-          class="absolute z-30 min-w-[170px] py-1 rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl text-xs"
+          class="absolute z-30 min-w-[170px] py-1 rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg text-xs"
           :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
           @contextmenu.prevent
           @mousedown.stop
@@ -518,25 +518,25 @@
                 }
               "
             >
-              <i class="fas fa-link-slash w-4 text-center text-slate-400"></i
+              <i class="fas fa-link-slash w-4 text-center text-[var(--wb-text-2)]"></i
               >{{ t('canvasMenuDeleteLink') }}
             </button>
           </template>
           <template v-else-if="ctxMenu.targetIds.length">
-            <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-500">
+            <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-[var(--wb-text-2)]">
               {{ ctxMenu.targetIds.length }} {{ t('canvasMenuItems') }}
             </div>
             <template v-for="m in ctxItems" :key="m.key">
-              <div v-if="m.sep" class="my-1 h-px bg-slate-600/60"></div>
+              <div v-if="m.sep" class="my-1 h-px bg-[var(--wb-stroke)]"></div>
               <div v-else-if="m.children" class="group/ctx relative">
                 <button
                   class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
                 >
-                  <i class="fas w-4 text-center text-slate-400" :class="m.icon"></i>{{ m.label }}
-                  <i class="fas fa-chevron-right ml-auto text-[9px] text-slate-500"></i>
+                  <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="m.icon"></i>{{ m.label }}
+                  <i class="fas fa-chevron-right ml-auto text-[9px] text-[var(--wb-text-2)]"></i>
                 </button>
                 <div
-                  class="absolute left-full top-0 -ml-1 hidden min-w-[170px] rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] py-1 shadow-xl group-hover/ctx:block"
+                  class="absolute left-full top-0 -ml-1 hidden min-w-[170px] rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] py-1 shadow-lg group-hover/ctx:block"
                 >
                   <button
                     v-for="c in m.children"
@@ -544,7 +544,7 @@
                     class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2 whitespace-nowrap"
                     @click="c.run()"
                   >
-                    <i class="fas w-4 text-center text-slate-400" :class="c.icon"></i>{{ c.label }}
+                    <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="c.icon"></i>{{ c.label }}
                   </button>
                 </div>
               </div>
@@ -553,7 +553,7 @@
                 class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
                 @click="m.run()"
               >
-                <i class="fas w-4 text-center text-slate-400" :class="m.icon"></i>{{ m.label }}
+                <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="m.icon"></i>{{ m.label }}
               </button>
             </template>
           </template>
@@ -562,33 +562,33 @@
               class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
               @click="pasteAt(ctxMenu.wx, ctxMenu.wy)"
             >
-              <i class="fas fa-paste w-4 text-center text-slate-400"></i>{{ t('canvasMenuPaste') }}
+              <i class="fas fa-paste w-4 text-center text-[var(--wb-text-2)]"></i>{{ t('canvasMenuPaste') }}
             </button>
             <button
               class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
               @click="addNoteAt(ctxMenu.wx, ctxMenu.wy)"
             >
-              <i class="fas fa-sticky-note w-4 text-center text-slate-400"></i
+              <i class="fas fa-sticky-note w-4 text-center text-[var(--wb-text-2)]"></i
               >{{ t('canvasMenuNote') }}
             </button>
             <button
               class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
               @click="addFrameAt(ctxMenu.wx, ctxMenu.wy)"
             >
-              <i class="fas fa-object-ungroup w-4 text-center text-slate-400"></i
+              <i class="fas fa-object-ungroup w-4 text-center text-[var(--wb-text-2)]"></i
               >{{ t('canvasMenuFrame') }}
             </button>
             <button
               class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
               @click="openAppPickerAtCtx()"
             >
-              <i class="fas fa-cube w-4 text-center text-slate-400"></i>{{ t('canvasMenuAppNode') }}
+              <i class="fas fa-cube w-4 text-center text-[var(--wb-text-2)]"></i>{{ t('canvasMenuAppNode') }}
             </button>
             <button
               class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
               @click="fitAll()"
             >
-              <i class="fas fa-expand w-4 text-center text-slate-400"></i>{{ t('canvasMenuFit') }}
+              <i class="fas fa-expand w-4 text-center text-[var(--wb-text-2)]"></i>{{ t('canvasMenuFit') }}
             </button>
           </template>
         </div>
@@ -597,7 +597,7 @@
         <div
           v-if="selPrompt"
           id="canvas-sel-prompt"
-          class="absolute z-20 flex items-center gap-2 px-2 py-1.5 rounded-xl border border-[var(--wb-accent)]/50 bg-[var(--wb-surface)] shadow-lg"
+          class="absolute z-20 flex items-center gap-2 px-2 py-1.5 rounded-[10px] border border-[var(--wb-accent)]/50 bg-[var(--wb-surface)] shadow-lg"
           :style="{ left: selPrompt.x + 'px', top: selPrompt.y + 'px' }"
           @mousedown.stop
         >
@@ -617,7 +617,7 @@
             <i class="fas fa-paper-plane text-xs"></i>
           </button>
           <button
-            class="w-7 h-7 rounded-lg text-slate-400 hover:text-white"
+            class="w-7 h-7 rounded-lg text-[var(--wb-text-2)] hover:text-white"
             :title="t('canvasMenuCompose')"
             @click="composeSelection()"
           >
@@ -628,7 +628,7 @@
         <!-- 生成节点参数弹窗（N3：prompt 卡 → 执行 → 产物落布） -->
         <div
           v-if="genNode"
-          class="absolute z-30 w-[320px] rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-2xl p-3 text-xs"
+          class="absolute z-30 w-[320px] rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg p-3 text-xs"
           :style="{ left: genNode.x + 'px', top: genNode.y + 'px' }"
           @mousedown.stop
         >
@@ -637,7 +637,7 @@
               ><i class="fas fa-wand-magic-sparkles text-[var(--wb-accent)] mr-1"></i
               >{{ t('canvasGenNode') }}</span
             >
-            <button class="text-slate-400 hover:text-white" @click="genNode = null">
+            <button class="text-[var(--wb-text-2)] hover:text-white" @click="genNode = null">
               <i class="fas fa-times"></i>
             </button>
           </div>
@@ -648,7 +648,7 @@
             :placeholder="t('canvasGenPromptPh')"
           ></textarea>
           <div class="flex items-center gap-2 mt-2">
-            <span class="text-slate-500"
+            <span class="text-[var(--wb-text-2)]"
               >{{ t('canvasGenRefs') }}: {{ genNode.refs.length || '0' }}</span
             >
             <button
@@ -666,7 +666,7 @@
         <!-- 提示词库面板（S6b）：内置分词 + 自定义 + JSON 导入 -->
         <div
           v-if="promptLib.open"
-          class="absolute z-30 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[560px] max-h-[70vh] flex flex-col rounded-2xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-2xl"
+          class="absolute z-30 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[560px] max-h-[70vh] flex flex-col rounded-[14px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg"
           @mousedown.stop
           @pointerdown.stop
         >
@@ -766,7 +766,7 @@
         <!-- 角度/翻转对话框（A2）：滑杆 + 翻转开关 -->
         <div
           v-if="angleDlg.open"
-          class="absolute z-30 flex flex-col gap-3 w-[300px] p-4 rounded-2xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-2xl"
+          class="absolute z-30 flex flex-col gap-3 w-[300px] p-4 rounded-[14px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg"
           :style="{ left: '50%', top: '50%', transform: 'translate(-50%,-50%)' }"
           @mousedown.stop
           @pointerdown.stop
@@ -821,7 +821,7 @@
         <!-- 放大对话框（A3）：目标长边 + 算法 -->
         <div
           v-if="upscaleDlg.open"
-          class="absolute z-30 flex flex-col gap-3 w-[300px] p-4 rounded-2xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-2xl"
+          class="absolute z-30 flex flex-col gap-3 w-[300px] p-4 rounded-[14px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg"
           :style="{ left: '50%', top: '50%', transform: 'translate(-50%,-50%)' }"
           @mousedown.stop
           @pointerdown.stop
@@ -867,7 +867,7 @@
           @mousedown.self="maskDlg.open = false"
         >
           <div
-            class="flex max-h-[92vh] w-[min(1080px,94vw)] gap-5 rounded-2xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] p-5 shadow-2xl"
+            class="flex max-h-[92vh] w-[min(1080px,94vw)] gap-5 rounded-[14px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] p-5 shadow-lg"
             @keydown="onMaskKeydown"
             @keyup="onMaskKeyup"
           >
@@ -875,7 +875,7 @@
             <div class="relative flex-1">
               <div
                 ref="maskViewportEl"
-                class="relative h-full overflow-auto rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-bg)]"
+                class="relative h-full overflow-auto rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-bg)]"
                 :class="maskDlg.panning ? 'cursor-grabbing' : ''"
                 @wheel.prevent="onMaskWheel"
                 @pointerdown.capture="onMaskPanDown"
@@ -1043,7 +1043,7 @@
                   :placeholder="t('canvasMaskPromptPlaceholder')"
                 ></textarea>
               </div>
-              <div v-if="maskDlg.error" class="text-xs font-medium text-red-500">
+              <div v-if="maskDlg.error" class="text-xs font-medium text-[var(--wb-danger)]">
                 {{ maskDlg.error }}
               </div>
               <div class="mt-auto flex items-center justify-between gap-2">
@@ -1075,7 +1075,7 @@
         <!-- 切分对话框（S6a）：横/竖切 N 片 -->
         <div
           v-if="splitDlg.open"
-          class="absolute z-30 flex items-center gap-2 h-11 px-3 rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl"
+          class="absolute z-30 flex items-center gap-2 h-11 px-3 rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg"
           :style="{ left: '50%', top: '50%', transform: 'translate(-50%,-50%)' }"
           @mousedown.stop
           @pointerdown.stop
@@ -1113,7 +1113,7 @@
         <!-- note AI 改写输入条（S5b）：note 下方，指令 + 发送 -->
         <div
           v-if="noteRewrite.noteId"
-          class="absolute z-20 w-[360px] rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl p-2.5 flex items-center gap-2"
+          class="absolute z-20 w-[360px] rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg p-2.5 flex items-center gap-2"
           :style="{ left: noteRewritePos.x + 'px', top: noteRewritePos.y + 'px' }"
           @mousedown.stop
           @pointerdown.stop
@@ -1182,7 +1182,7 @@
               <i class="fas fa-robot text-[var(--wb-accent)] mr-1"></i
               >{{ t('canvasAgentOpsTitle') }}
             </span>
-            <button class="text-slate-400 hover:text-white" @click="pendingAgentOps = null">
+            <button class="text-[var(--wb-text-2)] hover:text-white" @click="pendingAgentOps = null">
               <i class="fas fa-times"></i>
             </button>
           </div>
@@ -1207,7 +1207,7 @@
 
         <!-- 缩放指示 -->
         <div
-          class="absolute bottom-3 left-3 px-2 py-1 rounded bg-black/40 text-xs text-slate-300 font-mono"
+          class="absolute bottom-3 left-3 px-2 py-1 rounded bg-black/40 text-xs text-[var(--wb-text-2)] font-mono"
         >
           {{ Math.round(viewport.scale * 100) }}%
         </div>
@@ -1225,7 +1225,7 @@
         <!-- E2 节点参考条（参考 canvas-node-reference-bar）：上游引用缩略图横排 -->
         <div
           v-if="nodeRefBar"
-          class="node-ref-bar absolute z-20 flex h-[54px] items-center gap-1.5 rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] px-1.5 shadow-xl"
+          class="node-ref-bar absolute z-20 flex h-[54px] items-center gap-1.5 rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] px-1.5 shadow-lg"
           :style="{ left: nodeRefBar.x + 'px', top: nodeRefBar.y + 'px' }"
           @pointerenter.stop
           @pointerleave="refBarLeave"
@@ -1280,7 +1280,7 @@
         <!-- E2 引用大图预览浮层 -->
         <div
           v-if="refBarPreview.id && refBarPreviewObj"
-          class="pointer-events-none absolute z-30 w-72 rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] p-1.5 shadow-2xl"
+          class="pointer-events-none absolute z-30 w-72 rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] p-1.5 shadow-lg"
           :style="{ left: refBarPreview.x + 'px', top: refBarPreview.y + 'px' }"
         >
           <img
@@ -1307,7 +1307,7 @@
         <!-- 节点悬浮工具栏（参考 canvas-node-hover-toolbar）：悬停物件上方 HTML overlay -->
         <div
           v-if="hoverToolbar.items.length"
-          class="node-hover-toolbar absolute z-20 flex h-9 -translate-x-1/2 items-center rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-xl"
+          class="node-hover-toolbar absolute z-20 flex h-9 -translate-x-1/2 items-center rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg"
           :class="hoverToolbar.below ? 'is-below' : '-translate-y-full'"
           :style="{ left: hoverToolbar.x + 'px', top: hoverToolbar.y + 'px' }"
           @mousedown.stop
@@ -1326,7 +1326,7 @@
               v-else
               :title="b.title"
               class="h-9 px-2 rounded-lg text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/15 transition flex items-center justify-center"
-              :class="b.danger ? 'text-red-400' : ''"
+              :class="b.danger ? 'text-[var(--wb-danger)]' : ''"
               @click="b.action"
             >
               <i :class="b.icon" class="text-sm pointer-events-none"></i>
@@ -1340,7 +1340,7 @@
         <div
           v-if="tbSettings.open"
           data-tb-settings
-          class="absolute z-30 w-52 rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] p-2 shadow-xl"
+          class="absolute z-30 w-52 rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] p-2 shadow-lg"
           :style="{ left: tbSettings.x + 'px', top: tbSettings.y + 'px' }"
           @mousedown.stop
           @pointerdown.stop
@@ -1377,7 +1377,7 @@
         <!-- note 调色板（悬浮工具栏的调色按钮展开，位于工具栏下方） -->
         <div
           v-if="notePalette.open"
-          class="absolute z-30 flex h-10 -translate-x-1/2 items-center gap-1.5 rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] px-2 shadow-xl"
+          class="absolute z-30 flex h-10 -translate-x-1/2 items-center gap-1.5 rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] px-2 shadow-lg"
           :style="{ left: notePalette.x + 'px', top: notePalette.y + 'px' }"
           @mousedown.stop
           @pointerdown.stop
@@ -1438,12 +1438,12 @@
         <!-- D1d @ 提及候选浮层 -->
         <div
           v-if="noteMention.open && mentionCandidates.length"
-          class="absolute z-40 max-h-[200px] w-[230px] overflow-auto rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] py-1 text-xs shadow-xl"
+          class="absolute z-40 max-h-[200px] w-[230px] overflow-auto rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] py-1 text-xs shadow-lg"
           :style="{ left: noteMention.x + 'px', top: noteMention.y + 'px' }"
           @mousedown.stop
           @pointerdown.stop
         >
-          <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-500">
+          <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-[var(--wb-text-2)]">
             {{ t('canvasMentionTitle') }}
           </div>
           <button
@@ -1454,7 +1454,7 @@
             @click="pickMention(c)"
           >
             <i
-              class="fas w-4 text-center text-slate-400"
+              class="fas w-4 text-center text-[var(--wb-text-2)]"
               :class="
                 c.kind === 'img' ? 'fa-image' : c.kind === 'app' ? 'fa-cube' : 'fa-note-sticky'
               "
@@ -1482,7 +1482,7 @@
 
         <!-- 缩放控件条（左下，参考 canvas-zoom-controls）：小地图开关/复位/滑杆/百分比/适应/快捷键 -->
         <div
-          class="absolute bottom-3 left-3 z-10 flex items-center gap-1 h-11 px-2 rounded-xl bg-[var(--wb-surface)] border border-[var(--wb-stroke)] shadow-lg"
+          class="absolute bottom-3 left-3 z-10 flex items-center gap-1 h-11 px-2 rounded-[10px] bg-[var(--wb-surface)] border border-[var(--wb-stroke)] shadow-lg"
           @pointerdown.stop
           @mousedown.stop
           @dblclick.stop
@@ -1542,7 +1542,7 @@
           @mousedown.self="shortcutsOpen = false"
         >
           <div
-            class="w-[420px] max-w-[90vw] rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-2xl p-5"
+            class="w-[420px] max-w-[90vw] rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg p-5"
           >
             <div class="flex items-center justify-between mb-4">
               <span class="text-base font-semibold text-[var(--wb-text-1)]">{{
@@ -1580,12 +1580,12 @@
             class="absolute rounded-sm"
             :class="
               m.type === 'image'
-                ? 'bg-sky-400/70'
+                ? 'bg-[var(--wb-text-2)]/60'
                 : m.type === 'app'
                   ? m.status === 'running'
-                    ? 'bg-cyan-300 animate-pulse'
-                    : 'bg-indigo-400/80'
-                  : 'bg-slate-400/70'
+                    ? 'bg-[var(--wb-accent)] animate-pulse'
+                    : 'bg-[var(--wb-text)]/70'
+                  : 'bg-[var(--wb-text-3)]/60'
             "
             :style="{ left: m.x + 'px', top: m.y + 'px', width: m.w + 'px', height: m.h + 'px' }"
           ></div>
@@ -2361,9 +2361,9 @@ function accentColor() {
   }
   return accentColorCache
 }
-function highlightStroke(o, defStroke = 'rgba(148,163,184,0.4)') {
+function highlightStroke(o, defStroke = 'rgba(160,160,160,0.45)') {
   if (selection.value.includes(o.id)) return { stroke: accentColor(), strokeWidth: 2 }
-  if (isHighlightedOf(o)) return { stroke: '#38bdf8', strokeWidth: 2 }
+  if (isHighlightedOf(o)) return { stroke: accentColor(), strokeWidth: 2 }
   return { stroke: defStroke, strokeWidth: 1 }
 }
 /** 物件是否显示连接句柄：悬停/选中/连线拖拽中（起点与悬停目标，参考 isConnecting 全显） */
@@ -2417,8 +2417,8 @@ function handleConfig(o, side) {
     x: side === 'target' ? 0 : o.width,
     y: o.height / 2,
     radius: (hovered ? 7.5 : 6) / viewport.value.scale,
-    fill: '#1f1d1a',
-    stroke: '#d6d3d1',
+    fill: '#171718',
+    stroke: '#a0a0a0',
     strokeWidth: 2 / viewport.value.scale,
     opacity: showHandles(o) ? 1 : 0,
     cursor: 'crosshair',
@@ -2445,8 +2445,8 @@ function linkAnchorConfig(seg, side) {
     x: side === 'from' ? seg.x1 : seg.x2,
     y: side === 'from' ? seg.y1 : seg.y2,
     radius: 6.5 / viewport.value.scale,
-    fill: side === 'from' ? '#7dd3fc' : '#fcd34d', // 天蓝=源端 琥珀=目标端
-    stroke: '#1f1d1a',
+    fill: side === 'from' ? '#31b9f4' : '#a0a0a0', // 源端=accent-hover 目标端=中性灰
+    stroke: '#171718',
     strokeWidth: 1.5 / viewport.value.scale,
     opacity: active ? 1 : 0,
     cursor: 'grab',
@@ -2502,8 +2502,8 @@ function resizeAnchorConfig(o, corner) {
     x: corner.endsWith('e') ? o.width + off : -off,
     y: corner.startsWith('s') ? o.height + off : -off,
     radius: 6 / viewport.value.scale,
-    fill: '#fafaf9',
-    stroke: '#1f1d1a',
+    fill: '#ffffff',
+    stroke: '#171718',
     strokeWidth: 1.5 / viewport.value.scale,
     opacity: resizeVisible(o) ? 1 : 0,
     cursor: corner === 'nw' || corner === 'se' ? 'nwse-resize' : 'nesw-resize',
@@ -2573,7 +2573,7 @@ const gridStyle = computed(() => {
   const y = viewport.value.y % s
   return {
     backgroundImage:
-      'linear-gradient(to right, rgba(148,163,184,0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.08) 1px, transparent 1px)',
+      'linear-gradient(to right, rgba(49,50,53,0.5) 1px, transparent 1px), linear-gradient(to bottom, rgba(49,50,53,0.5) 1px, transparent 1px)',
     backgroundSize: `${s}px ${s}px`,
     backgroundPosition: `${x}px ${y}px`,
   }
@@ -2639,7 +2639,7 @@ function imageConfig(o) {
     image: loadImage(o.src),
     width: o.width,
     height: o.height,
-    ...highlightStroke(o, 'rgba(148,163,184,0.35)'),
+    ...highlightStroke(o, 'rgba(160,160,160,0.3)'),
     cornerRadius: 6,
   }
 }
@@ -2652,16 +2652,16 @@ function mediaRectConfig(o) {
   return {
     width: o.width,
     height: o.height,
-    fill: o.type === 'video' ? 'rgba(14,165,233,0.10)' : 'rgba(168,85,247,0.10)',
+    fill: o.type === 'video' ? 'rgba(11,140,233,0.10)' : 'rgba(11,140,233,0.07)',
     stroke: sel
-      ? '#38bdf8'
+      ? accentColor()
       : isHighlightedOf(o)
-        ? '#38bdf8'
+        ? accentColor()
         : o.type === 'video'
-          ? 'rgba(56,189,248,0.55)'
-          : 'rgba(192,132,252,0.55)',
+          ? 'rgba(11,140,233,0.55)'
+          : 'rgba(11,140,233,0.35)',
     strokeWidth: sel || isHighlightedOf(o) ? 2 : 1.5,
-    cornerRadius: 12,
+    cornerRadius: 10,
   }
 }
 
@@ -2670,7 +2670,7 @@ const NOTE_COLORS = [
   '#fef08a', // yellow
   '#f9a8d4', // pink
   '#86efac', // green
-  '#7dd3fc', // sky
+  '#7dd3fc', // 便签亮色系（NOTE_COLORS 功能色板，保留）
   '#fdba74', // orange
   '#c4b5fd', // violet
   '#fda4af', // rose
@@ -2685,7 +2685,7 @@ function noteTextColor(bg) {
   const g = parseInt(hex.slice(2, 4), 16)
   const b = parseInt(hex.slice(4, 6), 16)
   const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-  return lum > 0.55 ? '#1e293b' : '#e2e8f0'
+  return lum > 0.55 ? '#171718' : '#e2e8f0'
 }
 
 function noteRectConfig(o) {
@@ -2747,6 +2747,8 @@ const noteEditPos = computed(() => {
     width: o.width * s + 'px',
     height: o.height * s + 'px',
     fontSize: Math.max(10, (o.fontSize || 13) * s) + 'px',
+    background: o.color || NOTE_DEFAULT_COLOR,
+    color: noteTextColor(o.color),
   }
 })
 function startNoteEdit(id) {
@@ -3015,8 +3017,8 @@ function cropRectConfig() {
     y: Math.min(cropRect.value.y, cropRect.value.y + cropRect.value.h),
     width: Math.abs(cropRect.value.w),
     height: Math.abs(cropRect.value.h),
-    fill: 'rgba(16,185,129,0.10)',
-    stroke: 'rgba(16,185,129,0.7)',
+    fill: 'rgba(11,140,233,0.10)',
+    stroke: accentColor(),
     strokeWidth: 1,
     dash: [6, 4],
   }
@@ -3026,14 +3028,14 @@ function guideConfig(v, axis) {
   return axis === 'v'
     ? {
         points: [v, -s / 2, v, s / 2],
-        stroke: '#38bdf8',
+        stroke: accentColor(),
         strokeWidth: 1 / viewport.value.scale,
         dash: [4, 4],
         listening: false,
       }
     : {
         points: [-s / 2, v, s / 2, v],
-        stroke: '#38bdf8',
+        stroke: accentColor(),
         strokeWidth: 1 / viewport.value.scale,
         dash: [4, 4],
         listening: false,
@@ -5278,8 +5280,8 @@ function frameConfig(o) {
   return {
     width: o.width,
     height: o.height,
-    fill: 'rgba(99,102,241,0.05)',
-    stroke: sel ? accentColor() : 'rgba(129,140,248,0.5)',
+    fill: 'rgba(11,140,233,0.04)',
+    stroke: sel ? accentColor() : 'rgba(73,74,80,0.9)',
     strokeWidth: sel ? 2 : 1.5,
     ...(sel ? {} : { dash: [8, 6] }),
     cornerRadius: 10,
@@ -5294,7 +5296,7 @@ function frameLabelConfig(o) {
     y: -22,
     width: Math.max(40, o.width - 20),
     fontSize: 13,
-    fill: '#818cf8',
+    fill: '#a0a0a0',
     align: 'left',
     listening: false,
   }
@@ -5305,8 +5307,8 @@ function shotRectConfig(o) {
   return {
     width: o.width,
     height: o.height,
-    fill: 'rgba(20,184,166,0.08)',
-    ...highlightStroke(o, o.src ? 'rgba(45,212,191,0.7)' : 'rgba(20,184,166,0.45)'),
+    fill: 'rgba(11,140,233,0.06)',
+    ...highlightStroke(o, 'rgba(73,74,80,0.9)'),
     strokeWidth: selection.value.includes(o.id) ? 2 : 1.5,
     cornerRadius: 8,
   }
@@ -5319,7 +5321,7 @@ function shotSeqConfig(o) {
     y: 6,
     fontSize: 12,
     fontStyle: 'bold',
-    fill: '#2dd4bf',
+    fill: '#a0a0a0',
     listening: false,
   }
 }
@@ -5332,7 +5334,7 @@ function shotTextConfig(o) {
     width: o.width - 16,
     height: o.height - 32,
     fontSize: 11,
-    fill: '#94a3b8',
+    fill: '#a0a0a0',
     listening: false,
   }
 }
@@ -5965,12 +5967,12 @@ function placeNodeArtifacts(node, files) {
 
 // —— App 节点卡视觉（参考 infinite-canvas canvas-theme dark：stone 色系 + rounded-3xl + 选中近白描边）——
 const APP_CARD = {
-  fill: '#292524', // node.fill
-  stroke: '#44403c', // node.stroke
-  activeStroke: '#fafaf9', // node.activeStroke（选中）
-  text: '#f5f5f4', // node.text
-  muted: '#d6d3d1', // node.muted
-  faint: '#78716c', // node.faint
+  fill: '#262729', // node.fill  (--wb-surface)
+  stroke: '#313235', // node.stroke  (--wb-stroke)
+  activeStroke: '#ffffff', // node.activeStroke 选中=白描边 (--wb-selected)
+  text: '#ffffff', // node.text  (--wb-text)
+  muted: '#a0a0a0', // node.muted  (--wb-text-2)
+  faint: '#8a8a8a', // node.faint  (--wb-text-3)
 }
 function appNodeRectConfig(o) {
   const sel = selection.value.includes(o.id)
@@ -5979,12 +5981,12 @@ function appNodeRectConfig(o) {
     height: o.height,
     fill: APP_CARD.fill,
     stroke: sel || isHighlightedOf(o) ? APP_CARD.activeStroke : APP_CARD.stroke,
-    strokeWidth: sel ? 2 : 2,
-    cornerRadius: 24, // rounded-3xl
-    shadowColor: sel ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.25)',
-    shadowBlur: sel ? 48 : 18, // 选中态 0 18px 48px（参考 isRelated 投影）
-    shadowOffset: { x: 0, y: sel ? 18 : 6 },
-    shadowOpacity: 0.6,
+    strokeWidth: sel ? 2 : 1,
+    cornerRadius: 10, // --wb-r-card（原 rounded-3xl 24px 越阶收敛）
+    shadowColor: 'rgba(0,0,0,0.25)',
+    shadowBlur: 8, // 选中态不再放大投影：1px 白描边承担选中语义（发光语义退役）
+    shadowOffset: { x: 0, y: 2 },
+    shadowOpacity: 0.4,
   }
 }
 function appNodeTitleConfig(o) {
@@ -6015,7 +6017,7 @@ function appNodeSubConfig(o) {
     height: 20,
     fontSize: 11,
     fill:
-      o.status === 'error' ? '#f87171' : o.status === 'success' ? APP_CARD.muted : APP_CARD.faint,
+      o.status === 'error' ? '#f56c6c' : o.status === 'success' ? APP_CARD.muted : APP_CARD.faint,
     wrap: 'none',
     ellipsis: true,
     listening: false,
@@ -6033,9 +6035,9 @@ function appNodeStatusConfig(o) {
         : o.status === 'running'
           ? APP_CARD.activeStroke
           : o.status === 'error'
-            ? '#f87171'
+            ? '#f56c6c'
             : APP_CARD.faint,
-    stroke: running ? 'rgba(250,250,249,0.35)' : null,
+    stroke: running ? 'rgba(11,140,233,0.25)' : null,
     strokeWidth: running ? 8 : 0,
     listening: false,
   }
@@ -7386,11 +7388,12 @@ textarea {
 .node-hover-toolbar.is-below .tb-bridge {
   bottom: 100%;
 }
-/* note 就地编辑框：与便签底色/字号对齐，仅边框高亮提示编辑中 */
+/* note 就地编辑框：与便签底色/字号对齐（底色由 inline style 随便签色注入），
+   CSS 仅兜底默认色 + 高亮边框提示编辑中 */
 .note-editor {
   padding: 10px;
   line-height: 1.4;
-  background: #475569;
+  background: var(--wb-bg-base);
   color: #e2e8f0;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
@@ -7400,7 +7403,6 @@ textarea {
 /* E3 提及高亮 mirror：与 textarea 同排版参数（padding/行高/字号由 inline
    style 带出），承担底色；textarea 背景透明只显光标与选区 */
 .note-editor-mirror {
-  background: #475569;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 /* frame 名称重命名框：不透明底遮住下方 Konva 标签，Enter/blur 提交、Esc 取消 */

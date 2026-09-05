@@ -18,27 +18,27 @@
             @input="onInput"
           />
           <i
-            class="absolute left-3 top-1/2 transform -translate-y-1/2 fas fa-search text-slate-400"
+            class="absolute left-3 top-1/2 transform -translate-y-1/2 fas fa-search text-[var(--wb-text-2)]"
           ></i>
           <button
             v-if="keyword.trim()"
             @click="clearKeyword"
-            class="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-white"
+            class="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--wb-text-2)] hover:text-white"
           >
             <i class="fas fa-times"></i>
           </button>
         </div>
       </div>
 
-      <div v-if="loading" class="py-10 text-center text-slate-400">
+      <div v-if="loading" class="py-10 text-center text-[var(--wb-text-2)]">
         <a-spin />
       </div>
 
-      <div v-else-if="!keyword.trim()" class="py-10 text-center text-slate-400">
+      <div v-else-if="!keyword.trim()" class="py-10 text-center text-[var(--wb-text-2)]">
         {{ currentLang === 'zh' ? '输入关键词开始搜索' : 'Type a keyword to search' }}
       </div>
 
-      <div v-else-if="!hasResults" class="py-10 text-center text-slate-400">
+      <div v-else-if="!hasResults" class="py-10 text-center text-[var(--wb-text-2)]">
         {{ currentLang === 'zh' ? '未找到匹配结果' : 'No matching results' }}
       </div>
 
@@ -48,7 +48,7 @@
           <div v-for="app in apps" :key="'app-' + app.id" class="search-item" @click="goApp(app)">
             <i class="mr-2 fas fa-th-large text-tech-blue"></i>
             <span class="flex-1 truncate">{{ app.name }}</span>
-            <span class="text-xs text-slate-500 truncate">{{ app.category || '' }}</span>
+            <span class="text-xs text-[var(--wb-text-3)] truncate">{{ app.category || '' }}</span>
           </div>
         </div>
 
@@ -62,7 +62,7 @@
           >
             <i class="mr-2 fas fa-store text-tech-blue"></i>
             <span class="flex-1 truncate">{{ app.name }}</span>
-            <span class="text-xs text-slate-500 truncate">{{ app.category || '' }}</span>
+            <span class="text-xs text-[var(--wb-text-3)] truncate">{{ app.category || '' }}</span>
           </div>
         </div>
 
@@ -71,7 +71,7 @@
           <div v-for="img in images" :key="'img-' + img.id" class="search-item" @click="goImages">
             <i class="mr-2 fas fa-image text-tech-blue"></i>
             <span class="flex-1 truncate">{{ img.filename }}</span>
-            <span class="text-xs text-slate-500 truncate">{{ img.app_name || '' }}</span>
+            <span class="text-xs text-[var(--wb-text-3)] truncate">{{ img.app_name || '' }}</span>
           </div>
         </div>
       </div>
@@ -194,16 +194,16 @@ const goImages = () => {
 }
 /* 与应用中心一致的搜索输入框样式（单层边框） */
 .tech-input {
-  background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(56, 70, 102, 0.6);
+  background: var(--wb-surface);
+  border: 1px solid var(--wb-stroke);
   transition:
     background 0.3s ease,
     border-color 0.3s ease,
     box-shadow 0.3s ease;
 }
 .tech-input:focus {
-  border-color: #0ea5e9;
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+  border-color: var(--wb-accent);
+  box-shadow: 0 0 0 2px rgba(11, 140, 233, 0.2);
 }
 .global-search-results {
   max-height: 60vh;
@@ -215,7 +215,7 @@ const goImages = () => {
 }
 .search-group-title {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--wb-text-2);
   margin-bottom: 4px;
   padding-left: 4px;
 }
@@ -225,7 +225,7 @@ const goImages = () => {
   padding: 8px 10px;
   border-radius: 8px;
   cursor: pointer;
-  color: #e2e8f0;
+  color: var(--wb-text);
   transition: background 0.15s;
 }
 .search-item:hover {

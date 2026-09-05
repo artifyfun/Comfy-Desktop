@@ -1,7 +1,7 @@
 /*
  * 工作台统一输入框样式（与 app 列表 AppSearch 的 tech-input 同源）：
- * 深蓝透明底 + 石板描边 + 天蓝聚焦环。用于工作台内所有小输入框
- * （会话搜索/新建标题/预设表单/固化弹窗）；主输入框是 Composer 卡片。
+ * 炭黑表面底 + var(--wb-stroke) 描边 + azure 聚焦环（Comfy 令牌）。用于工作台内
+ * 所有小输入框（会话搜索/新建标题/预设表单/固化弹窗）；主输入框是 Composer 卡片。
  * 全局挂载（modal 传送到 body 外，父级 scoped 命不中）。
  */
 /* 单元素形态(原生 input / 无缀件 a-input):样式直接命中 */
@@ -54,14 +54,14 @@
 .wb-tech-input.ant-input-affix-wrapper-focused,
 .wb-tech-input .ant-input:focus,
 .wb-tech-input .ant-input-focused {
-  border-color: #0ea5e9;
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+  border-color: var(--wb-accent);
+  box-shadow: 0 0 0 2px var(--wb-accent-bg);
 }
 
 .wb-tech-input ::placeholder,
 .wb-tech-input .ant-input::placeholder,
 .wb-tech-input.ant-input-affix-wrapper .ant-input::placeholder {
-  color: #64748b;
+  color: var(--wb-text-3);
 }
 
 /* ---- 控件族扩展：工作台弹窗内所有原生控件统一为同一视觉语言 ---- */
@@ -78,21 +78,21 @@ textarea.wb-tech-input,
 select.wb-tech-input {
   appearance: none;
   padding-right: 2rem;
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 512' fill='%2364748b'%3E%3Cpath d='M137.4 374.6c12.5 12.5 32.8 12.5 45.3 0l128-128c9.2-9.2 11.9-22.9 6.9-34.9s-16.6-19.8-29.6-19.8L32 192c-12.9 0-24.6 7.8-29.6 19.8s-2.2 25.7 6.9 34.9l128 128z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 512' fill='%238a8a8a'%3E%3Cpath d='M137.4 374.6c12.5 12.5 32.8 12.5 45.3 0l128-128c9.2-9.2 11.9-22.9 6.9-34.9s-16.6-19.8-29.6-19.8L32 192c-12.9 0-24.6 7.8-29.6 19.8s-2.2 25.7 6.9 34.9l128 128z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.6rem center;
   background-size: 0.7rem;
 }
 
 select.wb-tech-input option {
-  background: #0f172a;
+  background: var(--wb-surface-deep);
   color: #fff;
 }
 
-/* checkbox / radio：accent 统一品牌蓝 */
+/* checkbox / radio：accent 统一品牌 azure */
 input[type='checkbox'].wb-tech-check,
 input[type='radio'].wb-tech-check {
-  accent-color: #0ea5e9;
+  accent-color: var(--wb-accent);
   width: 1rem;
   height: 1rem;
   cursor: pointer;
@@ -107,11 +107,11 @@ input[type='radio'].wb-tech-check {
 
 .wb-tech-input .ant-input-number-input::placeholder,
 .wb-tech-input input::placeholder {
-  color: #64748b;
+  color: var(--wb-text-3);
 }
 
-/* 预设 chip 选中态:azure 描边 + 淡 azure 底 */
+/* 预设 chip 选中态:白描边（--node-stroke-selected 语义，规范 §2.4 active=白描边） */
 .preset-chip-on {
-  border-color: var(--wb-accent) !important;
-  background: rgba(11, 140, 233, 0.12);
+  border-color: var(--wb-selected) !important;
+  background: transparent;
 }

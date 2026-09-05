@@ -1,7 +1,7 @@
 <template>
   <a-dropdown :trigger="['click']">
     <button
-      class="px-2 py-1 text-slate-300 hover:text-white rounded transition flex items-center"
+      class="px-2 py-1 text-[var(--wb-text-2)] hover:text-white rounded-md transition flex items-center"
       :title="t('workbenchReasoningEffortTitle')"
     >
       <i class="fas fa-gauge-high"></i>

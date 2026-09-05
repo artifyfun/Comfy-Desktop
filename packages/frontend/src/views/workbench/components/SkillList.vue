@@ -79,7 +79,7 @@
           </button>
           <button
             v-if="!s.builtin"
-            class="w-6 h-6 rounded text-[var(--wb-text-2)] hover:text-red-400 hover:bg-[var(--wb-surface-active)] flex items-center justify-center"
+            class="w-6 h-6 rounded-md text-[var(--wb-text-2)] hover:text-[var(--wb-danger)] hover:bg-[var(--wb-surface-active)] flex items-center justify-center"
             :title="t('delete')"
             @click="$emit('remove', s)"
           >

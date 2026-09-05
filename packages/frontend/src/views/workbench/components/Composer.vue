@@ -10,13 +10,13 @@
       class="absolute inset-0 z-40 flex flex-col items-center justify-center bg-[var(--wb-bg-base)]/95 border-2 border-dashed border-[var(--wb-accent)]"
     >
       <i class="fas fa-cloud-arrow-up text-3xl text-[var(--wb-accent)] mb-2"></i>
-      <div class="text-sm text-slate-200">{{ t('workbenchDropHint') }}</div>
+      <div class="text-sm text-[var(--wb-text)]">{{ t('workbenchDropHint') }}</div>
     </div>
 
-    <!-- dsh composer 布局：圆角卡片，textarea 全宽在上，工具条在底 -->
-    <!-- 圆角与中间面板 rounded-xl 一致，内层按 3px 内收对齐 border 重叠 -->
+    <!-- dsh composer 布局：圆角卡片（--wb-r-card 10px），textarea 全宽在上，工具条在底 -->
+    <!-- 聚焦态用 focus-within 升为 azure 描边，内层按 3px 内收对齐 border 重叠 -->
     <div
-      class="border border-[var(--wb-stroke)] bg-[var(--wb-surface-deep)] px-4 pt-3 pb-2"
+      class="border border-[var(--wb-stroke)] bg-[var(--wb-surface-deep)] px-4 pt-3 pb-2 transition-colors focus-within:border-[var(--wb-accent)]"
       style="border-radius: var(--wb-r-card)"
     >
       <!-- 附件行（缩略图在上） -->
@@ -32,7 +32,7 @@
         v-model="draft"
         :placeholder="t('workbenchInputPlaceholder')"
         :disabled="uploading && !busy"
-        class="w-full bg-transparent border-none outline-none resize-none text-[14px] leading-[22px] text-white placeholder-slate-500 max-h-40 min-h-[66px] py-1"
+        class="w-full bg-transparent border-none outline-none resize-none text-[14px] leading-[22px] text-white placeholder:text-[var(--wb-text-3)] max-h-40 min-h-[66px] py-1"
         @input="autoResize"
         @keydown.enter.exact="onEnterKey"
         @keydown="onKeydown"
@@ -55,7 +55,7 @@
         <!-- 附件单入口:下拉选「上传实体 / 引用本地路径」,不再并排两个按钮 -->
         <a-dropdown :trigger="['click']">
           <button
-            class="w-8 h-8 rounded-full text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)] flex items-center justify-center transition"
+            class="w-8 h-8 rounded-lg text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)] flex items-center justify-center transition"
             :title="t('workbenchAttach')"
             :disabled="uploading"
             @click.prevent
@@ -107,13 +107,15 @@
         </span>
         <!-- busy 时发送位变停止位（dsh 语义）：icon 在 ▲/■ 间切换，宽度不变不跳动 -->
         <button
-          class="w-8 h-8 rounded-full flex items-center justify-center transition"
+          class="w-8 h-8 rounded-lg flex items-center justify-center transition disabled:cursor-not-allowed disabled:opacity-40"
           :class="
-            busy
-              ? 'bg-[var(--wb-surface-hover)] text-white hover:bg-red-500/80'
-              : canSend
-                ? 'bg-[var(--wb-accent)] text-white hover:brightness-110'
-                : 'bg-[var(--wb-surface-hover)] text-[var(--wb-text-2)]'
+            busy && !stopping
+              ? 'bg-[var(--wb-surface-hover)] text-[var(--wb-text-2)] hover:bg-[var(--wb-danger)]/80 hover:text-white'
+              : busy
+                ? 'bg-[var(--wb-surface-hover)] text-[var(--wb-text-2)]'
+                : canSend
+                  ? 'bg-[var(--wb-accent)] text-white hover:brightness-110'
+                  : 'bg-[var(--wb-surface-hover)] text-[var(--wb-text-2)]'
           "
           :disabled="busy ? stopping : !canSend"
           :title="busy ? t('workbenchStop') : t('workbenchSend')"

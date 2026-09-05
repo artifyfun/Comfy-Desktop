@@ -1,20 +1,15 @@
 <template>
-  <div class="page-container bg-tech-dark">
-    <div id="app" class="pb-20">
-      <!-- 主内容区 -->
+  <div class="page-container bg-tech-dark h-full flex flex-col overflow-hidden">
+    <!-- 主内容区（高度链：AppLayout 锁高 → 本页 flex 内滚，避免 calc(100vh-*) 未折算
+         header 高度导致页面恒有纵向滚动条） -->
+    <div id="app" class="flex flex-col flex-1 min-h-0 min-w-0">
       <!-- 顶导航由 AppLayout 统一挂载（应用中心页经路由 meta 指向市场入口，避免自指） -->
-      <main class="relative px-4 mx-auto mt-4 max-w-7xl sm:px-6 lg:px-8">
-        <!-- 标题区域 -->
-        <!-- <div class="mb-10 text-center">
-          <h2 class="mb-4 text-4xl font-bold text-white md:text-5xl">
-            <span class="text-[var(--wb-accent)]">{{ t('app') }}</span> {{ t('center') }}
-          </h2>
-          <p class="mx-auto max-w-2xl text-xl text-slate-300">
-            {{ t('exploreFrontierAI') }}
-          </p>
-        </div> -->
+      <main
+        class="relative flex flex-col flex-1 min-h-0 w-full px-4 mx-auto mt-4 max-w-7xl sm:px-6 lg:px-8"
+      >
         <!-- 标题 + 操作同一行：标题居左，搜索/按钮居右（与资产库页头一致） -->
         <AppActions
+          class="shrink-0"
           :apps="appStore.apps"
           :search-query="searchQuery"
           :selected-category="selectedCategory"
@@ -41,8 +36,8 @@
           </template>
         </AppActions>
 
-        <!-- 应用网格 -->
-        <div class="h-[calc(100vh-270px)]">
+        <!-- 应用网格（flex 撑满剩余高度，虚拟滚动容器内部自滚） -->
+        <div class="flex-1 min-h-0">
           <a-spin :spinning="appStore.isLoading">
             <AppGrid
               :apps="appStore.apps"
@@ -288,6 +283,16 @@ function deleteHistoryItem(index) {
 
   .grid-lines {
     display: none;
+  }
+}
+
+// a-spin 参与高度链：nested-loading 撑满网格区，slot 内 height:100% 的虚拟滚动拿到确定参照
+:deep(.ant-spin-nested-loading) {
+  display: block;
+  height: 100%;
+
+  > .ant-spin-container {
+    height: 100%;
   }
 }
 </style>

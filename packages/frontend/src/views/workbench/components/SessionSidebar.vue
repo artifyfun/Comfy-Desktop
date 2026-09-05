@@ -7,11 +7,11 @@
     <div class="flex items-center justify-between px-2 h-12 border-b border-[var(--wb-stroke)]">
       <template v-if="!collapsed">
         <span class="text-sm font-semibold text-white">Artify</span>
-        <button class="text-slate-400 hover:text-white px-1" @click="$emit('collapse')">
+        <button class="text-[var(--wb-text-2)] hover:text-white px-1" @click="$emit('collapse')">
           <i class="fas fa-angles-left"></i>
         </button>
       </template>
-      <button v-else class="w-full text-slate-400 hover:text-white" @click="$emit('collapse')">
+      <button v-else class="w-full text-[var(--wb-text-2)] hover:text-white" @click="$emit('collapse')">
         <i class="fas fa-angles-right"></i>
       </button>
     </div>
@@ -42,7 +42,7 @@
         <template v-if="!showArchived">
           <span />
           <button
-            class="text-[11px] px-2 py-0.5 rounded flex items-center gap-1.5 text-slate-500 hover:text-slate-300 transition"
+            class="text-[11px] px-2 py-0.5 rounded-md flex items-center gap-1.5 text-[var(--wb-text-3)] hover:text-[var(--wb-text)] transition"
             :title="t('workbenchArchivedView')"
             @click="$emit('update:showArchived', true)"
           >
@@ -65,11 +65,11 @@
 
       <!-- 会话列表（时间分组） -->
       <div class="flex-1 overflow-y-auto px-2 pb-2 space-y-3">
-        <div v-if="groups.length === 0" class="text-center text-xs text-slate-500 mt-6">
+        <div v-if="groups.length === 0" class="text-center text-xs text-[var(--wb-text-3)] mt-6">
           {{ showArchived ? t('workbenchNoArchived') : t('workbenchNoSessions') }}
         </div>
         <div v-for="g in groups" :key="g.label">
-          <div class="text-[11px] text-slate-500 px-2 pb-1">{{ g.label }}</div>
+          <div class="text-[11px] text-[var(--wb-text-3)] px-2 pb-1">{{ g.label }}</div>
           <div
             v-for="s in g.sessions"
             :key="s.id"
@@ -87,7 +87,7 @@
             ></span>
             <div
               class="pl-2 pr-8 text-sm truncate"
-              :class="s.id === currentId ? 'text-white' : 'text-slate-300'"
+              :class="s.id === currentId ? 'text-white' : 'text-[var(--wb-text-2)]'"
             >
               {{ s.title }}
             </div>
@@ -105,7 +105,7 @@
                 @open-change="(o) => (menuOpenId = o ? s.id : '')"
               >
                 <button
-                  class="w-6 h-6 rounded text-slate-400 hover:text-white hover:bg-slate-600 flex items-center justify-center"
+                  class="w-6 h-6 rounded-md text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-active)] flex items-center justify-center"
                   :title="t('workbenchSessionActions')"
                   @click.stop
                 >
@@ -148,7 +148,7 @@
             <!-- 归档恢复 -->
             <button
               v-if="showArchived"
-              class="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded text-slate-400 hover:text-white hover:bg-slate-600 flex items-center justify-center"
+              class="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-active)] flex items-center justify-center"
               :title="t('workbenchUnarchive')"
               @click.stop="$emit('unarchive', s)"
             >
@@ -280,7 +280,7 @@ function onSessionAction(key, s) {
 
 function statusDot(s) {
   // dsh workspace 状态点：running 蓝 / 待处理琥珀
-  if (s._running) return 'bg-blue-400'
+  if (s._running) return 'bg-[var(--wb-accent)]'
   if (s._pending) return 'bg-amber-400'
   return ''
 }

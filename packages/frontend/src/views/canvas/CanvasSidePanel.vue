@@ -82,10 +82,10 @@
         <span
           v-if="row.statusDot"
           class="h-1.5 w-1.5 shrink-0 rounded-full"
-          :class="row.statusDot === 'running' ? 'animate-pulse bg-cyan-300' : ''"
+          :class="row.statusDot === 'running' ? 'animate-pulse bg-[var(--wb-accent)]' : ''"
           :style="
             row.statusDot === 'error'
-              ? 'background:#f87171'
+              ? 'background:#f56c6c'
               : row.statusDot === 'done'
                 ? 'background:#4ade80'
                 : ''
@@ -134,13 +134,14 @@ const filters = computed(() => [
 ])
 
 const TYPE_META = {
-  image: { icon: 'fas fa-image', color: '#38bdf8' },
-  video: { icon: 'fas fa-film', color: '#a78bfa' },
-  note: { icon: 'fas fa-note-sticky', color: '#fbbf24' },
-  app: { icon: 'fas fa-cube', color: '#818cf8' },
-  frame: { icon: 'fas fa-vector-square', color: '#a8a29e' },
-  shot: { icon: 'fas fa-clapperboard', color: '#f472b6' },
-  audio: { icon: 'fas fa-music', color: '#34d399' },
+  // 类型图标统一单色（--wb-text-2）；运行/错误态由 statusDot 语义色表达，不再用类型彩虹
+  image: { icon: 'fas fa-image', color: '#a0a0a0' },
+  video: { icon: 'fas fa-film', color: '#a0a0a0' },
+  note: { icon: 'fas fa-note-sticky', color: '#a0a0a0' },
+  app: { icon: 'fas fa-cube', color: '#a0a0a0' },
+  frame: { icon: 'fas fa-vector-square', color: '#a0a0a0' },
+  shot: { icon: 'fas fa-clapperboard', color: '#a0a0a0' },
+  audio: { icon: 'fas fa-music', color: '#a0a0a0' },
 }
 
 /** 行标签：note 取文本截断；image/video 取 name；app 取 name/appId；其余类型名 */

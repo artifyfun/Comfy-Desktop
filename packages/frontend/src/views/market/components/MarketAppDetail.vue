@@ -1,9 +1,9 @@
 <template>
   <div class="flex overflow-auto fixed inset-0 z-50 justify-center items-center p-4 bg-black/80">
-    <div class="relative p-6 w-full max-w-3xl rounded-xl glass-card">
+    <div class="relative p-6 w-full max-w-3xl glass-card" style="border-radius: var(--wb-r-modal)">
       <button
         @click="$emit('close')"
-        class="absolute top-6 right-6 text-xl text-slate-400 hover:text-white"
+        class="absolute top-6 right-6 text-xl text-[var(--wb-text-2)] hover:text-white"
       >
         <i class="fas fa-times"></i>
       </button>
@@ -18,12 +18,11 @@
             <span class="px-3 py-1 text-sm rounded-full bg-tech-blue/20 text-tech-blue">
               <i class="mr-1 fas fa-microchip"></i> {{ t(app.category) }}
             </span>
-            <span class="px-3 py-1 text-sm rounded-full bg-tech-purple/20 text-tech-purple">
+            <span
+              class="px-3 py-1 text-sm rounded-full bg-[var(--wb-surface)] text-white border border-[var(--wb-stroke-strong)]"
+            >
               <i class="mr-1 fas fa-bolt"></i> {{ t(app.powerLevel) }}
             </span>
-            <!-- <span class="px-3 py-1 text-sm rounded-full bg-tech-green/20 text-tech-green">
-                <i class="mr-1 fas fa-star"></i> {{ app.rating || '4.5' }}
-              </span> -->
           </div>
         </div>
 
@@ -39,20 +38,14 @@
               </div>
             </div>
 
-            <div class="flex justify-between items-center mb-4 text-sm text-slate-400">
+            <div class="flex justify-between items-center mb-4 text-sm text-[var(--wb-text-2)]">
               <div>
                 <i class="mr-2 far fa-clock"></i>
                 <span>{{ t('createdOn', { date: formatDate(app.createdAt) }) }}</span>
               </div>
-              <!-- <div class="flex items-center">
-                  <span class="text-tech-green">
-                    <i class="mr-1 fas fa-download"></i>
-                    {{ app.downloads || '1.2k' }}
-                  </span>
-                </div> -->
             </div>
 
-            <p class="mb-6 text-slate-300">
+            <p class="mb-6 text-[var(--wb-text)]">
               {{ app.description }}
             </p>
 
@@ -63,9 +56,9 @@
                 <div
                   v-for="feature in app.features || []"
                   :key="feature"
-                  class="flex items-center text-sm text-slate-300"
+                  class="flex items-center text-sm text-[var(--wb-text)]"
                 >
-                  <i class="mr-2 fas fa-check text-tech-green"></i>
+                  <i class="mr-2 fas fa-check text-[var(--wb-text-2)]"></i>
                   <span>{{ feature }}</span>
                 </div>
               </div>
@@ -118,13 +111,11 @@ function formatDate(date) {
 
 <style scoped>
 .glass-card {
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(56, 70, 102, 0.4);
-  box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
+  background: var(--wb-surface-deep);
+  border: 1px solid var(--wb-stroke);
   transition:
-    transform 0.15s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .fade-enter-active,

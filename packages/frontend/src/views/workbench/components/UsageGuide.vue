@@ -16,12 +16,12 @@
           <div
             v-for="s in SCENARIOS"
             :key="s.id"
-            class="group relative overflow-hidden rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface-deep)] transition hover:border-[var(--wb-accent)]/60 hover:shadow-lg hover:shadow-[var(--wb-accent)]/10"
+            class="group relative overflow-hidden rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface-deep)] transition hover:border-[var(--wb-accent)]"
           >
             <div class="relative h-32 w-full overflow-hidden">
               <video
                 v-if="s.video"
-                class="absolute inset-0 h-full w-full object-cover opacity-90 transition duration-500 group-hover:scale-105 group-hover:opacity-100"
+                class="absolute inset-0 h-full w-full object-cover opacity-90 transition duration-200 group-hover:scale-105 group-hover:opacity-100"
                 :src="s.video"
                 :poster="s.image"
                 muted
@@ -32,23 +32,23 @@
               ></video>
               <img
                 v-else
-                class="absolute inset-0 h-full w-full object-cover opacity-90 transition duration-500 group-hover:scale-105 group-hover:opacity-100"
+                class="absolute inset-0 h-full w-full object-cover opacity-90 transition duration-200 group-hover:scale-105 group-hover:opacity-100"
                 :src="s.image"
                 :alt="s.title[lang]"
                 loading="lazy"
               />
               <div
-                class="absolute inset-0 bg-gradient-to-t from-[rgba(8,10,18,0.92)] via-[rgba(8,10,18,0.35)] to-transparent"
+                class="absolute inset-0 bg-[rgba(8,10,18,0.85)]"
               ></div>
               <div class="absolute inset-x-0 bottom-0 p-3">
                 <div class="text-sm font-semibold text-white drop-shadow">{{ s.title[lang] }}</div>
-                <div class="mt-0.5 line-clamp-1 text-[11px] text-white/70">
+                <div class="mt-0.5 line-clamp-1 text-[11px] text-[var(--wb-text-2)]">
                   {{ s.desc[lang] }}
                 </div>
               </div>
               <span
                 v-if="s.video"
-                class="absolute right-2 top-2 rounded-full bg-black/50 px-2 py-0.5 text-[10px] text-white/80 backdrop-blur"
+                class="absolute right-2 top-2 rounded-full bg-[var(--wb-surface)] px-2 py-0.5 text-[10px] text-[var(--wb-text-2)]"
               >
                 <i class="fas fa-circle-play mr-1"></i>{{ c.hoverPlay }}
               </span>

@@ -14,7 +14,7 @@
         ></span>
       </span>
       <button
-        class="text-slate-400 hover:text-white"
+        class="text-[var(--wb-text-2)] hover:text-white"
         :title="t('canvasAppNodeClose')"
         @click="$emit('close')"
       >
@@ -125,7 +125,7 @@
         />
       </div>
     </div>
-    <div v-else class="text-slate-500 text-xs py-2">{{ t('canvasAppNodeNoParams') }}</div>
+    <div v-else class="text-[var(--wb-text-2)] text-xs py-2">{{ t('canvasAppNodeNoParams') }}</div>
 
     <!-- 上游喂养提示 -->
     <div v-if="fedLines.length" class="fed">
@@ -353,10 +353,10 @@ function selectOptions() {
   white-space: nowrap;
 }
 .status-text.success {
-  color: #34d399;
+  color: var(--wb-success);
 }
 .status-text.error {
-  color: #f87171;
+  color: var(--wb-danger);
 }
 .status-text.running {
   color: var(--wb-accent);

@@ -1,14 +1,12 @@
 <template>
   <div
-    class="overflow-hidden relative p-5 rounded-xl cursor-pointer glass-card"
+    class="overflow-hidden relative p-5 cursor-pointer glass-card"
+    style="border-radius: var(--wb-r-card)"
     @click="$emit('view-detail', app)"
   >
-    <!-- 卡片光效 -->
-    <div class="card-glow"></div>
-
     <!-- 封面图片 -->
     <div class="overflow-hidden relative mb-4 h-48 rounded-lg app-imageUrl">
-      <div class="absolute inset-0 z-10 bg-gradient-to-t to-transparent from-[#171718]"></div>
+      <div class="absolute inset-0 z-10 bg-[#171718]/40"></div>
       <div
         class="absolute top-3 right-3 px-2 py-1 text-sm font-medium text-white rounded bg-tech-blue/80"
       >
@@ -27,31 +25,20 @@
         </span> -->
       </div>
 
-      <p class="overflow-hidden mb-3 h-12 text-sm text-slate-300">
+      <p class="overflow-hidden mb-3 h-12 text-sm text-[var(--wb-text)]">
         {{ app.description }}
       </p>
 
-      <div class="flex justify-between items-center text-sm text-slate-400">
+      <div class="flex justify-between items-center text-sm text-[var(--wb-text-2)]">
         <div class="flex items-center">
           <i class="mr-2 far fa-clock"></i>
           <span>{{ formatDate(app.createdAt) }}</span>
         </div>
         <div class="flex items-center space-x-1">
-          <i class="fas fa-bolt text-tech-blue"></i>
+          <i class="fas fa-bolt text-[var(--wb-text-2)]"></i>
           <span>{{ t(app.powerLevel) }}</span>
         </div>
       </div>
-
-      <!-- 安装按钮 -->
-      <!-- <div class="pt-3 mt-3 border-t border-slate-700">
-        <button
-          class="px-4 py-2 w-full text-sm font-medium text-white rounded-md transition cursor-pointer btn-comfy-primary"
-          @click.stop="$emit('install', app)"
-        >
-          <i class="mr-2 fas fa-download"></i>
-          {{ t('install') }}
-        </button>
-      </div> -->
     </div>
   </div>
 </template>
@@ -80,35 +67,16 @@ function formatDate(date) {
 
 <style scoped>
 .glass-card {
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(56, 70, 102, 0.4);
-  box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
+  background: var(--wb-surface-deep);
+  border: 1px solid var(--wb-stroke);
   transition:
-    transform 0.15s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .glass-card:hover {
-  border-color: rgba(14, 165, 233, 0.5);
-  box-shadow: 0 12px 40px rgba(14, 165, 233, 0.2);
-}
-
-.card-glow {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 100%;
-  border-radius: 1rem;
-  z-index: -1;
-  background: radial-gradient(circle at center, rgba(14, 165, 233, 0.2) 0%, transparent 70%);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.glass-card:hover .card-glow {
-  opacity: 1;
+  background: var(--wb-surface);
+  border-color: var(--wb-selected);
 }
 
 .app-imageUrl {

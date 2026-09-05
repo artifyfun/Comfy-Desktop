@@ -20,14 +20,14 @@
             @click="$emit('view-detail', app)"
           >
             <!-- 应用图标 -->
-            <div class="overflow-hidden flex-shrink-0 mr-4 w-12 h-12 rounded-lg bg-tech-darker">
+            <div class="overflow-hidden flex-shrink-0 mr-4 w-12 h-12 rounded-md bg-tech-darker">
               <img
                 v-if="app.imageUrl"
                 :src="app.imageUrl"
                 :alt="app.name"
                 class="object-cover w-full h-full"
               />
-              <div v-else class="flex justify-center items-center w-full h-full text-tech-blue">
+              <div v-else class="flex justify-center items-center w-full h-full text-[var(--wb-text-2)]">
                 <i class="text-xl fas fa-robot"></i>
               </div>
             </div>
@@ -46,16 +46,16 @@
                     {{ t(app.category) }}
                   </span>
                   <!-- 状态指示器 -->
-                  <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <div class="w-2 h-2 bg-[var(--wb-success)] rounded-full"></div>
                 </div>
               </div>
 
-              <p class="text-xs text-slate-400 line-clamp-2">
+              <p class="text-xs text-[var(--wb-text-2)] line-clamp-2">
                 {{ app.description }}
               </p>
 
               <!-- 元数据 -->
-              <div class="flex items-center mt-2 space-x-4 text-xs text-slate-500">
+              <div class="flex items-center mt-2 space-x-4 text-xs text-[var(--wb-text-2)]">
                 <span class="flex items-center">
                   <i class="mr-1 fas fa-clock"></i>
                   {{ formatDate(app.createdAt) }}
@@ -64,37 +64,12 @@
                   <i class="mr-1 fas fa-code"></i>
                   {{ app.template ? Object.keys(app.template).length : 0 }} {{ t('nodes') }}
                 </span> -->
-                <span v-if="app.isFromMarket" class="flex items-center text-tech-green">
+                <span v-if="app.isFromMarket" class="flex items-center text-[var(--wb-text-2)]">
                   <i class="mr-1 fas fa-store"></i>
                   {{ t('fromMarket') }}
                 </span>
               </div>
             </div>
-
-            <!-- 操作按钮 -->
-            <!-- <div class="flex items-center space-x-2">
-              <button
-                @click.stop="$emit('view-detail', app)"
-                class="p-2 rounded-lg transition-colors text-slate-400 hover:text-white hover:bg-tech-darker"
-                :title="t('viewDetail')"
-              >
-                <i class="fas fa-eye"></i>
-              </button>
-              <button
-                @click.stop="$emit('edit', app)"
-                class="p-2 rounded-lg transition-colors text-slate-400 hover:text-white hover:bg-tech-darker"
-                :title="t('edit')"
-              >
-                <i class="fas fa-edit"></i>
-              </button>
-              <button
-                @click.stop="handleDelete(app)"
-                class="p-2 rounded-lg transition-colors text-slate-400 hover:text-red-400 hover:bg-red-400/10"
-                :title="t('delete')"
-              >
-                <i class="fas fa-trash"></i>
-              </button>
-            </div> -->
           </div>
         </transition-group>
       </div>
@@ -103,12 +78,12 @@
     <!-- 空状态 -->
     <div v-if="filteredApps.length === 0" class="py-20 text-center">
       <div class="inline-block p-6 mb-6 rounded-full bg-tech-darker">
-        <i class="text-5xl fas fa-robot text-tech-blue"></i>
+        <i class="text-5xl fas fa-robot text-[var(--wb-text-2)]"></i>
       </div>
       <h3 class="mb-2 text-2xl font-bold text-white">
         {{ searchQuery.trim() || selectedCategory ? t('noAppsFound') : t('noAppsAvailable') }}
       </h3>
-      <p class="mx-auto mb-6 max-w-md text-slate-400">
+      <p class="mx-auto mb-6 max-w-md text-[var(--wb-text-2)]">
         {{
           searchQuery.trim()
             ? t('noAppsFoundWithQuery', { query: searchQuery })
@@ -343,11 +318,13 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   padding: 12px 16px;
-  background: rgba(30, 41, 59, 0.5);
-  border: 1px solid rgba(51, 65, 85, 0.3);
-  border-radius: 8px;
+  background: var(--wb-surface-deep);
+  border: 1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-card);
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease;
   margin-bottom: 8px;
 }
 
@@ -356,9 +333,8 @@ onUnmounted(() => {
 }
 
 .compact-app-item:hover {
-  background: rgba(30, 41, 59, 0.8);
-  border-color: rgba(14, 165, 233, 0.3);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  background: var(--wb-surface-hover);
+  border-color: var(--wb-stroke-strong);
 }
 
 .line-clamp-2 {
@@ -385,16 +361,16 @@ onUnmounted(() => {
 }
 
 .virtual-scroll-container::-webkit-scrollbar-track {
-  background: rgba(30, 41, 59, 0.3);
+  background: var(--wb-surface-deep);
   border-radius: 3px;
 }
 
 .virtual-scroll-container::-webkit-scrollbar-thumb {
-  background: rgba(14, 165, 233, 0.5);
+  background: var(--wb-accent);
   border-radius: 3px;
 }
 
 .virtual-scroll-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(14, 165, 233, 0.7);
+  background: var(--wb-accent-hover);
 }
 </style>

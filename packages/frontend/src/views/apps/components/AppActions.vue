@@ -10,7 +10,7 @@
       <div class="flex items-center space-x-4" v-if="isElectron && props.showCreate">
         <a-dropdown :trigger="['click']">
           <button
-            class="flex items-center px-5 py-3 space-x-2 font-semibold text-white rounded-md transition cursor-pointer floating-btn btn-comfy-primary"
+            class="flex items-center px-4 py-2 space-x-2 font-semibold text-white rounded-md transition cursor-pointer btn-comfy-primary"
           >
             <i class="fas fa-plus"></i>
             <span>{{ t('addNewApp') }}</span>
@@ -62,7 +62,7 @@
               'flex items-center justify-center w-10 h-10 text-sm font-medium rounded-md transition',
               viewMode === 'grid'
                 ? 'text-white bg-[var(--wb-accent)]'
-                : 'text-slate-400 hover:text-white hover:bg-[var(--wb-surface-hover)]',
+                : 'text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]',
             ]"
             :title="t('gridView')"
           >
@@ -74,7 +74,7 @@
               'flex items-center justify-center w-10 h-10 text-sm font-medium rounded-md transition',
               viewMode === 'compact'
                 ? 'text-white bg-[var(--wb-accent)]'
-                : 'text-slate-400 hover:text-white hover:bg-[var(--wb-surface-hover)]',
+                : 'text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)]',
             ]"
             :title="t('compactView')"
           >
@@ -186,30 +186,6 @@ const handleAppUploadChange = ({ file }) => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--wb-success);
-}
-
-.floating-btn {
-  /* 发光退役（Comfy 无发光语义） */
-}
-
-@keyframes pulse-slow {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-
-@keyframes float {
-  0%,
-  100% {
-    transform: translateY(0px);
-  }
-  50% {
-    transform: translateY(-10px);
-  }
+  background: var(--wb-accent);
 }
 </style>

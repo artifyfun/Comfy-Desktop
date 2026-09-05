@@ -169,7 +169,7 @@
                   class="wb-tech-check"
                 />
                 <span class="text-sm text-white font-mono">{{ s.name }}</span>
-                <span v-if="!s.valid" class="text-[10px] text-red-400">{{
+                <span v-if="!s.valid" class="text-[10px] text-[var(--wb-danger)]">{{
                   t('workbenchSkillInvalid')
                 }}</span>
                 <span class="text-[11px] text-[var(--wb-text-2)] truncate ml-auto">{{

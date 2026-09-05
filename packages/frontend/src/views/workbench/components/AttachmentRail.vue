@@ -29,7 +29,7 @@
         <a-spin size="small" />
       </span>
       <button
-        class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[var(--wb-surface-hover)] text-white text-xs hidden group-hover:flex items-center justify-center hover:bg-red-500"
+        class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[var(--wb-surface-hover)] text-white text-xs hidden group-hover:flex items-center justify-center hover:bg-[var(--wb-danger)]"
         @click="$emit('remove', i)"
       >
         <i class="fas fa-times"></i>

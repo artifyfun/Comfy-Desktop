@@ -1,67 +1,73 @@
 <template>
   <div class="virtual-grid-container">
-    <!-- 虚拟滚动容器 -->
-    <div
-      v-show="filteredApps.length"
-      ref="scrollContainer"
-      class="virtual-scroll-container"
-      @scroll="handleScroll"
-    >
-      <!-- 总高度占位 -->
-      <div :style="{ height: totalHeight + 'px' }" class="virtual-scroll-spacer"></div>
-
-      <!-- 可见项目容器 -->
-      <div :style="{ transform: `translateY(${offsetY}px)` }" class="virtual-items-container">
-        <transition-group
-          name="card"
-          tag="div"
-          class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-        >
-          <MarketAppCard
-            v-for="app in visibleApps"
-            :key="app.id"
-            :app="app"
-            @view-detail="$emit('view-detail', $event)"
-            @install="$emit('install', $event)"
-          />
-        </transition-group>
-      </div>
+    <!-- 首载 loading（loading 期间不渲染网格/空态，避免空态闪现） -->
+    <div v-if="loading" class="flex justify-center items-center h-full py-24">
+      <a-spin size="large" />
     </div>
+    <template v-else>
+      <!-- 虚拟滚动容器 -->
+      <div
+        v-show="filteredApps.length"
+        ref="scrollContainer"
+        class="virtual-scroll-container"
+        @scroll="handleScroll"
+      >
+        <!-- 总高度占位 -->
+        <div :style="{ height: totalHeight + 'px' }" class="virtual-scroll-spacer"></div>
 
-    <!-- 空状态 -->
-    <div v-if="filteredApps.length === 0" class="py-20 text-center">
-      <div class="inline-block p-6 mb-6 rounded-full bg-tech-darker">
-        <i class="text-5xl fas fa-store text-tech-blue"></i>
+        <!-- 可见项目容器 -->
+        <div :style="{ transform: `translateY(${offsetY}px)` }" class="virtual-items-container">
+          <transition-group
+            name="card"
+            tag="div"
+            class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+          >
+            <MarketAppCard
+              v-for="app in visibleApps"
+              :key="app.id"
+              :app="app"
+              @view-detail="$emit('view-detail', $event)"
+              @install="$emit('install', $event)"
+            />
+          </transition-group>
+        </div>
       </div>
-      <h3 class="mb-2 text-2xl font-bold text-white">
-        {{ searchQuery.trim() || selectedCategory ? t('noAppsFound') : t('noAppsAvailable') }}
-      </h3>
-      <p class="mx-auto mb-6 max-w-md text-slate-400">
-        {{
-          searchQuery.trim()
-            ? t('noAppsFoundWithQuery', { query: searchQuery })
-            : selectedCategory
-              ? t('noAppsInCategory', { category: selectedCategory })
-              : t('marketEmptyDescription')
-        }}
-      </p>
-      <div class="flex justify-center space-x-2">
-        <button
-          v-if="searchQuery.trim()"
-          @click="$emit('clear-search')"
-          class="px-6 py-2 font-medium text-white rounded-md transition cursor-pointer btn-comfy-primary"
-        >
-          {{ t('clearSearch') }}
-        </button>
-        <button
-          v-if="selectedCategory"
-          @click="$emit('clear-filter')"
-          class="px-6 py-2 font-medium text-white rounded-md transition cursor-pointer btn-comfy-primary"
-        >
-          {{ t('clearFilter') }}
-        </button>
+
+      <!-- 空状态 -->
+      <div v-if="filteredApps.length === 0" class="py-20 text-center">
+        <div class="inline-block p-6 mb-6 rounded-full bg-tech-darker">
+          <i class="text-5xl fas fa-store text-[var(--wb-text-2)]"></i>
+        </div>
+        <h3 class="mb-2 text-2xl font-bold text-white">
+          {{ searchQuery.trim() || selectedCategory ? t('noAppsFound') : t('noAppsAvailable') }}
+        </h3>
+        <p class="mx-auto mb-6 max-w-md text-[var(--wb-text-2)]">
+          {{
+            searchQuery.trim()
+              ? t('noAppsFoundWithQuery', { query: searchQuery })
+              : selectedCategory
+                ? t('noAppsInCategory', { category: selectedCategory })
+                : t('marketEmptyDescription')
+          }}
+        </p>
+        <div class="flex justify-center space-x-2">
+          <button
+            v-if="searchQuery.trim()"
+            @click="$emit('clear-search')"
+            class="px-6 py-2 font-medium text-white rounded-md transition cursor-pointer btn-comfy-primary"
+          >
+            {{ t('clearSearch') }}
+          </button>
+          <button
+            v-if="selectedCategory"
+            @click="$emit('clear-filter')"
+            class="px-6 py-2 font-medium text-white rounded-md transition cursor-pointer btn-comfy-primary"
+          >
+            {{ t('clearFilter') }}
+          </button>
+        </div>
       </div>
-    </div>
+    </template>
   </div>
 </template>
 
@@ -82,6 +88,10 @@ const props = defineProps({
   selectedCategory: {
     type: String,
     default: '',
+  },
+  loading: {
+    type: Boolean,
+    default: false,
   },
 })
 
@@ -272,16 +282,16 @@ onUnmounted(() => {
 }
 
 .virtual-scroll-container::-webkit-scrollbar-track {
-  background: rgba(30, 41, 59, 0.3);
+  background: var(--wb-surface-deep);
   border-radius: 3px;
 }
 
 .virtual-scroll-container::-webkit-scrollbar-thumb {
-  background: rgba(14, 165, 233, 0.5);
+  background: var(--wb-accent);
   border-radius: 3px;
 }
 
 .virtual-scroll-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(14, 165, 233, 0.7);
+  background: var(--wb-accent-hover);
 }
 </style>

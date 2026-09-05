@@ -113,7 +113,7 @@ const getHistoryUrl = (item) => {
   font-family: var(--wb-font);
   background: var(--wb-bg-base);
   min-height: 100vh;
-  color: #e2e8f0;
+  color: var(--wb-text);
   overflow-x: hidden;
 
   &-mask {
@@ -135,8 +135,8 @@ const getHistoryUrl = (item) => {
     padding: 1.5rem;
     width: 100%;
     border-radius: 0.75rem;
-    background: rgba(15, 23, 42, 0.6);
-    border: 1px solid rgba(56, 70, 102, 0.4);
+    background: var(--wb-surface-deep);
+    border: 1px solid var(--wb-stroke);
     box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
     transition:
       transform 0.15s ease,
@@ -159,7 +159,7 @@ const getHistoryUrl = (item) => {
   }
 
   &-close {
-    color: #94a3b8;
+    color: var(--wb-text-2);
     background: none;
     border: none;
     cursor: pointer;
@@ -182,7 +182,7 @@ const getHistoryUrl = (item) => {
   .empty-history {
     padding: 3rem 0;
     text-align: center;
-    color: #64748b;
+    color: var(--wb-text-3);
 
     .empty-icon {
       font-size: 2.25rem;
@@ -244,7 +244,7 @@ const getHistoryUrl = (item) => {
   .delete-button {
     width: 1.5rem;
     height: 1.5rem;
-    background-color: #ef4444;
+    background-color: var(--wb-danger);
     border-radius: 50%;
     border: none;
     display: flex;
@@ -254,7 +254,7 @@ const getHistoryUrl = (item) => {
     transition: background-color 0.2s;
 
     &:hover {
-      background-color: #dc2626;
+      background-color: var(--wb-danger);
     }
 
     .fas {
@@ -269,7 +269,7 @@ const getHistoryUrl = (item) => {
 
   .history-date {
     font-size: 0.75rem;
-    color: #9ca3af;
+    color: var(--wb-text-3);
   }
 
   // 动画效果

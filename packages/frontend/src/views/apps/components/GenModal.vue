@@ -82,7 +82,7 @@
         <div class="style-selection-content">
           <div class="style-selection-header">
             <h3 class="mb-2 text-xl font-bold text-white">{{ t('selectAppStyle') }}</h3>
-            <p class="mb-6 text-slate-300">{{ t('styleSelectionDescription') }}</p>
+            <p class="mb-6 text-[var(--wb-text)]">{{ t('styleSelectionDescription') }}</p>
           </div>
 
           <!-- Tab切换 -->
@@ -92,7 +92,7 @@
                 <!-- 预设风格选择 -->
                 <div v-if="appStore.isLoading" class="flex justify-center items-center py-12">
                   <a-spin size="large" />
-                  <span class="ml-3 text-slate-300">{{ t('loadingStyles') }}</span>
+                  <span class="ml-3 text-[var(--wb-text)]">{{ t('loadingStyles') }}</span>
                 </div>
 
                 <div v-else-if="appStore.buildStyles.length > 0" class="style-grid-container">
@@ -121,10 +121,10 @@
                 </div>
 
                 <div v-else class="py-12 text-center">
-                  <div class="mb-4 text-slate-400">
+                  <div class="mb-4 text-[var(--wb-text-2)]">
                     <i class="text-2xl fas fa-exclamation-triangle"></i>
                   </div>
-                  <p class="text-slate-300">{{ t('noBuildStyles') }}</p>
+                  <p class="text-[var(--wb-text)]">{{ t('noBuildStyles') }}</p>
                 </div>
               </a-tab-pane>
 
@@ -156,8 +156,8 @@
                           class="style-preview"
                         />
                         <div v-else class="preview-placeholder">
-                          <i class="mb-2 text-2xl fas fa-eye text-slate-400"></i>
-                          <span class="text-slate-400">{{ t('previewPlaceholder') }}</span>
+                          <i class="mb-2 text-2xl fas fa-eye text-[var(--wb-text-2)]"></i>
+                          <span class="text-[var(--wb-text-2)]">{{ t('previewPlaceholder') }}</span>
                         </div>
                       </div>
                     </div>
@@ -598,25 +598,25 @@ const handleOptimizePrompt = () => {
     min-height: calc(100vh);
     width: 100%;
     height: 100%;
-    background: rgba(15, 23, 42, 0.95);
-    border: 1px solid rgba(56, 70, 102, 0.4);
-    border-radius: 16px;
-    box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
+    background: var(--wb-bg-base);
+    border: 1px solid var(--wb-stroke);
+    border-radius: var(--wb-r-modal);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   }
   .ant-modal-header {
     background: transparent;
-    border-bottom: 1px solid rgba(56, 70, 102, 0.4);
+    border-bottom: 1px solid var(--wb-stroke);
     padding: 20px 24px;
   }
   .ant-modal-title {
-    color: #e2e8f0;
+    color: var(--wb-text);
     font-family: var(--wb-font);
     font-weight: 600;
   }
   .ant-modal-body {
     flex: 1;
     background: transparent;
-    color: #e2e8f0;
+    color: var(--wb-text);
     .editor-box {
       width: 100%;
       height: 100%;
@@ -631,7 +631,7 @@ const handleOptimizePrompt = () => {
   }
   .ant-modal-footer {
     background: transparent;
-    border-top: 1px solid rgba(56, 70, 102, 0.4);
+    border-top: 1px solid var(--wb-stroke);
     padding: 16px 24px;
   }
 }
@@ -666,11 +666,11 @@ const handleOptimizePrompt = () => {
       margin-bottom: 20px;
       .ant-tabs-nav-list {
         .ant-tabs-tab {
-          color: #94a3b8;
+          color: var(--wb-text-2);
           font-size: 1rem;
           font-weight: 500;
           &.ant-tabs-tab-active {
-            color: #0ea5e9;
+            color: var(--wb-accent);
             font-weight: 600;
           }
         }
@@ -686,31 +686,31 @@ const handleOptimizePrompt = () => {
 }
 
 .config-section {
-  background: rgba(15, 23, 42, 0.6);
-  border: 2px solid rgba(56, 70, 102, 0.4);
-  border-radius: 16px;
+  background: var(--wb-surface);
+  border: 1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-card);
   padding: 20px;
 }
 
 .config-title {
   font-size: 1.2rem;
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--wb-text);
   margin-bottom: 8px;
 }
 
 .config-description {
   font-size: 0.9rem;
-  color: #94a3b8;
+  color: var(--wb-text-2);
   margin-bottom: 15px;
 }
 
 .code-editor-container {
   height: 400px;
-  border: 1px solid rgba(56, 70, 102, 0.4);
-  border-radius: 12px;
+  border: 1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-card);
   overflow: hidden;
-  background: rgba(15, 23, 42, 0.6);
+  background: var(--wb-surface);
 
   .code-editor {
     height: 100%;
@@ -722,16 +722,16 @@ const handleOptimizePrompt = () => {
   .preview-title {
     font-size: 1rem;
     font-weight: 500;
-    color: #e2e8f0;
+    color: var(--wb-text);
     margin-bottom: 8px;
   }
   .preview-frame {
     width: 100%;
     height: 200px;
-    border: 1px solid rgba(56, 70, 102, 0.4);
-    border-radius: 12px;
+    border: 1px solid var(--wb-stroke);
+    border-radius: var(--wb-r-card);
     overflow: hidden;
-    background: rgba(15, 23, 42, 0.6);
+    background: var(--wb-surface);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -743,7 +743,7 @@ const handleOptimizePrompt = () => {
     }
     .preview-placeholder {
       text-align: center;
-      color: #94a3b8;
+      color: var(--wb-text-2);
       .fas {
         margin-bottom: 8px;
       }
@@ -758,7 +758,7 @@ const handleOptimizePrompt = () => {
 
   /* 自定义滚动条样式 */
   scrollbar-width: thin;
-  scrollbar-color: rgba(14, 165, 233, 0.3) transparent;
+  scrollbar-color: var(--wb-accent) var(--wb-surface-deep);
 }
 
 .style-grid-container::-webkit-scrollbar {
@@ -766,18 +766,18 @@ const handleOptimizePrompt = () => {
 }
 
 .style-grid-container::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--wb-surface-deep);
   border-radius: 4px;
 }
 
 .style-grid-container::-webkit-scrollbar-thumb {
-  background: rgba(14, 165, 233, 0.3);
+  background: var(--wb-accent);
   border-radius: 4px;
   transition: background 0.3s ease;
 }
 
 .style-grid-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(14, 165, 233, 0.5);
+  background: var(--wb-accent-hover);
 }
 
 .style-grid {
@@ -788,30 +788,27 @@ const handleOptimizePrompt = () => {
 }
 
 .style-card {
-  background: rgba(15, 23, 42, 0.6);
-  border: 2px solid rgba(56, 70, 102, 0.4);
-  border-radius: 16px;
+  background: var(--wb-surface);
+  border: 1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-card);
   overflow: hidden;
   cursor: pointer;
   transition:
     transform 0.15s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+    border-color 0.15s ease;
 }
 
 .style-card:hover {
-  border-color: rgba(14, 165, 233, 0.5);
-  box-shadow: 0 12px 40px rgba(14, 165, 233, 0.2);
+  border-color: var(--wb-stroke-strong);
 }
 
 .style-card-selected {
-  border-color: #0ea5e9;
-  background: rgba(14, 165, 233, 0.1);
-  box-shadow: 0 0 20px rgba(14, 165, 233, 0.3);
+  border-color: var(--wb-selected);
+  background: var(--wb-accent-bg);
 }
 
 .style-card-default {
-  border-color: rgba(56, 70, 102, 0.4);
+  border-color: var(--wb-stroke);
 }
 
 .style-image-container {
@@ -836,7 +833,7 @@ const handleOptimizePrompt = () => {
   bottom: 0;
   left: 0;
   right: 0;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent);
+  background: rgba(23, 23, 24, 0.72);
   padding: 20px;
   color: white;
   opacity: 0;
@@ -865,13 +862,13 @@ const handleOptimizePrompt = () => {
 .style-title {
   font-size: 1.1rem;
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--wb-text);
   margin-bottom: 8px;
 }
 
 .style-subtitle {
   font-size: 0.9rem;
-  color: #94a3b8;
+  color: var(--wb-text-2);
   line-height: 1.4;
 }
 
@@ -909,7 +906,7 @@ const handleOptimizePrompt = () => {
   }
 
   .style-card {
-    border-radius: 12px;
+    border-radius: var(--wb-r-card);
   }
 }
 </style>

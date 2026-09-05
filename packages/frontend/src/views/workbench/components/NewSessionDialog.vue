@@ -127,10 +127,3 @@ function create() {
   emit('update:open', false)
 }
 </script>
-
-<style scoped>
-/* Comfy 选中语义:白描边（--node-stroke-selected） */
-.sel-white {
-  border: 1px solid var(--wb-selected) !important;
-}
-</style>

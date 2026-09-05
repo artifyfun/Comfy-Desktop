@@ -28,12 +28,12 @@
     <!-- 空状态 -->
     <div v-if="filteredApps.length === 0" class="py-20 text-center">
       <div class="inline-block p-6 mb-6 rounded-full bg-tech-darker">
-        <i class="text-5xl fas fa-robot text-tech-blue"></i>
+        <i class="text-5xl fas fa-robot text-[var(--wb-text-2)]"></i>
       </div>
       <h3 class="mb-2 text-2xl font-bold text-white">
         {{ searchQuery.trim() || selectedCategory ? t('noAppsFound') : t('noAppsAvailable') }}
       </h3>
-      <p class="mx-auto mb-6 max-w-md text-slate-400">
+      <p class="mx-auto mb-6 max-w-md text-[var(--wb-text-2)]">
         {{
           searchQuery.trim()
             ? t('noAppsFoundWithQuery', { query: searchQuery })
@@ -241,16 +241,16 @@ onUnmounted(() => {
 }
 
 .virtual-scroll-container::-webkit-scrollbar-track {
-  background: rgba(30, 41, 59, 0.3);
+  background: var(--wb-surface-deep);
   border-radius: 3px;
 }
 
 .virtual-scroll-container::-webkit-scrollbar-thumb {
-  background: rgba(14, 165, 233, 0.5);
+  background: var(--wb-accent);
   border-radius: 3px;
 }
 
 .virtual-scroll-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(14, 165, 233, 0.7);
+  background: var(--wb-accent-hover);
 }
 </style>

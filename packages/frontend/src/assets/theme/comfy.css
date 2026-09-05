@@ -8,6 +8,8 @@
 :root {
   /* surfaces — Comfy charcoal 阶梯 */
   --wb-bg-base: #171718;
+  /* 兼容别名：--wb-bg 曾被引用但从未定义（解析失败回退 inherit/透明） */
+  --wb-bg: var(--wb-bg-base);
   --wb-surface-deep: #202121;
   --wb-surface: #262729;
   --wb-surface-hover: #313235;
@@ -18,13 +20,20 @@
   --wb-selected: #ffffff;
   /* text */
   --wb-text: #ffffff;
+  /* 兼容别名：历史代码引用过 --wb-text-1（从未定义，解析失败回退 inherit）。
+     现映射到 --wb-text（主文字）；语义上应是次要文字的后续分批改 --wb-text-2 */
+  --wb-text-1: var(--wb-text);
   --wb-text-2: #a0a0a0;
   --wb-text-3: #8a8a8a;
   /* accent */
   --wb-accent: #0b8ce9;
   --wb-accent-hover: #31b9f4;
+  /* accent 淡底（chip/选中提示/状态条用；--wb-accent-bg 曾被引用但未定义） */
+  --wb-accent-bg: rgba(11, 140, 233, 0.12);
   --wb-danger: #f56c6c;
+  --wb-danger-bg: rgba(245, 108, 108, 0.12);
   --wb-success: #4ade80;
+  --wb-success-bg: rgba(74, 222, 128, 0.14);
   /* brand（仅 logo，不做界面功能色） */
   --wb-brand: #f0ff41;
   --wb-ink: #211927;

@@ -1075,122 +1075,6 @@ onMounted(async () => {
   bottom: 0;
   right: 0;
   z-index: 1000;
-
-  .glass-card {
-    background: rgba(15, 23, 42, 0.6);
-    border: 1px solid rgba(56, 70, 102, 0.4);
-    box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
-    transition:
-      transform 0.15s ease,
-      border-color 0.15s ease,
-      box-shadow 0.15s ease;
-  }
-
-  .glass-card:hover {
-    border-color: rgba(14, 165, 233, 0.5);
-    box-shadow: 0 12px 40px rgba(14, 165, 233, 0.2);
-  }
-
-  .card-glow {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 100%;
-    border-radius: 1rem;
-    z-index: -1;
-    background: radial-gradient(circle at center, rgba(14, 165, 233, 0.2) 0%, transparent 70%);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-  }
-
-  .glass-card:hover .card-glow {
-    opacity: 1;
-  }
-
-  .app-imageUrl {
-    transition: transform 0.2s ease-out;
-  }
-
-  .glass-card:hover .app-imageUrl {
-    transform: scale(1.05);
-  }
-
-  .grid-lines {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    display: none;
-    z-index: -2;
-  }
-
-  .pulse-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #0ea5e9;
-  }
-
-  .floating-btn {
-    box-shadow: 0 0 20px rgba(14, 165, 233, 0.5);
-  }
-
-  .neon-text {
-    text-shadow: 0 0 5px rgba(14, 165, 233, 0.7);
-  }
-
-  .tech-input {
-    background: var(--wb-bg-base);
-    border: 1px solid var(--wb-stroke-strong);
-    transition:
-      background 0.3s ease,
-      border-color 0.3s ease,
-      box-shadow 0.3s ease;
-  }
-
-  .tech-input:focus {
-    border-color: var(--wb-accent);
-    box-shadow: 0 0 0 3px rgba(11, 140, 233, 0.15);
-  }
-
-  .fade-enter-active,
-  .fade-leave-active {
-    transition: opacity 0.3s ease;
-  }
-
-  .fade-enter-from,
-  .fade-leave-to {
-    opacity: 0;
-  }
-
-  .slide-enter-active {
-    transition: opacity 0.3s ease-out;
-  }
-
-  .slide-leave-active {
-    transition:
-      opacity 0.25s ease-out,
-      transform 0.25s ease-out;
-  }
-
-  .slide-enter-from,
-  .slide-leave-to {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-
-  .card-enter-active {
-    transition:
-      opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
-      transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-  }
-
-  .card-enter-from {
-    opacity: 0;
-    transform: translateY(30px) scale(0.9);
-  }
 }
 </style>
 
@@ -1201,74 +1085,6 @@ body {
   min-height: 100vh;
   color: var(--wb-text);
   overflow-x: hidden;
-}
-
-.glass-card {
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(56, 70, 102, 0.4);
-  box-shadow: 0 8px 32px rgba(2, 8, 32, 0.4);
-  transition:
-    transform 0.15s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
-}
-
-.glass-card:hover {
-  border-color: rgba(14, 165, 233, 0.5);
-  box-shadow: 0 12px 40px rgba(14, 165, 233, 0.2);
-}
-
-.card-glow {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 100%;
-  border-radius: 1rem;
-  z-index: -1;
-  background: radial-gradient(circle at center, rgba(14, 165, 233, 0.2) 0%, transparent 70%);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-.glass-card:hover .card-glow {
-  opacity: 1;
-}
-
-.app-imageUrl {
-  transition: transform 0.2s ease-out;
-}
-
-.glass-card:hover .app-imageUrl {
-  transform: scale(1.05);
-}
-
-.grid-lines {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-image:
-    linear-gradient(rgba(56, 70, 102, 0.2) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(56, 70, 102, 0.2) 1px, transparent 1px);
-  background-size: 30px 30px;
-  z-index: -2;
-}
-
-.pulse-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #0ea5e9;
-}
-
-.floating-btn {
-  box-shadow: 0 0 20px rgba(14, 165, 233, 0.5);
-}
-
-.neon-text {
-  text-shadow: 0 0 5px rgba(14, 165, 233, 0.7);
 }
 
 .tech-input {
@@ -1282,7 +1098,7 @@ body {
 
 .tech-input:focus {
   border-color: var(--wb-accent);
-  box-shadow: 0 0 0 3px rgba(11, 140, 233, 0.15);
+  box-shadow: 0 0 0 2px rgba(11, 140, 233, 0.2);
 }
 
 .fade-enter-active,

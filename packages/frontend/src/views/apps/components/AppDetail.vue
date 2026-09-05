@@ -3,7 +3,7 @@
     <div class="relative p-6 w-full max-w-3xl glass-card" style="border-radius: var(--wb-r-modal)">
       <button
         @click="handleClose"
-        class="absolute top-6 right-6 text-xl text-slate-400 hover:text-white"
+        class="absolute top-6 right-6 text-xl text-[var(--wb-text-2)] hover:text-white"
       >
         <i class="fas fa-times"></i>
       </button>
@@ -22,7 +22,9 @@
             <span class="px-3 py-1 text-sm rounded-full bg-tech-blue/20 text-tech-blue">
               <i class="mr-1 fas fa-microchip"></i> {{ t(currentApp.category) }}
             </span>
-            <span class="px-3 py-1 text-sm rounded-full bg-tech-purple/20 text-tech-purple">
+            <span
+              class="px-3 py-1 text-sm rounded-full bg-[var(--wb-surface)] text-white border border-[var(--wb-stroke-strong)]"
+            >
               <i class="mr-1 fas fa-bolt"></i> {{ t(currentApp.powerLevel) }}
             </span>
           </div>
@@ -34,7 +36,7 @@
               <h3 class="text-2xl font-bold text-white">{{ currentApp.name }}</h3>
             </div>
 
-            <div class="flex justify-between items-center mb-4 text-sm text-slate-400">
+            <div class="flex justify-between items-center mb-4 text-sm text-[var(--wb-text-2)]">
               <div>
                 <i class="mr-2 far fa-clock"></i>
                 <span>{{ t('createdOn', { date: formatDate(currentApp.createdAt) }) }}</span>
@@ -42,20 +44,26 @@
               <div class="flex justify-end items-center" v-if="isElectron">
                 <a-tooltip>
                   <template #title>{{ t('edit') }}</template>
-                  <span class="text-xs cursor-pointer text-tech-blue" @click="handleEdit">
+                  <span
+                    class="text-xs cursor-pointer text-[var(--wb-text-2)] hover:text-white"
+                    @click="handleEdit"
+                  >
                     <i class="fas fa-solid fa-pen-to-square"></i>
                   </span>
                 </a-tooltip>
                 <a-tooltip>
                   <template #title>{{ t('export') }}</template>
-                  <span class="ml-2 text-xs cursor-pointer text-tech-blue" @click="handleExport">
+                  <span
+                    class="ml-2 text-xs cursor-pointer text-[var(--wb-text-2)] hover:text-white"
+                    @click="handleExport"
+                  >
                     <i class="fas fa-solid fa-cloud-arrow-down"></i>
                   </span>
                 </a-tooltip>
                 <a-tooltip>
                   <template #title>{{ t('versionHistory') }}</template>
                   <span
-                    class="ml-2 text-xs cursor-pointer text-tech-blue"
+                    class="ml-2 text-xs cursor-pointer text-[var(--wb-text-2)] hover:text-white"
                     @click="showVersions = true"
                   >
                     <i class="fas fa-solid fa-clock-rotate-left"></i>
@@ -63,20 +71,23 @@
                 </a-tooltip>
                 <a-tooltip>
                   <template #title>{{ t('checkDeps') }}</template>
-                  <span class="ml-2 text-xs cursor-pointer text-tech-blue" @click="handleCheckDeps">
+                  <span
+                    class="ml-2 text-xs cursor-pointer text-[var(--wb-text-2)] hover:text-white"
+                    @click="handleCheckDeps"
+                  >
                     <i class="fas fa-solid fa-shield-halved"></i>
                   </span>
                 </a-tooltip>
                 <a-tooltip>
                   <template #title>{{ t('delete') }}</template>
-                  <span class="ml-2 text-xs text-red-500 cursor-pointer" @click="handleDelete">
+                  <span class="ml-2 text-xs text-[var(--wb-danger)] cursor-pointer" @click="handleDelete">
                     <i class="fas fa-solid fa-trash"></i>
                   </span>
                 </a-tooltip>
               </div>
             </div>
 
-            <p class="mb-6 text-slate-300">
+            <p class="mb-6 text-[var(--wb-text)]">
               {{ currentApp.description }}
             </p>
           </div>
@@ -89,14 +100,14 @@
             </button>
             <button
               v-if="isElectron"
-              class="btn-comfy-primary px-1 py-3 font-medium text-white rounded-md cursor-pointer text-nowrap"
+              class="px-1 py-3 font-medium text-white rounded-md cursor-pointer text-nowrap bg-[var(--wb-surface)] border border-[var(--wb-stroke)] hover:bg-[var(--wb-surface-hover)]"
               @click="handleRunWorkflow"
             >
               {{ t('runWorkflow') }}
             </button>
             <button
               v-if="isElectron"
-              class="btn-comfy-primary relative px-1 py-3 font-medium text-white rounded-md cursor-pointer text-nowrap"
+              class="relative px-1 py-3 font-medium text-white rounded-md cursor-pointer text-nowrap bg-[var(--wb-surface)] border border-[var(--wb-stroke)] hover:bg-[var(--wb-surface-hover)]"
               @click="handleRunBatch"
             >
               {{ t('batchMode') }}
@@ -153,7 +164,7 @@
             <ul class="ml-5 list-disc">
               <li v-for="(m, i) in depsReport.missingModels" :key="i">
                 <code>{{ m.value }}</code>
-                <span class="ml-1 text-slate-400">({{ m.input }} @ {{ m.node }})</span>
+                <span class="ml-1 text-[var(--wb-text-2)]">({{ m.input }} @ {{ m.node }})</span>
               </li>
             </ul>
           </div>

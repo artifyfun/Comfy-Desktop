@@ -392,15 +392,15 @@ function onRootClick(e) {
 .wb-md :not(pre) > code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.92em;
-  background: rgba(15, 23, 42, 0.55);
-  border: 1px solid rgba(56, 70, 102, 0.5);
+  background: var(--wb-surface);
+  border: 1px solid var(--wb-stroke);
   border-radius: 4px;
   padding: 0.08em 0.35em;
 }
 /* 代码块卡片（头部含语言标签与复制按钮） */
 .wb-md .wb-md-code {
-  border: 1px solid rgba(56, 70, 102, 0.6);
-  border-radius: 8px;
+  border: 1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-card);
   overflow: hidden;
   margin: 0.5em 0;
 }
@@ -409,23 +409,23 @@ function onRootClick(e) {
   align-items: center;
   justify-content: space-between;
   padding: 3px 10px;
-  background: rgba(15, 23, 42, 0.65);
-  border-bottom: 1px solid rgba(56, 70, 102, 0.5);
+  background: var(--wb-surface-deep);
+  border-bottom: 1px solid var(--wb-stroke);
 }
 .wb-md .wb-md-lang {
   font-size: 11px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: #7dd3fc;
+  color: var(--wb-accent);
   letter-spacing: 0.03em;
 }
 .wb-md .wb-md-copy {
   font-size: 11px;
   line-height: 1;
   padding: 3px 8px;
-  border-radius: 4px;
-  border: 1px solid rgba(56, 70, 102, 0.6);
+  border-radius: var(--wb-r-ctrl);
+  border: 1px solid var(--wb-stroke);
   background: transparent;
-  color: #cbd5e1;
+  color: var(--wb-text);
   cursor: pointer;
   transition:
     color 0.15s ease,
@@ -433,12 +433,12 @@ function onRootClick(e) {
     background 0.15s ease;
 }
 .wb-md .wb-md-copy:hover {
-  color: #fff;
-  border-color: #0ea5e9;
-  background: rgba(14, 165, 233, 0.12);
+  color: var(--wb-text);
+  border-color: var(--wb-accent);
+  background: var(--wb-accent-bg);
 }
 .wb-md .wb-md-code pre {
-  background: rgba(2, 6, 23, 0.6);
+  background: #111;
   margin: 0;
   padding: 10px 12px;
   overflow-x: auto;
@@ -453,10 +453,10 @@ function onRootClick(e) {
 .wb-md blockquote {
   margin: 0.5em 0;
   padding: 0.1em 0.9em;
-  border-left: 3px solid #0ea5e9;
-  color: #cbd5e1;
-  background: rgba(14, 165, 233, 0.06);
-  border-radius: 0 6px 6px 0;
+  border-left: 3px solid var(--wb-accent);
+  color: var(--wb-text);
+  background: var(--wb-accent-bg);
+  border-radius: 0 var(--wb-r-ctrl) var(--wb-r-ctrl) 0;
 }
 .wb-md table {
   border-collapse: collapse;
@@ -468,27 +468,27 @@ function onRootClick(e) {
 }
 .wb-md th,
 .wb-md td {
-  border: 1px solid rgba(56, 70, 102, 0.7);
+  border: 1px solid var(--wb-stroke);
   padding: 4px 10px;
   text-align: left;
 }
 .wb-md th {
-  background: rgba(15, 23, 42, 0.5);
-  color: #fff;
+  background: var(--wb-surface);
+  color: var(--wb-text);
   white-space: nowrap;
 }
 .wb-md a {
-  color: #38bdf8;
+  color: var(--wb-accent);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 .wb-md hr {
-  border-color: rgba(56, 70, 102, 0.6);
+  border-color: var(--wb-stroke);
   margin: 0.8em 0;
 }
 /* 任务列表复选框保持只读展示 */
 .wb-md input[type='checkbox'] {
-  accent-color: #0ea5e9;
+  accent-color: var(--wb-accent);
   pointer-events: none;
   vertical-align: -1px;
 }

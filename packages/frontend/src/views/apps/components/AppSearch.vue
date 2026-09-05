@@ -8,19 +8,19 @@
         v-model="searchQuery"
         type="text"
         :placeholder="t('searchApps')"
-        class="px-4 py-2 pl-10 w-full text-white rounded-lg sm:w-64 tech-input search-input focus:outline-none"
+        class="px-4 py-2 pl-10 w-full text-white sm:w-64 tech-input search-input focus:outline-none"
         @keyup.enter="handleSearch"
         @focus="handleFocus"
         @blur="handleBlur"
       />
       <i
-        class="absolute left-3 top-1/2 transform -translate-y-1/2 fas fa-search text-slate-400"
+        class="absolute left-3 top-1/2 transform -translate-y-1/2 fas fa-search text-[var(--wb-text-2)]"
       ></i>
       <!-- 清除搜索按钮 -->
       <button
         v-if="searchQuery.trim()"
         @click="clearSearch"
-        class="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-white"
+        class="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--wb-text-2)] hover:text-white"
       >
         <i class="fas fa-times"></i>
       </button>
@@ -28,23 +28,23 @@
       <!-- 搜索历史下拉 -->
       <div
         v-if="searchHistory.length > 0 && !searchQuery.trim() && showSearchHistory"
-        class="absolute right-0 left-0 top-full z-10 mt-1 rounded-lg border shadow-lg bg-[var(--wb-surface-hover)] border-[var(--wb-stroke)]"
+        class="absolute right-0 left-0 top-full z-10 mt-1 rounded-md border shadow-[0_4px_12px_rgba(0,0,0,0.15)] bg-[var(--wb-surface-hover)] border-[var(--wb-stroke)]"
       >
         <div class="p-2">
-          <div class="px-2 mb-2 text-xs text-slate-400">{{ t('searchHistory') }}</div>
+          <div class="px-2 mb-2 text-xs text-[var(--wb-text-2)]">{{ t('searchHistory') }}</div>
           <div
             v-for="(history, index) in searchHistory"
             :key="index"
             @click="handleHistoryClick(history)"
             @contextmenu.prevent="deleteHistoryItem(index)"
-            class="relative px-2 py-1 text-sm rounded cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700 group"
+            class="relative px-2 py-1 text-sm rounded cursor-pointer text-[var(--wb-text)] hover:text-white hover:bg-[var(--wb-surface-active)] group"
           >
-            <i class="mr-2 fas fa-history text-tech-blue"></i>
+            <i class="mr-2 fas fa-history text-[var(--wb-text-2)]"></i>
             {{ history }}
             <!-- 删除单个历史记录按钮 -->
             <button
               @click.stop="deleteHistoryItem(index)"
-              class="absolute right-2 top-1/2 text-red-400 opacity-0 transition-opacity transform -translate-y-1/2 group-hover:opacity-100 hover:text-red-300"
+              class="absolute right-2 top-1/2 text-[var(--wb-danger)] opacity-0 transition-opacity transform -translate-y-1/2 group-hover:opacity-100"
               :title="t('deleteThisHistoryRecord')"
             >
               <i class="text-xs fas fa-times"></i>
@@ -52,12 +52,12 @@
           </div>
 
           <!-- 分隔线 -->
-          <div class="my-2 border-t border-slate-600"></div>
+          <div class="my-2 border-t border-[var(--wb-stroke-strong)]"></div>
 
           <!-- 清除全部历史按钮 -->
           <div
             @click="clearAllHistory"
-            class="px-2 py-1.5 text-sm text-red-400 rounded transition-colors cursor-pointer hover:text-red-300 hover:bg-red-900/30"
+            class="px-2 py-1.5 text-sm text-[var(--wb-danger)] rounded transition-colors cursor-pointer hover:bg-[rgba(245,108,108,0.12)]"
           >
             <i class="mr-2 fas fa-trash-alt"></i>
             {{ t('clearAllHistory') }}
@@ -68,29 +68,29 @@
       <!-- 无历史记录提示 -->
       <div
         v-if="searchHistory.length === 0 && !searchQuery.trim() && showSearchHistory"
-        class="absolute right-0 left-0 top-full z-10 mt-1 rounded-lg border shadow-lg bg-[var(--wb-surface-hover)] border-[var(--wb-stroke)]"
+        class="absolute right-0 left-0 top-full z-10 mt-1 rounded-md border shadow-[0_4px_12px_rgba(0,0,0,0.15)] bg-[var(--wb-surface-hover)] border-[var(--wb-stroke)]"
       >
         <div class="p-3 text-center">
-          <i class="mb-2 text-lg fas fa-history text-slate-500"></i>
-          <div class="text-sm text-slate-400">{{ t('noSearchHistory') }}</div>
-          <div class="mt-1 text-xs text-slate-500">{{ t('searchHistoryTip') }}</div>
+          <i class="mb-2 text-lg fas fa-history text-[var(--wb-text-3)]"></i>
+          <div class="text-sm text-[var(--wb-text-2)]">{{ t('noSearchHistory') }}</div>
+          <div class="mt-1 text-xs text-[var(--wb-text-2)]">{{ t('searchHistoryTip') }}</div>
         </div>
       </div>
 
       <!-- 搜索建议下拉 -->
       <div
         v-if="searchSuggestions.length > 0 && searchQuery.trim() && showSearchSuggestions"
-        class="absolute right-0 left-0 top-full z-10 mt-1 rounded-lg border shadow-lg bg-[var(--wb-surface-hover)] border-[var(--wb-stroke)]"
+        class="absolute right-0 left-0 top-full z-10 mt-1 rounded-md border shadow-[0_4px_12px_rgba(0,0,0,0.15)] bg-[var(--wb-surface-hover)] border-[var(--wb-stroke)]"
       >
         <div class="p-2">
-          <div class="px-2 mb-2 text-xs text-slate-400">{{ t('searchSuggestions') }}</div>
+          <div class="px-2 mb-2 text-xs text-[var(--wb-text-2)]">{{ t('searchSuggestions') }}</div>
           <div
             v-for="(suggestion, index) in searchSuggestions"
             :key="index"
             @click="handleSuggestionClick(suggestion)"
-            class="px-2 py-1 text-sm rounded cursor-pointer text-slate-300 hover:text-white hover:bg-slate-700"
+            class="px-2 py-1 text-sm rounded cursor-pointer text-[var(--wb-text)] hover:text-white hover:bg-[var(--wb-surface-active)]"
           >
-            <i class="mr-2 fas fa-lightbulb text-tech-blue"></i>
+            <i class="mr-2 fas fa-lightbulb text-[var(--wb-text-2)]"></i>
             {{ suggestion }}
           </div>
         </div>
@@ -99,7 +99,7 @@
 
     <!-- 分类筛选 -->
     <div class="flex flex-col space-y-2 sm:flex-row sm:items-center sm:space-y-0 sm:space-x-2">
-      <span class="text-sm text-slate-300">{{ t('category') }}</span>
+      <span class="text-sm text-[var(--wb-text)]">{{ t('category') }}</span>
       <div class="flex flex-wrap gap-1 items-center category-buttons">
         <button
           @click="handleCategoryChange('')"
@@ -107,7 +107,7 @@
             'px-3 py-1 text-xs rounded-full transition',
             selectedCategory === ''
               ? 'bg-tech-blue text-white'
-              : 'bg-slate-700 text-slate-300 hover:bg-slate-600',
+              : 'bg-[var(--wb-surface)] text-[var(--wb-text-2)] hover:bg-[var(--wb-surface-hover)] hover:text-[var(--wb-text)]',
           ]"
         >
           {{ t('all') }}
@@ -120,7 +120,7 @@
             'px-3 py-1 text-xs rounded-full transition',
             selectedCategory === category
               ? 'bg-tech-blue text-white'
-              : 'bg-slate-700 text-slate-300 hover:bg-slate-600',
+              : 'bg-[var(--wb-surface)] text-[var(--wb-text-2)] hover:bg-[var(--wb-surface-hover)] hover:text-[var(--wb-text)]',
           ]"
         >
           {{ t(category) }}
@@ -131,11 +131,11 @@
     <!-- 搜索结果提示 -->
     <div
       v-if="searchQuery.trim() || selectedCategory"
-      class="flex items-center text-sm text-slate-300"
+      class="flex items-center text-sm text-[var(--wb-text)]"
     >
-      <i class="mr-2 fas fa-filter text-tech-blue"></i>
+      <i class="mr-2 fas fa-filter text-[var(--wb-text-2)]"></i>
       <span>{{ t('foundResults', { count: filteredApps.length }) }}</span>
-      <span v-if="filteredApps.length > 0" class="ml-2 text-xs text-slate-400">
+      <span v-if="filteredApps.length > 0" class="ml-2 text-xs text-[var(--wb-text-2)]">
         ({{ t('totalApps', { count: totalApps }) }})
       </span>
     </div>
@@ -298,8 +298,9 @@ const deleteHistoryItem = (index) => {
 
 <style scoped>
 .tech-input {
-  background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(56, 70, 102, 0.6);
+  background: var(--wb-surface);
+  border: 1px solid var(--wb-stroke);
+  border-radius: 6px;
   transition:
     background 0.3s ease,
     border-color 0.3s ease,
@@ -307,8 +308,9 @@ const deleteHistoryItem = (index) => {
 }
 
 .tech-input:focus {
-  border-color: #0ea5e9;
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+  border-color: var(--wb-accent);
+  box-shadow: 0 0 0 2px var(--wb-accent-bg);
+  outline: none;
 }
 
 /* 搜索区域自适应样式 */

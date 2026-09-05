@@ -6,7 +6,7 @@
           <i class="fas fa-cube text-[var(--wb-accent)] mr-1"></i>{{ t('canvasAppPickerTitle') }}
         </span>
         <input v-model="q" class="search" :placeholder="t('canvasAppPickerSearch')" />
-        <button class="text-slate-400 hover:text-white" @click="$emit('close')">
+        <button class="text-[var(--wb-text-2)] hover:text-white" @click="$emit('close')">
           <i class="fas fa-times"></i>
         </button>
       </div>

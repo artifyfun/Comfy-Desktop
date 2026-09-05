@@ -81,7 +81,7 @@
         <div
           v-if="opsResultMsg"
           class="mb-2"
-          :style="{ color: opsResultOk ? 'var(--wb-accent)' : '#f87171' }"
+          :style="{ color: opsResultOk ? 'var(--wb-accent)' : 'var(--wb-danger)' }"
         >
           {{ opsResultMsg }}
         </div>
@@ -280,6 +280,14 @@
             </a-button>
           </div>
 
+          <!-- 会话切换加载指示（纯视觉 #11：不改动 selectSession 的 await/竞态守卫） -->
+          <div
+            v-if="sessionLoading"
+            class="mx-4 mt-2 shrink-0 flex items-center gap-2 self-start rounded-md border border-[var(--wb-stroke)] bg-[var(--wb-surface)] px-3 py-1 text-xs text-[var(--wb-text-2)]"
+          >
+            <a-spin size="small" />
+          </div>
+
           <!-- 对话流（含执行卡内联） -->
           <div ref="messagesEl" class="flex-1 overflow-y-auto p-4 space-y-6">
             <div v-if="messages.length === 0" class="text-center text-[var(--wb-text-2)] mt-10">
@@ -298,7 +306,7 @@
               <div v-if="m.__turnFirst" class="flex justify-start">
                 <div class="max-w-[85%] w-full space-y-1 group/msg">
                   <div
-                    class="rounded-lg px-3 py-2 text-sm break-words bg-[var(--wb-surface-deep)] text-slate-200 border border-[var(--wb-stroke-strong)]"
+                    class="rounded-[var(--wb-r-card)] px-3 py-2 text-sm break-words bg-[var(--wb-surface-deep)] text-[var(--wb-text)] border border-[var(--wb-stroke-strong)]"
                   >
                     <!-- P1-B3 合成兜底活动卡:turn 在途时置顶(turnActCover 同步隐藏
                          重复的过程折叠行);全完成自动回落「过程(N 步)」→ 历史零新增 -->
@@ -353,7 +361,11 @@
                             @click.stop="toggleProcessGroup(tmi)"
                           >
                             <a-spin v-if="processGroupRunning(processGroupAt(tmi))" size="small" />
-                            <i v-else class="fas fa-sliders text-tech-cyan"></i>
+                            <i
+                              v-else-if="processGroupFailed(processGroupAt(tmi))"
+                              class="fas fa-triangle-exclamation text-[var(--wb-danger)] shrink-0"
+                            ></i>
+                            <i v-else class="fas fa-check text-[var(--wb-success)] shrink-0"></i>
                             <span class="font-mono text-xs truncate flex-1">{{
                               t('workbenchProcessSteps').replace(
                                 '{n}',
@@ -373,9 +385,10 @@
                             >
                               <a-spin v-if="toolItemRunning(tm2.toolItem)" size="small" />
                               <i
-                                v-else
-                                :class="`fas ${toolItemSummary(tm2.toolItem).icon} text-tech-cyan`"
+                                v-else-if="toolItemFailed(tm2.toolItem)"
+                                class="fas fa-triangle-exclamation text-[var(--wb-danger)] shrink-0"
                               ></i>
+                              <i v-else class="fas fa-check text-[var(--wb-success)] shrink-0"></i>
                               <span class="font-mono text-xs truncate flex-1">{{
                                 toolItemSummary(tm2.toolItem).label
                               }}</span>
@@ -390,7 +403,7 @@
                                   expandedToolIds.has(x.toolItem?.id) && toolItemDetail(x.toolItem),
                               )"
                               :key="'d' + tm2._key"
-                              class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-black/40 border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
+                              class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-[var(--wb-surface)] border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
                               >{{ toolItemDetail(tm2.toolItem) }}</pre
                             >
                           </div>
@@ -403,9 +416,10 @@
                           >
                             <a-spin v-if="toolItemRunning(tm.toolItem)" size="small" />
                             <i
-                              v-else
-                              :class="`fas ${toolItemSummary(tm.toolItem).icon} text-tech-cyan`"
+                              v-else-if="toolItemFailed(tm.toolItem)"
+                              class="fas fa-triangle-exclamation text-[var(--wb-danger)] shrink-0"
                             ></i>
+                            <i v-else class="fas fa-check text-[var(--wb-success)] shrink-0"></i>
                             <span class="font-mono text-xs truncate flex-1">{{
                               toolItemSummary(tm.toolItem).label
                             }}</span>
@@ -418,7 +432,7 @@
                             v-if="
                               expandedToolIds.has(tm.toolItem.id) && toolItemDetail(tm.toolItem)
                             "
-                            class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-black/40 border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
+                            class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-[var(--wb-surface)] border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
                             >{{ toolItemDetail(tm.toolItem) }}</pre
                           >
                         </template>
@@ -458,7 +472,7 @@
                       <div
                         v-if="(tm.kind === 'chat' || tm.kind === 'error') && tm.role === 'agent'"
                         class="pt-0.5"
-                        :class="tm.kind === 'error' ? 'text-red-300' : ''"
+                        :class="tm.kind === 'error' ? 'text-[var(--wb-danger)]' : ''"
                       >
                         <WbMarkdown :source="tm.text" :streaming="busy && tm._streaming" />
                       </div>
@@ -466,7 +480,7 @@
                            后端断连即杀 run，自动重发有双跑风险） -->
                       <div v-if="tm.kind === 'error' && tm.retryInput && !busy" class="pt-1">
                         <button
-                          class="text-xs px-2 py-1 rounded border border-red-400/40 text-red-300 hover:bg-red-400/10 flex items-center gap-1"
+                          class="text-xs px-2 py-1 rounded border border-[var(--wb-danger)]/40 text-[var(--wb-danger)] hover:bg-[var(--wb-danger)]/10 flex items-center gap-1"
                           :title="t('workbenchRetryRoundTip')"
                           @click="retryRoundFrom(tm)"
                         >
@@ -482,20 +496,20 @@
                   >
                     <button
                       v-if="turnCopyText(i)"
-                      class="hover:text-slate-200 flex items-center gap-1"
+                      class="hover:text-[var(--wb-text)] flex items-center gap-1"
                       :title="t('workbenchCopyMessage')"
                       @click="copyMessage(turnTailInfo(i).m, i)"
                     >
                       <i
-                        :class="copiedIdx === i ? 'fas fa-check text-green-400' : 'far fa-copy'"
+                        :class="copiedIdx === i ? 'fas fa-check text-[var(--wb-success)]' : 'far fa-copy'"
                       ></i>
                     </button>
-                    <span class="text-slate-600">{{
+                    <span class="text-[var(--wb-text-3)]">{{
                       timeLabel(turnTailInfo(i).m?.createdAt)
                     }}</span>
                     <span
                       v-if="usageFor(turnTailInfo(i).m)"
-                      class="text-slate-600 tabular-nums"
+                      class="text-[var(--wb-text-3)] tabular-nums"
                       :title="usageTitle(usageFor(turnTailInfo(i).m))"
                     >
                       <i class="fas fa-arrow-up text-[9px]"></i
@@ -590,7 +604,11 @@
                           @click.stop="toggleProcessGroup(i)"
                         >
                           <a-spin v-if="processGroupRunning(processGroupAt(i))" size="small" />
-                          <i v-else class="fas fa-sliders text-tech-cyan"></i>
+                          <i
+                            v-else-if="processGroupFailed(processGroupAt(i))"
+                            class="fas fa-triangle-exclamation text-[var(--wb-danger)] shrink-0"
+                          ></i>
+                          <i v-else class="fas fa-check text-[var(--wb-success)] shrink-0"></i>
                           <span class="font-mono text-xs truncate flex-1">{{
                             t('workbenchProcessSteps').replace(
                               '{n}',
@@ -613,9 +631,10 @@
                             >
                               <a-spin v-if="toolItemRunning(tm.toolItem)" size="small" />
                               <i
-                                v-else
-                                :class="`fas ${toolItemSummary(tm.toolItem).icon} text-tech-cyan`"
+                                v-else-if="toolItemFailed(tm.toolItem)"
+                                class="fas fa-triangle-exclamation text-[var(--wb-danger)] shrink-0"
                               ></i>
+                              <i v-else class="fas fa-check text-[var(--wb-success)] shrink-0"></i>
                               <span class="font-mono text-xs truncate flex-1">{{
                                 toolItemSummary(tm.toolItem).label
                               }}</span>
@@ -628,7 +647,7 @@
                               v-if="
                                 expandedToolIds.has(tm.toolItem.id) && toolItemDetail(tm.toolItem)
                               "
-                              class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-black/40 border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
+                              class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-[var(--wb-surface)] border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
                               >{{ toolItemDetail(tm.toolItem) }}</pre
                             >
                           </div>
@@ -642,9 +661,10 @@
                       >
                         <a-spin v-if="toolItemRunning(m.toolItem)" size="small" />
                         <i
-                          v-else
-                          :class="`fas ${toolItemSummary(m.toolItem).icon} text-tech-cyan`"
+                          v-else-if="toolItemFailed(m.toolItem)"
+                          class="fas fa-triangle-exclamation text-[var(--wb-danger)] shrink-0"
                         ></i>
+                        <i v-else class="fas fa-check text-[var(--wb-success)] shrink-0"></i>
                         <span class="font-mono text-xs truncate flex-1">{{
                           toolItemSummary(m.toolItem).label
                         }}</span>
@@ -655,7 +675,7 @@
                       </div>
                       <pre
                         v-if="expandedToolIds.has(m.toolItem.id) && toolItemDetail(m.toolItem)"
-                        class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-black/40 border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
+                        class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-[var(--wb-surface)] border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
                         >{{ toolItemDetail(m.toolItem) }}</pre
                       >
                     </template>
@@ -682,19 +702,19 @@
                   >
                     <button
                       v-if="copyableText(m)"
-                      class="hover:text-slate-200 flex items-center gap-1"
+                      class="hover:text-[var(--wb-text)] flex items-center gap-1"
                       :title="t('workbenchCopyMessage')"
                       @click="copyMessage(m, i)"
                     >
                       <i
-                        :class="copiedIdx === i ? 'fas fa-check text-green-400' : 'far fa-copy'"
+                        :class="copiedIdx === i ? 'fas fa-check text-[var(--wb-success)]' : 'far fa-copy'"
                       ></i>
                     </button>
-                    <span class="text-slate-600">{{ timeLabel(m.createdAt) }}</span>
+                    <span class="text-[var(--wb-text-3)]">{{ timeLabel(m.createdAt) }}</span>
                     <!-- token 用量:仅该会话最后一轮 AI 回复显示(↑输入 ↓输出) -->
                     <span
                       v-if="usageFor(m)"
-                      class="text-slate-600 tabular-nums"
+                      class="text-[var(--wb-text-3)] tabular-nums"
                       :title="usageTitle(usageFor(m))"
                     >
                       <i class="fas fa-arrow-up text-[9px]"></i
@@ -705,7 +725,7 @@
                     <!-- 分支导航:该消息存在兄弟变体时显示 ‹ v/N › -->
                     <span v-if="m._variants > 1" class="flex items-center gap-1">
                       <button
-                        class="hover:text-slate-200 px-0.5"
+                        class="hover:text-[var(--wb-text)] px-0.5"
                         :disabled="m._variant <= 0"
                         :class="{ 'opacity-30 cursor-default': m._variant <= 0 }"
                         :title="t('workbenchPrevVariant')"
@@ -715,7 +735,7 @@
                       </button>
                       <span class="tabular-nums">{{ m._variant + 1 }}/{{ m._variants }}</span>
                       <button
-                        class="hover:text-slate-200 px-0.5"
+                        class="hover:text-[var(--wb-text)] px-0.5"
                         :disabled="m._variant >= m._variants - 1"
                         :class="{ 'opacity-30 cursor-default': m._variant >= m._variants - 1 }"
                         :title="t('workbenchNextVariant')"
@@ -813,7 +833,7 @@
                   }}</span>
                   <!-- 复制执行 ID：排查/反馈时贴给 AI 或开发者 -->
                   <button
-                    class="shrink-0 text-slate-500 hover:text-slate-200 text-xs px-1"
+                    class="shrink-0 text-[var(--wb-text-3)] hover:text-[var(--wb-text)] text-xs px-1"
                     :title="t('workbenchCopyPromptId')"
                     @click="copyPromptId(a)"
                   >
@@ -842,7 +862,7 @@
                 <div
                   v-for="(f, j) in a.files"
                   :key="j"
-                  class="group/file relative aspect-square rounded overflow-hidden bg-slate-900 border border-[var(--wb-stroke-strong)] cursor-zoom-in hover:border-[var(--wb-accent)] transition"
+                  class="group/file relative aspect-square rounded overflow-hidden bg-[var(--wb-surface-deep)] border border-[var(--wb-stroke-strong)] cursor-zoom-in hover:border-[var(--wb-accent)] transition"
                   @click="lightboxFile = f"
                 >
                   <img :src="viewUrl(f)" class="w-full h-full object-cover" loading="lazy" />
@@ -852,7 +872,7 @@
                     class="absolute right-1 top-1 hidden group-hover/file:block"
                   >
                     <button
-                      class="w-6 h-6 flex items-center justify-center rounded bg-black/70 text-slate-200 hover:text-white"
+                      class="w-6 h-6 flex items-center justify-center rounded bg-black/70 text-[var(--wb-text)] hover:text-white"
                       :title="t('workbenchFileActions')"
                       @click.stop
                     >
@@ -898,13 +918,13 @@
               <!-- 执行失败：错误摘要 + 复制全文（完整错误在轮询回填的 a.error） -->
               <div
                 v-if="a.status === 'error' && a.error"
-                class="mt-2 flex items-center justify-between gap-2 rounded bg-red-500/10 border border-red-500/30 px-2 py-1.5"
+                class="mt-2 flex items-center justify-between gap-2 rounded bg-[var(--wb-danger)]/10 border border-[var(--wb-danger)]/30 px-2 py-1.5"
               >
-                <span class="text-xs text-red-300 truncate flex-1" :title="a.error">{{
+                <span class="text-xs text-[var(--wb-danger)] truncate flex-1" :title="a.error">{{
                   a.error
                 }}</span>
                 <button
-                  class="shrink-0 text-xs text-red-200 hover:text-white flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-red-500/20"
+                  class="shrink-0 text-xs text-[var(--wb-danger)] hover:text-white flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-[var(--wb-danger)]/15"
                   @click="copyArtifactError(a)"
                 >
                   <i class="far fa-copy"></i>{{ t('workbenchCopyError') }}
@@ -936,7 +956,7 @@
                 <button
                   v-if="diagnosisOf(a).suggestion.fixOps && isNarrow"
                   class="text-[11px] px-2 py-0.5 rounded hover:opacity-80"
-                  style="background: var(--wb-accent); color: #04121c"
+                  style="background: var(--wb-accent); color: #fff"
                   @click="applyDiagnosisFix(a)"
                 >
                   <i class="fas fa-wrench mr-1"></i>{{ t('workbenchDiagFix') }}
@@ -1136,7 +1156,7 @@
           class="w-full wb-tech-input font-mono text-xs"
           :placeholder="t('workbenchImportJsonPlaceholder')"
         ></textarea>
-        <div v-if="importError" class="text-xs text-red-400">{{ importError }}</div>
+        <div v-if="importError" class="text-xs text-[var(--wb-danger)]">{{ importError }}</div>
       </div>
     </a-modal>
 
@@ -1158,11 +1178,11 @@
           :placeholder="t('workbenchAdvJsonPlaceholder')"
         ></textarea>
         <div v-if="advIssues.length" class="space-y-1">
-          <div v-for="(issue, i) in advIssues" :key="i" class="text-xs text-red-400">
+          <div v-for="(issue, i) in advIssues" :key="i" class="text-xs text-[var(--wb-danger)]">
             {{ issue.field }}: {{ issue.message }}
           </div>
         </div>
-        <div v-else-if="advValidated" class="text-xs text-green-400">{{ t('workbenchAdvOk') }}</div>
+        <div v-else-if="advValidated" class="text-xs text-[var(--wb-success)]">{{ t('workbenchAdvOk') }}</div>
         <div class="flex gap-2 justify-end">
           <a-button size="small" :loading="advChecking" @click="checkAdvOverrides">
             {{ t('workbenchAdvValidate') }}
@@ -1185,18 +1205,18 @@
         v-if="sessionImporting.active"
         class="fixed bottom-6 right-6 z-50 rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] px-4 py-3 shadow-xl flex items-center gap-3 text-sm text-[var(--wb-text-1)]"
       >
-        <i class="fas fa-circle-notch fa-spin text-slate-400"></i>
+        <i class="fas fa-circle-notch fa-spin text-[var(--wb-text-2)]"></i>
         <span>{{ sessionImporting.label }}</span>
         <div
           v-if="sessionImporting.percent > 0 && sessionImporting.percent < 100"
-          class="w-32 h-1.5 rounded bg-slate-700 overflow-hidden"
+          class="w-32 h-1.5 rounded bg-[var(--wb-surface-hover)] overflow-hidden"
         >
           <div
-            class="h-full bg-sky-500 transition-all"
+            class="h-full bg-[var(--wb-accent)] transition-all"
             :style="{ width: sessionImporting.percent + '%' }"
           ></div>
         </div>
-        <span v-else-if="sessionImporting.percent >= 100" class="text-emerald-400"
+        <span v-else-if="sessionImporting.percent >= 100" class="text-[var(--wb-success)]"
           ><i class="fas fa-check"></i
         ></span>
       </div>
@@ -1440,7 +1460,18 @@ async function loadAdvTemplates() {
   advTemplates.value = json?.data ?? []
 }
 
+/** #11 会话切换视觉加载态：只包一层 loading 标记，内层逻辑/竞态守卫原样不动 */
+const sessionLoading = ref(false)
 async function selectSession(s) {
+  sessionLoading.value = true
+  try {
+    await selectSessionImpl(s)
+  } finally {
+    sessionLoading.value = false
+  }
+}
+
+async function selectSessionImpl(s) {
   sessionId.value = s.id
   localStorage.setItem(LAST_SESSION_KEY, s.id)
   execProgressIndex.clear() // 执行占位下标同样 per-render，切会话清
@@ -2108,6 +2139,12 @@ function processGroupRunning(g) {
     .some((x) => x.toolItem && toolItemRunning(x.toolItem))
 }
 
+function processGroupFailed(g) {
+  return messages.value
+    .slice(g.start, g.end + 1)
+    .some((x) => x.toolItem && toolItemFailed(x.toolItem))
+}
+
 function toggleProcessGroup(i) {
   const g = processGroupAt(i)
   if (!g) return
@@ -2122,6 +2159,16 @@ function toolItemRunning(item) {
     item.status === 'inProgress' ||
     (item.type === 'command_execution' && item.exit_code === undefined) ||
     false
+  )
+}
+
+/** 折叠 tool 行终态判定：item 自身失败（type=error 或 status error/failed） */
+function toolItemFailed(item) {
+  return (
+    !!item &&
+    (item.status === 'error' ||
+      item.status === 'failed' ||
+      item.type === 'error')
   )
 }
 
@@ -3341,11 +3388,12 @@ async function onPresetMenu({ key }) {
 
 function messageClass(m) {
   if (m.role === 'user')
-    return 'bg-[var(--wb-surface-deep)] text-white border-l-[3px] border-l-[var(--wb-accent)]'
-  if (m.kind === 'error') return 'bg-red-900/60 text-red-200'
+    return 'bg-[var(--wb-surface-deep)] text-[var(--wb-text)] border border-[var(--wb-stroke)] border-l-[3px] border-l-[var(--wb-accent)]'
+  if (m.kind === 'error')
+    return 'bg-[rgba(245,108,108,0.12)] text-[var(--wb-danger)] border border-[var(--wb-danger)]/30'
   if (m.kind === 'card')
-    return 'bg-[var(--wb-surface-deep)] text-slate-200 border border-[var(--wb-stroke-strong)]'
-  return 'bg-[var(--wb-surface-deep)] text-slate-200 border-l-[3px] border-l-[var(--wb-stroke-strong)]'
+    return 'bg-[var(--wb-surface-deep)] text-[var(--wb-text)] border border-[var(--wb-stroke-strong)]'
+  return 'bg-[var(--wb-surface-deep)] text-[var(--wb-text)] border border-[var(--wb-stroke)] border-l-[3px] border-l-[var(--wb-stroke-strong)]'
 }
 
 // 回合合并：同 turn 相邻 agent 消息间距抵消（外层 space-y-6 → 组内紧凑）
@@ -3410,7 +3458,7 @@ function turnCopyText(i) {
     .join('\n')
 }
 
-// 回合合并：圆角只留组头/组尾，组内直角拼接，视觉上是一个回复块
+// 回合合并：圆角只留组头/组尾，组内直角拼接，视觉上是一个回复块（10px 卡片语义）
 function bubbleRadius(m, i) {
   const prev = messages.value[i - 1]
   const next = messages.value[i + 1]
@@ -3423,10 +3471,10 @@ function bubbleRadius(m, i) {
     a.turnId === b.turnId
   const withPrev = same(prev, m)
   const withNext = same(m, next)
-  if (withPrev && withNext) return 'rounded-t-md rounded-b-md'
-  if (withPrev) return 'rounded-t-md rounded-b-lg'
-  if (withNext) return 'rounded-t-lg rounded-b-md'
-  return 'rounded-lg'
+  if (withPrev && withNext) return ''
+  if (withPrev) return 'rounded-b-[10px]'
+  if (withNext) return 'rounded-t-[10px]'
+  return 'rounded-[10px]'
 }
 
 // ---------- token 用量展示 ----------

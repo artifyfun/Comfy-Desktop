@@ -4,9 +4,9 @@
       <div
         v-for="layout in visibleLayouts"
         :key="layout.item.id"
-        class="group absolute overflow-hidden rounded-lg cursor-pointer bg-slate-800/60"
+        class="group absolute overflow-hidden rounded-lg cursor-pointer bg-[var(--wb-surface-hover)]"
         :class="{
-          'ring-2 ring-tech-blue': selectMode && selectedIds.includes(layout.item.id),
+          'ring-1 ring-[var(--wb-selected)]': selectMode && selectedIds.includes(layout.item.id),
         }"
         :style="{
           left: layout.left + 'px',
@@ -16,11 +16,11 @@
         }"
         @click="onCardClick(layout.item)"
       >
-        <div class="absolute inset-0 bg-slate-800/60 animate-pulse"></div>
+        <div class="absolute inset-0 bg-[var(--wb-surface-hover)] animate-pulse"></div>
         <div
           v-if="selectMode"
           class="absolute top-2 left-2 z-10 flex items-center justify-center w-5 h-5 rounded border border-white/60 bg-black/40"
-          :class="{ 'bg-tech-blue border-tech-blue': selectedIds.includes(layout.item.id) }"
+          :class="{ 'bg-[var(--wb-accent)] border-[var(--wb-accent)]': selectedIds.includes(layout.item.id) }"
           @click.stop="onCardClick(layout.item)"
         >
           <i
@@ -39,21 +39,21 @@
           @error="$emit('img-error', $event, layout.item)"
         />
         <div
-          class="absolute inset-x-0 bottom-0 p-2 text-xs text-white bg-gradient-to-t from-black/80 to-transparent opacity-0 transition-opacity group-hover:opacity-100"
+          class="absolute inset-x-0 bottom-0 p-2 text-xs text-white bg-black/60 opacity-0 transition-opacity group-hover:opacity-100"
         >
           <div class="truncate">{{ layout.item.filename }}</div>
-          <div class="flex justify-between text-slate-300">
+          <div class="flex justify-between text-[var(--wb-text)]">
             <span class="truncate">{{
               layout.item.app_name || formatTime(layout.item.created_at)
             }}</span>
             <span class="flex items-center gap-1">
               <i
                 class="cursor-pointer"
-                :class="layout.item.starred ? 'fas fa-star text-yellow-400' : 'far fa-star'"
+                :class="layout.item.starred ? 'fas fa-star text-[var(--wb-accent)]' : 'far fa-star'"
                 @click.stop="$emit('star', layout.item)"
               ></i>
               <i
-                class="ml-1 cursor-pointer far fa-trash-alt hover:text-red-400"
+                class="ml-1 cursor-pointer far fa-trash-alt hover:text-[var(--wb-danger)]"
                 @click.stop="$emit('remove', layout.item)"
               ></i>
             </span>
@@ -62,7 +62,7 @@
       </div>
     </div>
 
-    <div v-if="loading" class="py-10 text-center text-slate-400">
+    <div v-if="loading" class="py-10 text-center text-[var(--wb-text-2)]">
       <a-spin size="large" />
     </div>
   </div>

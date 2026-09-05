@@ -19,7 +19,7 @@
 <template>
   <div
     data-testid="reasoning-block"
-    class="reasoning-block rounded-md border border-[var(--wb-stroke)] bg-black/20 text-xs"
+    class="reasoning-block rounded-md border border-[var(--wb-stroke)] bg-[var(--wb-surface)] text-xs"
     :class="{ 'reasoning-block--streaming': streaming }"
   >
     <header
@@ -55,7 +55,7 @@
       <div
         ref="bodyEl"
         data-testid="reasoning-body"
-        class="reasoning-block__scroll max-h-56 overflow-y-auto p-2 rounded bg-black/40 border border-[var(--wb-stroke)] text-[11px] leading-relaxed whitespace-pre-wrap break-words text-[var(--wb-text-2)]"
+        class="reasoning-block__scroll max-h-56 overflow-y-auto p-2 rounded bg-[var(--wb-surface-deep)] border border-[var(--wb-stroke)] text-[11px] leading-relaxed whitespace-pre-wrap break-words text-[var(--wb-text-2)]"
         @scroll="onBodyScroll"
         >{{ text }}</div
       >

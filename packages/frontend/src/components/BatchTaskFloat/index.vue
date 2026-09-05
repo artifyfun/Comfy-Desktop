@@ -298,16 +298,16 @@ function goDetail() {
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
-  background: rgba(15, 23, 42, 0.92);
-  border: 1px solid rgba(56, 70, 102, 0.8);
+  background: var(--wb-surface-deep);
+  border: 1px solid var(--wb-stroke);
   border-radius: 20px;
   cursor: pointer;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   &:hover {
-    border-color: #0ea5e9;
+    border-color: var(--wb-accent);
   }
   .pill-text {
-    color: #e2e8f0;
+    color: var(--wb-text);
     white-space: nowrap;
   }
   .pill-bar {
@@ -319,7 +319,7 @@ function goDetail() {
     .pill-bar-fill {
       width: 100%;
       height: 100%;
-      background: #0ea5e9;
+      background: var(--wb-accent);
       transform-origin: left center;
       transition: transform 0.3s ease-out;
     }
@@ -331,8 +331,8 @@ function goDetail() {
   width: 360px;
   max-height: 78vh;
   overflow-y: auto;
-  background: rgba(15, 23, 42, 0.97);
-  border: 1px solid rgba(56, 70, 102, 0.8);
+  background: var(--wb-surface-deep);
+  border: 1px solid var(--wb-stroke);
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   padding: 12px;
@@ -347,7 +347,7 @@ function goDetail() {
   gap: 8px;
   .panel-title {
     flex: 1;
-    color: #e2e8f0;
+    color: var(--wb-text);
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
@@ -356,12 +356,12 @@ function goDetail() {
   .panel-close {
     background: none;
     border: none;
-    color: #94a3b8;
+    color: var(--wb-text-2);
     font-size: 16px;
     cursor: pointer;
     line-height: 1;
     &:hover {
-      color: #e2e8f0;
+      color: var(--wb-text);
     }
   }
 }
@@ -372,16 +372,16 @@ function goDetail() {
   border-radius: 50%;
   flex-shrink: 0;
   &.running {
-    background: #0ea5e9;
+    background: var(--wb-accent);
   }
   &.waiting {
-    background: #fbbf24;
+    background: #f59e0b;
   }
   &.ok {
-    background: #10b981;
+    background: var(--wb-success);
   }
   &.err {
-    background: #ef4444;
+    background: var(--wb-danger);
   }
 }
 
@@ -396,12 +396,12 @@ function goDetail() {
     justify-content: space-between;
     cursor: pointer;
     .config-title {
-      color: #38bdf8;
+      color: var(--wb-accent);
       font-size: 11px;
       font-weight: 600;
     }
     .config-arrow {
-      color: #64748b;
+      color: var(--wb-text-3);
       font-size: 10px;
       transition: transform 0.2s;
       &.open {
@@ -415,14 +415,14 @@ function goDetail() {
     gap: 6px;
     margin-top: 6px;
     padding-top: 6px;
-    border-top: 1px solid rgba(56, 70, 102, 0.4);
+    border-top: 1px solid var(--wb-stroke);
   }
   .config-row {
     display: flex;
     align-items: center;
     gap: 8px;
     .config-label {
-      color: #cbd5e1;
+      color: var(--wb-text);
       font-size: 11px;
     }
   }
@@ -431,23 +431,23 @@ function goDetail() {
     .config-input {
       width: 100%;
       box-sizing: border-box;
-      background: rgba(15, 23, 42, 0.8);
-      border: 1px solid rgba(56, 70, 102, 0.7);
+      background: var(--wb-surface);
+      border: 1px solid var(--wb-stroke);
       border-radius: 4px;
-      color: #e2e8f0;
+      color: var(--wb-text);
       font-size: 11px;
       padding: 4px 8px;
       outline: none;
       &:focus {
-        border-color: #0ea5e9;
+        border-color: var(--wb-accent);
       }
       &::placeholder {
-        color: #475569;
+        color: var(--wb-text-3);
       }
     }
   }
   .config-note {
-    color: #64748b;
+    color: var(--wb-text-3);
     font-size: 10px;
     line-height: 1.4;
   }
@@ -458,8 +458,8 @@ function goDetail() {
   width: 28px;
   height: 16px;
   border-radius: 8px;
-  background: #334155;
-  border: 1px solid #475569;
+  background: var(--wb-stroke-strong);
+  border: 1px solid var(--wb-text-3);
   position: relative;
   cursor: pointer;
   flex-shrink: 0;
@@ -472,14 +472,14 @@ function goDetail() {
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    background: #94a3b8;
+    background: var(--wb-text-2);
     transition:
       left 0.2s,
       background 0.2s;
   }
   &.on {
-    background: #059669;
-    border-color: #10b981;
+    background: var(--wb-success);
+    border-color: var(--wb-success);
     .mini-knob {
       left: 13px;
       background: #ffffff;
@@ -493,7 +493,7 @@ function goDetail() {
   border-radius: 6px;
   padding: 6px 8px;
   .queue-summary {
-    color: #fbbf24;
+    color: #f59e0b;
     font-size: 11px;
     margin-bottom: 4px;
   }
@@ -506,9 +506,9 @@ function goDetail() {
       align-items: center;
       gap: 6px;
       font-size: 11px;
-      color: #94a3b8;
+      color: var(--wb-text-2);
       &.paused {
-        color: #fbbf24;
+        color: #f59e0b;
       }
       .queue-mini-name {
         flex: 1;
@@ -521,35 +521,35 @@ function goDetail() {
       }
       .mini-act {
         background: rgba(255, 255, 255, 0.08);
-        border: 1px solid rgba(56, 70, 102, 0.8);
+        border: 1px solid var(--wb-stroke);
         border-radius: 4px;
-        color: #94a3b8;
+        color: var(--wb-text-2);
         font-size: 10px;
         line-height: 1;
         padding: 3px 5px;
         cursor: pointer;
         &:hover {
-          color: #e2e8f0;
-          border-color: #0ea5e9;
+          color: var(--wb-text);
+          border-color: var(--wb-accent);
         }
         &.ok {
-          color: #10b981;
+          color: var(--wb-success);
           &:hover {
-            border-color: #10b981;
+            border-color: var(--wb-success);
           }
         }
         &.danger {
-          color: #f87171;
+          color: var(--wb-danger);
           &:hover {
-            border-color: #ef4444;
-            background: rgba(239, 68, 68, 0.15);
+            border-color: var(--wb-danger);
+            background: var(--wb-danger-bg);
           }
         }
       }
     }
     .queue-mini-more {
       font-size: 11px;
-      color: #64748b;
+      color: var(--wb-text-3);
     }
   }
 }
@@ -570,18 +570,18 @@ function goDetail() {
       transform-origin: left center;
       transition: transform 0.3s ease-out;
       &.running {
-        background: #0ea5e9;
+        background: var(--wb-accent);
       }
       &.ok {
-        background: #10b981;
+        background: var(--wb-success);
       }
       &.err {
-        background: #ef4444;
+        background: var(--wb-danger);
       }
     }
   }
   .progress-text {
-    color: #94a3b8;
+    color: var(--wb-text-2);
     white-space: nowrap;
   }
 }
@@ -589,12 +589,12 @@ function goDetail() {
 .panel-stats {
   display: flex;
   gap: 12px;
-  color: #94a3b8;
+  color: var(--wb-text-2);
   .ok {
-    color: #10b981;
+    color: var(--wb-success);
   }
   .fail {
-    color: #ef4444;
+    color: var(--wb-danger);
   }
   .current {
     flex: 1;
@@ -620,20 +620,20 @@ function goDetail() {
     font-size: 11px;
     line-height: 1.5;
     .log-time {
-      color: #64748b;
+      color: var(--wb-text-3);
       flex-shrink: 0;
     }
     .log-msg {
-      color: #94a3b8;
+      color: var(--wb-text-2);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     &.success .log-msg {
-      color: #10b981;
+      color: var(--wb-success);
     }
     &.error .log-msg {
-      color: #ef4444;
+      color: var(--wb-danger);
     }
   }
 }
@@ -645,33 +645,33 @@ function goDetail() {
     flex: 1;
     padding: 5px 0;
     border-radius: 6px;
-    border: 1px solid rgba(56, 70, 102, 0.8);
+    border: 1px solid var(--wb-stroke);
     background: rgba(255, 255, 255, 0.06);
-    color: #e2e8f0;
+    color: var(--wb-text);
     cursor: pointer;
     &:hover {
-      border-color: #0ea5e9;
+      border-color: var(--wb-accent);
     }
     &.btn-danger {
-      border-color: rgba(239, 68, 68, 0.6);
-      color: #f87171;
+      border-color: var(--wb-danger);
+      color: var(--wb-danger);
       &:hover {
-        background: rgba(239, 68, 68, 0.15);
+        background: var(--wb-danger-bg);
       }
     }
     &.btn-ok {
-      border-color: rgba(16, 185, 129, 0.6);
-      color: #34d399;
+      border-color: var(--wb-success);
+      color: var(--wb-success);
       &:hover {
-        background: rgba(16, 185, 129, 0.15);
+        background: var(--wb-success-bg);
       }
     }
     &.btn-primary {
-      background: linear-gradient(90deg, #0ea5e9 0%, #8b5cf6 100%);
+      background: var(--wb-accent);
       border: none;
       color: #fff;
       &:hover {
-        opacity: 0.9;
+        background: var(--wb-accent-hover);
       }
     }
   }

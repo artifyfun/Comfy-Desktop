@@ -1,9 +1,12 @@
 <template>
-  <div class="page-container bg-tech-dark">
-    <div id="app" class="pb-20">
-      <div class="fixed inset-0 grid-lines"></div>
-      <main class="relative px-4 mx-auto mt-4 max-w-7xl sm:px-6 lg:px-8">
-        <div class="flex flex-wrap gap-3 items-center justify-between mb-6">
+  <div class="page-container bg-tech-dark h-full flex flex-col overflow-hidden">
+    <!-- 主内容区（高度链：AppLayout 锁高 → 本页 flex 内滚，目录流/瀑布流各自内部滚动，
+         避免 calc(100vh-*) 未折算 header 高度导致页面恒有纵向滚动条） -->
+    <div id="app" class="flex flex-col flex-1 min-h-0 min-w-0">
+      <main
+        class="relative flex flex-col flex-1 min-h-0 w-full px-4 mx-auto mt-4 max-w-7xl sm:px-6 lg:px-8"
+      >
+        <div class="shrink-0 flex flex-wrap gap-3 items-center justify-between mb-6">
           <div class="flex items-center space-x-2">
             <div class="w-8 h-8 text-2xl text-tech-blue">
               <i class="fas fa-images"></i>
@@ -11,7 +14,7 @@
             <h1 class="text-2xl font-bold text-white">
               {{ t('gallery') }}
             </h1>
-            <span class="text-sm text-slate-400">
+            <span class="text-sm text-[var(--wb-text-2)]">
               {{ viewMode === 'dirs' ? dirsCount : total }}
               {{ currentLang === 'zh' ? '项' : 'items' }}
             </span>
@@ -24,18 +27,18 @@
                 :placeholder="
                   currentLang === 'zh' ? '搜索文件名 / 应用名' : 'Search filename / app'
                 "
-                class="px-4 py-2 pl-10 w-full text-white rounded-lg tech-input focus:outline-none"
+                class="px-4 py-2 pl-10 w-full text-white rounded-[var(--wb-r-ctrl)] tech-input focus:outline-none"
                 style="width: 200px"
                 @keyup.enter="onFilterChange"
                 @input="onFilterChange"
               />
               <i
-                class="absolute left-3 top-1/2 transform -translate-y-1/2 fas fa-search text-slate-400"
+                class="absolute left-3 top-1/2 transform -translate-y-1/2 fas fa-search text-[var(--wb-text-2)]"
               ></i>
               <button
                 v-if="query"
                 @click="clearQuery"
-                class="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-white"
+                class="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--wb-text-2)] hover:text-[var(--wb-text)]"
               >
                 <i class="fas fa-times"></i>
               </button>
@@ -59,9 +62,9 @@
         <!-- 批量操作条 -->
         <div
           v-if="viewMode === 'items' && selectionMode"
-          class="mb-4 flex flex-wrap items-center gap-3 rounded-lg bg-slate-800/60 px-4 py-2"
+          class="shrink-0 mb-4 flex flex-wrap items-center gap-3 rounded-[var(--wb-r-ctrl)] bg-[var(--wb-surface-deep)] px-4 py-2"
         >
-          <span class="text-sm text-slate-300">{{ selectedLabel }}</span>
+          <span class="text-sm text-[var(--wb-text)]">{{ selectedLabel }}</span>
           <a-button size="small" @click="toggleSelectAll">
             <i class="mr-1 fas" :class="allSelected ? 'fa-square' : 'fa-check-double'"></i
             >{{
@@ -103,11 +106,13 @@
 
         <!-- ===== 目录卡片视图（默认） ===== -->
         <template v-if="viewMode === 'dirs'">
-          <div v-if="loading" class="py-20 text-center text-slate-400">
+          <!-- 目录卡片视图：网格内容超一屏时在本容器内滚（外层锁高，无页面级滚动条） -->
+          <div class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+          <div v-if="loading" class="py-20 text-center text-[var(--wb-text-2)]">
             <a-spin size="large" />
           </div>
 
-          <div v-else-if="!dirs.length" class="py-20 text-center text-slate-400">
+          <div v-else-if="!dirs.length" class="py-20 text-center text-[var(--wb-text-2)]">
             <div class="mb-4"><i class="text-5xl fas fa-folder-open"></i></div>
             {{ currentLang === 'zh' ? '暂无生成目录，先去跑一张吧' : 'No directories yet' }}
             <div class="mt-4">
@@ -161,24 +166,30 @@
               </div>
             </div>
           </div>
+          </div>
         </template>
 
         <!-- ===== 目录内图片瀑布流 ===== -->
         <template v-else>
-          <div class="mb-4 flex items-center gap-3">
+          <!-- 目录内视图：flex 链锁高，返回行/加载更多常驻，瀑布流容器占满剩余高度自滚 -->
+          <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div class="shrink-0 mb-4 flex items-center gap-3">
             <a-button size="small" @click="goBackToDirs">
               <i class="mr-1 fas fa-arrow-left"></i>{{ currentLang === 'zh' ? '返回目录' : 'Back' }}
             </a-button>
-            <span class="text-sm text-slate-300">
+            <span class="text-sm text-[var(--wb-text)]">
               <i class="mr-1 fas fa-folder"></i>{{ activeDirLabel }}
             </span>
           </div>
 
-          <div v-if="loading" class="py-20 text-center text-slate-400">
+          <div v-if="loading" class="flex-1 min-h-0 overflow-y-auto py-20 text-center text-[var(--wb-text-2)]">
             <a-spin size="large" />
           </div>
 
-          <div v-else-if="!items.length" class="py-20 text-center text-slate-400">
+          <div
+            v-else-if="!items.length"
+            class="flex-1 min-h-0 overflow-y-auto py-20 text-center text-[var(--wb-text-2)]"
+          >
             <div class="mb-4"><i class="text-5xl fas fa-images"></i></div>
             {{ currentLang === 'zh' ? '该目录暂无内容' : 'Empty directory' }}
           </div>
@@ -202,10 +213,14 @@
             />
           </div>
 
-          <div v-if="items.length && items.length < total" class="mt-8 text-center">
+          <div
+            v-if="items.length && items.length < total"
+            class="shrink-0 mt-8 text-center"
+          >
             <a-button :loading="loading" @click="loadMore">
               {{ currentLang === 'zh' ? '加载更多' : 'Load more' }}
             </a-button>
+          </div>
           </div>
         </template>
       </main>
@@ -225,7 +240,7 @@
             <div class="relative">
               <div
                 v-if="!detailLoaded"
-                class="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-slate-800/60"
+                class="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-[var(--wb-surface-deep)]"
               >
                 <a-spin />
               </div>
@@ -238,7 +253,7 @@
                 @load="onDetailImageLoad"
               />
             </div>
-            <div class="mt-2 text-center text-xs text-slate-400">
+            <div class="mt-2 text-center text-xs text-[var(--wb-text-2)]">
               {{
                 currentLang === 'zh'
                   ? '滚轮缩放，拖拽平移，点击图片可全屏'
@@ -775,8 +790,8 @@ onMounted(() => {
 <style scoped>
 /* 与应用中心一致的搜索输入框样式（单层边框） */
 .tech-input {
-  background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(56, 70, 102, 0.6);
+  background: var(--wb-surface);
+  border: 1px solid var(--wb-stroke);
   transition:
     background 0.3s ease,
     border-color 0.3s ease,
@@ -784,8 +799,8 @@ onMounted(() => {
 }
 
 .tech-input:focus {
-  border-color: #0ea5e9;
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+  border-color: var(--wb-accent);
+  box-shadow: 0 0 0 2px rgba(11, 140, 233, 0.2);
 }
 
 .dir-grid {
@@ -795,15 +810,18 @@ onMounted(() => {
 }
 .dir-card {
   position: relative;
-  background: rgba(30, 41, 59, 0.6);
-  border: 1px solid rgba(148, 163, 184, 0.15);
-  border-radius: 12px;
+  background: var(--wb-surface-deep);
+  border: 1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-card);
   overflow: hidden;
   cursor: pointer;
-  transition: border-color 0.2s;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
 }
 .dir-card:hover {
-  border-color: rgba(56, 189, 248, 0.5);
+  background: var(--wb-surface-hover);
+  border-color: var(--wb-stroke-strong);
 }
 .dir-del {
   position: absolute;
@@ -825,21 +843,21 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(15, 23, 42, 0.6);
+  background: var(--wb-surface);
   font-size: 34px;
-  color: rgba(56, 189, 248, 0.6);
+  color: var(--wb-text-3);
 }
 .dir-thumb img {
   display: block;
 }
 .dir-thumb-all {
   font-size: 44px;
-  color: rgba(56, 189, 248, 0.7);
+  color: var(--wb-text-2);
 }
 .dir-name {
   padding: 8px 10px 0;
   font-size: 13px;
-  color: #e2e8f0;
+  color: var(--wb-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -847,10 +865,14 @@ onMounted(() => {
 .dir-count {
   padding: 2px 10px 10px;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--wb-text-2);
 }
 .gallery-virtual-wrap {
-  height: calc(100vh - 280px);
+  /* flex 链撑满剩余高度（替代 calc(100vh-280px)：外层 header 折算差会让页面恒有滚动条）；
+     min-height 兜底小窗口，masonry 内部 .gallery-masonry-scroll 自滚 */
+  flex: 1 1 0%;
   min-height: 320px;
+  min-width: 0;
+  overflow: hidden;
 }
 </style>

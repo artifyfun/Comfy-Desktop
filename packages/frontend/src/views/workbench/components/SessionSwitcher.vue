@@ -31,7 +31,7 @@
         :class="[
           s.threadId === activeThreadId
             ? 'is-active bg-[var(--wb-accent)]/15 text-white'
-            : 'text-slate-300 hover:bg-[var(--wb-surface-hover)]',
+            : 'text-[var(--wb-text-2)] hover:bg-[var(--wb-surface-hover)]',
           s.archived ? 'sess-archived opacity-50 text-[var(--wb-text-2)]' : '',
         ]"
         :title="s.title"
@@ -58,7 +58,7 @@
         <!-- hover 行操作:归档/恢复(同通道 emit,父级切换 archived 语义);stop 防误触 switch -->
         <button
           :data-testid="`session-archive-${s.threadId}`"
-          class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-slate-400 hover:text-white hover:bg-slate-600 group-hover:flex"
+          class="hidden h-4 w-4 shrink-0 items-center justify-center rounded-md text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-active)] group-hover:flex"
           :title="s.archived ? t('workbenchUnarchive') : t('workbenchArchive')"
           @click.stop="emit('archive', s.threadId)"
         >

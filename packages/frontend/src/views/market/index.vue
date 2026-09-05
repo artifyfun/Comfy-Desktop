@@ -1,11 +1,15 @@
 <template>
-  <div class="page-container bg-tech-dark">
-    <div id="app" class="pb-20">
-      <!-- 主内容区 -->
+  <div class="page-container bg-tech-dark h-full flex flex-col overflow-hidden">
+    <!-- 主内容区（高度链：AppLayout 锁高 → 本页 flex 内滚，避免 calc(100vh-*) 未折算
+         header 高度导致页面恒有纵向滚动条） -->
+    <div id="app" class="flex flex-col flex-1 min-h-0 min-w-0">
       <!-- 顶导航由 AppLayout 统一挂载（市场页首导航回应用中心） -->
-      <main class="relative px-4 mx-auto mt-4 max-w-7xl sm:px-6 lg:px-8">
+      <main
+        class="relative flex flex-col flex-1 min-h-0 w-full px-4 mx-auto mt-4 max-w-7xl sm:px-6 lg:px-8"
+      >
         <!-- 标题 + 操作同一行：标题居左，搜索/按钮居右（与资产库页头一致） -->
         <AppActions
+          class="shrink-0"
           :show-create="false"
           :apps="appStore.marketApps"
           :search-query="searchQuery"
@@ -33,8 +37,8 @@
           </template>
         </AppActions>
 
-        <!-- 应用网格 -->
-        <div class="h-[calc(100vh-300px)]">
+        <!-- 应用网格（flex 撑满剩余高度，虚拟滚动容器内部自滚） -->
+        <div class="flex-1 min-h-0">
           <MarketAppGrid
             :apps="appStore.marketApps"
             :search-query="searchQuery"
@@ -190,7 +194,7 @@ onMounted(() => {
   width: 100%;
   font-family: var(--wb-font);
   background: var(--wb-bg-base);
-  color: #e2e8f0;
+  color: var(--wb-text);
   overflow-x: hidden;
 
   .grid-lines {

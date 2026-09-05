@@ -79,7 +79,7 @@
         >
           <img :src="a.thumb" class="block w-full" style="aspect-ratio: 1; object-fit: cover" />
           <div
-            class="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/55 px-1.5 py-0.5 text-[9px] text-slate-200 opacity-0 transition group-hover:opacity-100"
+            class="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/55 px-1.5 py-0.5 text-[11px] text-[var(--wb-text)] opacity-0 transition group-hover:opacity-100"
           >
             {{ a.name }}
           </div>
@@ -117,7 +117,7 @@
             loading="lazy"
           />
           <div
-            class="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/55 px-1.5 py-0.5 text-[9px] text-slate-200 opacity-0 transition group-hover:opacity-100"
+            class="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/55 px-1.5 py-0.5 text-[11px] text-[var(--wb-text)] opacity-0 transition group-hover:opacity-100"
           >
             {{ g.filename }}
           </div>

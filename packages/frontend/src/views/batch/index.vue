@@ -727,7 +727,7 @@ const executionProgress = reactive({
   failed: 0,
   percent: 0,
   status: 'normal',
-  strokeColor: '#10b981',
+  strokeColor: '#4ade80',
   currentItem: '',
 })
 const executionLogs = ref([]) // 新增：执行日志
@@ -1662,7 +1662,7 @@ async function executeBatch() {
   }
 
   executionProgress.status = 'normal'
-  executionProgress.strokeColor = '#10b981'
+  executionProgress.strokeColor = '#4ade80'
   executionProgress.currentItem = ''
   executionLogs.value = []
 
@@ -1696,7 +1696,7 @@ async function executeBatch() {
     console.error('批量任务提交失败:', error)
     showError('batchExecutionFailed')
     executionProgress.status = 'exception'
-    executionProgress.strokeColor = '#ef4444'
+    executionProgress.strokeColor = '#f56c6c'
   }
 }
 
@@ -1773,12 +1773,12 @@ function watchBatchTask() {
         if (job.status === 'paused') {
           // 暂停中：进度保持，不当作终态；保留监控以便"继续"后恢复同步
           executionProgress.status = 'exception'
-          executionProgress.strokeColor = '#fbbf24'
+          executionProgress.strokeColor = '#f59e0b'
           executionProgress.currentItem = job.currentPreview
           return
         }
         executionProgress.status = job.status === 'completed' ? 'success' : 'exception'
-        executionProgress.strokeColor = job.status === 'completed' ? '#10b981' : '#ef4444'
+        executionProgress.strokeColor = job.status === 'completed' ? '#4ade80' : '#f56c6c'
         executionProgress.currentItem = ''
         if (job.status === 'completed') {
           showSuccess('batchExecutionCompleted', {
@@ -1861,7 +1861,7 @@ async function stopExecution() {
 
   // 更新进度状态
   executionProgress.status = 'exception'
-  executionProgress.strokeColor = '#ef4444'
+  executionProgress.strokeColor = '#f56c6c'
   executionProgress.currentItem = ''
 
   // 添加停止日志
