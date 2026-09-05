@@ -7,7 +7,7 @@
       <main
         class="relative flex flex-col flex-1 min-h-0 w-full px-4 mx-auto mt-4 max-w-7xl sm:px-6 lg:px-8"
       >
-        <!-- 标题 + 操作同一行：标题居左，搜索/按钮居右（与资产库页头一致） -->
+        <!-- 操作行：不设页面大标题（顶导航已有固定 tab），搜索/按钮居右 -->
         <AppActions
           class="shrink-0"
           :apps="appStore.apps"
@@ -26,14 +26,6 @@
           @create-new="handleShowAppForm"
           @import-app="handleAppUploadChange"
         >
-          <template #title>
-            <div class="flex items-center space-x-2">
-              <div class="w-8 h-8 text-2xl text-[var(--wb-accent)]">
-                <i class="fas fa-home"></i>
-              </div>
-              <h1 class="text-2xl font-bold text-white">{{ t('app') }}{{ t('center') }}</h1>
-            </div>
-          </template>
         </AppActions>
 
         <!-- 应用网格（flex 撑满剩余高度，虚拟滚动容器内部自滚） -->

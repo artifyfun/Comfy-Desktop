@@ -20,13 +20,18 @@
         class="flex items-center pl-1 gap-1 border-l"
         style="border-color: var(--wb-stroke)"
       >
+        <!-- 应用中心 / 应用市场 = 两个固定 tab，不再共用可切换的首导航位 -->
+        <router-link to="/" class="nav-tab" :class="{ 'nav-tab-on': $route.path === '/' }">
+          <i class="mr-2 fas fa-th-large"></i>
+          {{ t('appCenter') }}
+        </router-link>
         <router-link
-          :to="firstNavTo"
+          to="/market"
           class="nav-tab"
-          :class="{ 'nav-tab-on': $route.path === firstNavTo }"
+          :class="{ 'nav-tab-on': $route.path === '/market' }"
         >
-          <i :class="firstNavIcon"></i>
-          {{ firstNavLabel || t('appCenter') }}
+          <i class="mr-2 fas fa-store"></i>
+          {{ t('market') }}
         </router-link>
         <router-link
           to="/canvas"
@@ -105,14 +110,6 @@ import { isElectron } from '@/utils'
 
 const { t, currentLang } = useI18nInComponent()
 const appStore = useAppStore()
-
-// 首导航项可配置：默认「应用中心」（/）；如后续要恢复应用市场入口，
-// 传 first-nav-to="/market" first-nav-label 覆盖即可。
-const props = defineProps({
-  firstNavTo: { type: String, default: '/' },
-  firstNavLabel: { type: String, default: '' },
-  firstNavIcon: { type: String, default: 'mr-2 fas fa-th-large' },
-})
 
 // 模态框状态
 const showAboutModal = ref(false)

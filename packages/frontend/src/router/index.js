@@ -12,13 +12,10 @@ export const constantRoutes = [
     component: AppLayout,
     children: [
       {
-        // 应用中心（首页）：header 首导航指向市场，避免自指
+        // 应用中心（首页）：顶导航为固定 tab（应用中心/应用市场各自独立）
         path: '',
         component: () => import('@/views/apps/index.vue'),
         meta: {
-          headerFirstNav: '/market',
-          headerFirstNavKey: 'market',
-          headerFirstNavIcon: 'mr-2 fas fa-store',
           // 页面内部 flex 内滚（网格虚拟滚动自滚），布局壳锁高不产生外层滚动条
           scrollable: false,
         },
