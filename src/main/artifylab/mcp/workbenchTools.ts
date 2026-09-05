@@ -224,6 +224,8 @@ async function pollBatchUntilDone(jobId: string): Promise<BatchJobSummary> {
  * 不含身份参（其文件本组件不触碰），故在此独立声明。 */
 type WBToolFn = (args: Record<string, unknown>, identity?: string) => Promise<unknown>
 
+import { searchModelKnowledge, modelKnowledgeDetail } from '../workbench/modelKnowledge'
+
 const WB_TOOLS: Array<{ tool: Tool; fn: WBToolFn }> = [
   {
     tool: {
@@ -798,6 +800,60 @@ const WB_TOOLS: Array<{ tool: Tool; fn: WBToolFn }> = [
       const key = String(args.key ?? '').trim()
       const ok = key ? workbenchService.forgetMemory(key) : false
       return text({ ok, key })
+    }
+  },
+  {
+    tool: {
+      name: 'wb_query_models',
+      description:
+        '查询本机模型知识库（LoRA Manager 的 civitai 元数据）：lora/checkpoint 的触发词、用法提示、备注与官方示例提示词。选模型没把握、不知道某 lora 的触发词怎么写、想参考高质量示例提示词时先调它。action=search 按关键词搜清单（文件名/模型名/触发词/标签匹配）；action=detail 按文件名查单模型详情+示例提示词。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['search', 'detail'],
+            description: 'search=搜清单（默认）；detail=单模型详情'
+          },
+          type: {
+            type: 'string',
+            enum: ['loras', 'checkpoints', 'embeddings'],
+            description: '模型类型，默认 loras'
+          },
+          query: { type: 'string', description: 'action=search：关键词（空格分词，全部子串匹配）' },
+          file: {
+            type: 'string',
+            description: 'action=detail：模型文件名（或相对路径，支持部分匹配）'
+          },
+          limit: { type: 'number', description: 'action=search：返回条数上限，默认 15' }
+        },
+        additionalProperties: false
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false }
+    },
+    fn: async (args, identity) => {
+      requireSession(identity)
+      const action = args.action === 'detail' ? 'detail' : 'search'
+      try {
+        if (action === 'detail') {
+          const file = String(args.file ?? '').trim()
+          if (!file) return text({ ok: false, error: 'action=detail 需要 file 参数' })
+          return text(await modelKnowledgeDetail(file, args.type as string))
+        }
+        return text(
+          await searchModelKnowledge(
+            args.type as string,
+            args.query ? String(args.query) : undefined,
+            typeof args.limit === 'number' ? args.limit : 15
+          )
+        )
+      } catch (e) {
+        return text({
+          ok: false,
+          error: e instanceof Error ? e.message : String(e),
+          hint: 'LoRA Manager 未运行或未安装时不可用；不影响其它流程'
+        })
+      }
     }
   }
 ]

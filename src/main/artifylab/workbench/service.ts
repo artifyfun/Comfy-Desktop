@@ -1290,6 +1290,7 @@ batch 字段格式与 wb_execute_template 的 batch_items/batch_shared_params �
    - 校验执行：wb_validate_workflow → wb_run_workflow(workflow, wait=true)；产物自动落会话；
    - 效果好可 wb_publish_workflow 固化供复用。
    自组才是「根据需求建工作流」，宁可多调几次工具，也别为了省事硬套不合适的固化模板。
+1.2 **模型知识查询**（涉及 lora/模型选型或写提示词没把握时）：wb_query_models 查本机模型的 civitai 触发词/用法提示/官方示例提示词（action=search 搜清单，action=detail 拿单模型详情）——用 lora 前先看触发词与示例提示词，别凭空猜触发词；用法细则见 wb-model-knowledge skill。
 2. intent=text 走纯文本生成（文案/起名/总结等），把生成结果放 reply。
 3. intent=chat 用于追问澄清或闲聊，回复放 reply。
 ${canvasRunRules}${canvasOpsRules}4. 模板库为空或不匹配时选 chat 并说明。可跨会话保留的偏好/事实用 intent=memory（见「长期记忆」段）。
