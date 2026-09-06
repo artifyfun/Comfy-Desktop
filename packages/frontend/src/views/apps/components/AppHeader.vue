@@ -8,7 +8,7 @@
     <!-- 左：Logo + 桌面端主导航（同一组，导航紧贴 logo，中间不留空） -->
     <div class="flex flex-wrap items-center min-w-0 gap-x-1">
       <div class="flex items-center gap-2.5 shrink-0 pr-2 cursor-pointer" @click="toggleAboutModal">
-        <div class="flex justify-center items-center w-7 h-7 rounded-md brand-mark">A</div>
+        <img src="/artify-logo.png" alt="Artify" class="w-7 h-7 shrink-0" />
         <h1 class="text-lg font-semibold leading-none text-white">
           Artify<span class="text-slate-400 font-medium">{{
             currentLang === 'zh' ? '工坊' : 'Lab'
@@ -167,12 +167,5 @@ const handleUpdateConfig = async (config) => {
   height: 2px;
   background: var(--wb-accent);
   border-radius: 1px;
-}
-.brand-mark {
-  background: var(--wb-ink);
-  color: var(--wb-brand);
-  font-weight: 800;
-  font-size: 14px;
-  line-height: 1;
 }
 </style>

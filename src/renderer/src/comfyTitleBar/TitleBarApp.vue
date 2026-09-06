@@ -22,6 +22,7 @@ import { useCentralPillCoachmark } from './useCentralPillCoachmark'
 import { useAppLocale, windowApiLocaleSource } from '../lib/useAppLocale'
 import { visibleSurfaceOf } from '../../../shared/visibleSurface'
 import ComfyCLogo from '../components/icons/ComfyCLogo.vue'
+import artifyLogoUrl from '../assets/artify-logo.png'
 
 const { t, locale } = useI18n()
 const { syncLocale } = useAppLocale(windowApiLocaleSource())
@@ -833,7 +834,7 @@ onUnmounted(() => {
           v-bind="tooltipAttrs('Artify 工坊')"
           @click="switchToArtify"
         >
-          <span class="surface-switch-mark" aria-hidden="true">A</span>
+          <img :src="artifyLogoUrl" class="surface-switch-mark" alt="" aria-hidden="true" />
           <span class="surface-switch-label">{{ t('titleBar.surfaceArtify') }}</span>
         </button>
         <button
@@ -1251,13 +1252,10 @@ onUnmounted(() => {
   color: #fff;
 }
 .surface-switch-mark {
-  font-size: 13px;
-  font-weight: 800;
-  font-family:
-    'Inter',
-    -apple-system,
-    sans-serif;
-  line-height: 1;
+  width: 14px;
+  height: 14px;
+  display: block;
+  flex-shrink: 0;
 }
 .surface-switch-label {
   font-size: 11px;
