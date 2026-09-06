@@ -895,22 +895,50 @@
         content: ''; position: absolute; top: 0; bottom: 0; left: -${Math.floor(GUTTER_HOT / 2)}px; right: -${Math.floor(GUTTER_HOT / 2)}px;
       }
       .p-splitter-horizontal > .p-splitter-gutter { cursor: col-resize; }
+      /* \u62D6\u62FD\u8C03\u5BBD\u300C\u53EA\u80FD\u53D8\u5927\u4E0D\u80FD\u53D8\u5C0F\u300D\u4FEE\u590D\uFF1A
+         PrimeVue splitter \u628A mousemove \u6302\u5728\u5BBF\u4E3B document \u4E0A\uFF0C\u800C\u4FA7\u680F\u91CC\u5D4C\u7684\u662F
+         iframe\u2014\u2014\u5F80\u5DE6\u62D6\u6307\u9488\u79FB\u8FDB iframe \u540E\uFF0C\u5BBF\u4E3B document \u6536\u4E0D\u5230 mousemove
+         \uFF08iframe \u662F\u72EC\u7ACB\u6587\u6863\uFF0C\u4E8B\u4EF6\u4E0D\u5192\u6CE1\u51FA\uFF09\u2192 \u5BBD\u5EA6\u51BB\u7ED3\uFF0C\u8868\u73B0\u4E3A\u53EA\u80FD\u5F80\u53F3\u62C9\u5BBD\u3002
+         \u62D6\u62FD\u671F\u95F4\u7981\u7528 iframe \u547D\u4E2D\u6D4B\u8BD5 + \u5BBF\u4E3B\u9009\u533A\uFF0C\u6307\u9488\u4E8B\u4EF6\u7A7F\u900F\u56DE\u5BBF\u4E3B\u6587\u6863\u3002
+         [data-p-resizing] \u662F PrimeVue \u81EA\u5DF1\u5728 onResizeStart \u6302\u7684\u5C5E\u6027\uFF0C\u6CE8\u610F\u5FC5\u987B
+         \u7528\u503C\u5339\u914D "true"\uFF1AonResizeEnd \u662F setAttribute('data-p-resizing', false)\uFF0C
+         \u5C5E\u6027\u4F9D\u7136\u5B58\u5728\u3001\u503C\u53D8\u6210\u5B57\u7B26\u4E32 "false"\uFF0C\u5B58\u5728\u6027\u9009\u62E9\u5668 [data-p-resizing]
+         \u4F1A\u6052\u771F \u2192 iframe \u6C38\u4E45 pointer-events:none\uFF08\u4FA7\u680F\u70B9\u4E0D\u52A8\uFF09\u4E14\u94B3\u5236\u6C38\u4E45\u5931\u6548\u3002
+         .artify-resizing \u662F\u6211\u4EEC\u515C\u5E95\u52A0\u7684\uFF08\u5C5E\u6027\u65F6\u5E8F/\u7248\u672C\u5DEE\u5F02\u65F6\u4ECD\u751F\u6548\uFF09\u3002 */
+      [data-p-resizing="true"] iframe,
+      html.artify-resizing iframe { pointer-events: none !important; }
+      [data-p-resizing="true"],
+      html.artify-resizing { user-select: none !important; }
     `;
       document.head.appendChild(style);
     } catch (_e) {
     }
+    const findSiblingPanel = (panel2) => {
+      const byStructure = (el) => {
+        let n = el.nextElementSibling;
+        while (n && !(n.classList && n.classList.contains("p-splitterpanel"))) n = n.nextElementSibling;
+        return n;
+      };
+      const next = byStructure(panel2);
+      if (next) return next;
+      let p = panel2.previousElementSibling;
+      while (p && !(p.classList && p.classList.contains("p-splitterpanel"))) p = p.previousElementSibling;
+      if (p) return p;
+      return panel2.parentElement ? Array.from(panel2.parentElement.children).find(
+        (el) => el !== panel2 && el.classList && el.classList.contains("p-splitterpanel")
+      ) : null;
+    };
     let patching = false;
+    const isResizing = () => document.documentElement.classList.contains("artify-resizing") || !!document.querySelector('[data-p-resizing="true"]');
     const clampPanel = () => {
-      if (patching) return;
+      if (patching || isResizing()) return;
       const panel2 = document.querySelector(".p-splitterpanel.side-bar-panel");
       if (!panel2) return;
       const m = /calc\(([\d.]+)%/.exec(panel2.style.flexBasis || "");
       if (m && parseFloat(m[1]) > MAX_PCT) {
         patching = true;
         panel2.style.flexBasis = `calc(${MAX_PCT}% - 4px)`;
-        const other = panel2.parentElement ? Array.from(panel2.parentElement.children).find(
-          (el) => el !== panel2 && el.classList && el.classList.contains("p-splitterpanel")
-        ) : null;
+        const other = findSiblingPanel(panel2);
         if (other) other.style.flexBasis = `calc(${100 - MAX_PCT}% - 4px)`;
         patching = false;
       }
@@ -923,6 +951,26 @@
         attributeFilter: ["style"]
       });
     }
+    if (!window.__artifySidebarResizeHooks) {
+      window.__artifySidebarResizeHooks = true;
+      const GUTTER_SEL = ".p-splitter-horizontal > .p-splitter-gutter";
+      document.addEventListener(
+        "mousedown",
+        (e) => {
+          const g = e.target && e.target.closest && e.target.closest(GUTTER_SEL);
+          if (!g) return;
+          document.documentElement.classList.add("artify-resizing");
+        },
+        true
+      );
+      const endResize = () => {
+        if (!document.documentElement.classList.contains("artify-resizing")) return;
+        document.documentElement.classList.remove("artify-resizing");
+        setTimeout(clampPanel, 0);
+      };
+      document.addEventListener("mouseup", endResize, true);
+      window.addEventListener("blur", endResize);
+    }
     if (!window.__artifySidebarGovDbl) {
       window.__artifySidebarGovDbl = true;
       document.addEventListener(
@@ -933,9 +981,7 @@
           const p = document.querySelector(".p-splitterpanel.side-bar-panel");
           if (!p) return;
           p.style.flexBasis = `calc(${RESET_PCT}% - 4px)`;
-          const other = p.parentElement ? Array.from(p.parentElement.children).find(
-            (el) => el !== p && el.classList && el.classList.contains("p-splitterpanel")
-          ) : null;
+          const other = findSiblingPanel(p);
           if (other) other.style.flexBasis = `calc(${100 - RESET_PCT}% - 4px)`;
           e.preventDefault();
           e.stopPropagation();
