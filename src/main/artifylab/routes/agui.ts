@@ -32,9 +32,8 @@ import { isReasoningEffort } from '../workbench/reasoningEffort'
 import type { WorkbenchMessageKind } from '../workbench/service'
 import { stopExecution } from '../mcp/executor'
 import appStoreManager from '../appStore'
-import { validatePlanLocal } from '../workbench/plan'
 import { promptToWorkflowGraph } from '../workbench/templateCore'
-import type { WorkflowTemplate } from '../workbench/templateCore'
+import { dispatchPlan } from '../workbench/dispatchPlan'
 import type { AttachmentMeta } from '../workbench/presetCore'
 import type { ThreadEvent } from '../vendor/codex-sdk'
 import { createCodexMapper } from '../agui/codexMapper'
@@ -79,13 +78,6 @@ const cancelRequested = new Set<string>()
 /** SSE 帧写出:destroyed 挡(客户端提前断连时 writableEnded 仍 false,继续写会报错) */
 function sendFrame(res: Response, event: AGUIEvent): void {
   if (!res.writableEnded && !res.destroyed) res.write(encodeSseFrame(event))
-}
-
-/** 模板画布布局:有保存的 UI graph 直接用,否则 prompt 兜底转换(旧路由同款) */
-function templateWorkflow(tpl: WorkflowTemplate): unknown {
-  return tpl.workflow && Array.isArray((tpl.workflow as { nodes?: unknown }).nodes)
-    ? tpl.workflow
-    : promptToWorkflowGraph(tpl.prompt)
 }
 
 export function createAguiRouter(deps: { store?: EventStore } = {}): express.Router {
@@ -340,178 +332,27 @@ export function createAguiRouter(deps: { store?: EventStore } = {}): express.Rou
             flushArtifacts()
           }
 
-          // ---- 分派(次序对齐 routes/workbench.ts chat 595-793)----
-          // 预设意图约束是硬校验:codex 违反预设(如 text-to-image 预设下输出 text)
-          // 时立即拦截并回显,而不是继续执行/回复
-          const presetIssue = issues.find((i) => i.field === 'intent')
-          if (presetIssue) {
-            businessInvalid(
-              { issues: [presetIssue] },
-              `PLAN 违反预设意图约束：${presetIssue.message}`
-            )
-          } else {
-            const local = validatePlanLocal(plan, workbenchService.listTemplates(threadId))
-            if (!local.ok) {
-              // 结构性非法的 PLAN 先于 reply/execution 拦截(旧路由同款文案)
-              const errText = `PLAN 无效：${local.issues.map((i) => i.message).join('；')}`
-              note('error', errText)
-              businessInvalid({ issues: local.issues }, errText)
-            } else if (plan.intent === 'memory' && plan.memory) {
-              // 长期记忆(dsh memory 语义):执行 remember/forget,确认文案下发
-              const { action, key, value } = plan.memory
-              let ok = false
-              if (action === 'remember') {
-                workbenchService.rememberMemory(key, value ?? '')
-                ok = true
-              } else {
-                ok = workbenchService.forgetMemory(key)
-              }
-              const confirmText =
-                action === 'remember'
-                  ? `已记住【${key}】：${value}`
-                  : ok
-                    ? `已忘掉【${key}】`
-                    : `没有找到记忆【${key}】，未删除任何内容`
-              note('chat', confirmText)
-              sendText(confirmText)
-              finishRun()
-            } else if (plan.intent === 'chat' || plan.intent === 'text') {
-              const reply = plan.reply ?? ''
-              note('chat', reply)
-              sendText(reply)
-              finishRun()
-            } else if (plan.intent === 'workflow') {
-              // 同步模板工作流到宿主画布:UI graph({nodes,links})经 CUSTOM wb_sync 下发,
-              // 前端走注入桥 artify:canvas-ops loadWorkflow 整图加载;无保存布局时
-              // 用 prompt 兜底转换,保证节点能上画布
-              const tpl = local.template
-              const wf = tpl ? templateWorkflow(tpl) : null
-              if (!wf) {
-                const msg = `模板「${tpl?.name ?? plan.templateId}」无可用布局，无法同步。`
-                note('chat', msg)
-                sendText(msg)
-                finishRun()
-              } else {
-                emit(
-                  custom('wb_sync', {
-                    templateId: tpl!.id,
-                    name: tpl!.name,
-                    workflow: wf,
-                    ensureTab: true
-                  })
-                )
-                const okMsg = `已把「${tpl!.name}」加载到画布。`
-                note('chat', okMsg)
-                sendText(okMsg)
-                finishRun()
-              }
-            } else if (plan.intent === 'canvas-run') {
-              // 执行画布当前工作流:图在宿主前端,服务端拿不到——下发桥指令
-              // (前端 graphToPrompt → /api/canvas/execute 或 /api/canvas/batch),
-              // 结果由前端轮询补气泡
-              emit(
-                custom('wb_canvas_exec', {
-                  requestId: `canvas-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                  nodeOverrides: plan.nodeOverrides ?? undefined,
-                  sessionId: threadId,
-                  batch: plan.batch
-                    ? { items: plan.batch.items, sharedParams: plan.batch.sharedParams }
-                    : undefined
-                })
-              )
-              const progress = plan.batch ? '画布批量执行中…' : '正在执行画布当前工作流…'
-              note('progress', progress)
-              sendText(progress)
-              finishRun()
-            } else if (plan.intent === 'canvas-ops') {
-              // P3 A 画布 app 节点指令集：AI 产出 ops（run_node/add_app_node/
-              // update_node/connect_nodes/select_nodes），前端 canvas-embedded
-              // 模式经总线到宿主画布页人审执行；产物落布/状态灯由画布页闭环
-              emit(custom('wb_canvas_ops', { ops: plan.canvasOps ?? [] }))
-              const n = Array.isArray(plan.canvasOps) ? plan.canvasOps.length : 0
-              note('progress', `画布节点指令 ${n} 条已下发，等待画布确认…`)
-              sendText(plan.reply || `已下发 ${n} 条画布节点指令，请在画布上确认执行。`)
-              finishRun()
-            } else if (workbenchService.consumeOrchestratedFlag(threadId)) {
-              // 编排去重:codex 在 decide 轮内经 wb_execute_template 真实执行过时,
-              // 最终 PLAN 只是「编排总结的载体」——产物/卡片已由工具链路落会话,
-              // 跳过重复执行(产物经上方 flushArtifacts 补发)
-              emit(custom('wb_submitted', { orchestrated: true }))
-              sendText(plan.reply ?? '多步编排已完成，产物见上方过程流。')
-              finishRun()
-            } else if (!local.template) {
-              businessInvalid(
-                { issues: [{ field: 'templateId', message: '模板不存在' }] },
-                'PLAN 无效：模板不存在'
-              )
-            } else {
-              // 媒体执行意图:远端校验 → 执行前画布 tab 保证 → batch/单次执行
-              const template = local.template
-              const remote = await workbenchService.validateRemote(plan, template)
-              // force=true 跳过 VRAM 拦截(旧路由同款)
-              const blocking = remote.filter((i) => (force ? i.field !== 'vram' : true))
-              if (blocking.length > 0) {
-                businessInvalid(
-                  { issues: blocking },
-                  `校验未通过：${blocking.map((i) => i.message).join('；')}`
-                )
-              } else {
-                // 执行前画布 tab 保证(ensure-tab):每次执行模板都先把目标工作流
-                // 加载到画布——桥判定当前 tab 已是该工作流则复用,否则开新 tab
-                emit(
-                  custom('wb_sync', {
-                    templateId: template.id,
-                    name: template.name,
-                    workflow: templateWorkflow(template),
-                    ensureTab: true
-                  })
-                )
-                if (plan.batch) {
-                  // batch 编排:batchRunner 队列(串行),进度经既有 batch 轮询通道
-                  const { jobId, total } = await workbenchService.executeBatch(
-                    threadId,
-                    plan,
-                    template,
-                    []
-                  )
-                  workbenchService.appendBatchExecution(threadId, template.id, jobId, total)
-                  emit(
-                    custom('wb_artifact', {
-                      promptId: jobId,
-                      batch: { jobId, total },
-                      templateId: template.id,
-                      name: template.name
-                    })
-                  )
-                  const batchMsg = `批量任务已入队：${total} 条，模板「${template.name}」。进度可在批量任务面板查看。`
-                  note('chat', batchMsg)
-                  sendText(batchMsg)
-                  finishRun()
-                } else {
-                  const execution = await workbenchService.execute(threadId, plan, template, [])
-                  // 调试日志回填执行信息(模板/参数/状态)
-                  workbenchService.patchDebugExecution(threadId, execution.promptId, {
-                    promptId: execution.promptId,
-                    templateId: execution.templateId,
-                    executionStatus: execution.status
-                  })
-                  // 提交回执:outputs 在提交时点为空,真实产物由轮询落会话、
-                  // 下一轮 flushArtifacts 补发(旧路由 submitted/artifact 两段同构)
-                  emit(
-                    custom('wb_artifact', {
-                      promptId: execution.promptId,
-                      name: execution.templateId,
-                      outputs: [],
-                      outputFiles: []
-                    })
-                  )
-                  note('chat', '已提交到 ComfyUI 队列')
-                  sendText('已提交到 ComfyUI 队列')
-                  finishRun()
-                }
-              }
-            }
-          }
+          // ---- 分派（候选③：dispatchPlan 单一持有意图梯）----
+          await dispatchPlan(plan, issues, {
+            threadId,
+            emitCustom: (event, data) => emit(custom(event, data)),
+            note,
+            sendText,
+            finishRun,
+            businessInvalid,
+            listTemplates: (sid) => workbenchService.listTemplates(sid),
+            validateRemote: (p, tpl) => workbenchService.validateRemote(p, tpl),
+            execute: (p, tpl) => workbenchService.execute(threadId, p, tpl, []),
+            executeBatch: (p, tpl) => workbenchService.executeBatch(threadId, p, tpl, []),
+            appendBatchExecution: (tplId, jobId, total) =>
+              workbenchService.appendBatchExecution(threadId, tplId, jobId, total),
+            patchDebugExecution: (pid, patch) =>
+              workbenchService.patchDebugExecution(threadId, pid, patch),
+            consumeOrchestratedFlag: () => workbenchService.consumeOrchestratedFlag(threadId),
+            rememberMemory: workbenchService.rememberMemory,
+            forgetMemory: workbenchService.forgetMemory,
+            force: !!force
+          })
         }
       }
     } catch (error) {
