@@ -17,6 +17,16 @@ import type { Dirent } from 'node:fs'
 import appStoreManager, { type App, type ComfyPrompt, type ParamNode } from '../appStore'
 import { type AppServerRuntime, createAppServerRuntime } from './appServerRun'
 import { logger } from '../utils/logger'
+import {
+  record as recordExecution,
+  markSuccess,
+  markError,
+  extractFiles,
+  type WorkbenchExecution,
+  type WorkbenchOutputFile
+} from './executionLog'
+
+export type { WorkbenchExecution, WorkbenchOutputFile } from './executionLog'
 import { templateLibrary } from './templates'
 import { exportSession, importSession as importSessionCore } from './sessionTransfer'
 import { toPseudoApp, type WorkflowTemplate } from './templateCore'
@@ -259,27 +269,6 @@ export interface TurnUsage {
   outputTokens: number
   reasoningOutputTokens: number
   at: number
-}
-
-/** 产物文件引用（gallery /view 直出缩略图所需的完整定位） */
-export interface WorkbenchOutputFile {
-  filename: string
-  subfolder?: string
-  type?: string
-}
-
-export interface WorkbenchExecution {
-  promptId: string
-  templateId: string
-  params: Record<string, unknown>
-  /** v2：完整文件引用（含 subfolder/type，/view 直出）；旧数据为纯 filename 字符串 */
-  outputs: (WorkbenchOutputFile | string)[]
-  status: ExecutionResult['status']
-  startedAt: number
-  /** batch 编排执行:batchRunner 的 job id */
-  batchJobId?: string
-  /** 失败原因（轮询回填；产物卡「复制错误全文」用） */
-  error?: string
 }
 
 /** 收藏的产物文件（跨会话收藏夹,落 workbench-sessions.json store 根） */
@@ -1784,14 +1773,12 @@ ${userInput}`
       }
     }
     const result = await executeApp(toPseudoApp(template), args, comfyOrigin, plan.nodeOverrides)
-    const execution: WorkbenchExecution = {
+    const execution = recordExecution({
       promptId: result.prompt_id,
       templateId: template.id,
       params: args,
-      outputs: [],
-      status: result.status,
-      startedAt: Date.now()
-    }
+      status: result.status
+    })
     const session = this.getSession(sessionId)
     if (session) {
       session.executions.push(execution)
@@ -1872,14 +1859,11 @@ ${userInput}`
       nodeOverrides: opts.nodeOverrides,
       workflowKey: opts.name
     })
-    const execution: WorkbenchExecution = {
+    const execution = recordExecution({
       promptId: result.prompt_id,
       templateId: opts.name ?? 'session:workflow',
-      params: {},
-      outputs: [],
-      status: result.status,
-      startedAt: Date.now()
-    }
+      status: result.status
+    })
     const session = this.getSession(sessionId)
     if (session) {
       session.executions.push(execution)
@@ -1986,14 +1970,7 @@ ${userInput}`
   recordCanvasExecution(sessionId: string, promptId: string, name?: string): void {
     const session = this.getSession(sessionId)
     if (!session) return
-    session.executions.push({
-      promptId,
-      templateId: name ?? 'canvas:current',
-      params: {},
-      outputs: [],
-      status: 'queued',
-      startedAt: Date.now()
-    })
+    session.executions.push(recordExecution({ promptId, templateId: name ?? 'canvas:current' }))
     this.appendMessage(sessionId, {
       role: 'agent',
       kind: 'card',
@@ -2034,32 +2011,18 @@ ${userInput}`
       const session = this.getSession(sessionId)
       const exec = session?.executions.find((e) => e.promptId === promptId)
       if (exec) {
-        exec.status = 'success'
-        const files: WorkbenchOutputFile[] = []
-        // 产物提取：直接扫 ComfyUI 原始 history outputs 的所有节点 images/gifs——
-        // getExecutionStatus 的 extractOutputs 只挑 paramsNodes 声明的 output 节点，
-        // 而模板固化时常未声明输出（Anima+槽位替换A 等只声明输入参数 prompt）→
-        // 提取永远为空 → 前端「无产物文件」（真实事故：ComfyUI 已输出 2 张图，
-        // 会话产物却是 0）。
+        // 产物提取走 executionLog.extractFiles 单一实现（候选 ②）：
+        // paramsNodes 声明优先，未声明/未命中时裸扫全部节点（修复历史缺陷
+        // 「模板未声明输出节点 → 提取永远为空」）。history 读取失败按无产物
+        // 处理，不阻断轮询返回。
+        let files: WorkbenchOutputFile[] = []
         try {
           const history = await getHistory(comfyOrigin, promptId)
-          const rawOutputs = (history?.outputs as Record<string, unknown>) ?? {}
-          for (const v of Object.values(rawOutputs)) {
-            const o = v as {
-              images?: Array<{ filename?: string; subfolder?: string; type?: string }>
-              gifs?: Array<{ filename?: string; subfolder?: string; type?: string }>
-            }
-            for (const key of ['images', 'gifs'] as const) {
-              for (const it of o[key] ?? []) {
-                if (it.filename)
-                  files.push({ filename: it.filename, subfolder: it.subfolder, type: it.type })
-              }
-            }
-          }
+          files = extractFiles(undefined, history?.outputs as Record<string, unknown> | undefined)
         } catch {
           /* history 读取失败按无产物处理（不阻断轮询返回） */
         }
-        exec.outputs = files
+        markSuccess(exec, files)
         this.appendMessage(sessionId, {
           role: 'agent',
           kind: 'artifact',
@@ -2074,11 +2037,8 @@ ${userInput}`
     if (result.status === 'error' && result.error) {
       const session = this.getSession(sessionId)
       const exec = session?.executions.find((e) => e.promptId === promptId)
-      // 完整错误落执行记录（产物卡可复制全文；截断防会话文件膨胀）
-      if (exec) {
-        exec.status = 'error'
-        exec.error = result.error.slice(0, 2000)
-      }
+      // 完整错误落执行记录（executionLog.markError 统一截断）
+      if (exec) markError(exec, result.error)
       // 调试日志同步最终执行状态
       this.patchDebugExecution(sessionId, promptId, {
         executionStatus: 'error',
@@ -2275,15 +2235,9 @@ ${userInput}`
     const session = this.getSession(sessionId)
     if (!session) return
     session.executions = session.executions ?? []
-    session.executions.push({
-      promptId: jobId,
-      templateId,
-      params: { batch: true },
-      outputs: [],
-      status: 'queued',
-      startedAt: Date.now(),
-      batchJobId: jobId
-    })
+    session.executions.push(
+      recordExecution({ promptId: jobId, templateId, params: { batch: true }, batchJobId: jobId })
+    )
     this.flush()
   }
 

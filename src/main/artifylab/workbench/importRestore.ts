@@ -3,7 +3,8 @@
  * 路由层薄壳：只负责 multer buffer → 纯函数 → touchSession/scanOutputDir。
  */
 import pathUtil from 'path'
-import type { WorkbenchSession, WorkbenchOutputFile } from './service'
+import type { WorkbenchSession } from './service'
+import type { WorkbenchOutputFile } from './executionLog'
 
 export interface RestoredFile {
   filename: string
