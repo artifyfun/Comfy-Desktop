@@ -22,6 +22,17 @@ const mocks = {
   forceFreeAndTrack: vi.fn()
 }
 vi.mock('../mcp/executor', () => mocks)
+// queuePrompt/getHistory 已收口 comfyClient（候选 ④）：batchRunner 从那里 import，
+// mock 面同步跟随（executor 仍提供 stopExecution/free* —— 指纹跟踪逻辑还在那边）。
+vi.mock('../comfyClient', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
+  return {
+    ...actual,
+    queuePrompt: mocks.queuePrompt,
+    getHistory: mocks.getHistory,
+    randomizeSeedFields: actual.randomizeSeedFields
+  }
+})
 vi.mock('..', () => ({
   default: {
     getConfig: () => ({ comfy_origin: 'http://localhost:8188' }),
@@ -31,7 +42,8 @@ vi.mock('..', () => ({
 vi.mock('../utils/logger', () => ({ logger: { info: () => {}, warn: () => {}, error: () => {} } }))
 vi.mock('electron', () => ({ default: { getPath: () => '' } }))
 
-const { buildItemPrompt, convertValueByType, getSeed } = await import('./batchRunner')
+const { buildItemPrompt, convertValueByType } = await import('./batchRunner')
+const { randomSeed } = await import('../comfyClient')
 
 const basePrompt = {
   '1': { class_type: 'KSampler', inputs: { seed: 123, steps: 20 } },
@@ -62,10 +74,10 @@ describe('convertValueByType', () => {
   })
 })
 
-describe('getSeed', () => {
+describe('randomSeed（comfyClient，getSeed 双胞胎合并后）', () => {
   it('returns 15-digit number with non-zero lead', () => {
     for (let i = 0; i < 20; i++) {
-      const s = getSeed()
+      const s = randomSeed()
       expect(String(s)).toHaveLength(15)
       expect(String(s)[0]).not.toBe('0')
     }

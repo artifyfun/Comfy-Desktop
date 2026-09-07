@@ -9,6 +9,7 @@ import type { ComfyPrompt } from '../appStore'
 import type { WorkflowTemplate } from './templateCore'
 import { checkNodeOverrides, looksLikeMediaValue, looksLikeTextBlob } from '../mcp/executor'
 import { logger } from '../utils/logger'
+import { getObjectInfo, getSystemStats } from '../comfyClient'
 
 /** codex 决策输出的结构化执行计划 */
 export interface WorkbenchPlan {
@@ -104,13 +105,6 @@ export interface PlanValidationResult {
   template?: WorkflowTemplate
 }
 
-/** fetch 带超时（与 executor 一致的容错） */
-function fetchTimeout(url: string, ms = 15000): Promise<Response> {
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), ms)
-  return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(timer))
-}
-
 /** 参数基础校验：类型 + 数值范围（对照 selectedWidget.options） */
 function validateParams(
   template: WorkflowTemplate,
@@ -173,9 +167,7 @@ export async function validateAgainstObjectInfo(
   prompt: ComfyPrompt
 ): Promise<PlanValidationIssue[]> {
   try {
-    const res = await fetchTimeout(`${comfyOrigin}/object_info`)
-    if (!res.ok) return []
-    const info = (await res.json()) as Record<string, unknown>
+    const info = (await getObjectInfo({ origin: comfyOrigin })) as Record<string, unknown>
     const issues: PlanValidationIssue[] = []
     for (const [nodeId, node] of Object.entries(prompt)) {
       if (!(node.class_type in info)) {
@@ -226,9 +218,10 @@ export async function validateNodeOverrides(
   if (!nodeOverrides) return []
   const issues: PlanValidationIssue[] = []
   try {
-    const res = await fetchTimeout(`${comfyOrigin}/object_info`)
-    if (!res.ok) return []
-    const info = (await res.json()) as Record<string, ObjectInfoNode>
+    const info = (await getObjectInfo({ origin: comfyOrigin })) as unknown as Record<
+      string,
+      ObjectInfoNode
+    >
     for (const [nodeId, cfg] of Object.entries(nodeOverrides)) {
       const node = prompt[nodeId]
       if (!node || !cfg.widgetOverrides) continue
@@ -305,9 +298,7 @@ export async function validateModels(
   const required = template.requiredModels ?? []
   if (required.length === 0) return []
   try {
-    const res = await fetchTimeout(`${comfyOrigin}/object_info`)
-    if (!res.ok) return []
-    const info = (await res.json()) as Record<
+    const info = (await getObjectInfo({ origin: comfyOrigin })) as Record<
       string,
       { input?: { required?: Record<string, unknown> } }
     >
@@ -344,9 +335,7 @@ export async function checkVram(
 ): Promise<PlanValidationIssue[]> {
   if (force) return []
   try {
-    const res = await fetchTimeout(`${comfyOrigin}/system_stats`, 8000)
-    if (!res.ok) return []
-    const stats = (await res.json()) as {
+    const stats = (await getSystemStats({ origin: comfyOrigin })) as {
       devices?: Array<{ vram_free?: number }>
     }
     const free = stats.devices?.[0]?.vram_free

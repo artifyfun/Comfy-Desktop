@@ -10,6 +10,15 @@
 import { randomUUID } from 'node:crypto'
 import type { App, ComfyPrompt, ParamNode } from '../appStore'
 import { logger } from '../utils/logger'
+import {
+  comfyFetch,
+  freeMemory as comfyFreeMemory,
+  getHistory as comfyGetHistory,
+  interrupt as comfyInterrupt,
+  queuePrompt as comfyQueuePrompt,
+  randomSeed,
+  uploadImage
+} from '../comfyClient'
 
 export interface ExecutionResult {
   prompt_id: string
@@ -22,14 +31,9 @@ export interface ExecutionResult {
 const promptAppMap = new Map<string, ParamNode[]>()
 const MAX_PROMPT_ENTRIES = 500
 
-/** 15 位随机整数（首位非 0），移植自 artifylab-frontend/src/utils/index.js:523-533 */
+/** 15 位随机整数（首位非 0）——实现已收口 comfyClient.randomSeed（候选 ④）。 */
 export function getSeed(n = 15): number {
-  let num = ''
-  for (let i = 0; i < n; i++) {
-    num +=
-      i === 0 ? String(Math.floor(Math.random() * 9 + 1)) : String(Math.floor(Math.random() * 10))
-  }
-  return Number(num)
+  return randomSeed(n)
 }
 
 /** 从 workflow prompt 推断输出节点 id（无 paramsNodes 的裸工作流执行用）：
@@ -99,7 +103,7 @@ function applySeed(prompt: ComfyPrompt, args: Record<string, unknown>): void {
     for (const k of Object.keys(node.inputs)) {
       const isSeedField = k.toLowerCase().includes('seed') && typeof node.inputs[k] === 'number'
       if (!isSeedField) continue
-      if (randomize) node.inputs[k] = getSeed()
+      if (randomize) node.inputs[k] = randomSeed()
       else if (seedArg != null) node.inputs[k] = seedArg
     }
   }
@@ -200,13 +204,6 @@ export function looksLikeTextBlob(v: string): boolean {
   return /[\s,，、。]/.test(v)
 }
 
-/** 带超时的 fetch（L4：避免无响应 URL 挂死工具调用） */
-function fetchTimeout(url: string, init: RequestInit = {}, ms = 60000): Promise<Response> {
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), ms)
-  return fetch(url, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(timer))
-}
-
 /** 媒体来源白名单（H1：阻断 SSRF）——仅 data: URL 或本机 http(s) */
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
 const MAX_MEDIA_BYTES = 200 * 1024 * 1024
@@ -236,37 +233,24 @@ function mimeToExt(mime: string): string {
   return 'bin'
 }
 
-/** POST /prompt → prompt_id */
+/** POST /prompt → prompt_id（IO 已收口 comfyClient.queuePrompt，候选 ④） */
 export async function queuePrompt(
   comfyOrigin: string,
   prompt: ComfyPrompt,
   clientId: string
 ): Promise<string> {
-  const res = await fetchTimeout(`${comfyOrigin}/prompt`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ prompt, client_id: clientId })
-  })
-  if (!res.ok) throw new Error(`queuePrompt HTTP ${res.status}: ${await res.text()}`)
-  const json = (await res.json()) as { prompt_id?: string; error?: unknown }
-  if (json.error) throw new Error(`queuePrompt error: ${JSON.stringify(json.error)}`)
-  if (!json.prompt_id) throw new Error('queuePrompt: response missing prompt_id')
-  return json.prompt_id
+  return comfyQueuePrompt(prompt, clientId, { origin: comfyOrigin })
 }
 
 /**
- * GET /history/{prompt_id}。
+ * GET /history/{prompt_id}（IO 已收口 comfyClient.getHistory，候选 ④）。
  * 404 / 无 entry → null（仍排队/运行中）；5xx → throw（M3：避免永远误判 running）。
  */
 export async function getHistory(
   comfyOrigin: string,
   promptId: string
 ): Promise<Record<string, unknown> | null> {
-  const res = await fetchTimeout(`${comfyOrigin}/history/${promptId}`)
-  if (res.status === 404) return null
-  if (!res.ok) throw new Error(`getHistory HTTP ${res.status}`)
-  const json = (await res.json()) as Record<string, unknown>
-  return (json[promptId] as Record<string, unknown>) ?? null
+  return comfyGetHistory(promptId, { origin: comfyOrigin })
 }
 
 /** POST /upload/image → { name(含 subfolder 前缀), subfolder, type }（M4：文件名扩展名 + subfolder） */
@@ -275,7 +259,7 @@ export async function uploadMedia(
   dataUrl: string
 ): Promise<{ name: string; subfolder: string; type: string }> {
   assertSafeMediaUrl(dataUrl)
-  const blobRes = await fetchTimeout(dataUrl)
+  const blobRes = await comfyFetch(dataUrl, {}, { origin: '' })
   if (!blobRes.ok) throw new Error(`fetch media HTTP ${blobRes.status}`)
   const blob = await blobRes.blob()
   if (blob.size > MAX_MEDIA_BYTES)
@@ -305,21 +289,7 @@ async function uploadMediaBlob(
   blob: Blob,
   filename: string
 ): Promise<{ name: string; subfolder: string; type: string }> {
-  const form = new FormData()
-  form.append('image', blob, filename)
-  form.append('overwrite', 'true')
-  const res = await fetchTimeout(`${comfyOrigin}/upload/image`, { method: 'POST', body: form })
-  if (!res.ok) throw new Error(`uploadMedia HTTP ${res.status}`)
-  const json = (await res.json()) as {
-    name: string
-    subfolder: string
-    type: string
-    error?: unknown
-  }
-  if (json.error) throw new Error(`uploadMedia error: ${JSON.stringify(json.error)}`)
-  // ComfyUI LoadImage 等 widget 期望 "subfolder/filename" 或 "filename"
-  const filepath = json.subfolder ? `${json.subfolder}/${json.name}` : json.name
-  return { name: filepath, subfolder: json.subfolder, type: json.type }
+  return uploadImage(blob, filename, { origin: comfyOrigin })
 }
 
 /**
@@ -519,9 +489,9 @@ export async function getExecutionStatus(
   return { prompt_id: promptId, status: 'success', outputs }
 }
 
-/** POST /interrupt（移植 handlers.ts:34-45） */
+/** POST /interrupt（移植 handlers.ts:34-45；IO 已收口 comfyClient.interrupt，候选 ④） */
 export async function stopExecution(comfyOrigin: string): Promise<void> {
-  await fetchTimeout(`${comfyOrigin}/interrupt`, { method: 'POST' })
+  await comfyInterrupt({ origin: comfyOrigin })
 }
 
 /** 抽取 app 声明的 output 节点结果（移植 useWorkflow.js:189-207 handleResult；M6：回退分支不再 join 对象数组） */
@@ -558,13 +528,9 @@ export function extractOutputs(
   return response
 }
 
-/** POST /free：卸载模型 + 释放显存（工作流切换前调用，避免不同模型叠加 OOM） */
+/** POST /free：卸载模型 + 释放显存（工作流切换前调用，避免不同模型叠加 OOM；IO 已收口 comfyClient.freeMemory） */
 export async function freeModels(comfyOrigin: string): Promise<void> {
-  await fetchTimeout(`${comfyOrigin}/free`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ unload_models: true, free_memory: true })
-  })
+  await comfyFreeMemory({ origin: comfyOrigin })
 }
 
 /**

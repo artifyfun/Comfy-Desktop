@@ -25,8 +25,11 @@ import os from 'node:os'
 import electron from 'electron'
 import type { ComfyPrompt } from '../appStore'
 import {
-  queuePrompt,
-  getHistory,
+  queuePrompt as comfyQueuePrompt,
+  getHistory as comfyGetHistory,
+  randomizeSeedFields
+} from '../comfyClient'
+import {
   stopExecution,
   freeIfWorkflowChanged,
   forceFreeAndTrack,
@@ -257,32 +260,15 @@ export function convertValueByType(value: unknown, targetType?: string): unknown
   }
 }
 
-/** 15 位随机 seed（首位非 0），与前端 getSeed 一致 */
-export function getSeed(n = 15): number {
-  let num = ''
-  for (let i = 0; i < n; i++) {
-    num +=
-      i === 0 ? String(Math.floor(Math.random() * 9 + 1)) : String(Math.floor(Math.random() * 10))
-  }
-  return Number(num)
-}
-
-/** 组装单条 prompt（语义同批量页 getPrompt：seed 随机化 → 映射合并） */
+/** 组装单条 prompt（语义同批量页 getPrompt：seed 随机化 → 映射合并）。
+ * seed 语义已收口 comfyClient.randomizeSeedFields（候选 ④：原 getSeed 双胞胎删除） */
 export function buildItemPrompt(
   base: BatchStartOptions['prompt'],
   inputs: BatchInputNode[],
   data: Record<string, unknown>
 ): ComfyPrompt {
   const prompt = structuredClone(base)
-  for (const item of Object.values(prompt)) {
-    const inputs0 = (item as { inputs?: Record<string, unknown> }).inputs
-    if (!inputs0) continue
-    for (const k of Object.keys(inputs0)) {
-      if (k.toLowerCase().includes('seed') && typeof inputs0[k] === 'number') {
-        inputs0[k] = getSeed()
-      }
-    }
-  }
+  randomizeSeedFields(prompt)
   for (const node of inputs) {
     const target = prompt[node.id] as { inputs?: Record<string, unknown> } | undefined
     if (!target?.inputs || !(node.key in target.inputs)) continue
@@ -317,7 +303,7 @@ async function runItem(
   const clientId = randomUUID()
   let promptId: string
   try {
-    promptId = await queuePrompt(comfyOrigin, prompt, clientId)
+    promptId = await comfyQueuePrompt(prompt, clientId, { origin: comfyOrigin })
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
@@ -333,7 +319,7 @@ async function runItem(
     await new Promise((r) => setTimeout(r, 1000))
     let entry: Record<string, unknown> | null
     try {
-      entry = await getHistory(comfyOrigin, promptId)
+      entry = await comfyGetHistory(promptId, { origin: comfyOrigin })
     } catch (e) {
       return { ok: false, error: `history poll: ${(e as Error).message}` }
     }

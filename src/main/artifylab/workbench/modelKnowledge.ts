@@ -12,8 +12,8 @@
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import appStoreManager from '../appStore'
 import { logger } from '../utils/logger'
+import { comfyFetch } from '../comfyClient'
 
 export type ModelKind = 'loras' | 'checkpoints' | 'embeddings'
 
@@ -64,11 +64,7 @@ function lmSettings(): { apiKey: string; host: string } {
   return { apiKey, host }
 }
 
-function lmBase(): string {
-  const host = appStoreManager.getConfig().comfyHost
-  if (!host) throw new Error('ComfyUI 未配置（comfyHost 为空），无法访问 LoRA Manager API')
-  return `${host.replace(/\/$/, '')}/api/lm`
-}
+// lmBase() 已移除：LM API 前缀 /api/lm 由 comfyClient 的 comfyOrigin 拼接（候选 ④）
 
 function normalizeKind(kind?: string): ModelKind {
   if (kind && (KINDS as string[]).includes(kind)) return kind as ModelKind
@@ -78,8 +74,9 @@ function normalizeKind(kind?: string): ModelKind {
 async function fetchLmList(kind: ModelKind): Promise<LmItem[]> {
   const out: LmItem[] = []
   for (let page = 1; page <= 5; page++) {
-    const res = await fetch(`${lmBase()}/${kind}/list?page=${page}&page_size=200`, {
-      signal: AbortSignal.timeout(8000)
+    // ComfyUI 目标请求已收口 comfyClient（候选 ④）：comfyOrigin 解析 + 超时统一
+    const res = await comfyFetch(`/api/lm/${kind}/list?page=${page}&page_size=200`, {
+      timeoutMs: 8000
     })
     if (!res.ok)
       throw new Error(`LoRA Manager API ${res.status}（确认 ComfyUI 在运行且插件已安装）`)

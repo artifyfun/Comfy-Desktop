@@ -13,6 +13,7 @@
  * - 记忆工具同 workbench memory intent 语义（key 幂等，≤500 字）。
  */
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
+import { getObjectInfo } from '../comfyClient'
 import {
   validateNodeOverrides,
   validateNodeOverridesLocal,
@@ -387,13 +388,8 @@ const WB_TOOLS: Array<{ tool: Tool; fn: WBToolFn }> = [
       const sessionId = requireSession(identity)
       let info: Record<string, ObjectInfoNode> | null = null
       try {
-        const ctrl = new AbortController()
-        const timer = setTimeout(() => ctrl.abort(), 10000)
-        const res = await fetch(`${appStoreManager.getConfig().comfyHost}/object_info`, {
-          signal: ctrl.signal
-        })
-        clearTimeout(timer)
-        if (res.ok) info = (await res.json()) as Record<string, ObjectInfoNode>
+        // object_info 读取已收口 comfyClient（候选 ④）：超时/错误形状统一
+        info = (await getObjectInfo()) as unknown as Record<string, ObjectInfoNode>
       } catch {
         /* schema 补充失败不阻断：只有 current 值 */
       }

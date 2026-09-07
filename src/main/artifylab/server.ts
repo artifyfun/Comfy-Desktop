@@ -31,9 +31,14 @@ import { getApprovalGate } from './agui/approvalRegistry'
 import { workbenchService } from './workbench/service'
 import { isLoopbackHost, resolveListenHost } from './config/listenHost'
 import appStoreManager from './appStore'
+import { bindAppStore } from './comfyClient'
 
 // Load environment variables from .env file
 dotenv.config()
+
+// comfyClient 的缺省 origin 绑定（候选 ④）：ComfyUI HTTP 客户端懒读
+// appStore.comfyHost，装配期注入句柄，避免消费者加载链携带 electron 依赖。
+bindAppStore(appStoreManager)
 
 // 显式类型注解：pnpm 隔离布局下 express() 的推断类型引用了 .pnpm 深层路径，
 // 触发 TS2742（类型不可命名）——注解为 express.Express。

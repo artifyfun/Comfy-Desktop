@@ -27,6 +27,7 @@ import { HTTP_STATUS } from '../config/constants'
 import { createErrorResponse, createSuccessResponse } from '../utils/errorHandler'
 import { classifyExecutionError } from '../services/errorClassifier'
 import { executePrompt, getHistory, extractExecutionError } from '../mcp/executor'
+import { getNodeObjectInfo } from '../comfyClient'
 import type { ComfyPrompt } from '../appStore'
 import { startBatch, type BatchInputNode } from '../services/batchRunner'
 import { workbenchService } from '../workbench/service'
@@ -359,20 +360,12 @@ export function createCanvasRouter(
       origin
     ) {
       try {
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), 3000)
-        const infoRes = await fetch(
-          `${origin}/object_info/${encodeURIComponent(classified.nodeType)}`,
-          {
-            signal: controller.signal
-          }
-        )
-        clearTimeout(timer)
-        if (infoRes.ok) {
-          const info = (await infoRes.json()) as Record<
-            string,
-            { input?: { required?: Record<string, unknown>; optional?: Record<string, unknown> } }
-          >
+        // 单节点 schema 探测已收口 comfyClient（候选 ④）：超时 3s 语义保留
+        const info = (await getNodeObjectInfo(classified.nodeType, { origin })) as Record<
+          string,
+          { input?: { required?: Record<string, unknown>; optional?: Record<string, unknown> } }
+        >
+        {
           const node = info[classified.nodeType]
           const spec =
             (node?.input?.required ?? {})[classified.inputName] ??
