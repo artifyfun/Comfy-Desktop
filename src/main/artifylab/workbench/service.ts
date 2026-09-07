@@ -10,7 +10,7 @@
 import { join } from 'node:path'
 import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import appStoreManager, { type App, type ComfyPrompt, type ParamNode } from '../appStore'
 import { logger } from '../utils/logger'
@@ -30,8 +30,7 @@ import type {
   WorkbenchFavorite,
   SessionModelOverride,
   WorkbenchSession,
-  WorkbenchDebugLog,
-  SessionStore
+  WorkbenchDebugLog
 } from './sessionTypes'
 
 export type {
@@ -45,7 +44,6 @@ export type {
   SessionStore
 } from './sessionTypes'
 import { templateLibrary } from './templates'
-import { exportSession, importSession as importSessionCore } from './sessionTransfer'
 import { toPseudoApp, type WorkflowTemplate } from './templateCore'
 import {
   checkVram,
@@ -70,6 +68,7 @@ import {
 import { renderEnvSnapshot, SELF_KNOWLEDGE_TEXT, type WorkbenchEnvSnapshot } from './selfKnowledge'
 import { defaultSkillLibrary, type SkillInfo } from './skillStore'
 import { deployWorkbenchSkills } from './skillDeploy'
+import { SessionStoreRepo } from './sessionStore'
 import { resolveDecideInput } from './decideInput'
 import {
   renderDecisionSpec,
@@ -140,8 +139,6 @@ export type DecideProgressCallback = (
       }
 ) => void
 
-const MAX_SESSIONS = 50
-const FLUSH_DEBOUNCE_MS = 500
 /** 会话内保留的最大调试日志条数（每条 ~10KB，防 workbench-sessions.json 膨胀） */
 const MAX_DEBUG_LOGS = 10
 /** 调试日志字段截断：spec 决策提示词 / codex 原始输出 */
@@ -221,8 +218,8 @@ const MAX_AGENT_TURNS = 24
 const MAX_SESSION_TOKENS = 2_000_000
 
 class WorkbenchService {
-  private store: SessionStore = { sessions: [] }
-  private flushTimer: NodeJS.Timeout | null = null
+  /** 持久层（候选①）：sessions/presets/favorites/memories 的 home */
+  private repo: SessionStoreRepo
   /** /mcp 端点可用性（agent session 创建时探测，决定 spec 是否注入 wb_* 编排段） */
   private mcpAvailable = false
   /** 编排去重标记：decide 轮内 wb_execute_template 真实执行过 → 最终 PLAN 不再重复执行 */
@@ -249,7 +246,11 @@ class WorkbenchService {
   })
 
   constructor() {
-    this.load()
+    this.repo = new SessionStoreRepo({
+      storePath: sessionsPath,
+      presetExists: (id) => !!this.getPreset(id),
+      onDelete: (id) => this.agents.dispose(id)
+    })
     templateLibrary.on('change', () => this.pokeTemplates())
   }
 
@@ -260,33 +261,6 @@ class WorkbenchService {
     logger.debug('workbench: template library changed')
   }
 
-  private load(): void {
-    try {
-      const p = sessionsPath()
-      if (existsSync(p)) this.store = JSON.parse(readFileSync(p, 'utf8')) as SessionStore
-    } catch (e) {
-      logger.warn('workbench: load sessions failed', e)
-    }
-  }
-
-  private flush(): void {
-    if (this.flushTimer) clearTimeout(this.flushTimer)
-    this.flushTimer = setTimeout(() => {
-      this.flushTimer = null
-      try {
-        // 上限淘汰最旧会话
-        if (this.store.sessions.length > MAX_SESSIONS) {
-          this.store.sessions = this.store.sessions
-            .sort((a, b) => b.updatedAt - a.updatedAt)
-            .slice(0, MAX_SESSIONS)
-        }
-        writeFileSync(sessionsPath(), JSON.stringify(this.store, null, 2))
-      } catch (e) {
-        logger.warn('workbench: flush sessions failed', e)
-      }
-    }, FLUSH_DEBOUNCE_MS)
-  }
-
   /** 应用退出时清理全部 agent 运行时（组合根 facade→AgentRuntime） */
   disposeAllAgents(): void {
     this.agents.disposeAll()
@@ -294,18 +268,12 @@ class WorkbenchService {
 
   /** 导入件产物回填后触碰会话（updated 落盘） */
   touchSession(id: string): void {
-    const s = this.getSession(id)
-    if (s) {
-      s.updatedAt = Date.now()
-      this.flush()
-    }
+    this.repo.touchSession(id)
   }
 
   /** 导出会话（纯函数核心见 sessionTransfer.ts；剥 debugLogs/batchJobId） */
   exportSession(id: string) {
-    const session = this.getSession(id)
-    if (!session) return null
-    return exportSession(session)
+    return this.repo.exportSession(id)
   }
 
   /**
@@ -322,50 +290,21 @@ class WorkbenchService {
     error?: string
     existing?: { id: string; title: string; updatedAt: number }
   } {
-    const existing = new Set(this.store.sessions.map((s) => s.id))
-    const imported = this.store.sessions
-      .filter((s) => !!s.importedFrom)
-      .map((s) => ({
-        importedFrom: s.importedFrom!,
-        id: s.id,
-        title: s.title,
-        updatedAt: s.updatedAt
-      }))
-    const r = importSessionCore(raw, existing, { force: opts.force, imported })
-    if (!r.ok || !r.session) return { ok: false, error: r.error }
-    this.store.sessions.unshift(r.session)
-    this.flush()
-    return { ok: true, session: r.session }
+    return this.repo.importSession(raw, opts)
   }
 
   listSessions(archived?: boolean): WorkbenchSession[] {
-    return [...this.store.sessions]
-      .filter((s) => (archived === undefined ? true : !!s.archived === archived))
-      .sort((a, b) => b.updatedAt - a.updatedAt)
+    return this.repo.listSessions(archived)
   }
 
   getSession(id: string): WorkbenchSession | null {
-    return this.store.sessions.find((s) => s.id === id) ?? null
+    return this.repo.getSession(id)
   }
 
   createSession(
     opts: { title?: string; presetId?: string; entry?: WorkbenchSession['entry'] } = {}
   ): WorkbenchSession {
-    const session: WorkbenchSession = {
-      id: randomUUID(),
-      title: opts.title || '新会话',
-      // 用户在建会话时显式填了标题 → 视同手动命名，防 PLAN 自动标题覆盖
-      titleLocked: !!opts.title,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      messages: [],
-      executions: [],
-      presetId: opts.presetId,
-      entry: opts.entry
-    }
-    this.store.sessions.unshift(session)
-    this.flush()
-    return session
+    return this.repo.createSession(opts)
   }
 
   /** 会话元信息更新（标题/模型覆盖/归档；dsh 语义：模型可变，预设锁定） */
@@ -378,35 +317,11 @@ class WorkbenchService {
       presetId?: string
     }
   ): WorkbenchSession | null {
-    const session = this.getSession(id)
-    if (!session) return null
-    if (patch.title !== undefined) {
-      session.title = patch.title
-      session.titleLocked = true
-    }
-    if (patch.modelOverride !== undefined) session.modelOverride = patch.modelOverride
-    if (patch.archived !== undefined) session.archived = patch.archived
-    // 预设点击切换（dsh 模式）：仅接受已存在预设
-    if (patch.presetId !== undefined) {
-      if (patch.presetId === '' || this.getPreset(patch.presetId)) {
-        session.presetId = patch.presetId || undefined
-      }
-    }
-    session.updatedAt = Date.now()
-    this.flush()
-    return session
+    return this.repo.updateSession(id, patch)
   }
 
   deleteSession(id: string): boolean {
-    const before = this.store.sessions.length
-    this.store.sessions = this.store.sessions.filter((s) => s.id !== id)
-    const ok = this.store.sessions.length < before
-    if (ok) {
-      // 会话删除时一并销毁其 agent 运行时（线程/代理/tempHome）
-      this.agents.dispose(id)
-      this.flush()
-    }
-    return ok
+    return this.repo.deleteSession(id)
   }
 
   appendMessage(sessionId: string, msg: Omit<WorkbenchMessage, 'createdAt'>): void {
@@ -439,32 +354,32 @@ class WorkbenchService {
     msgs.push(node)
     session.activeLeaf = msgs.length - 1
     session.updatedAt = Date.now()
-    this.flush()
+    this.repo.flush()
   }
 
   // ---------------- 跨会话长期记忆（dsh memory 语义） ----------------
 
   listMemories(): Record<string, { value: string; updatedAt: number }> {
-    return { ...(this.store.memories ?? {}) }
+    return { ...(this.repo.store.memories ?? {}) }
   }
 
   /** 写入/更新(幂等,同 key 覆盖);工作台自我更新与用户指令共用此口 */
   rememberMemory(key: string, value: string): void {
     const k = key.trim().slice(0, 64)
     if (!k) throw new Error('memory key 不能为空')
-    this.store.memories = {
-      ...(this.store.memories ?? {}),
+    this.repo.store.memories = {
+      ...(this.repo.store.memories ?? {}),
       [k]: { value: value.trim().slice(0, 500), updatedAt: Date.now() }
     }
-    this.flush()
+    this.repo.flush()
   }
 
   forgetMemory(key: string): boolean {
-    if (!this.store.memories || !(key in this.store.memories)) return false
-    const next = { ...this.store.memories }
+    if (!this.repo.store.memories || !(key in this.repo.store.memories)) return false
+    const next = { ...this.repo.store.memories }
     delete next[key]
-    this.store.memories = next
-    this.flush()
+    this.repo.store.memories = next
+    this.repo.flush()
     return true
   }
 
@@ -484,7 +399,7 @@ class WorkbenchService {
 
   /** decide spec 的「用户长期记忆」注入段(空记忆返回空串) */
   renderMemoryContext(): string {
-    const entries = Object.entries(this.store.memories ?? {})
+    const entries = Object.entries(this.repo.store.memories ?? {})
     if (entries.length === 0) return ''
     const lines = entries
       .sort((a, b) => b[1].updatedAt - a[1].updatedAt)
@@ -499,7 +414,7 @@ class WorkbenchService {
     if (!session) return
     if (!session.turnUsages) session.turnUsages = []
     session.turnUsages.push(usage)
-    this.flush()
+    this.repo.flush()
   }
 
   /** 当前激活分支路径(根→叶下标序列);旧线性数据直接全量返回 */
@@ -547,7 +462,7 @@ class WorkbenchService {
     }
     session.lastBranchAt = Date.now()
     session.updatedAt = Date.now()
-    this.flush()
+    this.repo.flush()
     return true
   }
 
@@ -1049,7 +964,7 @@ class WorkbenchService {
     if (plan.title && session.title !== plan.title && !session.titleLocked) {
       session.title = plan.title.slice(0, 20)
       session.updatedAt = Date.now()
-      this.flush()
+      this.repo.flush()
     }
     this.recordDebug(sessionId, {
       effectiveInput,
@@ -1352,7 +1267,7 @@ class WorkbenchService {
       text: `执行画布工作流${name ? `（${name}）` : ''}`,
       promptId
     })
-    this.flush()
+    this.repo.flush()
   }
 
   /**
@@ -1406,7 +1321,7 @@ class WorkbenchService {
           outputFiles: files,
           promptId
         })
-        this.flush()
+        this.repo.flush()
       }
     }
     if (result.status === 'error' && result.error) {
@@ -1425,7 +1340,7 @@ class WorkbenchService {
         text: `执行失败: ${result.error.slice(0, 500)}`,
         promptId
       })
-      this.flush()
+      this.repo.flush()
     }
     return { ...result, outputsText }
   }
@@ -1478,7 +1393,7 @@ class WorkbenchService {
       ts: Date.now()
     })
     if (logs.length > MAX_DEBUG_LOGS) logs.splice(0, logs.length - MAX_DEBUG_LOGS)
-    this.flush()
+    this.repo.flush()
   }
 
   /** 执行结果回填到调试日志（execute 后与 poll 终态按 promptId 匹配） */
@@ -1613,13 +1528,13 @@ class WorkbenchService {
     session.executions.push(
       recordExecution({ promptId: jobId, templateId, params: { batch: true }, batchJobId: jobId })
     )
-    this.flush()
+    this.repo.flush()
   }
 
   // ---------------- 收藏（产物收藏夹，跨会话） ----------------
 
   listFavorites(sessionId?: string): WorkbenchFavorite[] {
-    const all = this.store.favorites ?? []
+    const all = this.repo.store.favorites ?? []
     return sessionId ? all.filter((f) => f.sessionId === sessionId) : all
   }
 
@@ -1642,23 +1557,23 @@ class WorkbenchService {
       createdAt: Date.now()
     }
     // 去重:同会话同文件重复收藏视为幂等
-    const dup = (this.store.favorites ?? []).find(
+    const dup = (this.repo.store.favorites ?? []).find(
       (f) =>
         f.sessionId === fav.sessionId &&
         f.file.filename === fav.file.filename &&
         (f.file.subfolder ?? '') === (fav.file.subfolder ?? '')
     )
     if (dup) return dup
-    this.store.favorites = [...(this.store.favorites ?? []), fav]
-    this.flush()
+    this.repo.store.favorites = [...(this.repo.store.favorites ?? []), fav]
+    this.repo.flush()
     return fav
   }
 
   removeFavorite(id: string): boolean {
-    const before = (this.store.favorites ?? []).length
-    this.store.favorites = (this.store.favorites ?? []).filter((f) => f.id !== id)
-    const changed = this.store.favorites.length !== before
-    if (changed) this.flush()
+    const before = (this.repo.store.favorites ?? []).length
+    this.repo.store.favorites = (this.repo.store.favorites ?? []).filter((f) => f.id !== id)
+    const changed = this.repo.store.favorites.length !== before
+    if (changed) this.repo.flush()
     return changed
   }
 
@@ -1690,7 +1605,7 @@ class WorkbenchService {
 
   listPresets(): WorkbenchPreset[] {
     // dsh preset.yml order 语义：按 order 升序，缺省排 100
-    return [...BUILTIN_PRESETS, ...(this.store.presets ?? [])].sort(
+    return [...BUILTIN_PRESETS, ...(this.repo.store.presets ?? [])].sort(
       (a, b) => (a.order ?? 100) - (b.order ?? 100)
     )
   }
@@ -1703,8 +1618,8 @@ class WorkbenchService {
     const existing = new Set(this.listPresets().map((p) => p.id))
     const preset = clonePreset(opts.from ?? 'standard', opts.id, opts.name ?? '', existing)
     if (!preset) throw new Error('预设 id 非法或已存在')
-    this.store.presets = [...(this.store.presets ?? []), preset]
-    this.flush()
+    this.repo.store.presets = [...(this.repo.store.presets ?? []), preset]
+    this.repo.flush()
     return preset
   }
 
@@ -1713,15 +1628,15 @@ class WorkbenchService {
    */
   updatePresetTemplates(id: string, templateIds: string[]): WorkbenchPreset {
     if (BUILTIN_PRESETS.some((p) => p.id === id)) throw new Error('builtin preset is readonly')
-    const list = this.store.presets ?? []
+    const list = this.repo.store.presets ?? []
     const idx = list.findIndex((p) => p.id === id)
     if (idx === -1) throw new Error(`preset not found: ${id}`)
     // 只保留真实存在的模板 id
     const valid = new Set(templateLibrary.list().map((t) => t.id))
     const next = [...new Set(templateIds)].filter((s) => valid.has(s))
     const updated = { ...list[idx]!, templateIds: next }
-    this.store.presets = list.with(idx, updated)
-    this.flush()
+    this.repo.store.presets = list.with(idx, updated)
+    this.repo.flush()
     return updated
   }
 
@@ -1730,7 +1645,7 @@ class WorkbenchService {
    */
   updatePresetSkills(id: string, skillIds: string[]): WorkbenchPreset {
     if (BUILTIN_PRESETS.some((p) => p.id === id)) throw new Error('builtin preset is readonly')
-    const list = this.store.presets ?? []
+    const list = this.repo.store.presets ?? []
     const idx = list.findIndex((p) => p.id === id)
     if (idx === -1) throw new Error(`preset not found: ${id}`)
     const valid = new Set(
@@ -1740,20 +1655,20 @@ class WorkbenchService {
     )
     const next = [...new Set(skillIds)].filter((s) => valid.has(s))
     const updated = { ...list[idx]!, skillIds: next }
-    this.store.presets = list.with(idx, updated)
-    this.flush()
+    this.repo.store.presets = list.with(idx, updated)
+    this.repo.flush()
     return updated
   }
 
   /** 技能改名后修正所有预设的捆绑引用（改名不失效）；供路由层在 update 改名后调用 */
   fixPresetSkillRefs(oldName: string, newName: string): number {
     let changed = 0
-    this.store.presets = (this.store.presets ?? []).map((p) => {
+    this.repo.store.presets = (this.repo.store.presets ?? []).map((p) => {
       if (!p.skillIds?.includes(oldName)) return p
       changed++
       return { ...p, skillIds: p.skillIds.map((s) => (s === oldName ? newName : s)) }
     })
-    if (changed) this.flush()
+    if (changed) this.repo.flush()
     return changed
   }
 
@@ -1766,23 +1681,23 @@ class WorkbenchService {
   deletePreset(id: string): boolean {
     // 内置不可删（dsh 同款：shipped preset 不归用户管理）
     if (BUILTIN_PRESETS.some((p) => p.id === id)) return false
-    const before = this.store.presets?.length ?? 0
-    this.store.presets = (this.store.presets ?? []).filter((p) => p.id !== id)
-    const ok = (this.store.presets?.length ?? 0) < before
-    if (ok) this.flush()
-    if (this.store.presetDefault === id) this.store.presetDefault = undefined
+    const before = this.repo.store.presets?.length ?? 0
+    this.repo.store.presets = (this.repo.store.presets ?? []).filter((p) => p.id !== id)
+    const ok = (this.repo.store.presets?.length ?? 0) < before
+    if (ok) this.repo.flush()
+    if (this.repo.store.presetDefault === id) this.repo.store.presetDefault = undefined
     return ok
   }
 
   setDefaultPreset(id: string): boolean {
     if (!this.listPresets().some((p) => p.id === id)) return false
-    this.store.presetDefault = id
-    this.flush()
+    this.repo.store.presetDefault = id
+    this.repo.flush()
     return true
   }
 
   getDefaultPresetId(): string {
-    return this.store.presetDefault ?? BUILTIN_PRESETS[0]!.id
+    return this.repo.store.presetDefault ?? BUILTIN_PRESETS[0]!.id
   }
 
   // ---------------- 环境快照（前端「能力说明」可视化用，与决策注入同源） ----------------
@@ -1827,7 +1742,7 @@ class WorkbenchService {
     if (list.some((a) => a.filename === meta.filename && a.subfolder === meta.subfolder)) return
     list.push(meta)
     if (list.length > 20) list.splice(0, list.length - 20)
-    this.flush()
+    this.repo.flush()
   }
 
   async uploadAttachment(buffer: Buffer, filename: string, mime?: string): Promise<AttachmentMeta> {
