@@ -1,5 +1,11 @@
 This repository has a zero tolerance policy for flaky tests.
 
+## Branch & release policy
+
+- **`artifylab-v2` is the only maintained branch.** All work lands there; do not maintain `main`.
+- **CI release pipeline is intentionally unmaintained.** `build-release.yml` fails at the secrets precheck (`TODESKTOP_EMAIL` / `TODESKTOP_ACCESS_TOKEN` are not configured in repo secrets). Tag-push release failures are expected noise — do not investigate or report them as problems. Local verification is `pnpm run typecheck:node` + `pnpm run typecheck:web` (note: `ci.yml` only triggers on PR / main push, so direct pushes to `artifylab-v2` run no CI).
+- **Upstream sync routine**: `git fetch upstream` → merge `upstream/main` into `artifylab-v2` → on conflict, keep fork branding in `package.json` (`name: artify-desktop`, version, description) and keep `scripts/dev.mjs` as the `dev` entry; release-config files (`todesktop.json`, starter-template scripts) take the upstream side → push to origin.
+
 ## Runtime logs
 
 - **Desktop app + ComfyUI server runtime log** (includes Python tracebacks from nodes): `C:\Users\Administrator\AppData\Roaming\artify-desktop\logs\app.log` (current run), rotated backups as `app.log_<timestamp>.log` in the same dir.
