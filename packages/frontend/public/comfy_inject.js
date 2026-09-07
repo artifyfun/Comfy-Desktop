@@ -1028,6 +1028,33 @@
     }
   }
 
+  // src/inject/protocol.js
+  var ARTIFY_MSG = {
+    /** 工作台产物 → 宿主画布陈列卡片（payload: files[]） */
+    DISPLAY_CARD: "artify:display-card",
+    /** 请求宿主画布当前状态摘要（无 payload） */
+    GET_CANVAS_STATE: "artify:get-canvas-state",
+    /** 宿主画布状态摘要回推（payload: state） */
+    CANVAS_STATE: "artify:canvas-state",
+    /** 画布编排指令（payload: ops[] + requestId + reason），需 ack */
+    CANVAS_OPS: "artify:canvas-ops",
+    /** CANVAS_OPS 的 ack（payload: requestId + ok/result） */
+    CANVAS_OPS_RESULT: "artify:canvas-ops-result",
+    /** 画布执行指令（payload: op + requestId），需 ack */
+    CANVAS_EXECUTE: "artify:canvas-execute",
+    /** CANVAS_EXECUTE 的 ack（payload: requestId + ok/result） */
+    CANVAS_EXECUTE_RESULT: "artify:canvas-execute-result",
+    /** 文件句柄回发给 embed 窗口（payload: files[]） */
+    CARD_ATTACH: "artify:card-attach"
+  };
+  var ARTIFY_ACK_OF = {
+    [ARTIFY_MSG.CANVAS_OPS]: ARTIFY_MSG.CANVAS_OPS_RESULT,
+    [ARTIFY_MSG.CANVAS_EXECUTE]: ARTIFY_MSG.CANVAS_EXECUTE_RESULT
+  };
+  function isArtifyMessage(data) {
+    return !!data && typeof data.type === "string" && data.type.startsWith("artify:");
+  }
+
   // src/inject/digest.js
   function getWorkflowName() {
     try {
@@ -1471,7 +1498,7 @@
       if (artifyEmbedWindow) {
         try {
           artifyEmbedWindow.postMessage(
-            JSON.stringify({ type: "artify:canvas-state", state: digest }),
+            JSON.stringify({ type: ARTIFY_MSG.CANVAS_STATE, state: digest }),
             "*"
           );
         } catch (_e) {
@@ -1514,7 +1541,7 @@
       for (const f of n.properties?.files || []) files.push(f);
     }
     if (!files.length) return;
-    artifyEmbedWindow2.postMessage(JSON.stringify({ type: "artify:card-attach", files }), "*");
+    artifyEmbedWindow2.postMessage(JSON.stringify({ type: ARTIFY_MSG.CARD_ATTACH, files }), "*");
   }
   function spawnDisplayCards(files) {
     const app = getCardApp();
@@ -1580,14 +1607,14 @@
     }
   }
   async function handleArtifyMessage(data) {
-    if (data.type === "artify:display-card" && Array.isArray(data.files) && data.files.length) {
+    if (data.type === ARTIFY_MSG.DISPLAY_CARD && Array.isArray(data.files) && data.files.length) {
       spawnDisplayCards(data.files);
     }
-    if (data.type === "artify:get-canvas-state") {
+    if (data.type === ARTIFY_MSG.GET_CANVAS_STATE) {
       pushCanvasDigest();
     }
-    if (data.type === "artify:canvas-ops") {
-      const ackType = "artify:canvas-ops-result";
+    if (data.type === ARTIFY_MSG.CANVAS_OPS) {
+      const ackType = ARTIFY_MSG.CANVAS_OPS_RESULT;
       try {
         const hasStructural = Array.isArray(data.ops) && data.ops.some((o) => o && o.type !== "setWidget");
         let checkpointId = null;
@@ -1603,8 +1630,8 @@
         });
       }
     }
-    if (data.type === "artify:canvas-execute") {
-      const ackType = "artify:canvas-execute-result";
+    if (data.type === ARTIFY_MSG.CANVAS_EXECUTE) {
+      const ackType = ARTIFY_MSG.CANVAS_EXECUTE_RESULT;
       try {
         const app = window.app;
         if (!app || typeof app.graphToPrompt !== "function")
@@ -1906,7 +1933,7 @@
           return;
         }
       }
-      if (data && typeof data.type === "string" && data.type.startsWith("artify:")) {
+      if (isArtifyMessage(data)) {
         if (event.source) setEmbedWindow(event.source);
         handleArtifyMessage(data);
       }

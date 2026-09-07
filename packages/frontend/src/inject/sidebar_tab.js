@@ -6,6 +6,7 @@ import { bindComfyApiEvents, startCanvasPoll } from './bridge_events.js'
 import { pushCanvasDigest } from './digest.js'
 import { getComfyUIApp } from './canvas_patches.js'
 import { getQueryParam } from './api_workflow.js'
+import { isArtifyMessage } from './protocol.js'
 // 从 comfy_inject.js 单体机械切分（技术债重构），逻辑零改动。
 export function ensureArtifySidebarTab() {
   const app = window.app
@@ -50,7 +51,7 @@ export function ensureArtifySidebarTab() {
         return
       }
     }
-    if (data && typeof data.type === 'string' && data.type.startsWith('artify:')) {
+    if (isArtifyMessage(data)) {
       if (event.source) setEmbedWindow(event.source)
       handleArtifyMessage(data)
     }

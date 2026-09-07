@@ -1,4 +1,5 @@
 import { CANVAS_BRIDGE } from './card_bridge.js'
+import { ARTIFY_MSG } from './protocol.js'
 import { getComfyUIApp } from './canvas_patches.js'
 // 从 comfy_inject.js 单体机械切分（技术债重构），逻辑零改动。
 export function getWorkflowName() {
@@ -562,7 +563,7 @@ export async function pushCanvasDigest(force) {
     if (artifyEmbedWindow) {
       try {
         artifyEmbedWindow.postMessage(
-          JSON.stringify({ type: 'artify:canvas-state', state: digest }),
+          JSON.stringify({ type: ARTIFY_MSG.CANVAS_STATE, state: digest }),
           '*',
         )
       } catch (_e) {

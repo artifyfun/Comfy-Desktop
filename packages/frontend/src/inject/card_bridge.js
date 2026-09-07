@@ -1,5 +1,6 @@
 import { ARTIFY_CARD_TYPE, getCardApp } from './card_node.js'
 import { pushCanvasDigest, applyCanvasOps, saveExpressCheckpoint } from './digest.js'
+import { ARTIFY_MSG } from './protocol.js'
 // 从 comfy_inject.js 单体机械切分（技术债重构），逻辑零改动。
 // 陈列卡片 ↔ 工作台 iframe 的消息面。artifyEmbedWindow 是共享可变状态
 // （iframe 就绪后由 sidebar_tab 写入），经 getEmbedWindow/setEmbedWindow
@@ -22,7 +23,7 @@ export function sendCardsToEmbed(nodes) {
     for (const f of n.properties?.files || []) files.push(f)
   }
   if (!files.length) return
-  artifyEmbedWindow.postMessage(JSON.stringify({ type: 'artify:card-attach', files }), '*')
+  artifyEmbedWindow.postMessage(JSON.stringify({ type: ARTIFY_MSG.CARD_ATTACH, files }), '*')
 }
 
 /**
@@ -103,16 +104,16 @@ export function spawnDisplayCards(files) {
 
 /** A UI → ComfyUI 消息：产物上墙 / 画布操作（唯一入口，iframe postMessage 进来） */
 export async function handleArtifyMessage(data) {
-  if (data.type === 'artify:display-card' && Array.isArray(data.files) && data.files.length) {
+  if (data.type === ARTIFY_MSG.DISPLAY_CARD && Array.isArray(data.files) && data.files.length) {
     spawnDisplayCards(data.files)
   }
-  if (data.type === 'artify:get-canvas-state') {
+  if (data.type === ARTIFY_MSG.GET_CANVAS_STATE) {
     // 工作台 iframe 首次挂载/重连时主动拉一份当前画布摘要
     pushCanvasDigest()
   }
-  if (data.type === 'artify:canvas-ops') {
+  if (data.type === ARTIFY_MSG.CANVAS_OPS) {
     // 写通道：工作台 diff 确认后下发。回执走同一 iframe postMessage。
-    const ackType = 'artify:canvas-ops-result'
+    const ackType = ARTIFY_MSG.CANVAS_OPS_RESULT
     try {
       // 结构级写前落 express checkpoint（跨会话回滚）；参数级只动 widget 不落
       const hasStructural =
@@ -130,10 +131,10 @@ export async function handleArtifyMessage(data) {
       })
     }
   }
-  if (data.type === 'artify:canvas-execute') {
+  if (data.type === ARTIFY_MSG.CANVAS_EXECUTE) {
     // M5 执行画布当前工作流：graphToPrompt（当前激活 tab）→ 服务端提交 →
     // ack promptId（单次）或 jobId（批量）。回执走同一 iframe postMessage。
-    const ackType = 'artify:canvas-execute-result'
+    const ackType = ARTIFY_MSG.CANVAS_EXECUTE_RESULT
     try {
       const app = window.app
       if (!app || typeof app.graphToPrompt !== 'function')

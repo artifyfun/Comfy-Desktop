@@ -1241,6 +1241,8 @@ import SkillManager from './components/SkillManager.vue'
 import UsageGuide from './components/UsageGuide.vue'
 import { scenarioByPreset } from './demoScenarios'
 import { canApplyFix } from './diagnosis'
+import { callBridge } from './bridgeCall'
+import { ARTIFY_MSG } from '@/inject/protocol'
 import { pushFiles, drainAttachments, drainFiles } from '@/utils/canvasBridge'
 import { useCanvasMode } from '@/utils/canvasMode'
 import { createAguiBridge } from './aguiBridge'
@@ -2732,7 +2734,7 @@ function pushCardsToCanvas(files) {
     return
   }
   try {
-    window.parent.postMessage(JSON.stringify({ type: 'artify:display-card', files }), '*')
+    window.parent.postMessage(JSON.stringify({ type: ARTIFY_MSG.DISPLAY_CARD, files }), '*')
   } catch (e) {
     console.warn('[workbench] display-card push failed:', e)
   }
@@ -2759,11 +2761,11 @@ function onWindowMessage(event) {
       return
     }
   }
-  if (data && data.type === 'artify:canvas-state') {
+  if (data && data.type === ARTIFY_MSG.CANVAS_STATE) {
     applyCanvasState(data.state)
     return
   }
-  if (!data || data.type !== 'artify:card-attach') return
+  if (!data || data.type !== ARTIFY_MSG.CARD_ATTACH) return
   const files = Array.isArray(data.files) ? data.files : []
   if (!files.length) return
   canvasAttachNotice.value = t('workbenchCardAttached').replace('{n}', String(files.length))
@@ -2852,7 +2854,7 @@ if (isCanvasEmbedded.value) onAttachments(pushCanvasAttachments)
 if (isEmbed.value) {
   setTimeout(() => {
     try {
-      window.parent.postMessage(JSON.stringify({ type: 'artify:get-canvas-state' }), '*')
+      window.parent.postMessage(JSON.stringify({ type: ARTIFY_MSG.GET_CANVAS_STATE }), '*')
     } catch {
       return
     }
@@ -2864,7 +2866,6 @@ const pendingOps = ref(null) // Array<op> | null
 const opsApplying = ref(false)
 const opsResultMsg = ref('')
 const opsResultOk = ref(false)
-let opsRequestSeq = 0
 
 /**
  * ops → 人类可读 diff 行（确认卡正文）。
@@ -2957,38 +2958,7 @@ async function confirmApplyOps() {
   if (!ops?.length || opsApplying.value) return
   opsApplying.value = true
   opsResultMsg.value = ''
-  const requestId = `ops-${Date.now()}-${++opsRequestSeq}`
-  const reply = await new Promise((resolve) => {
-    const onAck = (event) => {
-      let data = event.data
-      if (typeof data === 'string') {
-        try {
-          data = JSON.parse(data)
-        } catch {
-          return
-        }
-      }
-      if (data && data.type === 'artify:canvas-ops-result' && data.requestId === requestId) {
-        window.removeEventListener('message', onAck)
-        resolve(data)
-      }
-    }
-    window.addEventListener('message', onAck)
-    // 8s 超时：桥未就绪（tab 未打开过）时不无限等
-    setTimeout(() => {
-      window.removeEventListener('message', onAck)
-      resolve({ ok: false, error: 'bridge timeout' })
-    }, 8000)
-    try {
-      window.parent.postMessage(
-        JSON.stringify({ type: 'artify:canvas-ops', ops, requestId, reason: 'workbench-confirm' }),
-        '*',
-      )
-    } catch (e) {
-      window.removeEventListener('message', onAck)
-      resolve({ ok: false, error: String(e).slice(0, 80) })
-    }
-  })
+  const reply = await callBridge(ARTIFY_MSG.CANVAS_OPS, { ops, reason: 'workbench-confirm' })
   opsApplying.value = false
   opsResultOk.value = !!reply.ok
   const applied = Number(reply.applied) || 0
@@ -3025,46 +2995,15 @@ function syncWorkflowToCanvas({ templateId, name, workflow, ensureTab }) {
   }
   if (!workflow || !Array.isArray(workflow.nodes))
     return Promise.reject(new Error(t('workbenchSyncNoWorkflow')))
-  return new Promise((resolve, reject) => {
-    const requestId = `sync-${Date.now()}-${++opsRequestSeq}`
-    const timer = setTimeout(() => {
-      window.removeEventListener('message', onAck)
-      reject(new Error('bridge timeout'))
-    }, 8000)
-    function onAck(event) {
-      let data = event.data
-      if (typeof data === 'string') {
-        try {
-          data = JSON.parse(data)
-        } catch {
-          return
-        }
-      }
-      if (data && data.type === 'artify:canvas-ops-result' && data.requestId === requestId) {
-        window.removeEventListener('message', onAck)
-        clearTimeout(timer)
-        if (data.ok) resolve(data)
-        else reject(new Error(data.error || 'unknown'))
-      }
-    }
-    window.addEventListener('message', onAck)
-    try {
-      window.parent.postMessage(
-        JSON.stringify({
-          type: 'artify:canvas-ops',
-          // ensureTab：桥按「当前 tab 已是目标则复用、否则开新 tab」处理
-          ops: [{ type: 'loadWorkflow', workflow, newTab: ensureTab || undefined, name }],
-          requestId,
-          reason: 'workbench-sync-template',
-        }),
-        '*',
-      )
-    } catch (e) {
-      window.removeEventListener('message', onAck)
-      clearTimeout(timer)
-      reject(e)
-    }
-  })
+  // callBridge 永不 reject；此调用方对外维持 throw 语义
+  return callBridge(
+    ARTIFY_MSG.CANVAS_OPS,
+    {
+      // ensureTab：桥按「当前 tab 已是目标则复用、否则开新 tab」处理
+      ops: [{ type: 'loadWorkflow', workflow, newTab: ensureTab || undefined, name }],
+      reason: 'workbench-sync-template',
+    },
+  ).then((data) => (data.ok ? data : Promise.reject(new Error(data.error || 'unknown'))))
 }
 
 function isVideoFile(f) {
@@ -3076,48 +3015,14 @@ function isVideoFile(f) {
  * （或 /batch）→ ack 返回 promptId/jobId。与 sync 同通道但动作不同
  * （执行不改画布，只提交队列）。
  */
-function runCanvasOnHost({ requestId, nodeOverrides, name, sessionId, batch }) {
+function runCanvasOnHost({ requestId: _req, nodeOverrides, name, sessionId, batch }) {
   if (!isEmbed.value) return Promise.reject(new Error(t('workbenchSyncNotEmbed')))
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      window.removeEventListener('message', onAck)
-      reject(new Error('bridge timeout'))
-    }, 10000)
-    function onAck(event) {
-      let data = event.data
-      if (typeof data === 'string') {
-        try {
-          data = JSON.parse(data)
-        } catch {
-          return
-        }
-      }
-      if (data && data.type === 'artify:canvas-execute-result' && data.requestId === requestId) {
-        window.removeEventListener('message', onAck)
-        clearTimeout(timer)
-        if (data.ok) resolve(data)
-        else reject(new Error(data.error || 'unknown'))
-      }
-    }
-    window.addEventListener('message', onAck)
-    try {
-      window.parent.postMessage(
-        JSON.stringify({
-          type: 'artify:canvas-execute',
-          requestId,
-          nodeOverrides,
-          name,
-          sessionId,
-          batch,
-        }),
-        '*',
-      )
-    } catch (e) {
-      window.removeEventListener('message', onAck)
-      clearTimeout(timer)
-      reject(e)
-    }
-  })
+  // callBridge 永不 reject；此调用方对外维持 throw 语义（原 10s 超时保留）
+  return callBridge(
+    ARTIFY_MSG.CANVAS_EXECUTE,
+    { nodeOverrides, name, sessionId, batch },
+    { timeout: 10000 },
+  ).then((data) => (data.ok ? data : Promise.reject(new Error(data.error || 'unknown'))))
 }
 
 // ---------- 固化 ----------
