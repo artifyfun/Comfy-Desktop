@@ -437,7 +437,11 @@ function applyTokenUsage(pageApi, delta) {
  *   - getReasoningEffort () => string  当前推理强度(E1:'auto'|'low'|'medium'|'high'|'xhigh',
  *                         每轮随 run 请求透传;缺省 undefined 后端保持会话现状)
  */
-export function createAguiBridge(pageApi) {
+export function createAguiBridge(pageApi, http = {}) {
+  // S5a transport seam：4 处 agent-* POST 原先各自内联 fetch（拼头/解析/
+  // 错误形状重复四遍）。收口成一个 postJson，测试注入 http.post 即可覆盖
+  // 全部交换路径，不再 mock 全局 fetch。
+  const postJson = http.post || defaultPostJson(pageApi)
   let activeCtl = null // 当前轮 AbortController（单飞行轮，同 legacy chatReader）
   let lastState = null
   function pushError(state, text, extra = {}) {
@@ -473,31 +477,26 @@ export function createAguiBridge(pageApi) {
     const ctl = new AbortController()
     activeCtl = ctl
     try {
-      const res = await fetch(`${pageApi.origin.value}/api/workbench/agent/run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          threadId,
-          runId,
-          input: inputText,
-          // B1 会话级审批模式(标准/保守):桥每轮自取当前 UI 偏好透传;
-          // undefined(旧页面/测试桩未提供 getter)时后端 gate 走默认 standard。
-          approvalMode:
-            typeof pageApi.getApprovalMode === 'function' ? pageApi.getApprovalMode() : undefined,
-          // E1 会话级推理强度(auto/low/medium/high/xhigh):桥每轮自取当前 UI
-          // 偏好透传;undefined(旧页面/测试桩未提供 getter)时后端保持会话现状。
-          reasoningEffort:
-            typeof pageApi.getReasoningEffort === 'function'
-              ? pageApi.getReasoningEffort()
-              : undefined,
-          // 附件透传(AttachmentMeta 形状,后端 decide 落用户消息+会话素材表)
-          attachments: attachments && attachments.length ? attachments : undefined,
-        }),
-        signal: ctl.signal,
+      const res = await postJson('/api/workbench/agent/run', {
+        threadId,
+        runId,
+        input: inputText,
+        // B1 会话级审批模式(标准/保守):桥每轮自取当前 UI 偏好透传;
+        // undefined(旧页面/测试桩未提供 getter)时后端 gate 走默认 standard。
+        approvalMode:
+          typeof pageApi.getApprovalMode === 'function' ? pageApi.getApprovalMode() : undefined,
+        // E1 会话级推理强度(auto/low/medium/high/xhigh):桥每轮自取当前 UI
+        // 偏好透传;undefined(旧页面/测试桩未提供 getter)时后端保持会话现状。
+        reasoningEffort:
+          typeof pageApi.getReasoningEffort === 'function'
+            ? pageApi.getReasoningEffort()
+            : undefined,
+        // 附件透传(AttachmentMeta 形状,后端 decide 落用户消息+会话素材表)
+        attachments: attachments && attachments.length ? attachments : undefined,
+        __signal: ctl.signal,
       })
       if (!res.ok) {
-        const j = await res.json().catch(() => null)
-        throw new Error((j && j.message) || `HTTP ${res.status}`)
+        throw new Error((res.json && res.json.message) || `HTTP ${res.status}`)
       }
       const ctx = createHandlerContext(createPageEmit(pageApi, state))
       await readAguiStream(res, (ev) => dispatch(ctx, ev))
@@ -533,11 +532,9 @@ export function createAguiBridge(pageApi) {
     if (pageApi.stopping.value || !pageApi.busy.value) return
     pageApi.stopping.value = true
     try {
-      fetch(`${pageApi.origin.value}/api/workbench/agent/cancel`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ threadId: pageApi.getThreadId() }),
-      }).catch(() => {})
+      postJson('/api/workbench/agent/cancel', { threadId: pageApi.getThreadId() }).catch(
+        () => {},
+      )
       const ctl = activeCtl
       activeCtl = null
       if (ctl) {
@@ -580,12 +577,12 @@ export function createAguiBridge(pageApi) {
         // 竞态守卫：分页拉取期间用户再切会话（getThreadId 变了）即弃——
         // 旧会话回放覆盖新会话消息是真实竞态（20 页 await 窗口不短）
         if (typeof pageApi.getThreadId === 'function' && pageApi.getThreadId() !== threadId) return
-        const res = await fetch(`${pageApi.origin.value}/api/workbench/agent/threads/messages`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ threadId, limit: pageSize, offset: offset * pageSize }),
+        const res = await postJson('/api/workbench/agent/threads/messages', {
+          threadId,
+          limit: pageSize,
+          offset: offset * pageSize,
         })
-        const json = await res.json().catch(() => null)
+        const json = res.json
         const pageRecords = (json && json.data && json.data.records) || []
         records = records.concat(pageRecords)
         if (pageRecords.length < pageSize) break
@@ -686,15 +683,11 @@ export function createAguiBridge(pageApi) {
     if (msg._approvalInFlight) return
     msg._approvalInFlight = true
     try {
-      const res = await fetch(`${pageApi.origin.value}/api/workbench/agent/interaction-response`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          threadId: value.threadId || pageApi.getThreadId(),
-          requestId: value.requestId,
-          action,
-          ...(action === 'edit' ? { args } : {}),
-        }),
+      const res = await postJson('/api/workbench/agent/interaction-response', {
+        threadId: value.threadId || pageApi.getThreadId(),
+        requestId: value.requestId,
+        action,
+        ...(action === 'edit' ? { args } : {}),
       })
       if (res.status === 404) {
         // 已在他处解决(超时兜底 reject/另开窗口应答过):静默置终态,不再重试
@@ -702,8 +695,7 @@ export function createAguiBridge(pageApi) {
         return
       }
       if (!res.ok) {
-        const j = await res.json().catch(() => null)
-        throw new Error((j && j.message) || `HTTP ${res.status}`)
+        throw new Error((res.json && res.json.message) || `HTTP ${res.status}`)
       }
       // approve/edit 都是放行语义(edit = 按替换后参数放行);只有 reject 翻 rejected
       setApprovalStatus(msg, action === 'reject' ? 'rejected' : 'approved')
@@ -729,6 +721,24 @@ export function createAguiBridge(pageApi) {
   }
 
   return { runAgentTurn, stopAgentRun, loadHistoryIntoPage, respondApproval }
+}
+
+/**
+ * 默认 transport：POST JSON + res.json（原 4 处内联 fetch 的公共形状）。
+ * body.__signal 为内部约定（AbortController.signal 透传），发出前剥离。
+ */
+function defaultPostJson(pageApi) {
+  return async function postJson(path, body) {
+    const { __signal, ...payload } = body || {}
+    const res = await fetch(`${pageApi.origin.value}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: __signal,
+    })
+    const json = await res.json().catch(() => null)
+    return { ok: res.ok, status: res.status, json }
+  }
 }
 
 export default createAguiBridge

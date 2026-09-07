@@ -287,3 +287,51 @@ describe('mentionImageIds（D1d）', () => {
     expect(up.images.map((i) => i.id)).toEqual(['imgA'])
   })
 })
+
+// ---------------- 运行 seam（#10）：HTTP 交换 ----------------
+import { submitCanvasExecute, pollCanvasExecuteStatus } from './appNode'
+
+describe('submitCanvasExecute / pollCanvasExecuteStatus（HTTP seam）', () => {
+  const okFetch = (data) => async (url, opts) => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ success: true, data }),
+  })
+
+  it('submit 成功返回 data（promptId）', async () => {
+    const r = await submitCanvasExecute(
+      { prompt: { a: 1 }, name: 'x' },
+      { origin: 'http://s', fetcher: okFetch({ promptId: 'p1' }) },
+    )
+    expect(r.promptId).toBe('p1')
+  })
+
+  it('submit 非成功响应抛 Error（服务端 message 优先）', async () => {
+    const f = async () => ({ ok: false, status: 422, json: async () => ({ message: 'bad nodes' }) })
+    await expect(
+      submitCanvasExecute({ prompt: {} }, { origin: '', fetcher: f }),
+    ).rejects.toThrow('bad nodes')
+  })
+
+  it('submit JSON 解析失败抛 HTTP 状态', async () => {
+    const f = async () => ({ ok: false, status: 500, json: async () => { throw new Error('x') } })
+    await expect(submitCanvasExecute({ prompt: {} }, { fetcher: f })).rejects.toThrow('HTTP 500')
+  })
+
+  it('poll running / 无 data → null（下轮再试）', async () => {
+    const f = async () => ({ ok: true, json: async () => ({ data: { status: 'running' } }) })
+    expect(await pollCanvasExecuteStatus('p', { fetcher: f })).toBeNull()
+    const f2 = async () => ({ ok: true, json: async () => ({ data: null }) })
+    expect(await pollCanvasExecuteStatus('p', { fetcher: f2 })).toBeNull()
+  })
+
+  it('poll 终态原样返回', async () => {
+    const done = { status: 'success', outputs: { files: [{ filename: 'a.png' }] } }
+    expect(await pollCanvasExecuteStatus('p', { fetcher: okFetch(done) })).toEqual(done)
+  })
+
+  it('poll 网络异常吞掉返回 null（不中断轮询循环）', async () => {
+    const f = async () => { throw new TypeError('network down') }
+    expect(await pollCanvasExecuteStatus('p', { fetcher: f })).toBeNull()
+  })
+})

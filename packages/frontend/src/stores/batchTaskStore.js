@@ -9,6 +9,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { useAppStore } from './appStore'
+import { resolveBaseUrl } from '@/utils/apiClient'
 import localforage from 'localforage'
 
 export const useBatchTaskStore = defineStore('batchTask', () => {
@@ -48,7 +49,15 @@ export const useBatchTaskStore = defineStore('batchTask', () => {
   )
   const percent = computed(() => status.value?.percent ?? 0)
 
-  const api = (path) => `${appStore.config?.serverHost || ''}${path}`
+  // baseUrl 解析收口在 utils/apiClient（与 appStore 同一 home）；
+  // 轮询是同步拼接路径，启动时解析一次缓存即可
+  let baseUrl = ''
+  const refreshBaseUrl = async () => {
+    baseUrl = await resolveBaseUrl(appStore.config?.serverHost || '')
+  }
+  refreshBaseUrl()
+
+  const api = (path) => `${baseUrl}${path}`
 
   async function fetchQueue() {
     try {

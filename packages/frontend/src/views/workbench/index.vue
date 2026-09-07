@@ -1243,6 +1243,15 @@ import { scenarioByPreset } from './demoScenarios'
 import { canApplyFix } from './diagnosis'
 import { callBridge } from './bridgeCall'
 import { ARTIFY_MSG } from '@/inject/protocol'
+import {
+  setWorkbenchOrigin,
+  sessionsApi,
+  presetsApi,
+  templatesApi,
+  executeApi,
+  runtimeApi,
+  miscApi,
+} from './workbenchApi'
 import { pushFiles, drainAttachments, drainFiles } from '@/utils/canvasBridge'
 import { useCanvasMode } from '@/utils/canvasMode'
 import { createAguiBridge } from './aguiBridge'
@@ -1263,6 +1272,8 @@ const origin = computed(
     new URLSearchParams(window.location.search).get('server_origin') ||
     window.location.origin,
 )
+// HTTP 层（workbenchApi）从这里取 origin——单一来源，URL 拼接不再散落 26 处
+setWorkbenchOrigin(() => origin.value)
 const lang = computed(() => (getCurrentLanguage?.() === 'en' ? 'en' : 'zh'))
 
 // ---------- 会话状态 ----------
@@ -1442,14 +1453,12 @@ function onGlobalKey(e) {
 }
 
 async function loadSessions() {
-  const res = await fetch(`${origin.value}/api/workbench/sessions?archived=${showArchived.value}`)
-  const json = await res.json()
+  const { json } = await sessionsApi.list(showArchived.value)
   sessions.value = json?.data ?? []
 }
 
 async function loadPresets() {
-  const res = await fetch(`${origin.value}/api/workbench/presets`)
-  const json = await res.json()
+  const { json } = await presetsApi.list()
   presets.value = json?.data?.presets ?? []
   defaultPresetId.value = json?.data?.default ?? 'standard'
 }
@@ -1457,8 +1466,7 @@ async function loadPresets() {
 // 模板清单（高级参数抽屉的模板选择 + Composer「/」模板快捷方式数据源）
 const advTemplates = ref([])
 async function loadAdvTemplates() {
-  const res = await fetch(`${origin.value}/api/workbench/templates`)
-  const json = await res.json()
+  const { json } = await templatesApi.list()
   advTemplates.value = json?.data ?? []
 }
 
@@ -1482,9 +1490,8 @@ async function selectSessionImpl(s) {
   // 只替换 session 字段并保留其余 query——embed 模式的 embed=1/server_origin
   // 一旦被抹掉，isEmbed 判定失效，页面会按桌面布局渲染（会话栏挤爆窄侧栏）
   router.replace({ query: { ...route.query, session: s.id } })
-  const res = await fetch(`${origin.value}/api/workbench/session/${s.id}`)
-  const json = await res.json()
-  if (!res.ok || !json?.success) return
+  const { ok, json } = await sessionsApi.get(s.id)
+  if (!ok || !json?.success) return
   // 竞态守卫：await 期间又切了会话 → 本次结果弃（旧 session 数据覆盖新会话）
   if (sessionId.value !== s.id) return
   const session = json.data
@@ -1521,12 +1528,7 @@ async function selectSessionImpl(s) {
 async function createSession({ presetId, title }) {
   // 会话入口标记（P1 感知）：画布侧栏组件嵌入 > C 宿主 iframe > 独立工作台
   const entry = isCanvasEmbedded.value ? 'a-canvas' : isEmbed.value ? 'comfy-sidebar' : 'workbench'
-  const res = await fetch(`${origin.value}/api/workbench/sessions/create`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ presetId, title, entry }),
-  })
-  const json = await res.json()
+  const { json } = await sessionsApi.create({ presetId, title, entry })
   await loadSessions()
   await selectSession({ id: json.data.id })
 }
@@ -1565,11 +1567,7 @@ async function startScenario(sc) {
 }
 
 async function onRename({ id, title }) {
-  await fetch(`${origin.value}/api/workbench/sessions/update`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, title }),
-  })
+  await sessionsApi.update({ id, title })
   await loadSessions()
 }
 
@@ -1698,11 +1696,7 @@ async function onConfirmOk() {
 }
 
 async function doSetArchived(s, archived) {
-  await fetch(`${origin.value}/api/workbench/sessions/update`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: s.id, archived }),
-  })
+  await sessionsApi.update({ id: s.id, archived })
   await loadSessions()
   if (sessionId.value === s.id && archived) {
     const first = sessions.value.find((x) => !x.archived)
@@ -1715,11 +1709,7 @@ function onDelete(s) {
 }
 
 async function doDelete(s) {
-  await fetch(`${origin.value}/api/workbench/sessions/delete`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: s.id }),
-  })
+  await sessionsApi.remove(s.id)
   await loadSessions()
   if (sessionId.value === s.id) {
     const first = sessions.value[0]
@@ -1731,11 +1721,7 @@ async function doDelete(s) {
 async function saveModelOverride(v) {
   modelOverride.value = v
   if (!sessionId.value) return
-  await fetch(`${origin.value}/api/workbench/sessions/update`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: sessionId.value, modelOverride: v }),
-  })
+  await sessionsApi.update({ id: sessionId.value, modelOverride: v })
 }
 
 /**
@@ -1798,15 +1784,8 @@ async function uploadFiles(files, { silent = false } = {}) {
     try {
       const form = new FormData()
       form.append('file', f)
-      const res = await fetch(
-        `${origin.value}/api/workbench/upload?sessionId=${encodeURIComponent(sessionId.value)}`,
-        {
-          method: 'POST',
-          body: form,
-        },
-      )
-      const json = await res.json()
-      if (!res.ok || !json?.success) throw new Error(json?.message || 'upload failed')
+      const { ok, json } = await miscApi.upload(sessionId.value, form)
+      if (!ok || !json?.success) throw new Error(json?.message || 'upload failed')
       Object.assign(draftAttachments.value[idx], json.data, { uploading: false })
     } catch (e) {
       if (!silent) message.error(`${f.name}: ${e.message}`)
@@ -2347,8 +2326,7 @@ function applyExecutionSideEffect(kind, data) {
 function startBatchPoll(promptId) {
   const poll = async () => {
     try {
-      const res = await fetch(`${origin.value}/api/batch/status?id=${encodeURIComponent(promptId)}`)
-      const json = await res.json()
+      const { json } = await executeApi.batchStatus(promptId)
       const job = json?.data?.job ?? json?.data
       if (!job) return
       const artifact = artifacts.value.find((a) => a.promptId === promptId)
@@ -2408,12 +2386,7 @@ function stopBatchPoll(promptId) {
 function startPoll(promptId) {
   const poll = async () => {
     try {
-      const res = await fetch(`${origin.value}/api/workbench/poll`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: sessionId.value, promptId }),
-      })
-      const json = await res.json()
+      const { json } = await executeApi.poll(sessionId.value, promptId)
       const r = json?.data
       if (!r) return
       let doneFiles = []
@@ -2604,14 +2577,10 @@ async function copyDebugInfo() {
     return
   }
   try {
-    const res = await fetch(
-      `${origin.value}/api/workbench/debug/last?sessionId=${encodeURIComponent(sessionId.value)}`,
-    )
-    if (!res.ok) {
-      const j = await res.json().catch(() => null)
-      throw new Error(j?.message || `HTTP ${res.status}`)
+    const { ok, status, json } = await runtimeApi.debugLast(sessionId.value)
+    if (!ok) {
+      throw new Error(json?.message || `HTTP ${status}`)
     }
-    const json = await res.json()
     const log = json?.data
     if (!log) {
       message.warning(t('workbenchNoDebugLog'))
@@ -2644,12 +2613,11 @@ async function openInFolder(artifact, f) {
 // 收藏产物:跨会话收藏夹,缩略图区星星按钮
 async function favoriteArtifact(artifact, f) {
   try {
-    const res = await fetch(`${origin.value}/api/workbench/favorites`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: sessionId.value, promptId: artifact.promptId, file: f }),
+    const { json } = await miscApi.favorite({
+      sessionId: sessionId.value,
+      promptId: artifact.promptId,
+      file: f,
     })
-    const json = await res.json()
     if (json?.ok) message.success(t('workbenchFavorited'))
     else message.error(json?.message || 'favorite failed')
   } catch (e) {
@@ -2684,8 +2652,7 @@ async function saveArtifactAs(f) {
 const outputDirInfo = ref(null)
 async function loadOutputDir() {
   try {
-    const res = await fetch(`${origin.value}/api/workbench/runtime`)
-    const json = await res.json()
+    const { json } = await runtimeApi.info()
     outputDirInfo.value = json?.data ?? null
   } catch {}
 }
@@ -2919,18 +2886,13 @@ const diagnosisMap = new Map() // artifact.promptId → 分类结果
 
 async function diagnoseArtifact(artifact) {
   try {
-    const res = await fetch(`${origin.value}/api/canvas/debug`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        error: artifact.error || '',
-        // embed 模式工作台寄生在 ComfyUI 页面内：同源即 comfy origin，
-        // 供服务端反查 /object_info 补全被截断的枚举清单
-        comfyOrigin: isEmbed.value ? window.location.origin : undefined,
-      }),
+    const { ok, json } = await runtimeApi.canvasDebug({
+      error: artifact.error || '',
+      // embed 模式工作台寄生在 ComfyUI 页面内：同源即 comfy origin，
+      // 供服务端反查 /object_info 补全被截断的枚举清单
+      comfyOrigin: isEmbed.value ? window.location.origin : undefined,
     })
-    if (!res.ok) return
-    const json = await res.json()
+    if (!ok) return
     if (json?.data?.category) diagnosisMap.set(artifact.promptId, json.data)
   } catch {
     /* 诊断失败不影响错误展示主路径 */
@@ -3053,18 +3015,13 @@ async function runImportedWorkflow() {
   importing.value = true
   importError.value = ''
   try {
-    const res = await fetch(`${origin.value}/api/workbench/run-workflow`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: sessionId.value,
-        workflow,
-        name: importName.value.trim() || undefined,
-      }),
+    const { ok, status, json } = await templatesApi.runWorkflow({
+      sessionId: sessionId.value,
+      workflow,
+      name: importName.value.trim() || undefined,
     })
-    const json = await res.json().catch(() => null)
-    if (!res.ok || !json?.success) {
-      importError.value = json?.message || json?.error || `HTTP ${res.status}`
+    if (!ok || !json?.success) {
+      importError.value = json?.message || json?.error || `HTTP ${status}`
       return
     }
     importOpen.value = false
@@ -3119,19 +3076,14 @@ async function checkAdvOverrides() {
   if (!sessionId.value || !advTemplateId.value) return
   advValidated.value = false
   try {
-    const res = await fetch(`${origin.value}/api/workbench/clone-template`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: sessionId.value,
-        templateId: advTemplateId.value,
-        nodeOverrides: JSON.parse(advJson.value || '{}'),
-        validateOnly: true,
-      }),
+    const { ok, status, json } = await templatesApi.clone({
+      sessionId: sessionId.value,
+      templateId: advTemplateId.value,
+      nodeOverrides: JSON.parse(advJson.value || '{}'),
+      validateOnly: true,
     })
-    const json = await res.json().catch(() => null)
-    if (!res.ok || !json?.success) {
-      advIssues.value = [{ field: 'request', message: json?.message || `HTTP ${res.status}` }]
+    if (!ok || !json?.success) {
+      advIssues.value = [{ field: 'request', message: json?.message || `HTTP ${status}` }]
       return
     }
     advIssues.value = json.data.issues ?? []
@@ -3146,31 +3098,22 @@ async function runAdvOverrides() {
   advRunning.value = true
   try {
     // 1) 克隆出会话级变体（固化 nodeOverrides）
-    const res = await fetch(`${origin.value}/api/workbench/clone-template`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: sessionId.value,
-        templateId: advTemplateId.value,
-        nodeOverrides: JSON.parse(advJson.value || '{}'),
-      }),
+    const { ok, status, json } = await templatesApi.clone({
+      sessionId: sessionId.value,
+      templateId: advTemplateId.value,
+      nodeOverrides: JSON.parse(advJson.value || '{}'),
     })
-    const json = await res.json().catch(() => null)
-    if (!res.ok || !json?.success) {
-      advIssues.value = [{ field: 'request', message: json?.message || `HTTP ${res.status}` }]
+    if (!ok || !json?.success) {
+      advIssues.value = [{ field: 'request', message: json?.message || `HTTP ${status}` }]
       return
     }
     // 2) 直接执行变体（与 chat 执行同一链路，产物落会话）
-    const runRes = await fetch(`${origin.value}/api/workbench/execute`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: sessionId.value,
-        templateId: json.data.templateId,
-        params: {},
-      }),
+    const runRes = await executeApi.execute({
+      sessionId: sessionId.value,
+      templateId: json.data.templateId,
+      params: {},
     })
-    const runJson = await runRes.json().catch(() => null)
+    const runJson = runRes.json
     if (!runRes.ok || !runJson?.success) {
       advIssues.value = [{ field: 'execute', message: runJson?.message || `HTTP ${runRes.status}` }]
       return
@@ -3205,18 +3148,13 @@ async function doPublish() {
   if (!publishTarget.value || !publishName.value.trim()) return
   publishing.value = true
   try {
-    const res = await fetch(`${origin.value}/api/workbench/publish`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: sessionId.value,
-        promptId: publishTarget.value.promptId,
-        name: publishName.value.trim(),
-        buildUi: publishBuildUi.value,
-      }),
+    const { ok, json } = await miscApi.publish({
+      sessionId: sessionId.value,
+      promptId: publishTarget.value.promptId,
+      name: publishName.value.trim(),
+      buildUi: publishBuildUi.value,
     })
-    const json = await res.json()
-    if (!res.ok || !json?.success) throw new Error(json?.message || 'publish failed')
+    if (!ok || !json?.success) throw new Error(json?.message || 'publish failed')
     publishOpen.value = false
     pushMsg({
       role: 'agent',
@@ -3249,8 +3187,7 @@ async function showEnvDialog() {
     // 能力/环境快照走 /env（appNames/modelsByType/vramGb/customNodes）。
     // 勿改回 /runtime：那上面只有 outputDir（另存为白名单用），拿到后
     // 模板访问缺失字段会渲染崩，弹窗卡在 loading。
-    const res = await fetch(`${origin.value}/api/workbench/env`)
-    const json = await res.json()
+    const { json } = await runtimeApi.env()
     envSnapshot.value = json?.data ?? null
   } catch {
     envSnapshot.value = null
@@ -3280,11 +3217,7 @@ async function onPresetMenu({ key }) {
   }
   // 已选中同一预设则不重复写回
   if (currentSession.value?.presetId === key) return
-  await fetch(`${origin.value}/api/workbench/sessions/update`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: sessionId.value, presetId: key }),
-  })
+  await sessionsApi.update({ id: sessionId.value, presetId: key })
   await loadSessions()
   // 本地会话对象同步（selectSession 会重新拉详情）
   const s = sessions.value.find((x) => x.id === sessionId.value)
@@ -3442,12 +3375,11 @@ async function switchVariant(m, delta) {
   // 分叉父的下标按存储序:当前消息的 parentId 就是分叉父的 _idx
   const parentIdx = m._idx !== undefined ? (m.parentId ?? -1) : -1
   if (parentIdx < 0) return
-  const res = await fetch(`${origin.value}/api/workbench/session/${sessionId.value}/branch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messageIdx: parentIdx, variant: target }),
+  const { ok } = await sessionsApi.branch(sessionId.value, {
+    messageIdx: parentIdx,
+    variant: target,
   })
-  if (!res.ok) return
+  if (!ok) return
   await selectSession({ id: sessionId.value })
 }
 
@@ -3513,8 +3445,7 @@ function scrollToBottom() {
 const allCounts = ref({ total: 0, archived: 0 })
 async function loadArchiveCount() {
   try {
-    const res = await fetch(`${origin.value}/api/workbench/sessions`)
-    const json = await res.json()
+    const { json } = await sessionsApi.list()
     const list = json?.data ?? []
     allCounts.value = { total: list.length, archived: list.filter((x) => x.archived).length }
   } catch {}

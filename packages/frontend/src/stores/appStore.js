@@ -9,6 +9,7 @@ import {
   APP_POWER_LEVELS,
   getQueryParam,
 } from '@/utils'
+import { apiRequest as apiClientRequest } from '@/utils/apiClient'
 import defaultStyles from '@/utils/styles/styles.json'
 
 const LOCAL_CONFIG_KEY = 'LOCAL_CONFIG_KEY'
@@ -55,36 +56,9 @@ export const useAppStore = defineStore('app', () => {
   const buildStyles = ref([])
   const isLoading = ref(false)
 
-  // API 请求工具函数
-  const apiRequest = async (endpoint, options = {}) => {
-    let baseUrl
-    if (isElectron) {
-      const electronConfig = await getElectronConfig()
-      baseUrl = electronConfig.server_origin
-    } else if (getQueryParam('server_origin')) {
-      baseUrl = getQueryParam('server_origin')
-    } else {
-      baseUrl = config.value.serverHost
-    }
-
-    const defaultOptions = {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    }
-
-    const response = await fetch(`${baseUrl}${endpoint}`, {
-      ...defaultOptions,
-      ...options,
-    })
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ message: 'Request failed' }))
-      throw new Error(errorData.message || `HTTP ${response.status}`)
-    }
-
-    return response.json()
-  }
+  // API 请求：baseUrl 解析与错误归一收口在 utils/apiClient（唯一 home）
+  const apiRequest = (endpoint, options = {}) =>
+    apiClientRequest(endpoint, options, { fallbackHost: config.value.serverHost })
 
   // 初始化配置 - 调用后端接口
   const initConfig = async () => {

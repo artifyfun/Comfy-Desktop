@@ -12,6 +12,8 @@ import {
   cloneProject,
   importProject,
   projectCardStats,
+  bootProjectStore,
+  persistProjectStore,
 } from './projectStore'
 
 const legacyDoc = JSON.stringify({
@@ -194,5 +196,64 @@ describe('projectCardStats（E4 项目卡统计）', () => {
     expect(st.objects).toBe(0)
     expect(st.links).toBe(0)
     expect(st.rel).toBe('justNow')
+  })
+})
+
+// ---------------- I/O 适配层（S1 收尾） ----------------
+function mkStorage() {
+  const m = new Map()
+  return {
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => m.set(k, String(v)),
+    _m: m,
+  }
+}
+
+describe('bootProjectStore / persistProjectStore（I/O 适配层）', () => {
+  it('空 storage → 首个项目 + migrated=true', () => {
+    const { store, migrated } = bootProjectStore(mkStorage())
+    expect(migrated).toBe(true)
+    expect(store.projects).toHaveLength(1)
+    expect(store.activeId).toBe(store.projects[0].id)
+  })
+
+  it('已有项目集 → 原样装载 migrated=false', () => {
+    const s = mkStorage()
+    const first = bootProjectStore(s)
+    persistProjectStore(first.store, s)
+    const again = bootProjectStore(s)
+    expect(again.migrated).toBe(false)
+    expect(again.store.projects).toHaveLength(1)
+  })
+
+  it('persist 写入完整形状（version/activeId/projects）', () => {
+    const s = mkStorage()
+    const { store } = bootProjectStore(s)
+    persistProjectStore(store, s)
+    const raw = JSON.parse(s._m.get('artify.canvas.projects.v1'))
+    expect(raw.version).toBe(1)
+    expect(raw.activeId).toBe(store.activeId)
+    expect(Array.isArray(raw.projects)).toBe(true)
+  })
+
+  it('persist 容量满（setItem 抛错）静默不炸', () => {
+    const boom = { getItem: () => null, setItem: () => { throw new Error('QuotaExceeded') } }
+    const { store } = bootProjectStore(boom)
+    expect(() => persistProjectStore(store, boom)).not.toThrow()
+  })
+
+  it('旧单画布档迁移：doc 升格首个项目', () => {
+    const s = mkStorage()
+    s._m.set('artify.canvas.doc.v1', JSON.stringify({
+      version: 1,
+      viewport: { scale: 2, x: 5, y: 5 },
+      objects: [{ id: 'n1', type: 'note', x: 1 }],
+      links: [],
+      groups: [],
+    }))
+    const { store, migrated } = bootProjectStore(s)
+    expect(migrated).toBe(true)
+    expect(store.projects[0].doc.objects).toHaveLength(1)
+    expect(store.projects[0].doc.viewport.scale).toBe(2)
   })
 })

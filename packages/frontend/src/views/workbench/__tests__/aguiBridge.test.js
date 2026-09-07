@@ -961,3 +961,76 @@ describe('aguiBridge — STATE_DELTA /tokenUsage 接线', () => {
     ).not.toThrow()
   })
 })
+
+// ---------------- S5a transport seam：http.post 注入 ----------------
+describe('aguiBridge — transport seam（http.post 注入）', () => {
+  it('注入 http.post 后 runAgentTurn 走注入通道（不触全局 fetch）', async () => {
+    const { createAguiBridge } = await import('../aguiBridge')
+    const calls = []
+    const pageApi = makePageApi()
+    const http = {
+      post: async (path, body) => {
+        calls.push({ path, body })
+        // 返回空 SSE 流（立即结束，无事件）
+        return { ok: true, status: 200, json: { success: true } }
+      },
+    }
+    const bridge = createAguiBridge(pageApi, http)
+    await bridge.runAgentTurn('hi', [], { userBubble: 'hi' })
+    expect(calls).toHaveLength(1)
+    expect(calls[0].path).toBe('/api/workbench/agent/run')
+    expect(calls[0].body.input).toBe('hi')
+    // __signal 已被调用方约定剥离职责（defaultPostJson 剥），注入通道原样收到
+    expect(calls[0].body.__signal).toBeInstanceOf(AbortSignal)
+    // 干净截断 → 中断气泡（终帧缺失防线仍生效）
+    const kinds = pageApi.messages.value.map((m) => m.kind)
+    expect(kinds).toContain('error')
+  })
+
+  it('注入通道 reject → 错误气泡携带 retryInput', async () => {
+    const { createAguiBridge } = await import('../aguiBridge')
+    const pageApi = makePageApi()
+    const bridge = createAguiBridge(pageApi, {
+      post: async () => {
+        throw new Error('boom')
+      },
+    })
+    await bridge.runAgentTurn('q', [], { userBubble: 'q' })
+    const err = pageApi.messages.value.find((m) => m.kind === 'error')
+    expect(err.text).toBe('boom')
+    expect(err.retryInput).toBe('q')
+    expect(pageApi.busy.value).toBe(false)
+  })
+
+  it('stopAgentRun 经注入通道发 cancel（fire-and-forget 不炸）', async () => {
+    const { createAguiBridge } = await import('../aguiBridge')
+    const cancels = []
+    const pageApi = makePageApi()
+    const http = {
+      post: (path, body) => {
+        if (path.endsWith('/agent/cancel')) {
+          cancels.push(body)
+          return Promise.resolve({ ok: true, status: 200, json: { success: true } })
+        }
+        if (path.endsWith('/agent/run')) {
+          // 挂起直到调用方 abort（__signal 是 seam 的 abort 约定）
+          return new Promise((_, reject) => {
+            if (body.__signal) {
+              body.__signal.addEventListener('abort', () =>
+                reject(new DOMException('aborted', 'AbortError')),
+              )
+            }
+          })
+        }
+        return Promise.resolve({ ok: true, status: 200, json: { success: true } })
+      },
+    }
+    const bridge = createAguiBridge(pageApi, http)
+    const p = bridge.runAgentTurn('x', [], { userBubble: 'x' })
+    await new Promise((r) => setTimeout(r, 0))
+    await bridge.stopAgentRun()
+    await p
+    expect(cancels).toHaveLength(1)
+    expect(cancels[0].threadId).toBe('th-1')
+  })
+})

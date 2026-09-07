@@ -162,6 +162,31 @@ export function importProject(store, project, now = Date.now()) {
 
 export const PROJECTS_STORAGE_KEY = PROJECTS_KEY
 
+// ---------------- I/O 适配层（S1 收尾）----------------
+// localStorage 读写原先散在 index.vue（boot/persist 各一份拼 key 拼形状），
+// 收到这里后 UI 层只剩纯调用；注入 storage 便于单测。
+
+/** 读盘 + 启动迁移一步完成；返回 { store, migrated }，migrated 时需落盘 */
+export function bootProjectStore(storage = localStorage) {
+  const { store, migrated } = migrateLegacyStore(
+    storage.getItem(PROJECTS_KEY),
+    storage.getItem(LEGACY_DOC_KEY),
+  )
+  return { store, migrated }
+}
+
+/** 项目集落盘（容量满静默——画布仍可用） */
+export function persistProjectStore(store, storage = localStorage) {
+  try {
+    storage.setItem(
+      PROJECTS_KEY,
+      JSON.stringify({ version: 1, activeId: store.activeId, projects: store.projects }),
+    )
+  } catch {
+    /* 容量满静默 */
+  }
+}
+
 /**
  * E4 项目卡统计（纯投影）：物件/连线/便签/图片计数 + 相对时间描述。
  * doc 异常（缺字段/非数组）一律回退 0，卡片永不抛错。

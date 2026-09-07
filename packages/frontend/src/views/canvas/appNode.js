@@ -266,3 +266,45 @@ function digestParams(params) {
   }
   return parts.join(' | ')
 }
+
+// ---------------- 运行 seam（#10）：HTTP 交换抽纯函数 ----------------
+// runAppNode/startNodePoll 原先把 execute/execute-status fetch 内联在
+// index.vue（状态编排与网络交换耦合，不可测）。交换收口到此处，注入式
+// fetcher 可单测；vue 层只留状态机（running→polling→success/error）。
+
+/**
+ * 提交画布执行（POST /api/canvas/execute）。
+ * @param {string} origin 服务端 origin
+ * @param {{prompt: object, nodeOverrides?: object, name?: string}} payload
+ * @param {{fetcher?: typeof fetch}} di
+ * @returns {Promise<{promptId: string}>} 失败抛 Error（message 归一）
+ */
+export async function submitCanvasExecute(payload, { origin = '', fetcher = fetch } = {}) {
+  const res = await fetcher(`${origin}/api/canvas/execute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const j = await res.json().catch(() => null)
+  if (!res.ok || !j?.success) throw new Error(j?.message || j?.error || `HTTP ${res.status}`)
+  return j.data
+}
+
+/**
+ * 轮询执行状态（GET /api/canvas/execute-status）。
+ * @returns {Promise<{status: string, error?: string, outputs?: {files?: Array}} | null>}
+ *   null = 还在 running / 响应异常（调用方下轮再试）
+ */
+export async function pollCanvasExecuteStatus(promptId, { origin = '', fetcher = fetch } = {}) {
+  try {
+    const res = await fetcher(
+      `${origin}/api/canvas/execute-status?promptId=${encodeURIComponent(promptId)}`,
+    )
+    const j = await res.json().catch(() => null)
+    const r = j?.data
+    if (!r || r.status === 'running') return null
+    return r
+  } catch {
+    return null // 下轮重试
+  }
+}

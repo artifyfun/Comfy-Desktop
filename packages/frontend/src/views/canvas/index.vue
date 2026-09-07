@@ -1658,6 +1658,8 @@ import {
   artifactLayout,
   appNodesDigest,
   imageObjectRef,
+  submitCanvasExecute,
+  pollCanvasExecuteStatus,
 } from './appNode'
 import {
   makeViewport,
@@ -1710,9 +1712,6 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const router = useRouter()
 import {
-  PROJECTS_STORAGE_KEY,
-  LEGACY_STORAGE_KEY,
-  migrateLegacyStore,
   normalizeStore,
   addProject as psAddProject,
   renameProject as psRenameProject,
@@ -1720,7 +1719,10 @@ import {
   switchProject as psSwitchProject,
   updateProjectDoc as psUpdateProjectDoc,
   projectCardStats,
+  bootProjectStore,
+  persistProjectStore,
 } from './projectStore'
+import { buildCtxItems } from './canvasActions'
 import {
   builtinLibrary,
   loadCustomPrompts,
@@ -1845,26 +1847,13 @@ const projectMenuOpen = ref(false)
 
 // 启动迁移：旧单画布档升格首个项目（幂等）
 ;(function bootProjects() {
-  const { store, migrated } = migrateLegacyStore(
-    localStorage.getItem(PROJECTS_STORAGE_KEY),
-    localStorage.getItem(LEGACY_STORAGE_KEY),
-  )
+  // 读盘+迁移+落盘全在 projectStore 模块（I/O 适配层）
+  const { store, migrated } = bootProjectStore()
   Object.assign(projectStore, store)
   if (migrated) persistProjects()
 })()
 function persistProjects() {
-  try {
-    localStorage.setItem(
-      PROJECTS_STORAGE_KEY,
-      JSON.stringify({
-        version: 1,
-        activeId: projectStore.activeId,
-        projects: projectStore.projects,
-      }),
-    )
-  } catch {
-    /* 容量满静默 */
-  }
+  persistProjectStore(projectStore)
 }
 /** 当前 doc → 项目集（saveNow 一并落盘） */
 function syncActiveDocToStore() {
@@ -3792,365 +3781,48 @@ function closeCtxMenu() {
 const ctxItems = computed(() => {
   if (!ctxMenu.value) return []
   const ids = ctxMenu.value.targetIds
-  const hasImg = ids.some((id) => (objects.value.find((o) => o.id === id) || {}).type === 'image')
-  const imgWithMeta = ids.some((id) => (objects.value.find((o) => o.id === id) || {}).meta?.prompt)
-  const appIds = ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app')
-  const noteIds = ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'note')
-  const frameIds = ids.filter(
-    (id) => (objects.value.find((o) => o.id === id) || {}).type === 'frame',
-  )
-  const items = [
-    {
-      key: 'copy',
-      icon: 'fa-copy',
-      label: t('canvasMenuCopy'),
-      run: () => {
-        copySelection()
-        closeCtxMenu()
-      },
-    },
-  ]
-  if (noteIds.length === 1) {
-    items.push({
-      key: 'note-edit',
-      icon: 'fa-pen',
-      label: t('canvasMenuEditNote'),
-      run: () => {
-        startNoteEdit(noteIds[0])
-        closeCtxMenu()
-      },
-    })
+  // 动作声明（icon/谓词/子菜单）在 canvasActions 注册表；这里只注入
+  // run 实现（key → 组件函数），谓词过滤可脱离组件单测
+  const runners = {
+    copy: copySelection,
+    'note-edit': () => startNoteEdit(ids[0]),
+    'frame-rename': () => startFrameRename(ids[0]),
+    'gen-info': () => showImageGenInfo(ids[0]),
+    'app-run': () => runAppNodes(ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app')),
+    'app-panel': () => openAppNodePanel(ids.find((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app')),
+    'app-full': () => openFullApp(objects.value.find((o) => o.id === ids.find((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app'))),
+    ref: sendSelectionToWorkbench,
+    gen: () => openGenNode(ids),
+    crop: () => setTool('crop'),
+    inpaint: () => openMaskDialog(ids[0]),
+    reverse: () => reversePrompt(ids[0]),
+    enhance: () => enhanceImage(ids[0]),
+    outpaint: () => startOutpaint(ids[0]),
+    video: () => imageToVideo(ids[0]),
+    char: () => setConsistencyAsset(ids[0], 'character'),
+    style: () => setConsistencyAsset(ids[0], 'style'),
+    compose: composeSelection,
+    group: groupSelected,
+    exportSel: exportSelectionZip,
+    gridImg: gridArrangeSelected,
+    alignL: () => alignSel('left'),
+    alignH: () => alignSel('hcenter'),
+    alignR: () => alignSel('right'),
+    alignT: () => alignSel('top'),
+    alignV: () => alignSel('vcenter'),
+    alignB: () => alignSel('bottom'),
+    distH: () => distributeSel('x'),
+    distV: () => distributeSel('y'),
+    front: () => zShift(ids, 'front'),
+    forward: () => zShift(ids, 'forward'),
+    backward: () => zShift(ids, 'backward'),
+    back: () => zShift(ids, 'back'),
+    del: deleteSelected,
   }
-  if (frameIds.length === 1) {
-    items.push({
-      key: 'frame-rename',
-      icon: 'fa-pen',
-      label: t('canvasRenameFrame'),
-      run: () => {
-        startFrameRename(frameIds[0])
-        closeCtxMenu()
-      },
-    })
-  }
-  if (imgWithMeta) {
-    items.push({
-      key: 'gen-info',
-      icon: 'fa-circle-info',
-      label: t('canvasGenInfoTitle'),
-      run: () => {
-        showImageGenInfo(ids[0])
-        closeCtxMenu()
-      },
-    })
-  }
-  if (appIds.length) {
-    items.push(
-      {
-        key: 'app-run',
-        icon: 'fa-play',
-        label: t('canvasCtxRunApp'),
-        run: () => {
-          runAppNodes(appIds)
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'app-panel',
-        icon: 'fa-gear',
-        label: t('canvasCtxAppPanel'),
-        run: () => {
-          openAppNodePanel(appIds[0])
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'app-full',
-        icon: 'fa-up-right-from-square',
-        label: t('canvasCtxAppFull'),
-        run: () => {
-          openFullApp(objects.value.find((o) => o.id === appIds[0]))
-          closeCtxMenu()
-        },
-      },
-    )
-  }
-  if (hasImg) {
-    items.push(
-      {
-        key: 'ref',
-        icon: 'fa-paper-plane',
-        label: t('canvasMenuSendWb'),
-        run: () => {
-          sendSelectionToWorkbench()
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'gen',
-        icon: 'fa-wand-magic-sparkles',
-        label: t('canvasMenuGen'),
-        run: () => {
-          openGenNode(ids)
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'crop',
-        icon: 'fa-crop',
-        label: t('canvasCropTool'),
-        run: () => {
-          setTool('crop')
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'inpaint',
-        icon: 'fa-paint-brush',
-        label: t('canvasMenuInpaint'),
-        run: () => {
-          openMaskDialog(ids[0])
-          closeCtxMenu()
-        },
-      },
-      { key: 'sep-ai', sep: true },
-      {
-        key: 'ai-group',
-        icon: 'fa-wand-magic-sparkles',
-        label: t('canvasMenuAiGroup'),
-        children: [
-          {
-            key: 'reverse',
-            icon: 'fa-comment-dots',
-            label: t('canvasMenuReverse'),
-            run: () => {
-              reversePrompt(ids[0])
-              closeCtxMenu()
-            },
-          },
-          {
-            key: 'enhance',
-            icon: 'fa-up-right-and-down-left-from-center',
-            label: t('canvasMenuEnhance'),
-            run: () => {
-              enhanceImage(ids[0])
-              closeCtxMenu()
-            },
-          },
-          {
-            key: 'outpaint',
-            icon: 'fa-expand-arrows-alt',
-            label: t('canvasMenuOutpaint'),
-            run: () => {
-              startOutpaint(ids[0])
-              closeCtxMenu()
-            },
-          },
-          {
-            key: 'video',
-            icon: 'fa-film',
-            label: t('canvasMenuVideo'),
-            run: () => {
-              imageToVideo(ids[0])
-              closeCtxMenu()
-            },
-          },
-          {
-            key: 'char',
-            icon: 'fa-user-tag',
-            label: t('canvasMenuSetChar'),
-            run: () => {
-              setConsistencyAsset(ids[0], 'character')
-              closeCtxMenu()
-            },
-          },
-          {
-            key: 'style',
-            icon: 'fa-palette',
-            label: t('canvasMenuSetStyle'),
-            run: () => {
-              setConsistencyAsset(ids[0], 'style')
-              closeCtxMenu()
-            },
-          },
-        ],
-      },
-    )
-  }
-  if (ids.length >= 2) {
-    items.push(
-      {
-        key: 'compose',
-        icon: 'fa-layer-group',
-        label: t('canvasMenuCompose'),
-        run: () => {
-          composeSelection()
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'group',
-        icon: 'fa-object-group',
-        label: t('canvasGroupSel'),
-        run: () => {
-          groupSelected()
-          closeCtxMenu()
-        },
-      },
-    )
-  }
-  // P2: export selection zip when images picked
-  if (ids.some((id) => objects.value.find((o) => o.id === id)?.type === 'image')) {
-    items.push({
-      key: 'exportSel',
-      icon: 'fa-file-zipper',
-      label: t('canvasExportSelBtn'),
-      run: () => {
-        exportSelectionZip()
-        closeCtxMenu()
-      },
-    })
-  }
-  // P2: grid-arrange when 2+ images picked
-  const imgIds = ids.filter((id) => objects.value.find((o) => o.id === id)?.type === 'image')
-  if (imgIds.length >= 2) {
-    items.push({
-      key: 'gridImg',
-      icon: 'fa-table-cells',
-      label: t('canvasGridBtn'),
-      run: () => {
-        gridArrangeSelected()
-        closeCtxMenu()
-      },
-    })
-  }
-  if (ids.length >= 2) {
-    items.push(
-      {
-        key: 'alignL',
-        icon: 'fa-align-left',
-        label: t('canvasAlignLeft'),
-        run: () => {
-          alignSel('left')
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'alignH',
-        icon: 'fa-align-center',
-        label: t('canvasAlignHCenter'),
-        run: () => {
-          alignSel('hcenter')
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'alignR',
-        icon: 'fa-align-right',
-        label: t('canvasAlignRight'),
-        run: () => {
-          alignSel('right')
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'alignT',
-        icon: 'fa-arrow-up-long',
-        label: t('canvasAlignTop'),
-        run: () => {
-          alignSel('top')
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'alignV',
-        icon: 'fa-arrows-up-down',
-        label: t('canvasAlignVCenter'),
-        run: () => {
-          alignSel('vcenter')
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'alignB',
-        icon: 'fa-arrow-down-long',
-        label: t('canvasAlignBottom'),
-        run: () => {
-          alignSel('bottom')
-          closeCtxMenu()
-        },
-      },
-    )
-  }
-  if (ids.length >= 3) {
-    items.push(
-      {
-        key: 'distH',
-        icon: 'fa-arrows-left-right-to-line',
-        label: t('canvasDistH'),
-        run: () => {
-          distributeSel('x')
-          closeCtxMenu()
-        },
-      },
-      {
-        key: 'distV',
-        icon: 'fa-arrows-up-down-up-down-line',
-        label: t('canvasDistV'),
-        run: () => {
-          distributeSel('y')
-          closeCtxMenu()
-        },
-      },
-    )
-  }
-  items.push(
-    {
-      key: 'front',
-      icon: 'fa-layer-group',
-      label: t('canvasMenuFront'),
-      run: () => {
-        zShift(ids, 'front')
-        closeCtxMenu()
-      },
-    },
-    {
-      key: 'forward',
-      icon: 'fa-arrow-up',
-      label: t('canvasMenuForward'),
-      run: () => {
-        zShift(ids, 'forward')
-        closeCtxMenu()
-      },
-    },
-    {
-      key: 'backward',
-      icon: 'fa-arrow-down',
-      label: t('canvasMenuBackward'),
-      run: () => {
-        zShift(ids, 'backward')
-        closeCtxMenu()
-      },
-    },
-    {
-      key: 'back',
-      icon: 'fa-layer-group',
-      label: t('canvasMenuBack'),
-      run: () => {
-        zShift(ids, 'back')
-        closeCtxMenu()
-      },
-    },
-    {
-      key: 'del',
-      icon: 'fa-trash',
-      label: t('canvasMenuDelete'),
-      run: () => {
-        deleteSelected()
-        closeCtxMenu()
-      },
-    },
-  )
-  return items
+  return buildCtxItems(objects.value, ids, undefined, (key) => () => {
+    runners[key]?.()
+    closeCtxMenu()
+  }).map((it) => ({ ...it, label: it.labelKey ? t(it.labelKey) : undefined, children: it.children?.map((c) => ({ ...c, label: t(c.labelKey) })) }))
 })
 /**
  * z 层级四向（front/forward/backward/back），选中块整体移动保持内部顺序。
@@ -5836,18 +5508,15 @@ async function runAppNode(id) {
   }
   saveSoon()
   try {
-    const res = await fetch(`${serverOrigin.value}/api/canvas/execute`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    // HTTP 交换在 appNode.js（submitCanvasExecute），此处只留状态编排
+    const { promptId } = await submitCanvasExecute(
+      {
         prompt: app.template.prompt,
         nodeOverrides: Object.keys(nodeOverrides).length ? nodeOverrides : undefined,
         name: node.name || node.appId,
-      }),
-    })
-    const j = await res.json().catch(() => null)
-    if (!res.ok || !j?.success) throw new Error(j?.message || j?.error || `HTTP ${res.status}`)
-    const promptId = j.data.promptId
+      },
+      { origin: serverOrigin.value },
+    )
     node.lastRun = { ...node.lastRun, promptId, at: Date.now() }
     node.statusText = t('canvasAppNodeRunningStatus')
     startNodePoll(node.id, promptId)
@@ -5875,12 +5544,8 @@ function startNodePoll(nodeId, promptId) {
     const node = objects.value.find((o) => o.id === nodeId)
     if (!node) return stopNodePoll(nodeId)
     try {
-      const res = await fetch(
-        `${serverOrigin.value}/api/canvas/execute-status?promptId=${encodeURIComponent(promptId)}`,
-      )
-      const j = await res.json().catch(() => null)
-      const r = j?.data
-      if (!r || r.status === 'running') return
+      const r = await pollCanvasExecuteStatus(promptId, { origin: serverOrigin.value })
+      if (!r) return
       stopNodePoll(nodeId)
       if (r.status === 'success') {
         node.status = 'success'
