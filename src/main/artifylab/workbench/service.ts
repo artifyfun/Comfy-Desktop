@@ -7,16 +7,14 @@
  *
  * 会话存储：userData/workbench-sessions.json（防抖落盘，模式抄 batch-queue）。
  */
-import { startWorkbenchProxy } from './workbenchProxy'
 import { join } from 'node:path'
 import { app } from 'electron'
-import type { Server as HttpServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import appStoreManager, { type App, type ComfyPrompt, type ParamNode } from '../appStore'
-import { type AppServerRuntime, createAppServerRuntime } from './appServerRun'
 import { logger } from '../utils/logger'
+import { AgentRuntime } from './agentRuntime'
 import {
   record as recordExecution,
   markSuccess,
@@ -25,8 +23,27 @@ import {
   type WorkbenchExecution,
   type WorkbenchOutputFile
 } from './executionLog'
-
 export type { WorkbenchExecution, WorkbenchOutputFile } from './executionLog'
+import type {
+  WorkbenchMessage,
+  TurnUsage,
+  WorkbenchFavorite,
+  SessionModelOverride,
+  WorkbenchSession,
+  WorkbenchDebugLog,
+  SessionStore
+} from './sessionTypes'
+
+export type {
+  WorkbenchMessage,
+  WorkbenchMessageKind,
+  TurnUsage,
+  WorkbenchFavorite,
+  SessionModelOverride,
+  WorkbenchSession,
+  WorkbenchDebugLog,
+  SessionStore
+} from './sessionTypes'
 import { templateLibrary } from './templates'
 import { exportSession, importSession as importSessionCore } from './sessionTransfer'
 import { toPseudoApp, type WorkflowTemplate } from './templateCore'
@@ -54,116 +71,11 @@ import {
 } from './presetCore'
 import { renderEnvSnapshot, SELF_KNOWLEDGE_TEXT, type WorkbenchEnvSnapshot } from './selfKnowledge'
 import { defaultSkillLibrary, type SkillInfo } from './skillStore'
+import { deployWorkbenchSkills } from './skillDeploy'
+import type { ReasoningEffort } from './reasoningEffort'
 import { extractDocText, isDocumentAttachment, renderDocContext } from './docContext'
-import { spawn } from 'node:child_process'
-import { getCivitaiApiKey } from './modelKnowledge'
 
 /* ------------------------------------------------------------------ */
-/* civitai MCP（civitai-mcp-ultimate，uvx 托管）                        */
-/* ------------------------------------------------------------------ */
-
-/**
- * uvx 可用性探测（异步探测 + TTL 缓存）。uvx 缺失/超时 → config.toml 不写该段
- * （降级：wb_query_models action=civitai 走主进程 fetch，仍可在线搜索）。
- * 设计红线：主进程不做 spawnSync 阻塞探测（首次会话创建卡主进程 5s 不可接受）——
- * 启动时异步预热一次，同步读取只看缓存；缓存过期时后台刷新、先用旧值。
- */
-const UVX_TTL_MS = 10 * 60 * 1000
-let uvxCached: { value: boolean; at: number } | null = null
-let uvxProbing = false
-
-async function probeUvxAsync(): Promise<boolean> {
-  if (uvxProbing) return uvxCached?.value ?? false
-  uvxProbing = true
-  try {
-    const value = await new Promise<boolean>((resolve) => {
-      let settled = false
-      const done = (v: boolean) => {
-        if (!settled) {
-          settled = true
-          resolve(v)
-        }
-      }
-      try {
-        const child = spawn('uvx', ['--version'], { stdio: 'ignore' })
-        const timer = setTimeout(() => {
-          try {
-            child.kill()
-          } catch {
-            /* ignore */
-          }
-          done(false)
-        }, 5000)
-        timer.unref?.()
-        child.on('error', () => {
-          clearTimeout(timer)
-          done(false)
-        })
-        child.on('exit', (code) => {
-          clearTimeout(timer)
-          done(code === 0)
-        })
-      } catch {
-        done(false)
-      }
-    })
-    uvxCached = { value, at: Date.now() }
-    if (!value) logger.info('workbench: uvx 不可用，civitai MCP 跳过挂载')
-    return value
-  } finally {
-    uvxProbing = false
-  }
-}
-
-/** 启动预热：会话创建前缓存就绪，避免同步路径空转 */
-void probeUvxAsync().catch(() => {})
-
-function uvxAvailable(): boolean {
-  if (uvxCached && Date.now() - uvxCached.at < UVX_TTL_MS) return uvxCached.value
-  // 过期/未就绪：后台刷新，本次先用旧值（首次=按不可用降级，下个会话生效）
-  void probeUvxAsync().catch(() => {})
-  return uvxCached?.value ?? false
-}
-
-let civitaiMcpPreWarmed = false
-/** fire-and-forget 预热 uvx 包缓存：首次运行要拉 PyPI 包（秒级下载），
- * 不预热则 codex 起 MCP 握手可能超时。spawn error 或异常退出都复位标记，
- * 后续会话创建重试；成功退出（--help 帮助即退出）不复位。 */
-function preWarmCivitaiMcp(): void {
-  if (civitaiMcpPreWarmed || !uvxAvailable()) return
-  civitaiMcpPreWarmed = true
-  try {
-    const child = spawn('uvx', ['civitai-mcp-ultimate', '--help'], {
-      detached: true,
-      stdio: 'ignore',
-      env: { ...process.env }
-    })
-    child.on('error', () => {
-      civitaiMcpPreWarmed = false
-    })
-    // 非 0 退出（拉包失败/网络错误）也复位重试；0 = 预热成功
-    child.on('exit', (code) => {
-      if (code !== 0) civitaiMcpPreWarmed = false
-    })
-    child.unref()
-  } catch {
-    civitaiMcpPreWarmed = false
-  }
-}
-
-function civitaiMcpTomlLines(): string[] {
-  // key 复用 LoRA Manager settings（civitai_api_key）：无 key 也能搜（NSFW 受限）
-  const envPairs = [`"CIVITAI_API_KEY" = ${JSON.stringify(getCivitaiApiKey())}`]
-  const proxy = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY
-  if (proxy) envPairs.push(`"HTTPS_PROXY" = ${JSON.stringify(proxy)}`)
-  return [
-    `[mcp_servers.civitai]`,
-    `command = "uvx"`,
-    `args = ["civitai-mcp-ultimate"]`,
-    `env = { ${envPairs.join(', ')} }`
-  ]
-}
-
 /** 画布当前状态快照（/api/canvas/state 的 digest 投影，供 spec 注入） */
 interface CanvasStateSnapshot {
   workflowName: string
@@ -188,12 +100,7 @@ function renderKeyParams(kp?: Record<string, unknown>): string {
   return parts.join(' · ')
 }
 import { get as getSetting } from '../../settings'
-import { getOrCreateMcpToken } from '../mcp/auth'
-import {
-  beginWorkbenchToolContext,
-  endWorkbenchToolContext,
-  peekWorkbenchToolSession
-} from '../mcp/workbenchTools'
+import { peekWorkbenchToolSession } from '../mcp/workbenchTools'
 import {
   applyNodeOverrides,
   executeApp,
@@ -204,9 +111,6 @@ import {
   uploadMediaBuffer,
   type ExecutionResult
 } from '../mcp/executor'
-import { Codex, resolveCodexBaseUrl, resolveCodexBinary } from '../agentDriver'
-import type { Thread, ThreadOptions } from '../vendor/codex-sdk'
-import { toEngineEffort, type ReasoningEffort } from './reasoningEffort'
 import { startBatch } from '../services/batchRunner'
 import { deriveAttachmentKind } from './presetCore'
 
@@ -227,135 +131,6 @@ export type DecideProgressCallback = (
         delta: { kind: 'text' | 'reasoning'; itemId: string; delta: string }
       }
 ) => void
-
-export type WorkbenchMessageKind =
-  | 'chat'
-  | 'card'
-  | 'progress'
-  | 'artifact'
-  | 'error'
-  | 'invalid'
-  | 'title'
-  /** decide 过程条目(reasoning/命令/文件/搜索/todo/mcp),完整 ThreadItem 快照 */
-  | 'tool_item'
-
-export interface WorkbenchMessage {
-  role: 'user' | 'agent' | 'system'
-  kind: WorkbenchMessageKind
-  text: string
-  /** 回合分组 id：同一轮 decide（用户消息→agent 回复）的消息共享；前端据此合并气泡 */
-  turnId?: number
-  /** 分支树(dsh 同款):父消息在 messages[] 中的下标;-1 表示根(旧数据/首个用户消息) */
-  parentId?: number
-  /** 子分支下标列表(按创建序);单子时省略不存,节省存储 */
-  childrenIds?: number[]
-  /** 多子时当前激活的分支(决定 activePath 走向);与 childrenIds 同 length 对齐 */
-  activeChildIdx?: number
-  plan?: WorkbenchPlan
-  promptId?: string
-  outputs?: string[]
-  /** v2：完整产物引用（/view 直出缩略图） */
-  outputFiles?: WorkbenchOutputFile[]
-  attachments?: AttachmentMeta[]
-  /** kind='tool_item' 时的 codex ThreadItem 完整快照 */
-  toolItem?: unknown
-  createdAt: number
-}
-
-/** 单轮 token 用量（turn.completed.usage 快照） */
-export interface TurnUsage {
-  inputTokens: number
-  cachedInputTokens: number
-  outputTokens: number
-  reasoningOutputTokens: number
-  at: number
-}
-
-/** 收藏的产物文件（跨会话收藏夹,落 workbench-sessions.json store 根） */
-export interface WorkbenchFavorite {
-  id: string
-  sessionId: string
-  promptId: string
-  templateId: string
-  file: WorkbenchOutputFile
-  note?: string
-  createdAt: number
-}
-
-/** 会话级模型覆盖（dsh ModelSelection 语义：per-session 可变，影响后续请求） */
-export interface SessionModelOverride {
-  decisionModel?: string
-  buildModel?: string
-}
-
-export interface WorkbenchSession {
-  id: string
-  title: string
-  createdAt: number
-  updatedAt: number
-  messages: WorkbenchMessage[]
-  /** 分支(dsh 同款):当前激活叶;undefined=旧线性数据,取最后一条 */
-  activeLeaf?: number
-  /** 上次分支操作时间(侧栏「已编辑」徽标用,可选) */
-  lastBranchAt?: number
-  /** 每轮 token 用量(轮次序 append;与激活分支无关,会话级累计) */
-  turnUsages?: TurnUsage[]
-  executions: WorkbenchExecution[]
-  /** 本会话已上传素材（跨轮决策注入用——恢复轮/后续轮 agent 仍能看到文件名） */
-  attachments?: AttachmentMeta[]
-  /** 创建时选定，会话期锁定（dsh agent-preset 语义） */
-  presetId?: string
-  modelOverride?: SessionModelOverride
-  /** 归档：侧栏不显示，数据保留 */
-  archived?: boolean
-  /** 用户手动改过标题（自动生成不覆盖） */
-  titleLocked?: boolean
-  /** 调试日志（每轮 decide 的完整上下文；cap 10 条防会话文件膨胀） */
-  debugLogs?: WorkbenchDebugLog[]
-  /** 回合序号（用户消息推进；agent 消息继承当前值，前端据此合并气泡） */
-  turnSeq?: number
-  /** 导入溯源：源会话 UUID（重复导入检测锚点；原生会话无此字段） */
-  importedFrom?: string
-  /** 会话入口（创建时由前端标记）：workbench=独立工作台 / comfy-sidebar=C 界面侧栏 / a-canvas=无限画布 AI 侧栏 */
-  entry?: 'workbench' | 'comfy-sidebar' | 'a-canvas'
-}
-
-/**
- * 一轮 decide 的调试快照：spec(决策提示词全文) + codex 原始输出(含思考) +
- * 解析后的 PLAN + 校验 + 执行回填。前端「复制调试信息」按钮序列化整条，
- * 便于复盘工作台到底怎么想/怎么选的模板与参数。
- */
-export interface WorkbenchDebugLog {
-  /** 会话内轮次序号（1 起） */
-  seq: number
-  ts: number
-  /** 预设展开后的实际决策输入 */
-  effectiveInput: string
-  presetId?: string
-  templateShortcut?: string
-  /** 决策提示词（模板目录/会话近史/环境快照/规则），截断保护 */
-  spec: string
-  /** codex 原始输出（JSONL，含思考与工具调用），截断保护 */
-  rawOutput: string
-  plan: WorkbenchPlan | null
-  issues: PlanValidationIssue[]
-  remoteIssues?: PlanValidationIssue[]
-  /** 执行回填（recordDebug 后由 execute/poll 补齐） */
-  promptId?: string
-  templateId?: string
-  executionStatus?: string
-  executionError?: string
-  model?: string
-}
-
-interface SessionStore {
-  sessions: WorkbenchSession[]
-  presets?: WorkbenchPreset[]
-  presetDefault?: string
-  favorites?: WorkbenchFavorite[]
-  /** 跨会话长期记忆(dsh memory 语义):key 幂等,工作台可自我更新 */
-  memories?: Record<string, { value: string; updatedAt: number }>
-}
 
 const MAX_SESSIONS = 50
 const FLUSH_DEBOUNCE_MS = 500
@@ -409,13 +184,7 @@ function sessionsPath(): string {
  * 不可用时（打包路径变化/复制失败）静默降级：决策提示词内的最小触发提示
  * 仍能让模型走对路径，只是少了详细指南。
  */
-function deployWorkbenchSkills(codexHome: string): void {
-  try {
-    defaultSkillLibrary().deployTo(codexHome)
-  } catch (e) {
-    logger.warn('workbench skills deploy failed', e)
-  }
-}
+/* deployWorkbenchSkills 迁至 skillDeploy.ts（agentRuntime 共用） */
 
 /**
  * 预设 skillIds 失效过滤：指向已删除/禁用/校验失败的技能时，从决策约束
@@ -438,33 +207,6 @@ function effectivePreset(preset: WorkbenchPreset | undefined): WorkbenchPreset |
   }
 }
 
-/** 会话级 agent 运行时状态（harness P1）：codex+thread 跨消息复用 */
-interface AgentSession {
-  codex: Codex
-  thread: Thread
-  tempHome: string
-  /** 非 deepseek 官方端点时挂的 responses→chat 转换代理（随 session 回收） */
-  proxy?: { server: HttpServer; baseUrl: string }
-  /** C16:app-server 通道运行时(transport=appserver 时非空,随 session 回收) */
-  appServer?: AppServerRuntime
-  lastActiveAt: number
-  /** 本会话累计 agent 轮次（decide/恢复轮各 +1） */
-  turns: number
-  totalTokens: number
-  /**
-   * E1 当前会话推理强度（未指定/已撤销 = undefined，引擎默认）。
-   * exec 通道靠下方 threadOptions 引用改写下轮即时生效；appserver 通道在
-   * 会话创建时已注入 configArgs，中途变更需会话重建。
-   */
-  reasoningEffort?: ReasoningEffort
-  /** startThread 入参引用（exec 通道）：E1 强度变更直接改引用字段，下轮 run 生效 */
-  threadOptions?: ThreadOptions
-  /** decide 流式执行中（reap 空闲回收必须跳过，防长轮中途销毁 tempHome/通道） */
-  inFlight?: boolean
-}
-
-/** agent session 空闲回收：超过该时长无活动即销毁（线程/代理/tempHome） */
-const AGENT_IDLE_MS = 10 * 60 * 1000
 /** 单会话 agent 轮次上限（防 harness 无限循环烧 token） */
 const MAX_AGENT_TURNS = 24
 /** 会话 token 预算上限（spec §4.2④：轮次 + 预算双闸）。input+output 合计。 */
@@ -477,9 +219,26 @@ class WorkbenchService {
   private mcpAvailable = false
   /** 编排去重标记：decide 轮内 wb_execute_template 真实执行过 → 最终 PLAN 不再重复执行 */
   private orchestratedSessions = new Set<string>()
-  /** 会话级 agent 运行时（harness）：codex+thread+tempHome+proxy 跨消息复用，模型上下文连续 */
-  private agentSessions = new Map<string, AgentSession>()
-  private agentIdleTimer: NodeJS.Timeout | null = null
+  /** 会话级 agent 运行时（harness）：codex+thread+tempHome+proxy 跨消息复用，模型上下文连续。
+   * 候选①：生命周期收口到 AgentRuntime（agentRuntime.ts），service 为组合根。 */
+  private agents = new AgentRuntime({
+    readAgentAccess: () => {
+      try {
+        const fromSettings = getSetting('workbenchAgentAccess')
+        const fromConfig = appStoreManager.getConfig().workbenchAgentAccess
+        return (fromSettings ?? fromConfig) === 'full' ? 'full' : 'standard'
+      } catch {
+        try {
+          return appStoreManager.getConfig().workbenchAgentAccess === 'full' ? 'full' : 'standard'
+        } catch {
+          return 'standard'
+        }
+      }
+    },
+    onMcpAvailability: (available) => {
+      this.mcpAvailable = available
+    }
+  })
 
   constructor() {
     this.load()
@@ -487,347 +246,6 @@ class WorkbenchService {
   }
 
   // ---------- agent 运行时（harness P1）：会话级 codex+thread 复用 ----------
-
-  /**
-   * C16 传输通道解析:'exec'(默认,零行为变化) | 'appserver'(token 级流)。
-   * 优先级:用户设置 workbenchAgentTransport > appStore 配置 > 'exec'。
-   * 红线:M3 默认 exec——appserver 是 C16 灰度通道,显式开启才生效。
-   */
-  private resolveAgentTransport(): 'exec' | 'appserver' {
-    try {
-      const fromSettings = getSetting('workbenchAgentTransport')
-      if (fromSettings === 'appserver' || fromSettings === 'exec') return fromSettings
-    } catch {
-      /* 设置读取失败走 appStore */
-    }
-    try {
-      const v = appStoreManager.getConfig().workbenchAgentTransport
-      if (v === 'appserver' || v === 'exec') return v
-    } catch {
-      /* 全部失败回 exec */
-    }
-    return 'exec'
-  }
-
-  /**
-   * 取（或建）会话级 agent 运行时。首次创建：起内嵌代理（非 deepseek 官方端点）、
-   * 临时 CODEX_HOME（注册 workbench MCP，wb_* 工具回环）、spawn codex、startThread。
-   * 后续复用同一 thread → 模型在多次用户消息/恢复轮之间上下文连续，能看到自己
-   * 此前的工具调用与执行结果（这是「harness」的核心增益：不再是每轮重新失忆）。
-   * 应用重启后 Map 为空 → 自动重建，spec 注入近史兜底（降级不阻断）。
-   */
-  private async getOrCreateAgentSession(
-    sessionId: string,
-    onProgress: DecideProgressCallback,
-    /**
-     * E1 本轮期望推理强度：
-     * - 具名档位（minimal/low/…/xhigh）→ 新建会话随 startThread/configArgs 注入；
-     *   已建会话（exec 通道）改 threadOptions 引用，下轮 run 即时生效
-     * - 'auto' → 撤销具名档位回引擎默认（新建会话即无注入）
-     * - undefined（请求未带/非法值被路由过滤）→ 保持会话现状，零行为变化
-     */
-    reasoningEffort?: ReasoningEffort
-  ): Promise<AgentSession> {
-    const cached = this.agentSessions.get(sessionId)
-    if (cached) {
-      this.touchAgentSession(sessionId)
-      // E1:undefined=请求未带/非法值(旧客户端)→保持会话现状;仅显式档位或
-      // 'auto'(撤销)才变更。创建路径的 auto/undefined 由 toEngineEffort 折叠。
-      if (reasoningEffort !== undefined) this.applyAgentEffort(cached, reasoningEffort)
-      return cached
-    }
-    const binary = resolveCodexBinary()
-    if (!binary) throw new Error('codex binary not found (run scripts/copy-codex-bin.mjs)')
-    const cfg = appStoreManager.getConfig()
-    const upstreamBaseUrl = cfg.base_url || 'https://api.deepseek.com/v1'
-    let codexBaseUrl = upstreamBaseUrl
-    let proxy: AgentSession['proxy']
-    // 内嵌 responses→chat 转换代理：上游无 /v1/responses（new-api 默认）时由
-    // 应用自身兜底翻译。会话级常驻（复用），随 agent session 一起回收。
-    if (!/^https:\/\/api\.deepseek\.com/.test(upstreamBaseUrl)) {
-      const p = await startWorkbenchProxy({
-        upstreamBaseUrl,
-        upstreamApiKey: cfg.api_key || '',
-        model: cfg.buildModel || 'glm-5.3-flash'
-      })
-      proxy = { server: p.server, baseUrl: p.baseUrl }
-      codexBaseUrl = p.baseUrl
-    }
-    const tempHome = mkdtempSync(join(app.getPath('temp'), 'wb-codex-'))
-    const { getServerPort } = await import('../server')
-    const serverPort = getServerPort()
-    this.mcpAvailable = serverPort != null
-    if (serverPort) {
-      // C7 多会话并行：会话身份融入每会话 MCP server 配置——URL query 带
-      // wb_session=<sid>（codex 0.149.x 引擎对每个 [mcp_servers.*] 的
-      // RawMcpServerConfig 支持 http_headers/env_http_headers，二进制 strings
-      // 实测；此处同步双写 X-Workbench-Session，接收侧未来透传 header 时同构生效）。
-      // wb_* 工具按该身份精确路由回本会话，多会话并行 decide 不再串号。
-      const mcpUrl = `http://127.0.0.1:${serverPort}/mcp?wb_session=${encodeURIComponent(sessionId)}`
-      // 模型目录注入（fallback metadata 根治）：codex 二进制内置模型表只有
-      // gpt-5.x/gpt-4.x 系；第三方网关模型（glm/deepseek/自定义）查不到时
-      // 退保守 fallback 元数据并刷屏警告（"Model metadata for ... not found"），
-      // 上下文窗口猜小会导致过早自动压缩。把用户实际配置的模型写进目录——
-      // slug 匹配 startThread 的 model 名即命中，上下文窗口取常见 128k。
-      const buildModel = cfg.buildModel || 'glm-5.3-flash'
-      // schema 经二进制 strings + 最小复现逐字段探明（codex 0.149.x ModelInfo）：
-      // visibility: list|hide|none；truncation_policy: {limit: i64, mode: bytes|tokens}；
-      // base_instructions 与 model_messages.instructions_template 二选一必填。
-      // 上下文窗口取 128k（常见第三方模型档位），截断阈值 90%。
-      const modelCatalog = {
-        models: [
-          {
-            slug: buildModel,
-            display_name: buildModel,
-            description: 'workbench decide/build model (user configured)',
-            visibility: 'list',
-            supported_in_api: true,
-            priority: 100,
-            supported_reasoning_levels: [
-              { effort: 'medium', description: 'default reasoning effort' }
-            ],
-            shell_type: 'unified_exec',
-            support_verbosity: true,
-            truncation_policy: { limit: 115200, mode: 'tokens' },
-            experimental_supported_tools: [],
-            base_instructions: 'You are a helpful assistant.',
-            context_window: 128000,
-            max_context_window: 128000,
-            max_output_tokens: 16384
-          }
-        ]
-      }
-      const catalogPath = join(tempHome, 'model_catalog.json')
-      writeFileSync(catalogPath, JSON.stringify(modelCatalog))
-      writeFileSync(
-        join(tempHome, 'config.toml'),
-        [
-          // 顶层键必须在任何 [section] 前（TOML 语义）——模型目录注入
-          `model_catalog_json = ${JSON.stringify(catalogPath)}`,
-          ``,
-          `[mcp_servers.workbench]`,
-          `url = "${mcpUrl}"`,
-          `bearer_token_env_var = "WORKBENCH_MCP_TOKEN"`,
-          `http_headers = { "X-Workbench-Session" = "${sessionId}" }`,
-          // approve：exec 单轮 approval_policy=never、workspace-write 沙箱下唯一
-          // 无条件放行值（codex mcp_tool_call.rs：只有 AppToolApproval::Approve
-          // 不看注解直接豁免；auto/writes 对非 read-only 工具仍要弹窗→被拒）。
-          // wb_* 全部经 validatePlanLocal 白名单校验、上下文绑会话，安全面可控。
-          `default_tools_approval_mode = "approve"`,
-          ``,
-          // civitai MCP：uvx 可用时挂载 civitai-mcp-ultimate（在线搜 LoRA/
-          // checkpoint、触发词、示例图生成参数、NSFW 分级；只读工具）。
-          // 不可用时整段省略——wb_query_models action=civitai（主进程
-          // fetch，零依赖）兜底，两条通路不互斥。
-          ...(uvxAvailable() ? civitaiMcpTomlLines() : []),
-          ``,
-          // workspace-write 沙箱默认禁网 —— MCP(streamable HTTP) 属 executor 侧
-          // 网络，不放行则每次工具调用被 sandbox network proxy 拦截（探针实测
-          // "MCP tool call failed"，模型只能放弃编排）。仅放行回环 MCP 端点。
-          `[sandbox_workspace_write]`,
-          `network_access = true`,
-          ``
-        ].join('\n')
-      )
-      preWarmCivitaiMcp()
-    }
-    // 渐进式加载（skill 机制）：codex 0.149.x 原生扫描 $CODEX_HOME/skills/
-    // 下每个 <name>/SKILL.md（frontmatter name/description），把「name+description
-    // +路径」目录注入系统提示（## Skills 段），SKILL.md 正文按需完整读取——
-    // 决策提示词只留触发提示，长规则下沉 skill，省常驻 token 且不互相干扰。
-    try {
-      deployWorkbenchSkills(tempHome)
-    } catch (e) {
-      // skill 部署失败不阻断会话创建：决策提示词内保留了最小触发提示
-      logger.warn('workbench skill deploy failed', e)
-    }
-    beginWorkbenchToolContext(sessionId)
-    // C16 传输通道分流:appserver = codex app-server 子进程(JSON-RPC,token 级
-    // delta);默认 exec(零行为变化,红线:M3 默认不切)。两通道共用 tempHome
-    // (MCP 配置/技能同构)与代理(provider base_url 同源)。
-    const transport = this.resolveAgentTransport()
-    // E1 会话级推理强度 → 引擎 config 值:具名档位原样透传,auto/缺省=undefined
-    // 不注入(引擎默认,零行为变化)。appserver 通道随 configArgs 在 spawn 时注入
-    // (中途变更需会话重建);exec 通道走下方 threadOptions 引用,下轮即时生效。
-    const engineEffort = toEngineEffort(reasoningEffort)
-    let appServer: AgentSession['appServer']
-    if (transport === 'appserver') {
-      appServer = await createAppServerRuntime({
-        binary,
-        env: {
-          ...process.env,
-          CODEX_HOME: tempHome,
-          WORKBENCH_CODEX_API_KEY: cfg.api_key || process.env.CODEX_API_KEY || '',
-          ...(serverPort ? { WORKBENCH_MCP_TOKEN: getOrCreateMcpToken() } : {})
-        },
-        configArgs: [
-          `model="${cfg.buildModel || 'glm-5.3-flash'}"`,
-          'model_provider="openai_http"',
-          ...(engineEffort ? [`model_reasoning_effort="${engineEffort}"`] : []),
-          `model_providers.openai_http={ name = "Artify Workbench HTTP", base_url = "${resolveCodexBaseUrl({ baseUrl: codexBaseUrl })}", env_key = "WORKBENCH_CODEX_API_KEY", wire_api = "responses", requires_openai_auth = false, supports_websockets = false }`
-        ]
-      })
-    }
-    const codex = new Codex({
-      codexPathOverride: binary,
-      baseUrl: resolveCodexBaseUrl({
-        baseUrl: codexBaseUrl
-      }),
-      apiKey: cfg.api_key || process.env.CODEX_API_KEY || '',
-      env: {
-        ...process.env,
-        CODEX_HOME: tempHome,
-        // provider 用 env_key 字段读 API key（codex 0.149.x 的 provider 段
-        // 没有 api_key 字段；环境变量注入是官方自定义 provider 的标准做法）
-        WORKBENCH_CODEX_API_KEY: cfg.api_key || process.env.CODEX_API_KEY || '',
-        ...(serverPort ? { WORKBENCH_MCP_TOKEN: getOrCreateMcpToken() } : {})
-      },
-      // 双保险：即使泄露进 provider 配置，也强制回内置 openai 让 baseUrl 生效。
-      // code_mode/tool_search 关闭：0.149.x 新路由默认把 MCP 工具交给 JS
-      // code-mode runtime / 延迟注册（deferred），exec --experimental-json 单轮
-      // 下两者都不可用 → 模型调用报 "unsupported call: wb_*"（stderr 实测）。
-      // 关掉走经典工具路由，MCP 工具直接注册进 router。
-      config: {
-        // 自定义 provider 强制 HTTPS Streaming：codex 默认先试 WebSocket
-        // /v1/responses，而本机代理（mimo2codex）只实现了 POST 端点 → 每次
-        // 决策都要「404 → 重连 5 次 → 回退 HTTPS」浪费十几秒。保留
-        // wire_api="responses"（能力不变），supports_websockets=false 让引擎
-        // 直接走 HTTPS。
-        //
-        // 字段名必须是 base_url + env_key（0.149.x 引擎实测：api_base_url /
-        // api_key 不被识别，base_url 静默回落到 api.openai.com → 401 →
-        // "Codex Exec exited with code 1"，且 401 前没有任何 WS 尝试，说明
-        // supports_websockets 已生效）。
-        model_provider: 'openai_http',
-        'model_providers.openai_http': {
-          name: 'Artify Workbench HTTP',
-          base_url: resolveCodexBaseUrl({
-            baseUrl: codexBaseUrl
-          }),
-          env_key: 'WORKBENCH_CODEX_API_KEY',
-          wire_api: 'responses',
-          requires_openai_auth: false,
-          supports_websockets: false
-        },
-        features: { code_mode: false, tool_search: false }
-      }
-    })
-    // 沙箱档位:'standard'(默认)仅工作目录可写;'full' 完全放开(C 权限,
-    // 用户显式开启)。档位读取失败一律回退 standard,宁可少权不可多权。
-    let agentAccess: 'standard' | 'full' = 'standard'
-    try {
-      const fromSettings = getSetting('workbenchAgentAccess')
-      const fromConfig = appStoreManager.getConfig().workbenchAgentAccess
-      agentAccess = (fromSettings ?? fromConfig) === 'full' ? 'full' : 'standard'
-    } catch {
-      try {
-        agentAccess =
-          appStoreManager.getConfig().workbenchAgentAccess === 'full' ? 'full' : 'standard'
-      } catch {}
-    }
-    // E1:threadOptions 保留引用——exec 通道每轮 run 从该对象读 modelReasoningEffort,
-    // 中途切档直接改引用字段即可下轮生效(SDK startThread 原样持有入参对象,零拷贝)
-    const threadOptions: ThreadOptions = {
-      model: cfg.buildModel || 'glm-5.3-flash',
-      sandboxMode: agentAccess === 'full' ? 'danger-full-access' : 'workspace-write',
-      workingDirectory: process.cwd(),
-      skipGitRepoCheck: true,
-      ...(engineEffort ? { modelReasoningEffort: engineEffort } : {})
-    }
-    const thread = codex.startThread(threadOptions)
-    const agent: AgentSession = {
-      codex,
-      thread,
-      tempHome,
-      proxy,
-      ...(appServer ? { appServer } : {}),
-      ...(engineEffort ? { reasoningEffort: engineEffort } : {}),
-      threadOptions,
-      lastActiveAt: Date.now(),
-      turns: 0,
-      totalTokens: 0
-    }
-    this.agentSessions.set(sessionId, agent)
-    this.scheduleAgentIdleReap()
-    if (proxy) {
-      onProgress({
-        type: 'log',
-        text: `responses→chat 代理已就绪 ${proxy.baseUrl} → ${upstreamBaseUrl}`
-      })
-    }
-    return agent
-  }
-
-  /**
-   * E1 会话推理强度落 agent（调用方保证 reasoningEffort 为具名档位或 'auto'）：
-   * - exec 通道：改 threadOptions 引用（SDK 每轮 spawn 前读该字段），下轮即时生效
-   * - appserver 通道：effort 已在会话创建时注入 configArgs，此处仅记档——
-   *   中途变更需会话重建才生效
-   * - 具名档位 → 记档 + 注入；'auto' → 清档回引擎默认
-   */
-  private applyAgentEffort(agent: AgentSession, reasoningEffort?: ReasoningEffort): void {
-    const eff = toEngineEffort(reasoningEffort)
-    agent.reasoningEffort = eff
-    if (agent.threadOptions) {
-      if (eff) agent.threadOptions.modelReasoningEffort = eff
-      else delete agent.threadOptions.modelReasoningEffort
-    }
-  }
-
-  private touchAgentSession(sessionId: string): void {
-    const agent = this.agentSessions.get(sessionId)
-    if (agent) agent.lastActiveAt = Date.now()
-  }
-
-  /** 销毁会话级 agent 运行时：关代理、删临时 CODEX_HOME、失效 wb_* 工具上下文 */
-  private disposeAgentSession(sessionId: string): void {
-    const agent = this.agentSessions.get(sessionId)
-    if (!agent) return
-    this.agentSessions.delete(sessionId)
-    if (agent.appServer) {
-      void agent.appServer.dispose().catch(() => {})
-    }
-    try {
-      agent.proxy?.server.close()
-    } catch {
-      /* 代理关闭失败不影响 */
-    }
-    try {
-      rmSync(agent.tempHome, { recursive: true, force: true })
-    } catch {
-      /* 清理失败不影响 */
-    }
-    endWorkbenchToolContext(sessionId)
-  }
-
-  /** 空闲回收：超时无活动的 agent session 销毁（线程/代理/tempHome 不常驻） */
-  private scheduleAgentIdleReap(): void {
-    if (this.agentIdleTimer) return
-    this.agentIdleTimer = setInterval(() => {
-      const now = Date.now()
-      for (const [id, agent] of this.agentSessions) {
-        // decide 流式执行中不回收：SSE 总超时（15min）可超过 AGENT_IDLE_MS，
-        // 此时 lastActiveAt 停留在轮起——不跳过会销毁活跃会话的 tempHome/通道
-        if (agent.inFlight) continue
-        if (now - agent.lastActiveAt > AGENT_IDLE_MS) this.disposeAgentSession(id)
-      }
-      if (this.agentSessions.size === 0 && this.agentIdleTimer) {
-        clearInterval(this.agentIdleTimer)
-        this.agentIdleTimer = null
-      }
-    }, 60_000)
-    // 不 hold 事件循环退出
-    this.agentIdleTimer.unref?.()
-  }
-
-  /** 应用退出时清理全部 agent 运行时 */
-  disposeAllAgentSessions(): void {
-    for (const id of Array.from(this.agentSessions.keys())) this.disposeAgentSession(id)
-    if (this.agentIdleTimer) {
-      clearInterval(this.agentIdleTimer)
-      this.agentIdleTimer = null
-    }
-  }
 
   private pokeTemplates(): void {
     // 模板变更无需落盘（模板实时聚合），仅日志
@@ -859,6 +277,11 @@ class WorkbenchService {
         logger.warn('workbench: flush sessions failed', e)
       }
     }, FLUSH_DEBOUNCE_MS)
+  }
+
+  /** 应用退出时清理全部 agent 运行时（组合根 facade→AgentRuntime） */
+  disposeAllAgents(): void {
+    this.agents.disposeAll()
   }
 
   /** 导入件产物回填后触碰会话（updated 落盘） */
@@ -972,7 +395,7 @@ class WorkbenchService {
     const ok = this.store.sessions.length < before
     if (ok) {
       // 会话删除时一并销毁其 agent 运行时（线程/代理/tempHome）
-      this.disposeAgentSession(id)
+      this.agents.dispose(id)
       this.flush()
     }
     return ok
@@ -1259,7 +682,7 @@ class WorkbenchService {
     // 注：codex thread 本身跨轮复用（完整工具调用/执行结果都在上下文里），
     // 文本近史只在 fresh thread（agent 运行时被回收重建）时兜底注入一次，
     // 不再每轮拼接——重复注入同一信息既费 token 又稀释模型注意力。
-    const agent0 = this.agentSessions.get(session.id)
+    const agent0 = this.agents.get(session.id)
     const recent =
       !agent0 || agent0.turns === 0
         ? this.activePath(session.id)
@@ -1521,7 +944,7 @@ ${userInput}`
     // 自动重建，spec 注入近史兜底。
     // E1:opts.reasoningEffort(路由层已枚举校验;非法值折叠为 undefined,auto 显式
     // 透传=撤销具名档位)随创建透传,exec 通道下轮即时生效。
-    const agent = await this.getOrCreateAgentSession(sessionId, onProgress, opts.reasoningEffort)
+    const agent = await this.agents.getOrCreate(sessionId, onProgress, opts.reasoningEffort)
     // 技能热刷新：每轮重部署（内置全量+用户 enabled，36 目录 cpSync 开销可忽略）
     // ——会话中途导入/启停的技能本轮即生效，不等新会话。
     deployWorkbenchSkills(agent.tempHome)
@@ -1629,7 +1052,7 @@ ${userInput}`
     const raw = rawLines.join('\n')
     // harness：会话保持（不关代理/不删 tempHome/不失效工具上下文）——
     // 下一次用户消息/恢复轮继续同一 thread。更新活动时间与轮次预算。
-    this.touchAgentSession(sessionId)
+    this.agents.touch(sessionId)
     agent.turns++
 
     const plan = WorkbenchService.parsePlanFromCodex(raw)
@@ -2480,7 +1903,7 @@ export const workbenchService = new WorkbenchService()
 // 应用退出时清理会话级 agent 运行时（codex 子进程 / 内嵌代理 / 临时 CODEX_HOME）。
 // 安全包裹：测试环境的 electron mock 可能没有 once。
 try {
-  app.once('before-quit', () => workbenchService.disposeAllAgentSessions())
+  app.once('before-quit', () => workbenchService.disposeAllAgents())
 } catch {
   /* 测试环境忽略 */
 }
