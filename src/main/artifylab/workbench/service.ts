@@ -119,6 +119,7 @@ import {
   type ExecutionResult
 } from '../mcp/executor'
 import { startBatch } from '../services/batchRunner'
+import { buildBatchPayload } from './batchBridge'
 import { deriveAttachmentKind } from './presetCore'
 
 /** decide 过程回调：log=阶段文本；thread_event=codex 结构化事件（透传 SSE）；
@@ -1376,79 +1377,32 @@ class WorkbenchService {
     template: WorkflowTemplate,
     attachments: AttachmentMeta[] = []
   ): Promise<{ jobId: string; total: number }> {
-    const shared: Record<string, unknown> = {
-      ...(plan.params ?? {}),
-      ...(plan.batch?.sharedParams ?? {})
-    }
-    // 媒体槽位填充逻辑与单次 execute 完全一致(附件→槽位,链式→首槽)
-    const mediaSlots = template.paramsNodes
-      .filter(
-        (n) =>
-          n.category === 'input' && /image|video|audio|-uploader$/i.test(n.renderComponent ?? '')
-      )
-      .map((n) => ({
-        slot: { param: n.name ?? '', accept: acceptKindsFor(n.renderComponent ?? '') },
-        node: n
-      }))
-    // 素材槽值形态预检（与单次 execute 一致）：拦截提示词文本误填路径槽
-    const suspectMedia = mediaSlots.find((m) => {
-      const v = shared[m.slot.param]
-      if (v == null || typeof v !== 'string') return false
-      if (/^(data:|https?:)/i.test(v)) return false
-      return v.length > 80 && /\s{2,}|[.?!]\s/.test(v)
+    // 候选②：槽位预检/链式/附件分配/行合并收口到 batchBridge（纯函数）
+    const last = this.lastExecution(sessionId)
+    const payload = buildBatchPayload(plan, template, attachments, {
+      lastOutputs:
+        last && last.outputs.length > 0
+          ? last.outputs.map((o) => ({
+              filename: typeof o === 'string' ? o : o.filename
+            }))
+          : [],
+      resolveAttachmentRef: (a) => this.resolveAttachmentRef(a),
+      acceptKindsFor
     })
-    if (suspectMedia) {
+    if (payload.suspectParam) {
       throw new Error(
-        `参数「${suspectMedia.slot.param}」是素材路径槽，收到「${String(shared[suspectMedia.slot.param]).slice(0, 50)}…」不是有效文件。请传已上传素材的文件名或 http(s)/data URL（见会话素材清单）。`
+        `参数「${payload.suspectParam}」是素材路径槽，收到「${payload.suspectValue}…」不是有效文件。请传已上传素材的文件名或 http(s)/data URL（见会话素材清单）。`
       )
     }
-    if (plan.usePreviousOutput) {
-      const last = this.lastExecution(sessionId)
-      if (last && last.outputs.length > 0 && mediaSlots[0]) {
-        shared[mediaSlots[0]!.slot.param] = last.outputs[0]
-      }
-    }
-    if (attachments.length > 0 && mediaSlots.length > 0) {
-      const occupied = new Set(
-        mediaSlots.filter((m) => shared[m.slot.param] !== undefined).map((m) => m.slot.param)
-      )
-      const freeSlots = mediaSlots.filter((m) => !occupied.has(m.slot.param)).map((m) => m.slot)
-      const { assignments } = assignAttachmentsToSlots(attachments, freeSlots)
-      for (const a of assignments) {
-        if (a.slot.param) shared[a.slot.param] = this.resolveAttachmentRef(a.attachment)
-      }
-    }
-    // 数据行:行内值覆盖 shared 同名键;未知键(模板没有的参数名)丢弃并告警。
-    // 行内字段名直接用参数名(valueMap.key=参数名),类型转换按参数节点声明。
-    const inputNodes = template.paramsNodes.filter((n) => n.category === 'input')
-    const nodeByName = new Map(inputNodes.map((n) => [n.name, n]))
-    const items = (plan.batch?.items ?? []).map((row) => {
-      const clean: Record<string, unknown> = {}
-      for (const [k, v] of Object.entries(row ?? {})) {
-        if (nodeByName.has(k)) clean[k] = v
-        else logger.warn(`workbench batch: dropping unknown param key "${k}" from item row`)
-      }
-      return { ...shared, ...clean }
-    })
-    if (items.length < 2) throw new Error('batch items must be >= 2 after merging')
-    // mapping:模板的 param name → 工作流节点。valueMap.key=参数名 → buildItemPrompt
-    // 从行字典取值并按 valueType 转换;行内没有的键不会被写(prompt 保留模板默认值,
-    // 但我们的行是「shared 全量展开」,等价于逐行完整参数)
-    const inputsMapping = inputNodes.map((n, i) => ({
-      id: n.id,
-      key: n.name ?? `param${i}`,
-      category: 'input' as const,
-      valueType: n.selectedWidget?.type ?? n.type,
-      valueMap: { key: n.name ?? `param${i}` }
-    }))
+    if (payload.items.length < 2) throw new Error('batch items must be >= 2 after merging')
     const result = await startBatch({
       prompt: template.prompt,
-      inputsMapping,
-      items,
+      inputsMapping: payload.inputsMapping,
+      items: payload.items,
       appId: template.id,
       appName: `工作台批量·${template.name}`
     })
-    return { jobId: result.job.id, total: items.length }
+    return { jobId: result.job.id, total: payload.items.length }
   }
 
   /** 批量执行入会话记录(promptId=batch jobId,供产物轮询与链式引用识别) */

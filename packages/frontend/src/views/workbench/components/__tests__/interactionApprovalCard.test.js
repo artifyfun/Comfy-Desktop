@@ -40,7 +40,9 @@ afterEach(() => {
 describe('InteractionApprovalCard — pending 渲染', () => {
   it('pending:amber 警示条 + 工具名友好化 + 倒计时展示 mm:ss', () => {
     const w = mountCard({ status: 'pending' })
-    expect(w.find('[data-testid="approval-card"]').classes()).toContain('border-amber-500/40')
+    expect(w.find('[data-testid="approval-card"]').classes()).toContain(
+      'border-[var(--wb-accent)]/40',
+    )
     expect(w.find('[data-testid="approval-tool-name"]').text()).toBe('执行模板')
     // 原始名保留在 title(对齐 ToolCallCard 约定)
     expect(w.find('[data-testid="approval-tool-name"]').attributes('title')).toBe(
@@ -158,7 +160,9 @@ describe('InteractionApprovalCard — 倒计时(fake timers)', () => {
     expect(w.find('[data-testid="approval-countdown"]').text()).toBe('01:30')
     await vi.advanceTimersByTimeAsync(30 * 1000)
     expect(w.find('[data-testid="approval-countdown"]').text()).toBe('01:00')
-    expect(w.find('[data-testid="approval-countdown"]').classes()).toContain('text-red-300')
+    expect(w.find('[data-testid="approval-countdown"]').classes()).toContain(
+      'text-[var(--wb-danger)]',
+    )
   })
 
   it('推进到 0:视觉转 expired 提示、按钮禁用,但不自动 emit reject', async () => {
@@ -188,14 +192,14 @@ describe('InteractionApprovalCard — 倒计时(fake timers)', () => {
 
 describe('InteractionApprovalCard — 终态', () => {
   it.each([
-    ['approved', '已批准', 'border-emerald-500/50'],
-    ['rejected', '已拒绝', 'border-red-500/50'],
-    ['expired', '已超时', 'border-amber-500/50'],
+    ['approved', '已批准', 'border-[var(--wb-stroke)]'],
+    ['rejected', '已拒绝', 'border-[var(--wb-stroke)]'],
+    ['expired', '已超时', 'border-[var(--wb-stroke)]'],
   ])('%s:紧凑单行结果条,无按钮无倒计时', (status, label) => {
     const w = mountCard({ status })
     const card = w.find('[data-testid="approval-card"]')
     // 非 amber 警示条(切回中性描边)
-    expect(card.classes()).not.toContain('border-amber-500/40')
+    expect(card.classes()).not.toContain('border-[var(--wb-accent)]/40')
     expect(w.find('[data-testid="approval-result"]').exists()).toBe(true)
     expect(w.find('[data-testid="approval-result"]').text()).toContain(label)
     expect(w.find('[data-testid="approval-tool-name"]').exists()).toBe(false)
@@ -218,7 +222,10 @@ describe('InteractionApprovalCard — 生命周期', () => {
 
   it('approval 变化(requestId 不同):倒计时重置为新请求预算', async () => {
     const w = mount(InteractionApprovalCard, {
-      props: { status: 'pending', approval: approval({ requestId: 'req-1', timeoutMs: 30 * 1000 }) },
+      props: {
+        status: 'pending',
+        approval: approval({ requestId: 'req-1', timeoutMs: 30 * 1000 }),
+      },
     })
     await vi.advanceTimersByTimeAsync(10 * 1000)
     expect(w.find('[data-testid="approval-countdown"]').text()).toBe('00:20')
