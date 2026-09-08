@@ -622,6 +622,8 @@ import CodeEditor from '@/components/CodeEditor/index.vue'
 import { ExcelProcessor } from '@/utils/excel-utils'
 import localforage from 'localforage'
 import { useBatchTaskStore } from '@/stores/batchTaskStore'
+import { useBatchSource } from './useBatchSource'
+import { useBatchHistory } from './useBatchHistory'
 import {
   FolderOpenOutlined,
   FileTextOutlined,
@@ -662,12 +664,6 @@ const currentApp = ref(null)
 const currentStep = ref(0)
 
 // 批量来源相关
-const selectedSourceType = ref('directory')
-const directoryPath = ref('')
-const directoryFiles = ref([])
-const fileFilter = ref('all') // 文件过滤选项
-const uploadedFiles = ref([])
-const jsonInput = ref('[]')
 const jsonEditorRef = ref(null)
 
 const client = ref(null)
@@ -685,6 +681,28 @@ const getClient = () => {
 const batchData = ref([])
 const availableFields = ref([])
 
+// ---------- 数据源（composable 拆分，第一批①b）----------
+const {
+  selectedSourceType,
+  directoryPath,
+  directoryFiles,
+  fileFilter,
+  uploadedFiles,
+  jsonInput,
+  filteredDirectoryFiles,
+  fileTypes,
+  selectDirectory,
+  scanDirectory,
+  generateBatchDataFromFiles,
+  beforeFileUpload,
+  handleFileUpload,
+  removeFile,
+  handleJsonChange,
+} = useBatchSource({
+  batchData,
+  updateAvailableFields: () => updateAvailableFields(),
+})
+
 // 映射相关
 const draggedField = ref(null)
 
@@ -698,6 +716,31 @@ const notifyWebhookUrl = ref('') // 新增：Bark/Telegram/server酱 webhook URL
 // 队列相关：本页提交的任务 id（可能排队等待，也可能在跑）
 const currentJobId = ref(null)
 const myJob = computed(() => batchTaskStore.queue.find((j) => j.id === currentJobId.value) ?? null)
+
+// ---------- 执行历史（composable 拆分，第一批①b）----------
+const {
+  showHistoryDialog,
+  historyRecords,
+  currentHistoryRecordId,
+  ensureHistoryLoaded,
+  createNewHistoryRecord,
+  upsertHistoryRecord,
+  openHistoryDialog,
+  deleteHistoryRecord,
+} = useBatchHistory({
+  currentApp,
+  currentJobId,
+  batchTaskStore,
+  executionProgress,
+  startFromIndex,
+  state,
+  selectedSourceType,
+  directoryPath,
+  fileFilter,
+  uploadedFiles,
+  jsonInput,
+  batchData,
+})
 // 排在我前面的排队任务数
 const queueWaitCount = computed(() => {
   const idx = batchTaskStore.queue.findIndex((j) => j.id === currentJobId.value)
@@ -780,175 +823,6 @@ function formatDuration(ms) {
   return parts.length ? parts.join(t('timeUnitSeparator')) : t('lessThanOneSecond')
 }
 
-// ===== 执行记录（localforage） =====
-const showHistoryDialog = ref(false)
-const historyRecords = ref([])
-const currentHistoryRecordId = ref(null)
-const historyLoadedKey = ref('')
-const historyKey = computed(() =>
-  currentApp.value && currentApp.value.id ? `batch/history/${currentApp.value.id}` : '',
-)
-
-async function ensureHistoryLoaded() {
-  if (!historyKey.value) {
-    return
-  }
-  if (historyLoadedKey.value === historyKey.value && historyRecords.value.length) return
-  try {
-    const list = (await localforage.getItem(historyKey.value)) || []
-    historyRecords.value = Array.isArray(list) ? list : []
-    // 按更新时间倒序
-    historyRecords.value.sort(
-      (a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt),
-    )
-    historyLoadedKey.value = historyKey.value
-  } catch (error) {
-    // 读取失败时不清空已有列表（避免把「读不到」伪装成「无记录」），仅记录并提示。
-    console.error('加载历史记录失败:', error)
-    showError('historyLoadFailed')
-  }
-}
-
-async function saveHistory() {
-  if (!historyKey.value) return
-  try {
-    await localforage.setItem(historyKey.value, JSON.parse(JSON.stringify(historyRecords.value)))
-  } catch (error) {
-    console.error('保存历史记录失败:', error)
-    showError('historySaveFailed')
-  }
-}
-// ===== 队列级配置（关机/通知）：与浮层/详情页共用一份，变更即时应用到后端 =====
-async function loadQueueConfig() {
-  await batchTaskStore.loadQueueConfig()
-  autoShutdownEnabled.value = batchTaskStore.queueConfig.autoShutdown
-  notifyEnabled.value = batchTaskStore.queueConfig.notifyEnabled
-  notifyWebhookUrl.value = batchTaskStore.queueConfig.notifyUrl
-}
-function syncQueueConfig() {
-  batchTaskStore.setQueueConfig({
-    autoShutdown: autoShutdownEnabled.value,
-    notifyEnabled: notifyEnabled.value,
-    notifyUrl: notifyWebhookUrl.value,
-  })
-}
-// URL 输入防抖应用（避免每敲一个字符就打一次后端）
-const debouncedApplyQueueConfig = debounce(() => {
-  syncQueueConfig()
-  batchTaskStore.applyQueueConfig()
-}, 800)
-let queueConfigLoaded = false
-watch(autoShutdownEnabled, () => {
-  if (!queueConfigLoaded) return
-  syncQueueConfig()
-  batchTaskStore.applyQueueConfig()
-})
-watch(notifyEnabled, () => {
-  if (!queueConfigLoaded) return
-  syncQueueConfig()
-  batchTaskStore.applyQueueConfig()
-})
-watch(notifyWebhookUrl, () => {
-  if (!queueConfigLoaded) return
-  debouncedApplyQueueConfig()
-})
-
-function deepClone(obj) {
-  return JSON.parse(JSON.stringify(obj))
-}
-
-async function createNewHistoryRecord() {
-  const newId = uuidv4()
-  const now = new Date().toISOString()
-  const record = {
-    id: newId,
-    taskId: currentJobId.value ?? batchTaskStore.status?.id ?? null,
-    appId: currentApp.value?.id,
-    appName: currentApp.value?.name,
-    createdAt: now,
-    updatedAt: now,
-    status: 'running',
-    clientId: state.clientId,
-    total: executionProgress.total,
-    processed: 0,
-    success: 0,
-    failed: 0,
-    percent: 0,
-    startFromIndex: startFromIndex.value,
-    lastIndexProcessed: startFromIndex.value - 1,
-    inputsMapping: deepClone(state.inputs),
-    batchSource: {
-      type: selectedSourceType.value,
-      directoryPath: directoryPath.value,
-      fileFilter: fileFilter.value,
-      uploadedFiles:
-        deepClone(uploadedFiles.value?.map((f) => ({ name: f.name, size: f.size }))) || [],
-      jsonInput: jsonInput.value,
-    },
-    batchData: deepClone(batchData.value),
-    logs: [],
-    results: [],
-  }
-  historyRecords.value.unshift(record)
-  await saveHistory()
-  return newId
-}
-
-async function upsertHistoryRecord(update) {
-  if (!update?.id) return
-  const idx = historyRecords.value.findIndex((r) => r.id === update.id)
-  if (idx === -1) return
-  const rec = historyRecords.value[idx]
-  const merged = { ...rec, ...update }
-  if (typeof update.processed === 'number') {
-    // update.processed 已包含跳过前缀（init 为 startFromIndex-1），其值即 1-based
-    // currentIndex；之前额外 +(startFromIndex-1) 会重复叠加，导致断点续跑时
-    // lastIndexProcessed 偏大、再次续跑跳过未处理项（数据丢失）。
-    merged.lastIndexProcessed = Math.max(rec.lastIndexProcessed || 0, update.processed)
-  }
-  if (Array.isArray(update.logs) && update.logs.length) {
-    merged.logs = [...update.logs, ...(rec.logs || [])]
-  }
-  if (update.resultItem) {
-    merged.results = [...(rec.results || []), update.resultItem]
-    merged.lastIndexProcessed = Math.max(rec.lastIndexProcessed || 0, update.resultItem.index)
-  }
-  merged.updatedAt = new Date().toISOString()
-  historyRecords.value.splice(idx, 1, merged)
-  await saveHistory()
-}
-
-async function openHistoryDialog() {
-  await ensureHistoryLoaded()
-  showHistoryDialog.value = true
-}
-
-async function deleteHistoryRecord(id) {
-  const idx = historyRecords.value.findIndex((r) => r.id === id)
-  if (idx > -1) {
-    historyRecords.value.splice(idx, 1)
-    await saveHistory()
-  }
-}
-
-function restoreFromRecord(rec) {
-  if (!rec) return
-  // 恢复源与数据、映射
-  selectedSourceType.value = rec.batchSource?.type || 'json'
-  directoryPath.value = rec.batchSource?.directoryPath || ''
-  fileFilter.value = rec.batchSource?.fileFilter || 'all'
-  jsonInput.value = rec.batchSource?.jsonInput || '[]'
-  batchData.value = Array.isArray(rec.batchData) ? deepClone(rec.batchData) : []
-  state.inputs = Array.isArray(rec.inputsMapping) ? deepClone(rec.inputsMapping) : state.inputs
-  updateAvailableFields()
-  // 继续索引：lastIndexProcessed 是 1-based 已完成项，续跑应从「下一项」开始，
-  // 否则会重跑最后一项（固定 seed 工作流会产生重复输出）。
-  const nextIndex = Math.min((rec.lastIndexProcessed || 0) + 1, batchData.value.length)
-  startFromIndex.value = Math.max(1, nextIndex)
-  currentStep.value = 2
-  showHistoryDialog.value = false
-}
-
 // 计算属性
 const canProceed = computed(() => {
   switch (currentStep.value) {
@@ -998,137 +872,6 @@ const fileCounts = computed(() => {
 })
 
 // 文件类型定义
-const fileTypes = {
-  images: [
-    '.jpg',
-    '.jpeg',
-    '.png',
-    '.gif',
-    '.bmp',
-    '.webp',
-    '.svg',
-    '.ico',
-    '.tiff',
-    '.tif',
-    '.jfif',
-  ],
-  videos: [
-    '.mp4',
-    '.avi',
-    '.mov',
-    '.wmv',
-    '.flv',
-    '.webm',
-    '.mkv',
-    '.m4v',
-    '.3gp',
-    '.ogv',
-    '.ts',
-    '.mts',
-    '.m2ts',
-    '.vob',
-    '.asf',
-    '.rm',
-    '.rmvb',
-    '.divx',
-    '.xvid',
-  ],
-  audios: [
-    '.mp3',
-    '.wav',
-    '.flac',
-    '.aac',
-    '.ogg',
-    '.wma',
-    '.m4a',
-    '.opus',
-    '.aiff',
-    '.au',
-    '.ra',
-    '.mid',
-    '.midi',
-    '.amr',
-    '.ape',
-    '.alac',
-    '.wv',
-  ],
-  texts: [
-    '.txt',
-    '.md',
-    '.json',
-    '.xml',
-    '.html',
-    '.htm',
-    '.css',
-    '.js',
-    '.ts',
-    '.jsx',
-    '.tsx',
-    '.vue',
-    '.py',
-    '.java',
-    '.cpp',
-    '.c',
-    '.h',
-    '.php',
-    '.rb',
-    '.go',
-    '.rs',
-    '.swift',
-    '.kt',
-    '.scala',
-    '.sql',
-    '.sh',
-    '.bat',
-    '.ps1',
-    '.yaml',
-    '.yml',
-    '.toml',
-    '.ini',
-    '.cfg',
-    '.conf',
-    '.log',
-  ],
-  documents: [
-    '.pdf',
-    '.doc',
-    '.docx',
-    '.xls',
-    '.xlsx',
-    '.ppt',
-    '.pptx',
-    '.odt',
-    '.ods',
-    '.odp',
-    '.rtf',
-    '.csv',
-  ],
-}
-
-// 过滤后的文件列表
-const filteredDirectoryFiles = computed(() => {
-  if (fileFilter.value === 'all') {
-    return directoryFiles.value
-  }
-
-  const filterMap = {
-    files: (file) => !file.isDirectory,
-    directories: (file) => file.isDirectory,
-    images: (file) =>
-      !file.isDirectory && fileTypes.images.some((ext) => file.name.toLowerCase().endsWith(ext)),
-    videos: (file) =>
-      !file.isDirectory && fileTypes.videos.some((ext) => file.name.toLowerCase().endsWith(ext)),
-    audios: (file) =>
-      !file.isDirectory && fileTypes.audios.some((ext) => file.name.toLowerCase().endsWith(ext)),
-    texts: (file) =>
-      !file.isDirectory && fileTypes.texts.some((ext) => file.name.toLowerCase().endsWith(ext)),
-    documents: (file) =>
-      !file.isDirectory && fileTypes.documents.some((ext) => file.name.toLowerCase().endsWith(ext)),
-  }
-
-  const filterFn = filterMap[fileFilter.value]
-  return filterFn ? directoryFiles.value.filter(filterFn) : directoryFiles.value
-})
 
 const previewColumns = computed(() => {
   if (batchData.value.length === 0) return []
@@ -1207,218 +950,6 @@ async function init() {
   state.inputs = inputs
   // 加载当前应用的执行记录
   await ensureHistoryLoaded()
-}
-
-// 选择目录
-async function selectDirectory() {
-  try {
-    if (window.electronAPI) {
-      const result = await window.electronAPI.ArtifyLab.selectFile()
-      if (!result) return
-
-      directoryPath.value = result
-      await scanDirectory(result)
-    } else {
-      showError('electronNotAvailable')
-    }
-  } catch (error) {
-    console.error('选择目录失败:', error)
-    showError('selectDirectoryFailed')
-  }
-}
-
-// 扫描目录
-async function scanDirectory(path) {
-  try {
-    if (window.electronAPI) {
-      const files = await window.electronAPI.ArtifyLab.scanFolder(path)
-      directoryFiles.value = files.map((file) => ({
-        name: file.fileName,
-        path: file.fullPath,
-        size: file.size,
-        type: file.isDirectory ? 'directory' : 'file',
-        extension: file.extension,
-        isDirectory: file.isDirectory,
-        lastModified: file.lastModified,
-        relativePath: file.relativePath,
-      }))
-
-      // 生成批量数据
-      generateBatchDataFromFiles()
-    }
-  } catch (error) {
-    console.error('扫描目录失败:', error)
-    showError('scanDirectoryFailed')
-  }
-}
-
-// 从文件生成批量数据
-function generateBatchDataFromFiles() {
-  batchData.value = filteredDirectoryFiles.value.map((file) => ({
-    fileName: file.name,
-    filePath: file.path,
-    fileSize: file.size,
-    fileType: file.type,
-    fileExtension: file.extension,
-    // file.extension 来自 path.extname，含前导点（'.jpg'），按其本身长度截断即可，
-    // 之前用 length+1 会多砍一个字符（photo.jpg → phot）。
-    fileNameWithoutExt: file.extension ? file.name.slice(0, -file.extension.length) : file.name,
-    isDirectory: file.isDirectory,
-    lastModified: file.lastModified,
-    relativePath: file.relativePath,
-  }))
-
-  updateAvailableFields()
-}
-
-// 文件上传处理
-function beforeFileUpload(file) {
-  // 使用ExcelProcessor验证文件
-  if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-    const validation = ExcelProcessor.validateExcelFile(file)
-    if (!validation.isValid) {
-      showError(validation.errors[0])
-      return false
-    }
-  } else {
-    // 其他文件类型验证
-    const isValidType = ['text/csv', 'application/json'].includes(file.type)
-    if (!isValidType) {
-      showError('unsupportedFileType')
-      return false
-    }
-
-    const isLt10M = file.size / 1024 / 1024 < 10
-    if (!isLt10M) {
-      showError('fileTooLarge')
-      return false
-    }
-  }
-
-  return false // 阻止自动上传，手动处理
-}
-
-// 处理文件上传
-async function handleFileUpload(file) {
-  try {
-    if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-      // Excel文件处理
-      await parseExcelFile(file)
-    } else {
-      // 其他文件处理
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        const content = e.target.result
-        parseFileContent(content, file.name)
-      }
-      reader.readAsText(file)
-    }
-  } catch (error) {
-    console.error('文件处理失败:', error)
-    showError('fileProcessingFailed')
-  }
-}
-
-// 解析文件内容
-function parseFileContent(content, fileName) {
-  try {
-    let data = []
-
-    if (fileName.endsWith('.json')) {
-      data = JSON.parse(content)
-    } else if (fileName.endsWith('.csv')) {
-      data = parseCSV(content)
-    } else {
-      showError('unsupportedFileType')
-      return
-    }
-
-    if (Array.isArray(data)) {
-      batchData.value = data
-      updateAvailableFields()
-      showSuccess('fileParsedSuccessfully')
-    } else {
-      showError('invalidDataFormat')
-    }
-  } catch (error) {
-    console.error('解析文件失败:', error)
-    showError('fileParseFailed')
-  }
-}
-
-// 解析Excel文件
-async function parseExcelFile(file) {
-  try {
-    // 使用ExcelProcessor解析文件
-    const result = await ExcelProcessor.parseExcelFile(file, {
-      sheetIndex: 0, // 使用第一个工作表
-      headerRow: 0, // 第一行作为表头
-      dataStartRow: 1, // 从第二行开始读取数据
-      maxRows: 10000, // 最大读取10000行
-      includeEmptyRows: false, // 不包含空行
-      dateFormat: 'YYYY-MM-DD', // 日期格式
-      numberFormat: 'string', // 数字转换为字符串
-    })
-
-    batchData.value = result.data
-    updateAvailableFields()
-    showSuccess('excelFileParsedSuccessfully')
-
-    // 显示文件信息
-    console.log('Excel文件解析成功:', {
-      sheetName: result.sheetName,
-      totalRows: result.totalRows,
-      headers: result.headers,
-    })
-
-    return result.data
-  } catch (error) {
-    console.error('Excel文件解析失败:', error)
-    showError('excelParseFailed')
-    throw error
-  }
-}
-
-// 解析CSV
-function parseCSV(content) {
-  const lines = content.split('\n')
-  const headers = lines[0].split(',').map((h) => h.trim())
-  const data = []
-
-  for (let i = 1; i < lines.length; i++) {
-    if (lines[i].trim()) {
-      const values = lines[i].split(',').map((v) => v.trim())
-      const item = {}
-      headers.forEach((header, index) => {
-        item[header] = values[index] || ''
-      })
-      data.push(item)
-    }
-  }
-
-  return data
-}
-
-// 移除文件
-function removeFile(file) {
-  const index = uploadedFiles.value.findIndex((f) => f.uid === file.uid)
-  if (index > -1) {
-    uploadedFiles.value.splice(index, 1)
-  }
-}
-
-// JSON输入处理
-function handleJsonChange(value) {
-  jsonInput.value = value
-  try {
-    const data = JSON.parse(value)
-    if (Array.isArray(data)) {
-      batchData.value = data
-      updateAvailableFields()
-    }
-  } catch (error) {
-    // JSON格式错误时不更新数据
-  }
 }
 
 // 更新可用字段
