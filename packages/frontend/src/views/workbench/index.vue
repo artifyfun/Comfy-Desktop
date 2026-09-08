@@ -1255,6 +1255,14 @@ import {
 import { pushFiles, drainAttachments, drainFiles } from '@/utils/canvasBridge'
 import { useCanvasMode } from '@/utils/canvasMode'
 import { createAguiBridge } from './aguiBridge'
+import {
+  useTranscriptModel,
+  toolItemSummary as _toolItemSummary,
+  toolItemDetail as _toolItemDetail,
+  toolItemRunning as _toolItemRunning,
+  toolItemFailed as _toolItemFailed,
+} from './useTranscriptModel'
+import { useExecutionPolling, extractFiles } from './useExecutionPolling'
 const { t, getCurrentLanguage } = useI18n()
 const { onResult, emitResult, onAttachments, onCanvasState, onPrompt, emitOps } = useCanvasMode()
 // 画布侧栏模式：store 模式由画布页设置；这里只需把产物经 emitResult 推给宿主
@@ -1367,6 +1375,30 @@ function pushMsg(m) {
   messages.value.push(msg)
   return msg
 }
+
+// ---------- codex 条目转录模型 + 执行轮询（composable 拆分，第一批①a）----------
+const {
+  isTodoMsg,
+  isActivityMsg,
+  expandedToolIds,
+  toggleToolItem,
+  processGroupAt,
+  processGroupSkipped,
+  processGroupItems,
+  turnProgressModel,
+  turnActCover,
+  todoCardRunning,
+  processGroupRunning,
+  processGroupFailed,
+  toggleProcessGroup,
+  dismissDecidingProgress,
+  turnGroupItems,
+} = useTranscriptModel({ messages, busy, t, pushMsg })
+// 展示模型工具函数（模板直接用）
+const toolItemSummary = _toolItemSummary
+const toolItemDetail = _toolItemDetail
+const toolItemRunning = _toolItemRunning
+const toolItemFailed = _toolItemFailed
 // 执行中计数（响应式）：SSE 结束后 ComfyUI 仍在跑（轮询阶段），停止按钮要持续显示
 const executingCount = ref(0)
 const draftAttachments = ref([])
@@ -1380,6 +1412,35 @@ const panelOpen = ref(true)
 const messagesEl = ref(null)
 const composerEl = ref(null)
 const pollTimers = new Map()
+const {
+  applyExecutionSideEffect,
+  startPoll,
+  stopPoll,
+  startBatchPoll,
+  stopBatchPoll,
+} = useExecutionPolling({
+  messages,
+  artifacts,
+  sessionId,
+  executingCount,
+  execProgressIndex,
+  pollTimers,
+  t,
+  pushMsg,
+  scrollToBottom: () => scrollToBottom(),
+  loadSessions,
+  sessions,
+  autoRecover: (err) => autoRecover(err),
+  diagnoseArtifact: (a) => diagnoseArtifact(a),
+  pushCardsToCanvas: (files) => pushCardsToCanvas(files),
+  executeApi,
+  pendingIssues,
+  isCanvasEmbedded,
+  emitOps,
+  dismissDecidingProgress,
+  syncWorkflowToCanvas,
+  runCanvasOnHost,
+})
 const newDialogOpen = ref(false)
 const presetMgrOpen = ref(false)
 const skillMgrOpen = ref(false)
@@ -1955,552 +2016,6 @@ async function send() {
   await runChat(inputText, attachments, { userBubble: text })
 }
 
-// ---------- codex 条目流转写（抄 codex app-server/dsh transcript：
-// item.id → 消息行索引，started 占行，updated/completed 原位 upsert） ----------
-
-// P1-B3:todo_list 是任务级进度卡(独立渲染,不参与「过程(N 步)」折叠)；
-// 其余 tool_item(reasoning/工具)是活动级条目(可折叠/合成 activity 步骤)。
-const isTodoMsg = (m) =>
-  m && m.kind === 'tool_item' && m.toolItem && m.toolItem.type === 'todo_list'
-const isActivityMsg = (m) =>
-  m && m.kind === 'tool_item' && m.toolItem && m.toolItem.type !== 'todo_list'
-
-function toolItemSummary(item) {
-  switch (item.type) {
-    case 'command_execution':
-      return { icon: 'fa-terminal', label: item.command }
-    case 'file_change':
-      return {
-        icon: 'fa-file-pen',
-        label: (item.changes || []).map((c) => c.path).join(', ') || 'file change',
-      }
-    case 'mcp_tool_call':
-      return { icon: 'fa-plug', label: `${item.server}/${item.tool}` }
-    case 'web_search':
-      return { icon: 'fa-magnifying-glass', label: item.query || 'web search' }
-    case 'reasoning':
-      return { icon: 'fa-brain', label: (item.text || '').slice(0, 80) }
-    case 'todo_list':
-      return { icon: 'fa-list-check', label: 'todo' }
-    case 'error':
-      return { icon: 'fa-triangle-exclamation', label: item.message || 'error' }
-    default:
-      return { icon: 'fa-circle-dot', label: item.type }
-  }
-}
-
-const expandedToolIds = reactive(new Set())
-
-function toggleToolItem(m) {
-  const id = m.toolItem?.id
-  if (!id || !toolItemDetail(m.toolItem)) return
-  if (expandedToolIds.has(id)) expandedToolIds.delete(id)
-  else expandedToolIds.add(id)
-}
-
-// 回合级过程折叠：同 turn 相邻 tool_item 消息聚合为一行「过程（N 步）」。
-// 仅组首 index 有映射；组内非首条由组首统一渲染，不单独占行。
-// P1-B3:todo_list 卡不参与折叠(任务级进度卡独立成行,见模板 isTodoMsg 分支)——它
-// 天然打断相邻 tool_item 的连续聚合(前后工具各自成组,互不横跨进度卡)。
-const processGroups = computed(() => {
-  const map = new Map()
-  const msgs = messages.value
-  for (let i = 0; i < msgs.length; i++) {
-    const m = msgs[i]
-    if (!m || !isActivityMsg(m)) continue
-    const prev = msgs[i - 1]
-    if (prev && isActivityMsg(prev) && prev.turnId != null && prev.turnId === m.turnId) continue
-    let j = i
-    while (j < msgs.length && msgs[j] && isActivityMsg(msgs[j])) {
-      if (j > i && msgs[j].turnId !== m.turnId) break
-      j++
-    }
-    map.set(i, { start: i, end: j - 1, count: j - i })
-  }
-  return map
-})
-const expandedProcessGroups = reactive(new Set())
-
-function processGroupAt(i) {
-  const g = processGroups.value.get(i)
-  // 单条目不聚合（保持原标题行）；旧数据（无 turnId）天然 count=1 走原样
-  return g && g.count > 1 ? g : null
-}
-
-/** 组内非首条：由组首聚合渲染，跳过占行（仅活动级条目参与；todo 卡独立成行） */
-function processGroupSkipped(i) {
-  const m = messages.value[i]
-  const prev = messages.value[i - 1]
-  return !!(
-    isActivityMsg(m) &&
-    prev &&
-    isActivityMsg(prev) &&
-    m.turnId != null &&
-    prev.turnId === m.turnId
-  )
-}
-
-function processGroupItems(g) {
-  return messages.value.slice(g.start, g.end + 1)
-}
-
-/**
- * P1-B3 回合级进度模型（方案 C=A+B 混合，供 ProgressCard 消费）：
- * - 原生优先(mode 'todo')：turn 内有 todo_list 消息 → 任务清单卡。卡在消息流
- *   原位渲染(见模板 isTodoMsg 分支),此处只取 running 判定口径;
- * - 合成兜底(mode 'activity')：无原生 todo 且 turn 存在**在途** reasoning/工具
- *   条目时,把全 turn 活动条目归一为步骤叙事卡(置顶渲染,期间隐藏重复的
- *   「过程(N 步)」折叠行);全完成后回落既有折叠行——终态/历史零新增视觉;
- * - 纯文本回合 / 全终态 → null(不占位)。
- */
-function turnProgressModel(turnFirst) {
-  const items = turnGroupItems(turnFirst)
-  const todoEntry = items.find((x) => isTodoMsg(x.m))
-  if (todoEntry) {
-    const ti = todoEntry.m.toolItem
-    const list = ti.items || []
-    const done = list.filter((it) => it && it.completed === true).length
-    return {
-      mode: 'todo',
-      title: t('workbenchTaskProgress'),
-      // 头部 spinner 口径:updated 全勾帧先于 completed 事件到达时也不闪 spinner
-      running: ti.status === 'in_progress' && busy.value && done < list.length,
-      items: list,
-    }
-  }
-  const acts = items.filter((x) => isActivityMsg(x.m))
-  if (!acts.length) return null
-  if (!acts.some((x) => toolItemRunning(x.m.toolItem))) return null // 全终态 → 回落
-  return {
-    mode: 'activity',
-    title: t('workbenchExecProgress'),
-    running: true,
-    steps: acts.map(({ m }) => {
-      const ti = m.toolItem
-      const sum = toolItemSummary(ti)
-      return {
-        label: sum.label,
-        icon: sum.icon,
-        status: toolItemRunning(ti) ? 'in_progress' : 'completed',
-        detail: toolItemDetail(ti) || '',
-      }
-    }),
-  }
-}
-
-/** activity 卡展示期间,该 turn 的「过程(N 步)」折叠行整体隐藏(防与卡重复) */
-function turnActCover(i) {
-  const base = messages.value[i]
-  if (!base || base.turnId == null || !isActivityMsg(base)) return false
-  let j = i
-  while (j > 0) {
-    const p = messages.value[j - 1]
-    if (p && p.role === 'agent' && p.turnId === base.turnId) j -= 1
-    else break
-  }
-  const model = turnProgressModel(j)
-  return !!(model && model.mode === 'activity')
-}
-
-/** 原生 todo 卡头部 running 口径：快照 in_progress 且页面仍在忙且未全勾才转 spinner
- *  (updated 全勾帧先于 completed 事件到达时保持冷静,不闪 spinner) */
-function todoCardRunning(toolItem) {
-  const list = (toolItem && toolItem.items) || []
-  return !!(
-    toolItem &&
-    toolItem.status === 'in_progress' &&
-    busy.value &&
-    list.some((it) => !it || it.completed !== true)
-  )
-}
-
-function processGroupRunning(g) {
-  return messages.value
-    .slice(g.start, g.end + 1)
-    .some((x) => x.toolItem && toolItemRunning(x.toolItem))
-}
-
-function processGroupFailed(g) {
-  return messages.value
-    .slice(g.start, g.end + 1)
-    .some((x) => x.toolItem && toolItemFailed(x.toolItem))
-}
-
-function toggleProcessGroup(i) {
-  const g = processGroupAt(i)
-  if (!g) return
-  if (expandedProcessGroups.has(i)) expandedProcessGroups.delete(i)
-  else expandedProcessGroups.add(i)
-}
-
-function toolItemRunning(item) {
-  // 各 item 的 in-flight 状态字段统一收口
-  return (
-    item.status === 'in_progress' ||
-    item.status === 'inProgress' ||
-    (item.type === 'command_execution' && item.exit_code === undefined) ||
-    false
-  )
-}
-
-/** 折叠 tool 行终态判定：item 自身失败（type=error 或 status error/failed） */
-function toolItemFailed(item) {
-  return (
-    !!item &&
-    (item.status === 'error' ||
-      item.status === 'failed' ||
-      item.type === 'error')
-  )
-}
-
-function toolItemDetail(item) {
-  switch (item.type) {
-    case 'command_execution':
-      return item.aggregated_output || null
-    case 'file_change':
-      return (item.changes || []).map((c) => `${c.kind || 'update'}: ${c.path}`).join('\n') || null
-    case 'mcp_tool_call':
-      return item.result
-        ? JSON.stringify(item.result, null, 1)
-        : JSON.stringify(item.arguments ?? {}, null, 1)
-    case 'reasoning':
-      return item.text && item.text.length > 80 ? item.text : null
-    default:
-      return null
-  }
-}
-
-/**
- * 移除 AI 占位进度气泡（「AI 正在决策…」/「执行失败，AI 正在分析…」）。
- * 不能只 pop 尾部：decide 阶段的过程条目（tool_item）追加在占位之后，占位
- * 可能已不在数组末尾，尾部 pop 会漏掉它，导致 loading 气泡残留/错位。
- */
-function dismissDecidingProgress() {
-  const placeholders = [t('workbenchDeciding'), t('workbenchAutoRecovering')]
-  for (let i = messages.value.length - 1; i >= 0; i--) {
-    const m = messages.value[i]
-    if (m.kind === 'progress' && placeholders.includes(m.text)) {
-      messages.value.splice(i, 1)
-    }
-  }
-}
-
-/**
- * 执行类副作用统一分派(legacy SSE artifact/sync/canvas-exec/invalid 与
- * AG-UI 桥 CUSTOM wb_artifact/wb_sync/wb_canvas_exec/wb_invalid 共用同一实现,
- * 消息模型与行为逐字节对齐——两条管线只差事件来源,不差功能)。
- * kind:'artifact'|'sync'|'canvas-exec'|'invalid'
- */
-function applyExecutionSideEffect(kind, data) {
-  if (kind === 'artifact') {
-    // 工具执行（自组工作流 wb_run_workflow / wb_execute_template wait=true）产物补推：
-    // pollExecution 落盘 artifact 消息但不推 SSE，前端实时无图。去重：已有同
-    // promptId 的 artifact 消息则跳过（模板/画布执行的前端轮询已原位升级显示）。
-    const files = data.outputFiles || []
-    if (!files.length) return
-    if (messages.value.some((m) => m.kind === 'artifact' && m.promptId === data.promptId)) return
-    pushMsg({
-      role: 'agent',
-      kind: 'artifact',
-      text: `产物 ${files.length} 个文件`,
-      outputs: files.map((f) => f.filename),
-      outputFiles: files,
-      promptId: data.promptId,
-      createdAt: Date.now(),
-    })
-    return
-  }
-  if (kind === 'sync') {
-    // 模板工作流 → 宿主画布。ensureTab（执行前自动加载）失败只降级不打断
-    // 生成流程；显式同步失败仍补错误气泡。
-    syncWorkflowToCanvas(data).catch((e) => {
-      if (data.ensureTab) {
-        console.warn('[workbench] ensure-tab skipped:', e)
-        return
-      }
-      pushMsg({
-        role: 'agent',
-        kind: 'error',
-        text: t('workbenchSyncFailed') + ': ' + (e?.message || String(e)),
-        createdAt: Date.now(),
-      })
-    })
-    return
-  }
-  if (kind === 'canvas-ops') {
-    // P3 A 画布 app 节点指令集：canvas-embedded 模式经总线推给宿主画布页
-    // （人审确认卡 → 执行）；embed/独立页无宿主画布，提示不可用
-    const ops = Array.isArray(data?.ops) ? data.ops : []
-    if (!ops.length) return
-    if (isCanvasEmbedded.value) {
-      emitOps(ops)
-      pushMsg({
-        role: 'agent',
-        kind: 'chat',
-        text: t('workbenchCanvasOpsSent').replace('{n}', String(ops.length)),
-        createdAt: Date.now(),
-      })
-    } else {
-      pushMsg({
-        role: 'agent',
-        kind: 'error',
-        text: t('workbenchCanvasOpsNoHost'),
-        createdAt: Date.now(),
-      })
-    }
-    return
-  }
-  if (kind === 'canvas-exec') {
-    // 执行画布当前工作流：前端 → 注入桥 graphToPrompt → 服务端提交 → ack
-    runCanvasOnHost(data)
-      .then((r) => {
-        dismissDecidingProgress()
-        if (r.batch) {
-          artifacts.value.unshift({
-            promptId: r.jobId,
-            templateId: '画布批量',
-            templateName: '画布批量',
-            status: 'running',
-            error: '',
-            outputs: [],
-            files: [],
-          })
-          startBatchPoll(r.jobId)
-          pushMsg({
-            role: 'agent',
-            kind: 'chat',
-            text: t('workbenchCanvasBatchQueued'),
-            createdAt: Date.now(),
-          })
-        } else {
-          artifacts.value.unshift({
-            promptId: r.promptId,
-            templateId: '画布当前工作流',
-            templateName: '画布当前工作流',
-            status: 'running',
-            error: '',
-            outputs: [],
-            files: [],
-          })
-          const msg = pushMsg({
-            role: 'agent',
-            kind: 'progress',
-            text: t('workbenchExecuting'),
-            createdAt: Date.now(),
-          })
-          execProgressIndex.set(r.promptId, msg._key)
-          executingCount.value++
-          startPoll(r.promptId)
-          pushMsg({
-            role: 'agent',
-            kind: 'chat',
-            text: t('workbenchCanvasRunQueued'),
-            createdAt: Date.now(),
-          })
-        }
-        scrollToBottom()
-      })
-      .catch((e) => {
-        dismissDecidingProgress()
-        pushMsg({
-          role: 'agent',
-          kind: 'error',
-          text: t('workbenchCanvasRunFailed') + ': ' + (e?.message || String(e)),
-          createdAt: Date.now(),
-        })
-      })
-    return
-  }
-  if (kind === 'invalid') {
-    pendingIssues.value = data.issues ?? []
-    pushMsg({
-      role: 'agent',
-      kind: 'error',
-      text: t('workbenchPlanInvalid') + ': ' + (data.issues ?? []).map((i) => i.message).join('；'),
-      createdAt: Date.now(),
-    })
-  }
-}
-
-// 批量任务轮询:进度/产物经 batch API 汇入产物卡(同一张卡,进度条展示)
-function startBatchPoll(promptId) {
-  const poll = async () => {
-    try {
-      const { json } = await executeApi.batchStatus(promptId)
-      const job = json?.data?.job ?? json?.data
-      if (!job) return
-      const artifact = artifacts.value.find((a) => a.promptId === promptId)
-      if (!artifact) {
-        stopBatchPoll(promptId)
-        return
-      }
-      artifact.batchStatus = job.status
-      artifact.batchPercent = job.percent
-      artifact.batchSuccess = job.success
-      artifact.batchFailed = job.failed
-      artifact.batchTotal = job.total
-      const doneFiles = (job.results ?? [])
-        .filter((r) => r.success && r.files)
-        .flatMap((r) => r.files)
-      if (doneFiles.length) {
-        artifact.files = doneFiles
-        artifact.outputs = doneFiles.map((f) => f.filename)
-      }
-      if (['completed', 'stopped', 'failed'].includes(job.status)) {
-        artifact.status = job.status === 'completed' ? 'success' : 'error'
-        // 批量终态：completed 推 artifact 消息（产物图进回合卡片，窄容器也可见）
-        pushMsg(
-          job.status === 'completed'
-            ? {
-                role: 'agent',
-                kind: 'artifact',
-                text: t('workbenchBatchDone', { total: job.total, success: job.success }),
-                outputs: doneFiles.map((f) => f.filename),
-                outputFiles: doneFiles,
-                createdAt: Date.now(),
-              }
-            : {
-                role: 'agent',
-                kind: 'error',
-                text: `${t('workbenchFailed')}: 批量任务 ${job.status}`,
-                createdAt: Date.now(),
-              },
-        )
-        scrollToBottom()
-        stopBatchPoll(promptId)
-      }
-    } catch {
-      /* 下轮重试 */
-    }
-  }
-  poll()
-  pollTimers.set(`batch:${promptId}`, setInterval(poll, 2500))
-}
-
-function stopBatchPoll(promptId) {
-  const t = pollTimers.get(`batch:${promptId}`)
-  if (t) clearInterval(t)
-  pollTimers.delete(`batch:${promptId}`)
-}
-
-function startPoll(promptId) {
-  const poll = async () => {
-    try {
-      const { json } = await executeApi.poll(sessionId.value, promptId)
-      const r = json?.data
-      if (!r) return
-      let doneFiles = []
-      const artifact = artifacts.value.find((a) => a.promptId === promptId)
-      if (artifact) {
-        artifact.status = r.status
-        if (r.status === 'error') {
-          artifact.error = (r.error || '').slice(0, 2000)
-          // M4 调试路由：失败即自动分类（异步填 diagnosis，卡片出现后可一键修）
-          void diagnoseArtifact(artifact)
-        }
-        if (r.status === 'success' && r.outputs) {
-          doneFiles = extractFiles(r.outputs)
-          artifact.outputs = doneFiles.map((f) => f.filename)
-          artifact.files = doneFiles
-          // embed 模式：执行成功自动把产物铺上画布（用户也可手动补贴）
-          pushCardsToCanvas(doneFiles)
-        }
-      }
-      if (r.status === 'success' || r.status === 'error') {
-        // 按 _key 原位更新执行占位气泡为最终结果；找不到（重进会话/切会话后
-        // 恢复轮询/停止后清理）时兜底 push 新气泡
-        const execKey = execProgressIndex.get(promptId)
-        execProgressIndex.delete(promptId)
-        if (executingCount.value > 0) executingCount.value--
-        const execIdx =
-          execKey !== undefined ? messages.value.findIndex((m) => m._key === execKey) : -1
-        if (execIdx !== -1) {
-          // 成功：占位气泡原位升级为 artifact 消息——产物图直接进回合卡片
-          // （file part 渲染）；失败：原地转错误文本。
-          messages.value[execIdx] =
-            r.status === 'success'
-              ? {
-                  ...messages.value[execIdx],
-                  kind: 'artifact',
-                  text: doneFiles.length
-                    ? `${t('workbenchDone')}（${doneFiles.length} 个文件）`
-                    : t('workbenchDone'),
-                  outputs: doneFiles.map((f) => f.filename),
-                  outputFiles: doneFiles,
-                }
-              : {
-                  ...messages.value[execIdx],
-                  kind: 'error',
-                  text: `${t('workbenchFailed')}: ${(r.error || '').slice(0, 300)}`,
-                }
-        } else {
-          pushMsg(
-            r.status === 'success'
-              ? {
-                  role: 'agent',
-                  kind: 'artifact',
-                  text: doneFiles.length
-                    ? `${t('workbenchDone')}（${doneFiles.length} 个文件）`
-                    : t('workbenchDone'),
-                  outputs: doneFiles.map((f) => f.filename),
-                  outputFiles: doneFiles,
-                  createdAt: Date.now(),
-                }
-              : {
-                  role: 'agent',
-                  kind: 'error',
-                  text: `${t('workbenchFailed')}: ${(r.error || '').slice(0, 300)}`,
-                  createdAt: Date.now(),
-                },
-          )
-        }
-        scrollToBottom()
-        stopPoll(promptId)
-        // 快路径执行失败：自动发起恢复轮（限次防死循环），让 AI 分析原因并继续
-        if (r.status === 'error') void autoRecover(r.error || '')
-        loadSessions().then(() => {
-          const s = sessions.value.find((x) => x.id === sessionId.value)
-          const exec = s?.executions?.find((e) => e.promptId === promptId)
-          if (exec) {
-            const art = artifacts.value.find((a) => a.promptId === promptId)
-            if (art) {
-              art.outputs = (exec.outputs ?? []).map((f) =>
-                typeof f === 'string' ? f : f.filename,
-              )
-              art.files = (exec.outputs ?? []).filter((f) => typeof f === 'object')
-            }
-          }
-        })
-      }
-    } catch {
-      /* 下轮重试 */
-    }
-  }
-  pollTimers.set(promptId, setInterval(poll, 3000))
-}
-
-function stopPoll(promptId) {
-  const timer = pollTimers.get(promptId)
-  if (timer) {
-    clearInterval(timer)
-    pollTimers.delete(promptId)
-  }
-}
-
-function extractFiles(outputs) {
-  // v2：保留完整引用（filename+subfolder+type），/view 直出缩略图
-  const files = []
-  for (const v of Object.values(outputs || {})) {
-    const o = v || {}
-    for (const key of ['images', 'gifs']) {
-      for (const it of o[key] ?? []) {
-        if (it.filename)
-          files.push({ filename: it.filename, subfolder: it.subfolder, type: it.type })
-      }
-    }
-  }
-  return files
-}
 
 const comfyOrigin = computed(() => appStore.config?.comfyHost || 'http://127.0.0.1:8188')
 const lightboxFile = ref(null)
@@ -3267,20 +2782,6 @@ const msgsWithTurn = computed(() => {
 })
 
 /** 返回组首 index 起同 turn 的全部消息（带真实 index，供 processGroupAt 复用） */
-function turnGroupItems(i) {
-  const base = messages.value[i]
-  if (!base || base.turnId == null) return [{ m: base, i }]
-  const out = []
-  let j = i
-  while (j < messages.value.length) {
-    const x = messages.value[j]
-    if (j > i && (x.role !== 'agent' || x.turnId !== base.turnId)) break
-    out.push({ m: x, i: j })
-    j++
-  }
-  return out
-}
-
 /** 回合卡片操作行数据：取组尾消息（时间/token 归属） */
 function turnTailInfo(i) {
   const items = turnGroupItems(i)
