@@ -272,4 +272,47 @@ describe('workbench wb_* MCP tools', () => {
     expect(planArg.batch?.items).toEqual([{ prompt: 'A' }, { prompt: 'B', steps: 28 }])
     expect(planArg.batch?.sharedParams).toEqual({ prompt: 'shared prompt' })
   })
+
+  it('wb_list_batch_jobs：全队列紧凑列表（剥大字段）', async () => {
+    beginWorkbenchToolContext('s1')
+    const r = registry()
+    const out = await r.handle('wb_list_batch_jobs', {})
+    const parsed = JSON.parse((out as { content: Array<{ text: string }> }).content[0]!.text)
+    expect(parsed.ok).toBe(true)
+    expect(parsed.running).toBe(0)
+    expect(parsed.queued).toBe(0)
+    expect(parsed.jobs).toHaveLength(1)
+    expect(parsed.jobs[0]).toMatchObject({
+      id: 'job-1',
+      status: 'completed',
+      total: 2,
+      processed: 2,
+      success: 2,
+      failed: 0,
+      percent: 100
+    })
+    // 紧凑投影不含大字段（logs/results 不出列表模式，控上下文）
+    expect(parsed.jobs[0].results).toBeUndefined()
+    expect(parsed.jobs[0].logs).toBeUndefined()
+  })
+
+  it('wb_list_batch_jobs：job_id 详情含日志尾部与失败样本', async () => {
+    beginWorkbenchToolContext('s1')
+    const r = registry()
+    const out = await r.handle('wb_list_batch_jobs', { job_id: 'job-1' })
+    const parsed = JSON.parse((out as { content: Array<{ text: string }> }).content[0]!.text)
+    expect(parsed.ok).toBe(true)
+    expect(parsed.job.id).toBe('job-1')
+    expect(parsed.job.recent_logs).toEqual([])
+    expect(parsed.job.failed_samples).toEqual([])
+  })
+
+  it('wb_list_batch_jobs：未知 job_id 报 not found', async () => {
+    beginWorkbenchToolContext('s1')
+    const r = registry()
+    const out = await r.handle('wb_list_batch_jobs', { job_id: 'nope' })
+    const parsed = JSON.parse((out as { content: Array<{ text: string }> }).content[0]!.text)
+    expect(parsed.ok).toBe(false)
+    expect(parsed.error).toBe('job not found')
+  })
 })

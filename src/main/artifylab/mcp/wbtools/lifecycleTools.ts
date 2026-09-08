@@ -3,6 +3,7 @@ import type { WBToolFn } from './shared'
 import { requireSession, text } from './shared'
 import type { WorkbenchPlan } from '../../workbench/plan'
 import type { ComfyPrompt, ParamNode } from '../../appStore'
+import { listBatchQueue, type BatchJobSummary } from '../../services/batchRunner'
 
 import { workbenchService } from '../../workbench/service'
 
@@ -147,6 +148,61 @@ export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
         outputs: exec.outputs ?? [],
         error: exec.error
       })
+    }
+  },
+  {
+    tool: {
+      name: 'wb_list_batch_jobs',
+      description:
+        '查询批量队列快照（只读、非阻塞）：默认返回全部任务的紧凑进度（id/状态/成败计数/百分比/当前行预览），可传 job_id 看单任务详情（含最近日志尾部与失败行样本）。配合 wb_execute_template 的 batch_items 使用——会话中断后用它找回队列里的任务状态。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          job_id: {
+            type: 'string',
+            description: '可选：只看某个任务的详情（含最近日志尾部与失败样本）；缺省返回全队列'
+          }
+        },
+        additionalProperties: false
+      },
+      annotations: { readOnlyHint: true }
+    },
+    fn: async (args, identity) => {
+      requireSession(identity)
+      const jobId = args.job_id ? String(args.job_id) : null
+      const queue = listBatchQueue()
+      // 紧凑投影：剥掉 notifyUrl/autoShutdown/results/logs 等大字段，控上下文体积
+      const compact = (j: BatchJobSummary) => ({
+        id: j.id,
+        status: j.status,
+        app_name: j.appName ?? j.appId ?? '',
+        total: j.total,
+        processed: j.processed,
+        success: j.success,
+        failed: j.failed,
+        percent: j.percent,
+        current_preview: j.currentPreview,
+        updated_at: j.updatedAt
+      })
+      if (jobId) {
+        const job = queue.find((j) => j.id === jobId)
+        if (!job) return text({ ok: false, error: 'job not found' })
+        const failedSamples = job.results
+          .filter((r) => !r.success)
+          .slice(0, 5)
+          .map((r) => ({ index: r.index, error: r.error ?? 'unknown' }))
+        return text({
+          ok: true,
+          job: {
+            ...compact(job),
+            recent_logs: job.logs.slice(-10),
+            failed_samples: failedSamples
+          }
+        })
+      }
+      const running = queue.filter((j) => j.status === 'running').length
+      const queued = queue.filter((j) => j.status === 'queued' || j.status === 'paused').length
+      return text({ ok: true, running, queued, jobs: queue.map(compact) })
     }
   }
 ]
