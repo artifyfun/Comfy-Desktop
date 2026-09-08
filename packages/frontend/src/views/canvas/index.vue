@@ -1752,97 +1752,6 @@ import { importProject as psImportProject, cloneProject as psCloneProject } from
 const { onResult, emitAttachments, emitCanvasState, emitPrompt, onOps } = useCanvasMode()
 const wbOpen = ref(true) // 工作台侧边栏开合
 const layersOpen = ref(false)
-// —— 素材库（P2）：本地图片资产，点击/拖入画布复用 ——
-const ASSETS_KEY = 'artify.canvas.assets.v1'
-const assetsOpen = ref(false)
-const assets = ref(JSON.parse(localStorage.getItem(ASSETS_KEY) || '[]'))
-function saveAssets() {
-  // dataURL 较大，超限（~4MB）时丢弃最旧的并提示
-  try {
-    localStorage.setItem(ASSETS_KEY, JSON.stringify(assets.value))
-  } catch {
-    if (assets.value.length > 1) {
-      assets.value.shift()
-      saveAssets()
-    }
-  }
-}
-function assetAdded(a) {
-  assets.value.unshift({ id: 'a' + Date.now() + Math.random().toString(36).slice(2, 5), ...a })
-  saveAssets()
-}
-function assetRemoved(id) {
-  assets.value = assets.value.filter((x) => x.id !== id)
-  saveAssets()
-}
-/** 素材入画布：persist dataURL 直接建 image 节点（等比 ≤260px） */
-/** 视口中心的世界坐标（素材点击落点） */
-function centerWorld() {
-  return screenToWorld(viewport.value, size.w / 2, size.h / 2)
-}
-function insertAsset(a, wx, wy) {
-  const probe = new Image()
-  probe.onload = () => {
-    const scale = Math.min(1, 260 / probe.naturalWidth)
-    const o = {
-      id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
-      type: 'image',
-      x: Math.round(wx),
-      y: Math.round(wy),
-      width: Math.round(probe.naturalWidth * scale),
-      height: Math.round(probe.naturalHeight * scale),
-      src: probe.src,
-      persist: probe.src,
-    }
-    beforeChange()
-    objects.value.push(o)
-    selection.value = [o.id]
-    saveSoon()
-  }
-  probe.src = a.persist
-} // 图层面板开合（P1：画布侧板）
-const hoverFromPanel = ref(null) // 面板悬停的物件 id（预留画布侧高亮联动）
-let layersFocusAnim = null // 图层定位的 rAF 句柄
-
-/** 图层树点击行：选中该物件并以 450ms easeOutCubic 动画居中（参考 focusNode） */
-function focusObject(id) {
-  const o = objects.value.find((x) => x.id === id)
-  if (!o) return
-  selection.value = [id]
-  selectedLinkId.value = null
-  if (ctxMenu.value) ctxMenu.value = null
-  const wx = o.x + o.width / 2
-  const wy = o.y + o.height / 2
-  const k = Math.min(
-    Math.max(Math.min((size.w * 0.6) / o.width, (size.h * 0.6) / o.height), 0.1),
-    1,
-  )
-  const target = {
-    x: size.w / 2 - wx * k,
-    y: size.h / 2 - wy * k,
-    scale: k,
-  }
-  if (layersFocusAnim) cancelAnimationFrame(layersFocusAnim)
-  const start = { ...viewport.value }
-  const duration = 450
-  const ease = (p) => 1 - Math.pow(1 - p, 3)
-  let t0 = null
-  const step = (now) => {
-    if (t0 === null) t0 = now
-    const p = Math.min((now - t0) / duration, 1)
-    const e = ease(p)
-    viewport.value = {
-      scale: start.scale + (target.scale - start.scale) * e,
-      x: start.x + (target.x - start.x) * e,
-      y: start.y + (target.y - start.y) * e,
-    }
-    applyViewport()
-    layersFocusAnim = p < 1 ? requestAnimationFrame(step) : null
-  }
-  layersFocusAnim = requestAnimationFrame(step)
-  saveSoon()
-}
-
 const STORAGE_KEY = 'artify.canvas.doc.v1'
 // —— 多画布项目集（composable 拆分，第一批①c）——
 const projectStore = reactive({ version: 1, activeId: null, projects: [] })
@@ -4275,90 +4184,6 @@ async function applyUpscale() {
   }, 'image/png')
 }
 
-// —— 提示词库（S6b）：内置分词 + 自定义（localStorage）+ JSON 导入 ——
-const promptLib = reactive({ open: false, q: '', tab: 'builtin' }) // tab: builtin | custom
-const customPrompts = ref([])
-try {
-  customPrompts.value = loadCustomPrompts(localStorage)
-} catch {
-  customPrompts.value = []
-}
-const promptLibView = computed(() => {
-  if (promptLib.tab === 'custom') {
-    return searchPrompts(
-      [{ category: t('canvasPromptCustomTab'), items: customPrompts.value }],
-      promptLib.q,
-    )
-  }
-  return searchPrompts(builtinLibrary(), promptLib.q)
-})
-/** 选中词条 → 回填目标（note 编辑/改写指令，按当前激活输入） */
-function applyPrompt(text) {
-  const target = promptTarget.value
-  if (target?.kind === 'note') {
-    const o = objects.value.find((x) => x.id === target.id)
-    if (o) {
-      beforeChange()
-      o.text = o.text ? o.text + '\n' + text : text
-      // 正在就地编辑同一便签时，把回填同步进编辑框（否则提交会覆盖掉刚插的词条）
-      if (noteEdit.id === target.id) noteEdit.text = o.text
-      saveSoon()
-    }
-  } else if (target?.kind === 'rewrite') {
-    noteRewrite.instruction = noteRewrite.instruction ? noteRewrite.instruction + '；' + text : text
-  } else if (target?.kind === 'gen' && genNode.value) {
-    genNode.value.prompt = genNode.value.prompt ? genNode.value.prompt + '\n' + text : text
-  } else {
-    // fix(静默无操作): 无回填目标时点击词条此前什么都不发生——改为复制到
-    // 剪贴板 + toast，用户至少拿到词条内容（选中笔记/开生图对话框后回填）。
-    try {
-      navigator.clipboard.writeText(text)
-      message.info(t('canvasPromptCopied'))
-    } catch {
-      /* 剪贴板不可用（权限/非安全上下文）——只关面板 */
-    }
-  }
-  promptLib.open = false
-}
-/** 回填目标推导：生图对话框开着优先，其次改写输入条，再次选中/悬停的 note */
-const promptTarget = computed(() => {
-  if (genNode.value) return { kind: 'gen', id: null }
-  if (noteRewrite.noteId) return { kind: 'rewrite', id: noteRewrite.noteId }
-  const selNote = objects.value.find((o) => o.id === selection.value[0] && o.type === 'note')
-  if (selNote) return { kind: 'note', id: selNote.id }
-  const hovNote = objects.value.find((o) => o.id === hoverNodeId.value && o.type === 'note')
-  if (hovNote) return { kind: 'note', id: hovNote.id }
-  return null
-})
-function addCustomPrompt(text) {
-  const t = String(text || '').trim()
-  if (!t) return
-  customPrompts.value = [{ text: t, hint: '' }, ...customPrompts.value]
-  saveCustomPrompts(customPrompts.value, localStorage)
-}
-function removeCustomPrompt(text) {
-  customPrompts.value = customPrompts.value.filter((x) => x.text !== text)
-  saveCustomPrompts(customPrompts.value, localStorage)
-}
-function importPromptsFile() {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = '.json,application/json'
-  input.onchange = () => {
-    const f = input.files?.[0]
-    if (!f) return
-    f.text()
-      .then(parseImportedPrompts)
-      .then((list) => {
-        customPrompts.value = mergePrompts(list, customPrompts.value)
-        saveCustomPrompts(customPrompts.value, localStorage)
-        message.success(t('canvasPromptImported').replace('{n}', String(list.length)))
-      })
-      .catch((e) => message.error(t('canvasPromptImportFailed') + ': ' + (e?.message || '')))
-  }
-  input.click()
-}
-
 function openGenNode(ids = []) {
   const imgs = ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'image')
   const refs = imgs.map(refOf).filter(Boolean)
@@ -5813,78 +5638,6 @@ function pushDigestSnapshot(d) {
   }, 2000)
 }
 
-// —— minimap：全景（物件 bbox ∪ 视口框，等比缩到 160x110 内）——
-const MINI_W = 160
-const MINI_H = 110
-const MINI_PAD = 10
-const mini = computed(() => {
-  const b = bboxOf(objects.value)
-  let x0 = b.x,
-    y0 = b.y,
-    x1 = b.x + b.width,
-    y1 = b.y + b.height
-  // 把当前视口也纳入范围
-  const vw = size.w / viewport.value.scale
-  const vh = size.h / viewport.value.scale
-  const vx0 = -viewport.value.x / viewport.value.scale
-  const vy0 = -viewport.value.y / viewport.value.scale
-  x0 = Math.min(x0, vx0)
-  y0 = Math.min(y0, vy0)
-  x1 = Math.max(x1, vx0 + vw)
-  y1 = Math.max(y1, vy0 + vh)
-  const s = Math.min((MINI_W - MINI_PAD * 2) / (x1 - x0), (MINI_H - MINI_PAD * 2) / (y1 - y0))
-  return { x0, y0, s }
-})
-const miniItems = computed(() =>
-  objects.value.map((o) => ({
-    id: o.id,
-    type: o.type,
-    status: o.status,
-    x: MINI_PAD + (o.x - mini.value.x0) * mini.value.s,
-    y: MINI_PAD + (o.y - mini.value.y0) * mini.value.s,
-    w: Math.max(4, o.width * mini.value.s),
-    h: Math.max(3, o.height * mini.value.s),
-  })),
-)
-const miniView = computed(() => {
-  const vx0 = -viewport.value.x / viewport.value.scale
-  const vy0 = -viewport.value.y / viewport.value.scale
-  return {
-    x: MINI_PAD + (vx0 - mini.value.x0) * mini.value.s,
-    y: MINI_PAD + (vy0 - mini.value.y0) * mini.value.s,
-    w: (size.w / viewport.value.scale) * mini.value.s,
-    h: (size.h / viewport.value.scale) * mini.value.s,
-  }
-})
-function miniJump(e) {
-  const el = e.currentTarget
-  const r = el.getBoundingClientRect()
-  // 小窗坐标 → 世界坐标 → 居中该点
-  const moveTo = (cx, cy) => {
-    const wx = mini.value.x0 + (cx - r.left - MINI_PAD) / mini.value.s
-    const wy = mini.value.y0 + (cy - r.top - MINI_PAD) / mini.value.s
-    viewport.value = {
-      scale: viewport.value.scale,
-      x: size.w / 2 - wx * viewport.value.scale,
-      y: size.h / 2 - wy * viewport.value.scale,
-    }
-    applyViewport()
-  }
-  moveTo(e.clientX, e.clientY)
-  // 拖动巡视：指针捕获后跟随 move，仅 x/y 平移（同参考实现，缩放不变）
-  el.setPointerCapture?.(e.pointerId)
-  const onMove = (ev) => moveTo(ev.clientX, ev.clientY)
-  const onUp = () => {
-    el.removeEventListener('pointermove', onMove)
-    el.removeEventListener('pointerup', onUp)
-    el.removeEventListener('pointercancel', onUp)
-    saveSoon()
-  }
-  el.addEventListener('pointermove', onMove)
-  el.addEventListener('pointerup', onUp)
-  el.addEventListener('pointercancel', onUp)
-}
-
 // —— 持久化（localStorage 防抖 500ms）——
 let saveTimer = null
 function saveSoon() {
@@ -6846,6 +6599,60 @@ onBeforeUnmount(() => {
   for (const nodeId of [...nodePolls.keys()]) stopNodePoll(nodeId)
   // AI ops 订阅清场
   offOps?.()
+})
+
+// —— 提示词库（composable 拆分，第四批③）——
+const {
+  promptLib,
+  customPrompts,
+  promptLibView,
+  promptTarget,
+  applyPrompt,
+  addCustomPrompt,
+  removeCustomPrompt,
+  importPromptsFile,
+} = usePromptLibrary({
+  t,
+  objects,
+  selection,
+  hoverNodeId,
+  genNode,
+  noteRewrite,
+  noteEdit,
+  beforeChange,
+  saveSoon: () => saveSoon(),
+})
+
+// —— 素材库 + 图层面板（composable 拆分，第四批③）——
+const {
+  assetsOpen,
+  assets,
+  assetAdded,
+  assetRemoved,
+  centerWorld,
+  insertAsset,
+  hoverFromPanel,
+  focusObject,
+} = useCanvasAssets({
+  objects,
+  selection,
+  viewport,
+  size,
+  screenToWorld,
+  beforeChange,
+  saveSoon: () => saveSoon(),
+  applyViewport: () => applyViewport(),
+  selectedLinkId,
+  ctxMenu,
+})
+
+// —— minimap（composable 拆分，第四批③）——
+const { mini, miniItems, miniView, miniJump } = useCanvasMinimap({
+  objects,
+  viewport,
+  size,
+  applyViewport: () => applyViewport(),
+  saveSoon: () => saveSoon(),
 })
 </script>
 
