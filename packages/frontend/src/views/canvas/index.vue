@@ -495,7 +495,8 @@
             class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
             @click="createNodeFromConnect(opt.k)"
           >
-            <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="opt.icon"></i>{{ opt.label }}
+            <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="opt.icon"></i
+            >{{ opt.label }}
           </button>
         </div>
 
@@ -532,7 +533,8 @@
                 <button
                   class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
                 >
-                  <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="m.icon"></i>{{ m.label }}
+                  <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="m.icon"></i
+                  >{{ m.label }}
                   <i class="fas fa-chevron-right ml-auto text-[9px] text-[var(--wb-text-2)]"></i>
                 </button>
                 <div
@@ -544,7 +546,8 @@
                     class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2 whitespace-nowrap"
                     @click="c.run()"
                   >
-                    <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="c.icon"></i>{{ c.label }}
+                    <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="c.icon"></i
+                    >{{ c.label }}
                   </button>
                 </div>
               </div>
@@ -553,7 +556,8 @@
                 class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
                 @click="m.run()"
               >
-                <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="m.icon"></i>{{ m.label }}
+                <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="m.icon"></i
+                >{{ m.label }}
               </button>
             </template>
           </template>
@@ -562,7 +566,8 @@
               class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
               @click="pasteAt(ctxMenu.wx, ctxMenu.wy)"
             >
-              <i class="fas fa-paste w-4 text-center text-[var(--wb-text-2)]"></i>{{ t('canvasMenuPaste') }}
+              <i class="fas fa-paste w-4 text-center text-[var(--wb-text-2)]"></i
+              >{{ t('canvasMenuPaste') }}
             </button>
             <button
               class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
@@ -582,13 +587,15 @@
               class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
               @click="openAppPickerAtCtx()"
             >
-              <i class="fas fa-cube w-4 text-center text-[var(--wb-text-2)]"></i>{{ t('canvasMenuAppNode') }}
+              <i class="fas fa-cube w-4 text-center text-[var(--wb-text-2)]"></i
+              >{{ t('canvasMenuAppNode') }}
             </button>
             <button
               class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
               @click="fitAll()"
             >
-              <i class="fas fa-expand w-4 text-center text-[var(--wb-text-2)]"></i>{{ t('canvasMenuFit') }}
+              <i class="fas fa-expand w-4 text-center text-[var(--wb-text-2)]"></i
+              >{{ t('canvasMenuFit') }}
             </button>
           </template>
         </div>
@@ -1182,7 +1189,10 @@
               <i class="fas fa-robot text-[var(--wb-accent)] mr-1"></i
               >{{ t('canvasAgentOpsTitle') }}
             </span>
-            <button class="text-[var(--wb-text-2)] hover:text-white" @click="pendingAgentOps = null">
+            <button
+              class="text-[var(--wb-text-2)] hover:text-white"
+              @click="pendingAgentOps = null"
+            >
               <i class="fas fa-times"></i>
             </button>
           </div>
@@ -1834,250 +1844,71 @@ function focusObject(id) {
 }
 
 const STORAGE_KEY = 'artify.canvas.doc.v1'
-
-// —— 多画布项目集（S1）：artify.canvas.projects.v1，旧 artify.canvas.doc.v1 自动迁移 ——
-const projectStore = reactive({ ...emptyProjectStore() })
-function emptyProjectStore() {
-  return { version: 1, activeId: null, projects: [] }
-}
-const activeProject = computed(
-  () => projectStore.projects.find((p) => p.id === projectStore.activeId) || null,
-)
-const projectMenuOpen = ref(false)
-
+// —— 多画布项目集（composable 拆分，第一批①c）——
+const projectStore = reactive({ version: 1, activeId: null, projects: [] })
+const {
+  exportCurrentProject,
+  activeProject,
+  projectMenuOpen,
+  syncDoc: syncActiveDocToStore,
+  openProjectById,
+  createNewProject,
+  renameActiveProject,
+  persistProjects,
+  prjBatchMode,
+  prjChecked,
+  prjRenameId,
+  prjRenameInput,
+  prjStats,
+  prjRelTime,
+  togglePrjCheck,
+  startPrjRename,
+  commitPrjRename,
+  exportProjectById,
+  deleteProjectById,
+  exitPrjBatch,
+  deleteCheckedProjects,
+  deleteActiveProject,
+} = useCanvasProjects({
+  projectStore,
+  t,
+  viewport,
+  objects,
+  links,
+  groups,
+  selection,
+  selectedLinkId,
+  appPanel,
+  beforeChange,
+  resetHistory: () => {
+    history.value = createHistory(60)
+  },
+  afterProjectSwitch: () => nextTick(() => syncDraggables()),
+  loadProjectIntoCanvas: () => loadProjectIntoCanvas(),
+  engine: {
+    psUpdateProjectDoc,
+    psSwitchProject,
+    psAddProject,
+    psRenameProject,
+    psDeleteProject,
+    psCloneProject,
+    bootProjectStore,
+    persistProjectStore,
+    normalizeStore,
+    projectCardStats,
+    buildExportPayload,
+    packExportZip,
+    makeViewport,
+  },
+})
 // 启动迁移：旧单画布档升格首个项目（幂等）
 ;(function bootProjects() {
-  // 读盘+迁移+落盘全在 projectStore 模块（I/O 适配层）
   const { store, migrated } = bootProjectStore()
   Object.assign(projectStore, store)
   if (migrated) persistProjects()
 })()
-function persistProjects() {
-  persistProjectStore(projectStore)
-}
-/** 当前 doc → 项目集（saveNow 一并落盘） */
-function syncActiveDocToStore() {
-  if (!projectStore.activeId) return
-  Object.assign(
-    projectStore,
-    psUpdateProjectDoc(normalizeStore({ ...projectStore }), projectStore.activeId, {
-      version: 2,
-      name: activeProject.value?.title || t('canvasUntitled'),
-      viewport: { scale: viewport.value.scale, x: viewport.value.x, y: viewport.value.y },
-      objects: objects.value.map((o) => ({ ...o })),
-      links: links.value.map((l) => ({ ...l })),
-      groups: groups.value.map((g) => ({ ...g })),
-    }),
-  )
-}
-/** 切换项目：当前内容先入库，再载入目标 */
-function openProjectById(id) {
-  if (id === projectStore.activeId) {
-    projectMenuOpen.value = false
-    return
-  }
-  syncActiveDocToStore()
-  persistProjects()
-  const target = projectStore.projects.find((p) => p.id === id)
-  if (!target) return
-  beforeChange()
-  objects.value = target.doc.objects.map((o) => ({ ...o }))
-  links.value = target.doc.links.map((l) => ({ ...l }))
-  groups.value = target.doc.groups.map((g) => ({ ...g }))
-  viewport.value = makeViewport(
-    target.doc.viewport.scale,
-    target.doc.viewport.x,
-    target.doc.viewport.y,
-  )
-  Object.assign(projectStore, psSwitchProject({ ...projectStore }, id))
-  selection.value = []
-  selectedLinkId.value = null
-  appPanel.id = null
-  history.value = createHistory(60)
-  nextTick(() => syncDraggables())
-  persistProjects()
-  projectMenuOpen.value = false
-  message.info(t('canvasProjectSwitched').replace('{n}', target.title))
-}
-function createNewProject() {
-  syncActiveDocToStore()
-  const n = projectStore.projects.length + 1
-  Object.assign(
-    projectStore,
-    psAddProject({ ...projectStore }, t('canvasProjectDefaultName').replace('{n}', String(n))),
-  )
-  loadProjectIntoCanvas()
-  persistProjects()
-  projectMenuOpen.value = false
-}
-function renameActiveProject(title) {
-  if (!projectStore.activeId) return
-  Object.assign(projectStore, psRenameProject({ ...projectStore }, projectStore.activeId, title))
-  persistProjects()
-}
-// —— E4 项目卡：统计/相对时间/内联重命名/单删/导出/批量删除 ——
-const prjBatchMode = ref(false)
-const prjChecked = reactive(new Set())
-const prjRenameId = ref(null)
-const prjRenameInput = ref(null)
-function prjStats(pr) {
-  return projectCardStats(pr)
-}
-function prjRelTime(pr) {
-  const st = prjStats(pr)
-  const key =
-    st.rel === 'justNow'
-      ? 'canvasPrjJustNow'
-      : st.rel === 'minutesAgo'
-        ? 'canvasPrjMinutesAgo'
-        : st.rel === 'hoursAgo'
-          ? 'canvasPrjHoursAgo'
-          : 'canvasPrjDaysAgo'
-  return t(key).replace('{n}', String(st.relValue))
-}
-function togglePrjCheck(id) {
-  if (prjChecked.has(id)) prjChecked.delete(id)
-  else prjChecked.add(id)
-}
-function startPrjRename(id) {
-  prjRenameId.value = id
-  nextTick(() => {
-    const el = Array.isArray(prjRenameInput.value) ? prjRenameInput.value[0] : prjRenameInput.value
-    el?.focus?.()
-    el?.select?.()
-  })
-}
-function commitPrjRename(e) {
-  const title = String(e.target.value || '').trim()
-  const id = prjRenameId.value
-  prjRenameId.value = null
-  if (!id || !title) return
-  Object.assign(projectStore, psRenameProject({ ...projectStore }, id, title))
-  persistProjects()
-}
-/** E4：单项目导出（复用当前导出管线） */
-/** 选中图片节点 → 纯图片 ZIP 下载（P2 节点级导出） */
-function exportSelectionZip() {
-  const picked = objects.value.filter((o) => selection.value.includes(o.id))
-  buildSelectionZip(picked, {
-    fetcher: async (url) => {
-      const r = await fetch(url)
-      return new Uint8Array(await r.arrayBuffer())
-    },
-  }).then((blob) => {
-    if (!blob) {
-      message.warning(t('canvasExportSelEmpty'))
-      return
-    }
-    const u = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = u
-    a.download = `canvas-selection-${new Date().toISOString().slice(0, 10)}.zip`
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(u), 5000)
-  })
-}
-function exportProjectById(id) {
-  syncActiveDocToStore()
-  const clone = psCloneProject({ ...projectStore }, id)
-  if (!clone) return
-  const { payload, files } = buildExportPayload([clone])
-  packExportZip(payload, files).then((blob) => {
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    const pr = projectStore.projects.find((p) => p.id === id)
-    a.download = `${(pr?.title || 'canvas').replace(/[\\/:*?"<>|]/g, '_')}.artify-canvas.zip`
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 5000)
-    message.success(t('canvasExported'))
-  })
-}
-/** E4：卡片单删（含当前项目时切走并重载） */
-function deleteProjectById(id) {
-  const pr = projectStore.projects.find((p) => p.id === id)
-  if (!pr) return
-  Modal.confirm({
-    title: t('canvasProjectDeleteTitle'),
-    content: t('canvasProjectDeleteConfirm').replace('{n}', pr.title),
-    okText: t('canvasProjectDeleteOk'),
-    cancelText: t('cancel'),
-    okButtonProps: { danger: true },
-    onOk: () => {
-      // fix: 删唯一项目时 psDeleteProject 兜底新建"未命名画布"（新 id），
-      // 旧条件比较的是 computed 重算后的 activeProject（已指向新项目）→ 永假
-      // → 画布残留旧节点，且后续 syncActiveDocToStore 把旧内容写进新项目。
-      // 改为记录删除前的项目 id：变了就无条件重装载。
-      const beforeId = projectStore.activeId
-      Object.assign(projectStore, psDeleteProject({ ...projectStore }, id))
-      if (projectStore.activeId !== beforeId) loadProjectIntoCanvas()
-      persistProjects()
-    },
-  })
-}
-/** E4：批量删除（勾选集；当前项目被删则切默认并重载） */
-function exitPrjBatch() {
-  prjBatchMode.value = false
-  prjChecked.clear()
-}
-function deleteCheckedProjects() {
-  const ids = Array.from(prjChecked)
-  if (!ids.length) return
-  Modal.confirm({
-    title: t('canvasPrjBatchDel'),
-    content: `${ids.length} → ${ids
-      .slice(0, 5)
-      .map((i) => projectStore.projects.find((p) => p.id === i)?.title || i)
-      .join('、')}${ids.length > 5 ? '…' : ''}`,
-    okText: t('canvasProjectDeleteOk'),
-    cancelText: t('cancel'),
-    okButtonProps: { danger: true },
-    onOk: () => {
-      // fix: 同单卡删除——先记删除前 activeId，避免 computed 已重算导致漏装载
-      const beforeId = projectStore.activeId
-      let store = { ...projectStore }
-      for (const id of ids) store = psDeleteProject(store, id)
-      Object.assign(projectStore, store)
-      if (!projectStore.projects.some((p) => p.id === beforeId)) loadProjectIntoCanvas()
-      persistProjects()
-      prjChecked.clear()
-      prjBatchMode.value = false
-    },
-  })
-}
 
-function deleteActiveProject() {
-  const cur = activeProject.value
-  if (!cur) return
-  Modal.confirm({
-    title: t('canvasProjectDeleteTitle'),
-    content: t('canvasProjectDeleteConfirm').replace('{n}', cur.title),
-    okText: t('canvasProjectDeleteOk'),
-    cancelText: t('cancel'),
-    okButtonProps: { danger: true },
-    onOk: () => {
-      Object.assign(projectStore, psDeleteProject({ ...projectStore }, cur.id))
-      loadProjectIntoCanvas()
-      persistProjects()
-    },
-  })
-}
 // —— 导入导出（S2）：当前项目导出 ZIP（projects.json + 图片文件），导入支持 zip/json ——
-function exportCurrentProject() {
-  syncActiveDocToStore()
-  const clone = psCloneProject({ ...projectStore }, projectStore.activeId)
-  if (!clone) return
-  const { payload, files } = buildExportPayload([clone])
-  packExportZip(payload, files).then((blob) => {
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${(activeProject.value?.title || 'canvas').replace(/[\\/:*?"<>|]/g, '_')}.artify-canvas.zip`
-    a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 5000)
-    message.success(t('canvasExported'))
-  })
-}
 function pickImportFile() {
   const input = document.createElement('input')
   input.type = 'file'
@@ -3788,9 +3619,22 @@ const ctxItems = computed(() => {
     'note-edit': () => startNoteEdit(ids[0]),
     'frame-rename': () => startFrameRename(ids[0]),
     'gen-info': () => showImageGenInfo(ids[0]),
-    'app-run': () => runAppNodes(ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app')),
-    'app-panel': () => openAppNodePanel(ids.find((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app')),
-    'app-full': () => openFullApp(objects.value.find((o) => o.id === ids.find((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app'))),
+    'app-run': () =>
+      runAppNodes(
+        ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app'),
+      ),
+    'app-panel': () =>
+      openAppNodePanel(
+        ids.find((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app'),
+      ),
+    'app-full': () =>
+      openFullApp(
+        objects.value.find(
+          (o) =>
+            o.id ===
+            ids.find((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app'),
+        ),
+      ),
     ref: sendSelectionToWorkbench,
     gen: () => openGenNode(ids),
     crop: () => setTool('crop'),
@@ -3822,7 +3666,11 @@ const ctxItems = computed(() => {
   return buildCtxItems(objects.value, ids, undefined, (key) => () => {
     runners[key]?.()
     closeCtxMenu()
-  }).map((it) => ({ ...it, label: it.labelKey ? t(it.labelKey) : undefined, children: it.children?.map((c) => ({ ...c, label: t(c.labelKey) })) }))
+  }).map((it) => ({
+    ...it,
+    label: it.labelKey ? t(it.labelKey) : undefined,
+    children: it.children?.map((c) => ({ ...c, label: t(c.labelKey) })),
+  }))
 })
 /**
  * z 层级四向（front/forward/backward/back），选中块整体移动保持内部顺序。
