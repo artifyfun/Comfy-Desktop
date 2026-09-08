@@ -36,6 +36,7 @@ import {
   resolveWorkflowKey
 } from '../mcp/executor'
 import { logger } from '../utils/logger'
+import { sendWebhookNotification, scheduleSystemShutdown } from './systemActions'
 import artifyUtils from '..'
 
 /** 单条输入映射节点（与批量页 state.inputs 的 item 同构） */
@@ -508,20 +509,18 @@ async function pump(): Promise<void> {
   }
 }
 
-/** 单任务完成通知（每个任务各自触发，URL 取自该任务） */
+/** 单任务完成通知（每个任务各自触发，URL 取自该任务）——
+ * 候选③：进程内直调 systemActions（此前 fetch localhost 自环，端口未就绪
+ * 时静默丢通知）；SSRF 防护/通道分支（Telegram/Bark/通用）与路由同一份。 */
 async function notifyJob(job: BatchJob): Promise<void> {
   if (!job.notifyUrl || !/^https:\/\//.test(job.notifyUrl)) return
-  const serverOrigin = `http://localhost:${artifyUtils.getServerPort() ?? ''}`
   try {
-    await fetch(`${serverOrigin}/api/notify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: job.notifyUrl,
-        title: job.appName ? `批量任务完成：${job.appName}` : '批量任务完成',
-        body: `total=${job.total} success=${job.success} failed=${job.failed}`
-      })
+    const r = await sendWebhookNotification({
+      url: job.notifyUrl,
+      title: job.appName ? `批量任务完成：${job.appName}` : '批量任务完成',
+      body: `total=${job.total} success=${job.success} failed=${job.failed}`
     })
+    if ('error' in r) logger.warn('batch notify rejected:', r.error)
   } catch (e) {
     logger.error('batch notify failed', e)
   }
@@ -533,13 +532,10 @@ async function finishActionsWhenIdle(): Promise<void> {
   autoShutdownHandled = true
   if (userStopped) return // 用户手动停止过队列 → 不再自动关机
   if (!sessionAutoShutdown) return // 本会话没执行过 autoShutdown 任务（含历史残留）→ 不关机
-  const serverOrigin = `http://localhost:${artifyUtils.getServerPort() ?? ''}`
+  // 候选③：进程内直调（同 notifyJob，去自环 HTTP）
   try {
-    await fetch(`${serverOrigin}/api/shutdown`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ delay: 30, force: true })
-    })
+    const r = scheduleSystemShutdown({ delay: 30, force: true })
+    if ('error' in r) logger.error('batch shutdown rejected:', r.error)
   } catch (e) {
     logger.error('batch shutdown failed', e)
   }

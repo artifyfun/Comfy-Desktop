@@ -1,10 +1,9 @@
 import express from 'express'
-import { exec } from 'node:child_process'
-import { platform } from 'node:os'
 import { HTTP_STATUS } from '../config/constants'
 import { logger } from '../utils/logger'
 import { handleApiError, createErrorResponse, createSuccessResponse } from '../utils/errorHandler'
 import { fetchWithRetry } from '../utils/fetch'
+import { sendWebhookNotification, scheduleSystemShutdown } from '../services/systemActions'
 import { memoryCache } from '../services/cache'
 import artifyUtils from '..'
 
@@ -52,71 +51,18 @@ export function createProxyRouter(): express.Router {
   // 通用:    POST JSON {title, body}（server酱等）
   router.post('/api/notify', async (req: express.Request, res: express.Response) => {
     try {
-      const url = String(req.body?.url || '').trim()
-      const title = String(req.body?.title || '').slice(0, 200)
-      const bodyText = String(req.body?.body || '').slice(0, 2000)
-      if (!/^https:\/\//i.test(url)) {
-        res
-          .status(HTTP_STATUS.BAD_REQUEST)
-          .json(createErrorResponse('url must be a valid https webhook'))
+      const r = await sendWebhookNotification({
+        url: String(req.body?.url || ''),
+        title: String(req.body?.title || ''),
+        body: String(req.body?.body || '')
+      })
+      if ('error' in r) {
+        res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse(r.error))
         return
-      }
-      let parsed: URL
-      try {
-        parsed = new URL(url)
-      } catch {
-        res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('invalid url'))
-        return
-      }
-      // SSRF 防护：拒绝私网/环回/链路本地地址
-      const hostname = parsed.hostname.toLowerCase()
-      const ipv4 = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
-      if (
-        hostname === 'localhost' ||
-        hostname === '[::1]' ||
-        hostname.endsWith('.local') ||
-        hostname.endsWith('.internal') ||
-        (ipv4 &&
-          (ipv4[1] === '127' ||
-            ipv4[1] === '10' ||
-            (ipv4[1] === '172' && Number(ipv4[2]) >= 16 && Number(ipv4[2]) <= 31) ||
-            (ipv4[1] === '192' && ipv4[2] === '168') ||
-            (ipv4[1] === '169' && ipv4[2] === '254') ||
-            ipv4[1] === '0'))
-      ) {
-        res
-          .status(HTTP_STATUS.BAD_REQUEST)
-          .json(createErrorResponse('private network addresses are not allowed'))
-        return
-      }
-
-      let resp: Response
-      // redirect: 'manual' 防止 302 跳转到 http/内网地址绕过上面的校验
-      const noRedirect = { redirect: 'manual' as const }
-      if (parsed.pathname.includes('/sendMessage')) {
-        // Telegram Bot API
-        resp = await fetchWithRetry(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: `${title}\n${bodyText}`.trim() }),
-          ...noRedirect
-        })
-      } else if (parsed.hostname === 'api.day.app' || parsed.hostname === 'api.bark.app') {
-        // Bark：路径拼接（encodeURIComponent）
-        const barkUrl = `${parsed.origin}${parsed.pathname}/${encodeURIComponent(title)}/${encodeURIComponent(bodyText || 'done')}`
-        resp = await fetchWithRetry(barkUrl, { method: 'GET', ...noRedirect })
-      } else {
-        // 通用 webhook（server酱 / 飞书 / 钉钉等）
-        resp = await fetchWithRetry(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title, body: bodyText }),
-          ...noRedirect
-        })
       }
       res
         .status(HTTP_STATUS.OK)
-        .json(createSuccessResponse({ status: resp.status }, `notify http ${resp.status}`))
+        .json(createSuccessResponse({ status: r.status }, `notify http ${r.status}`))
     } catch (error) {
       logger.error('Notify failed', error)
       res
@@ -303,107 +249,21 @@ export function createProxyRouter(): express.Router {
   router.post('/api/shutdown', async (req: express.Request, res: express.Response) => {
     try {
       const { delay = 0, force = false } = req.body
-
-      // 验证延迟时间
-      if (delay < 0 || delay > 3600) {
-        return res
-          .status(HTTP_STATUS.BAD_REQUEST)
-          .json(createErrorResponse('Delay must be between 0 and 3600 seconds'))
+      const r = scheduleSystemShutdown({ delay: Number(delay), force: !!force })
+      if ('error' in r) {
+        const status = r.error.startsWith('Delay')
+          ? HTTP_STATUS.BAD_REQUEST
+          : r.error.startsWith('Unsupported')
+            ? HTTP_STATUS.INTERNAL_SERVER_ERROR
+            : HTTP_STATUS.UNAUTHORIZED
+        res.status(status).json(createErrorResponse(r.error))
+        return
       }
-
-      const currentPlatform = platform()
-      let shutdownCommand: string
-
-      // 根据操作系统构建关机命令
-      switch (currentPlatform) {
-        case 'win32': {
-          // Windows 关机命令
-          const forceFlag = force ? '/f' : ''
-          const delayFlag = delay > 0 ? `/t ${delay}` : ''
-          shutdownCommand = `shutdown /s ${forceFlag} ${delayFlag}`.trim()
-          break
-        }
-
-        case 'darwin':
-          // macOS 关机命令
-          if (delay > 0) {
-            shutdownCommand = `sudo shutdown -h +${Math.ceil(delay / 60)}`
-          } else {
-            shutdownCommand = 'sudo shutdown -h now'
-          }
-          break
-
-        case 'linux':
-          // Linux 关机命令
-          if (delay > 0) {
-            shutdownCommand = `sudo shutdown -h +${Math.ceil(delay / 60)}`
-          } else {
-            shutdownCommand = 'sudo shutdown -h now'
-          }
-          break
-
-        default:
-          return res
-            .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-            .json(createErrorResponse(`Unsupported operating system: ${currentPlatform}`))
-      }
-
-      logger.info('Executing shutdown command', {
-        platform: currentPlatform,
-        command: shutdownCommand,
-        delay,
-        force
-      })
-
-      // 执行关机命令
-      exec(shutdownCommand, (error, stdout, stderr) => {
-        if (error) {
-          logger.error('Shutdown command failed', {
-            error: error.message,
-            stderr,
-            platform: currentPlatform
-          })
-
-          // 如果是权限错误，提供更友好的错误信息
-          if (error.message.includes('permission') || error.message.includes('denied')) {
-            return res
-              .status(HTTP_STATUS.UNAUTHORIZED)
-              .json(
-                createErrorResponse(
-                  'Permission denied. Please run the application with administrator/sudo privileges.'
-                )
-              )
-          }
-
-          return res
-            .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
-            .json(createErrorResponse(`Shutdown failed: ${error.message}`))
-        }
-
-        logger.info('Shutdown command executed successfully', {
-          stdout,
-          platform: currentPlatform
-        })
-
-        const message =
-          delay > 0 ? `System will shutdown in ${delay} seconds` : 'System shutdown initiated'
-
-        res.status(HTTP_STATUS.OK).json(
-          createSuccessResponse(
-            {
-              command: shutdownCommand,
-              platform: currentPlatform,
-              delay,
-              force
-            },
-            message
-          )
-        )
-      })
+      res.status(HTTP_STATUS.OK).json(createSuccessResponse({ started: true }))
     } catch (error) {
+      logger.error('Shutdown failed', error)
       handleApiError(error, res)
     }
   })
-
   return router
 }

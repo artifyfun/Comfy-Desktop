@@ -14,7 +14,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import appStoreManager, { type App, type ComfyPrompt, type ParamNode } from '../appStore'
 import { logger } from '../utils/logger'
-import { AgentRuntime } from './agentRuntime'
+import { AgentRuntime, type AgentProgressCallback as DecideProgressCallback } from './agentRuntime'
 import {
   record as recordExecution,
   markSuccess,
@@ -123,21 +123,10 @@ import { deriveAttachmentKind } from './presetCore'
 
 /** decide 过程回调：log=阶段文本；thread_event=codex 结构化事件（透传 SSE）；
  * stream_delta=C16 token 级增量(appserver 通道,AG-UI TEXT/REASONING CONTENT) */
-export type DecideProgressCallback = (
-  p:
-    | {
-        type: 'log'
-        text: string
-      }
-    | {
-        type: 'thread_event'
-        event: unknown
-      }
-    | {
-        type: 'stream_delta'
-        delta: { kind: 'text' | 'reasoning'; itemId: string; delta: string }
-      }
-) => void
+export type {
+  DecideProgressEvent,
+  AgentProgressCallback as DecideProgressCallback
+} from './agentRuntime'
 
 /** 会话内保留的最大调试日志条数（每条 ~10KB，防 workbench-sessions.json 膨胀） */
 const MAX_DEBUG_LOGS = 10
@@ -826,61 +815,10 @@ class WorkbenchService {
       attachments,
       templateShortcut
     })
-    // codex exec 的 JSONL 原始行（string 形态）——parsePlanFromCodex 容错解析用
-    const rawLines: string[] = []
-    // 流式窗口标记 inFlight：reap 空闲回收跳过本会话（finally 保证任何出口复位）
-    agent.inFlight = true
+    // codex exec 的 JSONL 原始行（runDecideTurn 产出，parsePlanFromCodex 用）
+    let rawLines: string[] = []
     try {
-      if (agent.appServer) {
-        // C16 appserver 通道:token 级 delta 经 thread_event 旁路 + stream_delta
-        // 上抛(路由层 mapper.feedStreamDelta 映射 AG-UI 增量帧);exec 形态事件
-        // 照常 thread_event 透传,rawLines 收 JSON.stringify(PLAN 解析同构)。
-        const { stream } = await agent.appServer.startTurn(spec, opts.signal)
-        for await (const frame of stream) {
-          for (const d of frame.deltas) {
-            onProgress({ type: 'stream_delta', delta: d })
-          }
-          if (frame.event) {
-            onProgress({ type: 'thread_event', event: frame.event })
-            try {
-              rawLines.push(JSON.stringify(frame.event))
-            } catch {
-              /* ignore */
-            }
-            if (
-              frame.event.type === 'turn.completed' &&
-              (frame.event as { usage?: unknown }).usage
-            ) {
-              const u = (frame.event as unknown as { usage: Record<string, number> }).usage
-              agent.totalTokens += Number(u.input_tokens ?? 0) + Number(u.output_tokens ?? 0)
-            }
-          }
-          onProgress({ type: 'log', text: 'deciding' })
-        }
-      } else {
-        const { events } = await agent.thread.runStreamed(spec, { signal: opts.signal })
-        for await (const event of events) {
-          if (typeof event === 'string') {
-            rawLines.push(event)
-            onProgress({ type: 'log', text: 'deciding' })
-            continue
-          }
-          // 结构化 ThreadEvent：透传给路由层（SSE item 流，前端实时渲染
-          // 工具调用/文件改动/web 搜索/reasoning，抄 codex app-server 条目驱动模型）
-          onProgress({ type: 'thread_event', event })
-          try {
-            rawLines.push(JSON.stringify(event))
-          } catch {
-            /* ignore */
-          }
-          // 轮级 usage 累计（预算监控：每会话 token 总量）
-          if (event.type === 'turn.completed' && event.usage) {
-            agent.totalTokens +=
-              Number(event.usage.input_tokens ?? 0) + Number(event.usage.output_tokens ?? 0)
-          }
-          onProgress({ type: 'log', text: 'deciding' })
-        }
-      }
+      rawLines = await this.agents.runDecideTurn(agent, spec, onProgress, opts.signal)
     } catch (e) {
       // 中断/异常都留调试日志（用户停止或失败后「复制 debug」仍有内容可看）。
       // 历史上只记 abort；普通执行异常（如上游 429/超时导致 codex exit 1）不记，
@@ -913,8 +851,6 @@ class WorkbenchService {
         throw wrapped
       }
       throw e
-    } finally {
-      agent.inFlight = false
     }
     const raw = rawLines.join('\n')
     // harness：会话保持（不关代理/不删 tempHome/不失效工具上下文）——

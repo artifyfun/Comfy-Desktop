@@ -61,8 +61,23 @@ export interface AgentSession {
 /** agent session 空闲回收：超过该时长无活动即销毁（线程/代理/tempHome） */
 export const AGENT_IDLE_MS = 10 * 60 * 1000
 
-/** 进度回调（onProgress）——decide 流式事件的最小形状 */
-export type AgentProgressCallback = (event: { type: 'log'; text: string }) => void
+/** decide 流式进度事件（log / codex ThreadEvent 透传 / token 级 delta） */
+export type DecideProgressEvent =
+  | {
+      type: 'log'
+      text: string
+    }
+  | {
+      type: 'thread_event'
+      event: unknown
+    }
+  | {
+      type: 'stream_delta'
+      delta: { kind: 'text' | 'reasoning'; itemId: string; delta: string }
+    }
+
+/** 进度回调（onProgress）——decide 流式事件的精确判别联合 */
+export type AgentProgressCallback = (p: DecideProgressEvent) => void
 
 /** 装配期依赖注入（service 组合根提供） */
 export interface AgentRuntimeDeps {
@@ -344,6 +359,80 @@ export class AgentRuntime {
       if (eff) agent.threadOptions.modelReasoningEffort = eff
       else delete agent.threadOptions.modelReasoningEffort
     }
+  }
+
+  /**
+   * 跑一轮 decide 流式执行（候选 ②：从 service.decide 抽出的 harness 核心）。
+   *
+   * 双通道：appserver（token 级 delta + JSON-RPC 帧）或 exec（JSONL 事件流）。
+   * rawLines 收 JSON.stringify 的事件（PLAN 解析同构）；turn.completed 的
+   * usage 累计进会话预算；inFlight 标记 reap 空闲回收跳过（finally 复位）。
+   *
+   * @returns codex 原始输出行（join('\n') 后喂 parsePlanFromCodex）
+   */
+  async runDecideTurn(
+    agent: AgentSession,
+    spec: string,
+    onProgress: AgentProgressCallback,
+    signal?: AbortSignal
+  ): Promise<string[]> {
+    const rawLines: string[] = []
+    agent.inFlight = true
+    try {
+      if (agent.appServer) {
+        // C16 appserver 通道:token 级 delta 经 thread_event 旁路 + stream_delta
+        // 上抛(路由层 mapper.feedStreamDelta 映射 AG-UI 增量帧);exec 形态事件
+        // 照常 thread_event 透传,rawLines 收 JSON.stringify(PLAN 解析同构)。
+        const { stream } = await agent.appServer.startTurn(spec, signal)
+        for await (const frame of stream) {
+          for (const d of frame.deltas) {
+            onProgress({ type: 'stream_delta', delta: d })
+          }
+          if (frame.event) {
+            onProgress({ type: 'thread_event', event: frame.event })
+            try {
+              rawLines.push(JSON.stringify(frame.event))
+            } catch {
+              /* ignore */
+            }
+            if (
+              frame.event.type === 'turn.completed' &&
+              (frame.event as { usage?: unknown }).usage
+            ) {
+              const u = (frame.event as unknown as { usage: Record<string, number> }).usage
+              agent.totalTokens += Number(u.input_tokens ?? 0) + Number(u.output_tokens ?? 0)
+            }
+          }
+          onProgress({ type: 'log', text: 'deciding' })
+        }
+      } else {
+        const { events } = await agent.thread.runStreamed(spec, { signal })
+        for await (const event of events) {
+          if (typeof event === 'string') {
+            rawLines.push(event)
+            onProgress({ type: 'log', text: 'deciding' })
+            continue
+          }
+          // 结构化 ThreadEvent：透传给路由层（SSE item 流，前端实时渲染
+          // 工具调用/文件改动/web 搜索/reasoning，抄 codex app-server 条目驱动模型）
+          onProgress({ type: 'thread_event', event })
+          try {
+            rawLines.push(JSON.stringify(event))
+          } catch {
+            /* ignore */
+          }
+          // 轮级 usage 累计（预算监控：每会话 token 总量）
+          if (event.type === 'turn.completed' && event.usage) {
+            agent.totalTokens +=
+              Number(event.usage.input_tokens ?? 0) + Number(event.usage.output_tokens ?? 0)
+          }
+          onProgress({ type: 'log', text: 'deciding' })
+        }
+      }
+    } finally {
+      agent.inFlight = false
+    }
+    return rawLines
   }
 
   touch(sessionId: string): void {

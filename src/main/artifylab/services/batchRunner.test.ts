@@ -40,6 +40,13 @@ vi.mock('..', () => ({
   }
 }))
 vi.mock('../utils/logger', () => ({ logger: { info: () => {}, warn: () => {}, error: () => {} } }))
+// systemActions mock（候选③：batchRunner 直调进程内函数，不再自环 fetch）——
+// 关机/通知断言改看这两个 spy；默认 no-op 防真关机。
+const systemMocks = {
+  scheduleSystemShutdown: vi.fn(() => ({ started: true })),
+  sendWebhookNotification: vi.fn(async () => ({ status: 200 }))
+}
+vi.mock('./systemActions', () => systemMocks)
 vi.mock('electron', () => ({ default: { getPath: () => '' } }))
 
 const { buildItemPrompt, convertValueByType } = await import('./batchRunner')
@@ -420,18 +427,16 @@ describe('batch queue engine', () => {
 
   it('natural completion triggers auto-shutdown once', async () => {
     const mod = await import('./batchRunner')
-    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}'))
-    vi.stubGlobal('fetch', fetchSpy)
+    systemMocks.scheduleSystemShutdown.mockClear()
     await mod.startBatch(mkOpts({ autoShutdown: true }))
-    await waitFor(() => fetchSpy.mock.calls.some(([u]) => String(u).includes('/api/shutdown')))
-    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/api/shutdown'))).toHaveLength(1)
-    vi.unstubAllGlobals()
+    await waitFor(() => systemMocks.scheduleSystemShutdown.mock.calls.length > 0)
+    expect(systemMocks.scheduleSystemShutdown).toHaveBeenCalledTimes(1)
+    expect(systemMocks.scheduleSystemShutdown).toHaveBeenCalledWith({ delay: 30, force: true })
   })
 
   it('manual stop suppresses auto-shutdown', async () => {
     const mod = await import('./batchRunner')
-    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}'))
-    vi.stubGlobal('fetch', fetchSpy)
+    systemMocks.scheduleSystemShutdown.mockClear()
     await mod.startBatch(mkOpts({ autoShutdown: true }))
     await mod.startBatch(mkOpts())
     await mod.stopBatch({ stopAll: true })
@@ -439,10 +444,9 @@ describe('batch queue engine', () => {
     await waitFor(() =>
       mod.listBatchQueue().every((j) => j.status === 'stopped' || j.status === 'failed')
     )
-    // 给 pump 收尾留时间，确认没有触发关机请求
+    // 给 pump 收尾留时间，确认没有触发关机
     await new Promise((r) => setTimeout(r, 100))
-    expect(fetchSpy.mock.calls.some(([u]) => String(u).includes('/api/shutdown'))).toBe(false)
-    vi.unstubAllGlobals()
+    expect(systemMocks.scheduleSystemShutdown).not.toHaveBeenCalled()
   })
 
   it('residual auto-shutdown job from persistence does not trigger shutdown for new batch', async () => {
@@ -475,16 +479,14 @@ describe('batch queue engine', () => {
     )
     const mod = await import('./batchRunner')
     mod.loadQueue()
-    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}'))
-    vi.stubGlobal('fetch', fetchSpy)
+    systemMocks.scheduleSystemShutdown.mockClear()
     // 本次新提交普通任务（未开自动关机）→ 跑完不应触发关机
     await mod.startBatch(mkOpts({ appId: 'plain' }))
     await waitFor(() =>
       mod.listBatchQueue().every((j) => j.status !== 'queued' && j.status !== 'running')
     )
     await new Promise((r) => setTimeout(r, 100))
-    expect(fetchSpy.mock.calls.some(([u]) => String(u).includes('/api/shutdown'))).toBe(false)
-    vi.unstubAllGlobals()
+    expect(systemMocks.scheduleSystemShutdown).not.toHaveBeenCalled()
   })
 
   // ---------- 暂停 / 继续 / 删除出队 / 队列级配置 ----------
@@ -571,8 +573,8 @@ describe('batch queue engine', () => {
 
   it('setQueueConfig applies shutdown/notify to active jobs and arms shutdown', async () => {
     const mod = await import('./batchRunner')
-    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}'))
-    vi.stubGlobal('fetch', fetchSpy)
+    systemMocks.scheduleSystemShutdown.mockClear()
+    systemMocks.sendWebhookNotification.mockClear()
     await mod.startBatch(mkOpts({ appId: 'a' }))
     await mod.startBatch(mkOpts({ appId: 'b' }))
     mod.setQueueConfig({ autoShutdown: true, notifyUrl: 'https://api.day.app/x' })
@@ -582,27 +584,22 @@ describe('batch queue engine', () => {
       expect(j.notifyUrl).toBe('https://api.day.app/x')
     }
     // 会话级关机意图已武装：任务本身未开关机，但配置了 → 自然跑完触发一次关机
-    await waitFor(() => fetchSpy.mock.calls.some(([u]) => String(u).includes('/api/shutdown')))
-    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/api/shutdown'))).toHaveLength(1)
-    vi.unstubAllGlobals()
+    await waitFor(() => systemMocks.scheduleSystemShutdown.mock.calls.length > 0)
+    expect(systemMocks.scheduleSystemShutdown).toHaveBeenCalledTimes(1)
   })
 
   it('setQueueConfig re-arms shutdown after a previous session already fired it', async () => {
     const mod = await import('./batchRunner')
-    const fetchSpy = vi.fn().mockResolvedValue(new Response('{}'))
-    vi.stubGlobal('fetch', fetchSpy)
+    systemMocks.scheduleSystemShutdown.mockClear()
     // 第一轮：autoShutdown 任务跑完触发关机（autoShutdownHandled=true）
     await mod.startBatch(mkOpts({ autoShutdown: true }))
-    await waitFor(() => fetchSpy.mock.calls.some(([u]) => String(u).includes('/api/shutdown')))
-    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/api/shutdown'))).toHaveLength(1)
+    await waitFor(() => systemMocks.scheduleSystemShutdown.mock.calls.length > 0)
+    expect(systemMocks.scheduleSystemShutdown).toHaveBeenCalledTimes(1)
     // 第二轮：仅通过队列配置重新开启关机，提交普通任务 → 应再次触发
     mod.setQueueConfig({ autoShutdown: true })
     await mod.startBatch(mkOpts({ appId: 'plain' }))
-    await waitFor(
-      () => fetchSpy.mock.calls.filter(([u]) => String(u).includes('/api/shutdown')).length >= 2
-    )
-    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/api/shutdown'))).toHaveLength(2)
-    vi.unstubAllGlobals()
+    await waitFor(() => systemMocks.scheduleSystemShutdown.mock.calls.length >= 2)
+    expect(systemMocks.scheduleSystemShutdown).toHaveBeenCalledTimes(2)
   })
 
   it('setQueueConfig applies config to paused jobs too (resume uses latest values)', async () => {
@@ -775,17 +772,13 @@ describe('batch queue engine', () => {
     await expect(mod.rerunBatchJob('done-1')).rejects.toThrow(/queue is full/)
   })
 
-  it('default fetch guard intercepts shutdown path (never real POST)', async () => {
-    // 不显式 stub fetch：依赖 beforeEach 的默认守卫。
-    // 若守卫失效，finishActionsWhenIdle 会真实 POST localhost:3008/api/shutdown，
-    // 本机 Comfy-Desktop 在运行时会真的关机——本测试证明该路径只走 mock。
-    fetchGuard.mockClear()
+  it('shutdown goes through in-process systemActions mock (never real exec)', async () => {
+    // 候选③后：关机不再经 localhost fetch（自环已移除），直接调
+    // systemActions.scheduleSystemShutdown——测试 mock 该模块，绝不会真关机。
+    systemMocks.scheduleSystemShutdown.mockClear()
     const mod = await import('./batchRunner')
     await mod.startBatch(mkOpts({ autoShutdown: true }))
-    await waitFor(() => fetchGuard.mock.calls.some(([u]) => String(u).includes('/api/shutdown')))
-    // 请求确实被守卫（mock）接收并返回空响应，从未发往本机 server
-    const shutdownCalls = fetchGuard.mock.calls.filter(([u]) => String(u).includes('/api/shutdown'))
-    expect(shutdownCalls.length).toBe(1)
-    expect(String(shutdownCalls[0]![0])).toMatch(/^http:\/\/localhost:\d+\/api\/shutdown$/)
+    await waitFor(() => systemMocks.scheduleSystemShutdown.mock.calls.length > 0)
+    expect(systemMocks.scheduleSystemShutdown).toHaveBeenCalledWith({ delay: 30, force: true })
   })
 })
