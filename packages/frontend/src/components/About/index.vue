@@ -90,10 +90,12 @@
           </div>
           <div v-if="appInfo && appInfo.version" class="version-update-row">
             <div class="app-version">Version: {{ appInfo.version }}</div>
+            <!-- 检查更新按钮暂时隐藏（如需恢复，取消注释即可）
             <button @click="showUpdateModal = true" class="check-update-btn">
               <i class="fas fa-sync-alt"></i>
               <span>{{ t('checkForUpdates') }}</span>
             </button>
+            -->
           </div>
           <div
             class="license-info"
