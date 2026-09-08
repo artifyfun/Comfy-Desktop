@@ -3856,117 +3856,6 @@ async function runNoteRewrite() {
   }
 }
 
-// —— S6a 节点级图像编辑：旋转 ±90°/180°（原地）、切分（横/竖 N 片→子节点）、
-// 裁剪（进 crop 模式圈选，已有 canvas 级链路复用） ——
-async function imageToCanvasEl(o) {
-  const img = await fetchImageForCrop(o.src)
-  return img
-}
-async function rotateImageNode(id, deg) {
-  const o = objects.value.find((x) => x.id === id)
-  if (!o || o.type !== 'image' || !o.src) return
-  let img
-  try {
-    img = await imageToCanvasEl(o)
-  } catch {
-    message.warning(t('canvasCropNoImage'))
-    return
-  }
-  const d = ((Math.round(deg / 90) % 4) + 4) % 4
-  // fetchImageForCrop 可能返回 ImageBitmap（width/height）或 HTMLImageElement
-  // （naturalWidth/naturalHeight），两者兼容取值
-  const iw = img.naturalWidth || img.width
-  const ih = img.naturalHeight || img.height
-  const sz = rotatedSize(iw, ih, d * 90)
-  const cv = document.createElement('canvas')
-  cv.width = Math.max(1, Math.round(sz.w))
-  cv.height = Math.max(1, Math.round(sz.h))
-  const ctx = cv.getContext('2d')
-  ctx.translate(cv.width / 2, cv.height / 2)
-  ctx.rotate((d * Math.PI) / 2)
-  ctx.drawImage(img, -iw / 2, -ih / 2)
-  cv.toBlob((blob) => {
-    if (!blob) return
-    const url = URL.createObjectURL(blob)
-    beforeChange()
-    const nsz = rotatedSize(o.width, o.height, d * 90)
-    o.src = url
-    o.width = nsz.w
-    o.height = nsz.h
-    persistImage(o)
-    saveSoon()
-  }, 'image/png')
-}
-const splitDlg = reactive({ open: false, id: null, n: 2, dir: 'h' })
-async function splitImageNode(id) {
-  const o = objects.value.find((x) => x.id === id)
-  if (!o || o.type !== 'image' || !o.src) return
-  splitDlg.open = true
-  splitDlg.id = id
-  splitDlg.n = 2
-  splitDlg.dir = 'h'
-}
-async function applySplit() {
-  const o = objects.value.find((x) => x.id === splitDlg.id)
-  if (!o || !splitDlg.open) return
-  splitDlg.open = false
-  let img
-  try {
-    img = await imageToCanvasEl(o)
-  } catch {
-    message.warning(t('canvasCropNoImage'))
-    return
-  }
-  const iw = img.naturalWidth || img.width
-  const ih = img.naturalHeight || img.height
-  const rects = splitRects(iw, ih, splitDlg.n, splitDlg.dir)
-  const scale = o.width / iw
-  beforeChange()
-  rects.forEach((r, i) => {
-    const cv = document.createElement('canvas')
-    cv.width = Math.max(1, Math.round(r.w))
-    cv.height = Math.max(1, Math.round(r.h))
-    const ctx = cv.getContext('2d')
-    ctx.drawImage(img, r.x, r.y, r.w, r.h, 0, 0, cv.width, cv.height)
-    cv.toBlob((blob) => {
-      if (!blob) return
-      const url = URL.createObjectURL(blob)
-      const node = {
-        id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
-        type: 'image',
-        x:
-          o.x +
-          (splitDlg.dir === 'h' ? r.x * scale : 0) +
-          (splitDlg.dir === 'v' ? o.width + 40 : 0),
-        y:
-          o.y +
-          (splitDlg.dir === 'v' ? r.y * scale : 0) +
-          (splitDlg.dir === 'h' ? o.height + 40 : 0),
-        width: Math.max(20, Math.round(r.w * scale)),
-        height: Math.max(20, Math.round(r.h * scale)),
-        src: url,
-        persist: null,
-      }
-      objects.value.push(node)
-      persistImage(node)
-      links.value.push({
-        id: 'l' + Date.now() + Math.random().toString(36).slice(2, 6) + i,
-        from: o.id,
-        to: node.id,
-      })
-      saveSoon()
-    }, 'image/png')
-  })
-  message.success(t('canvasSplitDone').replace('{n}', String(rects.length)))
-}
-/** 节点级裁剪：进 crop 模式并选中该图（圈选已有链路：cropRectFor→canvas 裁剪→新节点） */
-function cropImageNode(id) {
-  const o = objects.value.find((x) => x.id === id)
-  if (!o || o.type !== 'image') return
-  selection.value = [id]
-  setTool('crop')
-}
-
 // —— B2 图→提示词溯源：复制生成提示词 / 查看生成信息 ——
 async function copyImagePrompt(id) {
   const o = objects.value.find((x) => x.id === id)
@@ -4210,397 +4099,6 @@ async function runGenNode() {
 
 // —— A1 画布内 inpaint / A2 扩图 / A9 增强 / A7 反推 / A4 视频 / A10 一致性 ——
 // 这些动作都收敛为「把指令+目标附件发工作台执行」，产物经 onResult 自动落布+溯源。
-// —— D1a 蒙版编辑对话框（对齐参考 canvas-node-mask-edit-dialog）——
-// 双 canvas：隐藏 mask（黑笔触，序列化用）+ 预览叠加（蓝半透明）。笔触历史数组
-// 支撑 undo/redo（重放）。Alt+水平拖 = 调笔刷。提交 = prompt + mask 附件发工作台。
-const maskDlg = reactive({
-  open: false,
-  id: null,
-  imgW: 0,
-  imgH: 0,
-  prompt: '',
-  brush: 100,
-  mode: 'paint', // paint | erase
-  drawing: false,
-  brushAdjust: null, // {startX, startSize}
-  strokes: [], // {mode,size,points:[]}
-  redoStack: [],
-  cursor: null, // {x,y} 预览圆（stage 坐标）
-  error: '',
-  view: 1, // E1：编辑视口缩放（1..4，滚轮/按钮，指针锚定）
-  fitScale: 1, // E1：图适配视口的基准比例（stage 内容 = 原图 * fitScale * view）
-  panning: false, // E1：空格/中键平移中
-  spaceDown: false, // E1：空格按住（平移模式）
-})
-/** E1：蒙版编辑 stage 尺寸（适配 × 缩放） */
-const maskStageSize = computed(() => ({
-  w: Math.round(maskDlg.imgW * maskDlg.fitScale * maskDlg.view),
-  h: Math.round(maskDlg.imgH * maskDlg.fitScale * maskDlg.view),
-}))
-/** E1：stage 1px = 原图多少像素（笔刷/坐标换算） */
-const maskImageScale = computed(
-  () => (maskDlg.imgW ? maskStageSize.value.w / maskDlg.imgW : 1) || 1,
-)
-const maskCanvasEl = ref(null) // 隐藏 mask
-const maskPreviewEl = ref(null) // 预览叠加
-const MASK_PREVIEW_COLOR = 'rgba(37, 99, 235, .38)'
-function openMaskDialog(id) {
-  const o = objects.value.find((x) => x.id === id)
-  if (!o || o.type !== 'image') return
-  const img = new Image()
-  img.onload = () => {
-    maskDlg.id = id
-    maskDlg.imgW = img.naturalWidth || img.width
-    maskDlg.imgH = img.naturalHeight || img.height
-    maskDlg.prompt = ''
-    maskDlg.brush = Math.round(clampBrushSize(Math.max(maskDlg.imgW, maskDlg.imgH) * 0.12))
-    maskDlg.mode = 'paint'
-    maskDlg.drawing = false
-    maskDlg.brushAdjust = null
-    maskDlg.strokes = []
-    maskDlg.redoStack = []
-    maskDlg.cursor = null
-    maskDlg.error = ''
-    maskDlg.view = 1
-    maskDlg.panning = false
-    maskDlg.spaceDown = false
-    maskDlg.open = true
-    // src 落位后清画布 + 适配视口
-    nextTick(() => {
-      for (const el of [maskCanvasEl.value, maskPreviewEl.value]) {
-        if (!el) continue
-        el.width = maskDlg.imgW
-        el.height = maskDlg.imgH
-        el.getContext('2d')?.clearRect(0, 0, el.width, el.height)
-      }
-      maskFitViewport()
-    })
-  }
-  img.onerror = () => message.error(t('canvasCropNoImage'))
-  img.src = o.src
-}
-function maskStrokeCtx(ctx, stroke) {
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-  ctx.lineWidth = stroke.size
-  ctx.globalCompositeOperation = stroke.mode === 'paint' ? 'source-over' : 'destination-out'
-}
-function drawMaskSeg(ctx, from, to, size) {
-  if (from.x === to.x && from.y === to.y) {
-    ctx.beginPath()
-    ctx.arc(to.x, to.y, size / 2, 0, Math.PI * 2)
-    ctx.fill()
-    return
-  }
-  ctx.beginPath()
-  ctx.moveTo(from.x, from.y)
-  ctx.lineTo(to.x, to.y)
-  ctx.stroke()
-}
-function replayMaskStrokes() {
-  const mc = maskCanvasEl.value
-  const pc = maskPreviewEl.value
-  if (!mc || !pc) return
-  const mctx = mc.getContext('2d', { willReadFrequently: true })
-  const pctx = pc.getContext('2d')
-  if (!mctx || !pctx) return
-  mctx.clearRect(0, 0, mc.width, mc.height)
-  pctx.clearRect(0, 0, pc.width, pc.height)
-  for (const st of maskDlg.strokes) {
-    maskStrokeCtx(mctx, st)
-    mctx.strokeStyle = '#000'
-    mctx.fillStyle = '#000'
-    maskStrokeCtx(pctx, st)
-    pctx.strokeStyle = MASK_PREVIEW_COLOR
-    pctx.fillStyle = MASK_PREVIEW_COLOR
-    st.points.forEach((pt, i) => {
-      const prev = st.points[i - 1] || pt
-      drawMaskSeg(mctx, prev, pt, st.size)
-      drawMaskSeg(pctx, prev, pt, st.size)
-    })
-  }
-}
-/** E1：适配视口 —— 图等比缩到可视区内（padding 24），记基准比例 */
-function maskFitViewport() {
-  const vp = maskViewportEl.value
-  if (!vp || !maskDlg.imgW) return
-  const availW = Math.max(1, vp.clientWidth - 48)
-  const availH = Math.max(1, vp.clientHeight - 48)
-  const sc = Math.min(availW / maskDlg.imgW, availH / maskDlg.imgH, 1)
-  maskDlg.fitScale = sc > 0 ? sc : 1
-  maskDlg.view = 1
-  nextTick(() => {
-    vp.scrollLeft = (vp.scrollWidth - vp.clientWidth) / 2
-    vp.scrollTop = (vp.scrollHeight - vp.clientHeight) / 2
-  })
-}
-/** E1：滚轮缩放（指针锚定：缩放后保持指针下的图像点不动） */
-function onMaskWheel(e) {
-  e.preventDefault()
-  const vp = maskViewportEl.value
-  if (!vp) return
-  const next = clamp(maskDlg.view * (e.deltaY < 0 ? 1.2 : 1 / 1.2), 1, 4)
-  if (Math.abs(next - maskDlg.view) < 0.001) return
-  // 指针在 stage 内的相对比例
-  const rect = maskPreviewEl.value?.getBoundingClientRect()
-  const anchor = rect
-    ? {
-        rx: clamp((e.clientX - rect.left) / Math.max(1, rect.width), 0, 1),
-        ry: clamp((e.clientY - rect.top) / Math.max(1, rect.height), 0, 1),
-        vx: e.clientX - vp.getBoundingClientRect().left,
-        vy: e.clientY - vp.getBoundingClientRect().top,
-      }
-    : null
-  maskDlg.view = next
-  if (!anchor) return
-  nextTick(() => {
-    // stage 新尺寸下把锚点拉回指针位置
-    const st = maskStageSize.value
-    vp.scrollLeft =
-      Math.max(0, (Math.max(vp.clientWidth, st.w) - st.w) / 2) + anchor.rx * st.w - anchor.vx
-    vp.scrollTop =
-      Math.max(0, (Math.max(vp.clientHeight, st.h) - st.h) / 2) + anchor.ry * st.h - anchor.vy
-  })
-}
-/** E1：缩放按钮（中心锚定） */
-function maskZoom(dir) {
-  const vp = maskViewportEl.value
-  if (!vp) return
-  const next = clamp(maskDlg.view * (dir > 0 ? 1.2 : 1 / 1.2), 1, 4)
-  if (Math.abs(next - maskDlg.view) < 0.001) return
-  const r = vp.getBoundingClientRect()
-  onMaskWheel({
-    preventDefault() {},
-    deltaY: dir > 0 ? -1 : 1,
-    clientX: r.left + r.width / 2,
-    clientY: r.top + r.height / 2,
-  })
-}
-/** E1：空格/中键平移（viewport 捕获指针，写 scrollLeft/Top） */
-function onMaskPanDown(e) {
-  if (!(e.button === 1 || (e.button === 0 && maskDlg.spaceDown))) return
-  const vp = e.currentTarget
-  // 合成事件/已释放指针会抛 InvalidPointerId —— 捕获失败不影响拖拽本身
-  try {
-    vp.setPointerCapture?.(e.pointerId)
-  } catch {
-    /* 指针不存在（测试合成事件）：跳过捕获 */
-  }
-  maskPan.pt = { x: e.clientX, y: e.clientY, l: vp.scrollLeft, t: vp.scrollTop, id: e.pointerId }
-  maskDlg.panning = true
-  e.preventDefault()
-  e.stopPropagation()
-}
-function onMaskPanMove(e) {
-  const p = maskPan.pt
-  if (!p || e.pointerId !== p.id) return
-  const vp = maskViewportEl.value
-  if (!vp) return
-  vp.scrollLeft = p.l - (e.clientX - p.x)
-  vp.scrollTop = p.t - (e.clientY - p.y)
-  e.preventDefault()
-  e.stopPropagation()
-}
-function onMaskPanUp(e) {
-  const p = maskPan.pt
-  if (!p || e.pointerId !== p.id) return
-  maskPan.pt = null
-  maskDlg.panning = false
-}
-const maskPan = reactive({ pt: null })
-const maskViewportEl = ref(null)
-/** E1：对话框空格键态（window 级，编辑器打开期间生效） */
-function onMaskKeydown(e) {
-  if (e.code === 'Space' && !e.repeat) {
-    const t = e.target
-    if (t && t.closest && t.closest("input,textarea,[contenteditable='true']")) return
-    e.preventDefault()
-    maskDlg.spaceDown = true
-  }
-}
-function onMaskKeyup(e) {
-  if (e.code === 'Space') {
-    e.preventDefault()
-    maskDlg.spaceDown = false
-  }
-}
-
-function onMaskPointerDown(e) {
-  // E1：空格/中键平移由容器捕获处理，这里不抢
-  if (maskDlg.panning || maskDlg.spaceDown) return
-  if (e.button !== 0 && !e.altKey) return
-  const el = e.currentTarget
-  el.setPointerCapture?.(e.pointerId)
-  // Alt+拖 = 调笔刷（参考 brushAdjust）
-  if (e.altKey) {
-    maskDlg.brushAdjust = { startX: e.clientX, startSize: maskDlg.brush }
-    return
-  }
-  if (e.button !== 0) return
-  maskDlg.drawing = true
-  maskDlg.redoStack = []
-  const st = { mode: maskDlg.mode, size: maskDlg.brush, points: [] }
-  maskDlg.strokes.push(st)
-  onMaskPointerMove(e)
-}
-function onMaskPointerMove(e) {
-  const el = maskPreviewEl.value
-  if (!el) return
-  const rect = el.getBoundingClientRect()
-  maskDlg.cursor = {
-    x: e.clientX - rect.left,
-    y: e.clientY - rect.top,
-  }
-  if (maskDlg.brushAdjust) {
-    // E1：屏幕位移按视口缩放还原为图像像素
-    maskDlg.brush = clampBrushSize(
-      maskDlg.brushAdjust.startSize +
-        (e.clientX - maskDlg.brushAdjust.startX) / maskImageScale.value,
-    )
-    return
-  }
-  if (!maskDlg.drawing) return
-  const st = maskDlg.strokes[maskDlg.strokes.length - 1]
-  if (!st) return
-  const pt = maskCanvasPoint(el, e.clientX, e.clientY)
-  const mctx = maskCanvasEl.value?.getContext('2d', { willReadFrequently: true })
-  const pctx = el.getContext('2d')
-  if (!mctx || !pctx) return
-  maskStrokeCtx(mctx, st)
-  mctx.strokeStyle = '#000'
-  mctx.fillStyle = '#000'
-  maskStrokeCtx(pctx, st)
-  pctx.strokeStyle = MASK_PREVIEW_COLOR
-  pctx.fillStyle = MASK_PREVIEW_COLOR
-  const prev = st.points[st.points.length - 1] || pt
-  drawMaskSeg(mctx, prev, pt, st.size)
-  drawMaskSeg(pctx, prev, pt, st.size)
-  st.points.push(pt)
-}
-function onMaskPointerUp() {
-  if (maskDlg.brushAdjust) maskDlg.brushAdjust = null
-  if (!maskDlg.drawing) return
-  maskDlg.drawing = false
-}
-function undoMaskStroke() {
-  if (maskDlg.drawing || !maskDlg.strokes.length) return
-  maskDlg.redoStack.push(maskDlg.strokes.pop())
-  replayMaskStrokes()
-}
-function redoMaskStroke() {
-  if (maskDlg.drawing || !maskDlg.redoStack.length) return
-  maskDlg.strokes.push(maskDlg.redoStack.pop())
-  replayMaskStrokes()
-}
-function resetMaskDialog() {
-  maskDlg.strokes = []
-  maskDlg.redoStack = []
-  replayMaskStrokes()
-}
-/** 提交蒙版编辑：mask 附件 + 原图引用 → 工作台局部重绘 */
-async function submitMaskDialog() {
-  const prompt = maskDlg.prompt.trim()
-  const mc = maskCanvasEl.value
-  if (!prompt) {
-    maskDlg.error = t('canvasMaskPromptRequired')
-    return
-  }
-  if (!mc || !maskHasPaint(mc)) {
-    maskDlg.error = t('canvasMaskRequired')
-    return
-  }
-  const objId = maskDlg.id
-  maskDlg.open = false
-  // mask 序列化 → File（ComfyUI inpaint 兼容：白=保留 透=重绘）
-  const dataUrl = buildInpaintMask(mc)
-  const blob = await (await fetch(dataUrl)).blob()
-  const maskFile = new File([blob], 'mask-' + Date.now() + '.png', { type: 'image/png' })
-  // 原图引用（/view 直附；blob/dataURL 时转 File 附）
-  const refs = [refOf(objId)].filter(Boolean)
-  const o = objects.value.find((x) => x.id === objId)
-  if (!refs.length && o?.src) {
-    try {
-      const b2 = await (await fetch(o.src)).blob()
-      refs.push({
-        filename: 'source-' + Date.now() + '.png',
-        file: new File([b2], 'source-' + Date.now() + '.png', { type: b2.type || 'image/png' }),
-      })
-    } catch {
-      /* 拿不到就只发 mask */
-    }
-  }
-  refs.push({ filename: maskFile.name, file: maskFile })
-  lastSourceIds = [objId]
-  emitPrompt(prompt, { autoSend: true, attachments: refs })
-  message.success(t('canvasAiQueued'))
-}
-
-// （D1a 起局部重绘改走 openMaskDialog 蒙版编辑器，旧的直发工作台路径已删）
-function startOutpaint(objId) {
-  lastSourceIds = [objId]
-  emitPrompt(t('canvasOutpaintPrompt'), {
-    autoSend: true,
-    attachments: [refOf(objId)].filter(Boolean),
-  })
-  message.info(t('canvasAiQueued'))
-}
-async function enhanceImage(objId) {
-  const o = objects.value.find((x) => x.id === objId)
-  if (!o) return
-  lastSourceIds = [objId]
-  emitPrompt(t('canvasEnhancePrompt'), {
-    autoSend: true,
-    attachments: [refOf(objId)].filter(Boolean),
-  })
-  message.info(t('canvasAiQueued'))
-}
-async function reversePrompt(objId) {
-  lastSourceIds = [objId]
-  emitPrompt(t('canvasReversePrompt'), {
-    autoSend: true,
-    attachments: [refOf(objId)].filter(Boolean),
-  })
-  message.info(t('canvasAiQueued'))
-}
-function imageToVideo(objId) {
-  lastSourceIds = [objId]
-  emitPrompt(t('canvasVideoPrompt'), {
-    autoSend: true,
-    attachments: [refOf(objId)].filter(Boolean),
-  })
-  message.info(t('canvasAiQueued'))
-}
-function setConsistencyAsset(objId, kind) {
-  const o = objects.value.find((x) => x.id === objId)
-  if (!o) return
-  o.assetKind = kind // character | style：一致性标记，序列化随 doc 持久化
-  saveSoon()
-  message.success(
-    (kind === 'character' ? t('canvasCharSet') : t('canvasStyleSet')).replace(
-      '{name}',
-      o.name || o.id.slice(-4),
-    ),
-  )
-}
-// 画布右键菜单（容器级 DOM 事件：Konva 层与空白统一在此处理）
-function onWrapContext(e) {
-  const r = wrapEl.value.getBoundingClientRect()
-  const sx = e.clientX - r.left
-  const sy = e.clientY - r.top
-  const w = screenToWorld(viewport.value, sx, sy)
-  // hitTest 返回单个索引（-1 = 空地）；命中时若已选集合含该物件则整组操作
-  const hit = hitTest(objects.value, w.x, w.y)
-  const hitId = hit >= 0 ? objects.value[hit].id : null
-  const targetIds =
-    hitId && selection.value.length && selection.value.includes(hitId)
-      ? selection.value
-      : hitId
-        ? [hitId]
-        : []
-  if (targetIds.length) selection.value = targetIds
-  ctxMenu.value = { x: sx + 8, y: sy + 8, wx: w.x, wy: w.y, targetIds }
-}
-
 // —— N10 Frame 分区 ——
 function addFrameAt(wx, wy) {
   beforeChange()
@@ -4965,545 +4463,6 @@ function clamp(v, a, b) {
   return Math.min(b, Math.max(a, v))
 }
 
-// —— App 节点（P1/P2：画布上的 A 应用实例，可随时运行） ——
-const appNodeObjects = computed(() => withCull((o) => o.type === 'app'))
-
-// app 详情缓存：appId → 完整 app（含 template；picker 拾取/详情接口回填）
-// cacheVer 是响应式触发器：Map.set 不触发 computed，靠版本号驱动面板刷新
-const appCache = new Map()
-const appCacheVer = ref(0)
-async function ensureAppDetail(appId) {
-  if (appCache.has(appId)) return appCache.get(appId)
-  try {
-    const app = await appStore.getAppById(appId)
-    if (app) {
-      appCache.set(appId, app)
-      appCacheVer.value++
-    }
-    return app || null
-  } catch {
-    return null
-  }
-}
-
-const appPicker = reactive({ open: false, wx: 0, wy: 0 })
-function openAppPicker(wx, wy) {
-  appPicker.wx = wx
-  appPicker.wy = wy
-  appPicker.open = true
-}
-function onAppPicked(app) {
-  appPicker.open = false
-  if (!app?.id) return
-  const pendingLink = connectCreate.pickLink || null
-  connectCreate.pickLink = null
-  // picker 的 app 已带完整 template —— 立即入缓存（面板字段即时渲染）
-  appCache.set(app.id, app)
-  appCacheVer.value++
-  beforeChange()
-  const node = makeAppNode(app.id, app.name, appPicker.wx, appPicker.wy)
-  objects.value.push(node)
-  if (pendingLink) linkFromConnect(node.id, pendingLink.from, pendingLink.to)
-  selection.value = [node.id]
-  saveSoon()
-  // 拾取即展开参数面板
-  nextTick(() => openAppNodePanel(node.id))
-  // S5a 编排流：note 生图 → 连线 + 自动运行（不展开面板避免遮挡）
-  if (genFromNote.value) {
-    appPanel.id = null
-    maybeRunGenFromNote(node)
-  }
-}
-
-/** 右键菜单位置开拾取器（点选后关闭菜单） */
-function openAppPickerAtCtx() {
-  openAppPicker(ctxMenu.value?.wx ?? 0, ctxMenu.value?.wy ?? 0)
-  closeCtxMenu()
-}
-
-// 展开面板状态：{ id } —— node/pos/fed 全部由 computed 派生（视口/节点变化自动跟随）
-const appPanel = reactive({ id: null })
-const appPanelNode = computed(() => objects.value.find((o) => o.id === appPanel.id) || null)
-// 兼容旧引用：模板里直接用 appPanel.node（computed 语义）
-Object.defineProperty(appPanel, 'node', {
-  get: () => appPanelNode.value,
-  enumerable: true,
-})
-const appPanelApp = computed(() => {
-  appCacheVer.value // 依赖缓存版本（Map.set 本身不触发）
-  return appPanelNode.value ? appCache.get(appPanelNode.value.appId) || null : null
-})
-const appPanelPos = computed(() => {
-  const n = appPanelNode.value
-  if (!n) return { x: 0, y: 0 }
-  const tl = worldToScreen(viewport.value, n.x + n.width, n.y)
-  return {
-    x: clamp(tl.x + 12, 8, Math.max(8, size.w - 336)),
-    y: clamp(tl.y, 8, Math.max(8, size.h - 120)),
-  }
-})
-const appPanelFed = ref([])
-function openAppNodePanel(id) {
-  const node = objects.value.find((o) => o.id === id)
-  if (!node || node.type !== 'app') return
-  appPanel.id = id
-  // 异步补 app 详情 + 刷新喂养提示
-  void ensureAppDetail(node.appId).then(refreshFed)
-}
-/** Konva 卡上 ⚙ 按钮（Konva 事件对象不兼容 Vue .prevent/.stop 修饰符，代理进 handler） */
-function openAppNodePanelFromKonva(id, kev) {
-  stopKonvaEvent(kev)
-  openAppNodePanel(id)
-}
-/** Konva 卡上 ▶ 按钮 */
-function runAppNodeFromKonva(id, kev) {
-  stopKonvaEvent(kev)
-  runAppNode(id)
-}
-function refreshFed() {
-  const node = appPanelNode.value
-  const app = appPanelApp.value
-  if (!node || !app) {
-    appPanelFed.value = []
-    return
-  }
-  const up = collectUpstream(node.id, objects.value, links.value)
-  const { fedFields } = buildNodeOverrides(node, paramFieldsFromTemplate(app), up)
-  appPanelFed.value = fedFields
-}
-
-// 参数面板打开时：文档/视口/连线/app 缓存变化刷新喂养提示
-// （appCacheVer：Map.set 不触发响应，靠版本号驱动 detail 到达后的重算）
-watch(
-  () => [
-    appPanel.id,
-    links.value.length,
-    objects.value.length,
-    Math.round(viewport.value.scale * 4),
-    appCacheVer.value,
-  ],
-  () => {
-    if (appPanel.id) refreshFed()
-  },
-)
-
-/** 参数面板写回（AppNodeCard update-param 事件：子组件不改 prop，由宿主落） */
-function onPanelParamUpdate({ nodeId, key, value }) {
-  const node = appPanelNode.value
-  if (!node) return
-  if (!node.params) node.params = {}
-  if (!node.params[nodeId]) node.params[nodeId] = {}
-  node.params[nodeId][key] = value
-  saveSoon()
-}
-
-/** 画布拾取一张图喂给参数槽（pick-canvas 事件：选图片物件或直接手填） */
-function pickCanvasImageFor(field) {
-  const imgs = objects.value.filter((o) => o.type === 'image')
-  if (!imgs.length) {
-    message.info(t('canvasAppNodeNoImages'))
-    return
-  }
-  // 无 UI 树的轻量选择：按离节点最近的一张
-  const node = appPanelNode.value
-  let best = imgs[0]
-  if (node) {
-    let bestD = Infinity
-    for (const img of imgs) {
-      const d = (img.x - node.x) ** 2 + (img.y - node.y) ** 2
-      if (d < bestD) {
-        bestD = d
-        best = img
-      }
-    }
-  }
-  const ref = imageObjectRef(best)
-  if (!ref?.filename) {
-    message.info(t('canvasAppNodeNoViewRef'))
-    return
-  }
-  if (!appPanelNode.value.params) appPanelNode.value.params = {}
-  if (!appPanelNode.value.params[field.nodeId]) appPanelNode.value.params[field.nodeId] = {}
-  appPanelNode.value.params[field.nodeId][field.key] = ref.filename
-  message.success(t('canvasAppNodeFed').replace('{f}', field.label).replace('{n}', ref.filename))
-}
-
-/** 弹窗打开完整应用（genHtml iframe 预览，复杂交互兜底） */
-async function openFullApp(node) {
-  const app = await ensureAppDetail(node.appId)
-  if (!app) {
-    message.warning(t('canvasAppNodeAppMissing'))
-    return
-  }
-  await appStore.updateConfig({ activeAppId: node.appId })
-  router.push({ path: '/web' })
-}
-
-// —— P2 运行链路 ——
-const POLL_INTERVAL = 2500
-const nodePolls = new Map() // nodeId → interval id
-const serverOrigin = computed(() => appStore.config?.serverHost || window.location.origin)
-
-/** 运行一个 app 节点：参数聚合 → POST /api/canvas/execute → 状态机轮询 → 产物落布 */
-async function runAppNode(id) {
-  const node = objects.value.find((o) => o.id === id)
-  if (!node || node.type !== 'app' || node.status === 'running') return
-  const app = await ensureAppDetail(node.appId)
-  if (!app?.template?.prompt || !Object.keys(app.template.prompt).length) {
-    node.status = 'error'
-    node.statusText = t('canvasAppNodeAppMissing')
-    saveSoon()
-    return
-  }
-  const fields = paramFieldsFromTemplate(app)
-  const up = collectUpstream(node.id, objects.value, links.value)
-  const { overrides } = buildNodeOverrides(node, fields, up)
-  // nodeOverrides 形状：{ [nodeId]: { widgetOverrides: {...} } }
-  const nodeOverrides = {}
-  for (const [nid, widgets] of Object.entries(overrides)) {
-    nodeOverrides[nid] = { widgetOverrides: widgets }
-  }
-  node.status = 'running'
-  node.statusText = t('canvasAppNodeQueued')
-  node.lastRunSourceIds = up.srcIds
-  // B1 产物溯源：记录本次运行的 resolved 文本 + app 名（产物落布时写入图元数据）
-  const promptTexts = []
-  for (const w of Object.values(overrides)) {
-    for (const v of Object.values(w)) {
-      if (typeof v === 'string' && v.trim()) promptTexts.push(v.trim())
-    }
-  }
-  node.lastRun = {
-    promptId: null,
-    at: Date.now(),
-    appLabel: app.name || node.name || node.appId,
-    promptText: promptTexts.join('\n').slice(0, 2000) || null,
-  }
-  saveSoon()
-  try {
-    // HTTP 交换在 appNode.js（submitCanvasExecute），此处只留状态编排
-    const { promptId } = await submitCanvasExecute(
-      {
-        prompt: app.template.prompt,
-        nodeOverrides: Object.keys(nodeOverrides).length ? nodeOverrides : undefined,
-        name: node.name || node.appId,
-      },
-      { origin: serverOrigin.value },
-    )
-    node.lastRun = { ...node.lastRun, promptId, at: Date.now() }
-    node.statusText = t('canvasAppNodeRunningStatus')
-    startNodePoll(node.id, promptId)
-  } catch (e) {
-    node.status = 'error'
-    node.statusText = String(e?.message || e).slice(0, 120)
-    saveSoon()
-  }
-}
-
-/** 批量运行：选中多个 app 节点依次触发（服务端排队天然并行） */
-function runAppNodes(ids) {
-  const targets = ids.filter((id) => {
-    const o = objects.value.find((x) => x.id === id)
-    return o?.type === 'app' && o.status !== 'running'
-  })
-  for (const id of targets) void runAppNode(id)
-  if (targets.length)
-    message.info(t('canvasAppNodeBatchQueued').replace('{n}', String(targets.length)))
-}
-
-function startNodePoll(nodeId, promptId) {
-  stopNodePoll(nodeId)
-  const tick = async () => {
-    const node = objects.value.find((o) => o.id === nodeId)
-    if (!node) return stopNodePoll(nodeId)
-    try {
-      const r = await pollCanvasExecuteStatus(promptId, { origin: serverOrigin.value })
-      if (!r) return
-      stopNodePoll(nodeId)
-      if (r.status === 'success') {
-        node.status = 'success'
-        node.statusText = t('canvasAppNodeDone')
-        placeNodeArtifacts(node, extractStatusFiles(r))
-      } else {
-        node.status = 'error'
-        node.statusText = String(r.error || 'error').slice(0, 120)
-      }
-      saveSoon()
-    } catch {
-      /* 下轮重试 */
-    }
-  }
-  nodePolls.set(nodeId, setInterval(tick, POLL_INTERVAL))
-  void tick()
-}
-function stopNodePoll(nodeId) {
-  const t = nodePolls.get(nodeId)
-  if (t) clearInterval(t)
-  nodePolls.delete(nodeId)
-}
-
-/** 轮询结果 outputs → 文件列表（服务端已全扫为 outputs.files） */
-function extractStatusFiles(r) {
-  const files = Array.isArray(r?.outputs?.files) ? r.outputs.files : []
-  return files
-    .filter((f) => f && f.filename)
-    .map((f) => ({ filename: f.filename, subfolder: f.subfolder || '', type: f.type || 'output' }))
-}
-
-/** 产物落布：节点右侧一列 + 溯源连线（app 节点 → 产物） */
-function placeNodeArtifacts(node, files) {
-  if (!files?.length) return
-  const origin = appStore.config?.comfyHost || 'http://127.0.0.1:8188'
-  // 预取尺寸定布局（artifactLayout 纯函数给列坐标；加载失败不落布）
-  const urls = files.map(
-    (f) =>
-      `${origin}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? '')}&type=${encodeURIComponent(f.type ?? 'output')}`,
-  )
-  Promise.all(
-    urls.map(
-      (u) =>
-        new Promise((resolve) => {
-          const probe = new Image()
-          probe.onload = () => resolve({ w: probe.naturalWidth, h: probe.naturalHeight })
-          probe.onerror = () => resolve(null)
-          probe.src = u
-        }),
-    ),
-  ).then((dims) => {
-    const ok = urls.filter((_, i) => dims[i] && dims[i].w > 0)
-    const sizes = dims.filter((d) => d && d.w > 0)
-    if (!sizes.length) return
-    const scaleOf = (d) => Math.min(1, 260 / d.w)
-    const widths = sizes.map((d) => Math.round(d.w * scaleOf(d)))
-    const heights = sizes.map((d) => Math.round(d.h * scaleOf(d)))
-    const spots = artifactLayout(node, sizes.length, heights)
-    beforeChange()
-    const genMeta = node.lastRun
-      ? {
-          app: node.lastRun.appLabel || null,
-          prompt: node.lastRun.promptText || null,
-          at: node.lastRun.at || Date.now(),
-        }
-      : null
-    spots.forEach((spot, i) => {
-      const id = 'n' + Date.now() + i + Math.random().toString(36).slice(2, 5)
-      objects.value.push({
-        id,
-        type: 'image',
-        x: spot.x,
-        y: spot.y,
-        width: widths[i],
-        height: heights[i],
-        src: ok[i],
-        meta: genMeta ? { ...genMeta } : undefined,
-      })
-      links.value.push({ id: 'l' + Date.now() + i, from: node.id, to: id })
-    })
-    saveSoon()
-  })
-}
-
-// —— App 节点卡视觉（参考 infinite-canvas canvas-theme dark：stone 色系 + rounded-3xl + 选中近白描边）——
-const APP_CARD = {
-  fill: '#262729', // node.fill  (--wb-surface)
-  stroke: '#313235', // node.stroke  (--wb-stroke)
-  activeStroke: '#ffffff', // node.activeStroke 选中=白描边 (--wb-selected)
-  text: '#ffffff', // node.text  (--wb-text)
-  muted: '#a0a0a0', // node.muted  (--wb-text-2)
-  faint: '#8a8a8a', // node.faint  (--wb-text-3)
-}
-function appNodeRectConfig(o) {
-  const sel = selection.value.includes(o.id)
-  return {
-    width: o.width,
-    height: o.height,
-    fill: APP_CARD.fill,
-    stroke: sel || isHighlightedOf(o) ? APP_CARD.activeStroke : APP_CARD.stroke,
-    strokeWidth: sel ? 2 : 1,
-    cornerRadius: 10, // --wb-r-card（原 rounded-3xl 24px 越阶收敛）
-    shadowColor: 'rgba(0,0,0,0.25)',
-    shadowBlur: 8, // 选中态不再放大投影：1px 白描边承担选中语义（发光语义退役）
-    shadowOffset: { x: 0, y: 2 },
-    shadowOpacity: 0.4,
-  }
-}
-function appNodeTitleConfig(o) {
-  if (!lodTextVisible(viewport.value.scale)) return { visible: false, listening: false }
-  return {
-    text: o.name || o.appId,
-    x: 16,
-    y: 14,
-    width: o.width - 76,
-    height: 24,
-    fontSize: 14,
-    fontStyle: 'bold',
-    fill: APP_CARD.text,
-    wrap: 'none',
-    ellipsis: true,
-    listening: false,
-  }
-}
-function appNodeSubConfig(o) {
-  if (!lodTextVisible(viewport.value.scale)) return { visible: false, listening: false }
-  const sub =
-    o.status === 'running' ? o.statusText || '…' : o.statusText || t('canvasAppNodeSubDefault')
-  return {
-    text: sub,
-    x: 16,
-    y: o.height - 30,
-    width: o.width - 32,
-    height: 20,
-    fontSize: 11,
-    fill:
-      o.status === 'error' ? '#f56c6c' : o.status === 'success' ? APP_CARD.muted : APP_CARD.faint,
-    wrap: 'none',
-    ellipsis: true,
-    listening: false,
-  }
-}
-function appNodeStatusConfig(o) {
-  const running = o.status === 'running'
-  return {
-    x: o.width - 26,
-    y: 24,
-    radius: running ? 6 : 5,
-    fill:
-      o.status === 'success'
-        ? APP_CARD.muted
-        : o.status === 'running'
-          ? APP_CARD.activeStroke
-          : o.status === 'error'
-            ? '#f56c6c'
-            : APP_CARD.faint,
-    stroke: running ? 'rgba(11,140,233,0.25)' : null,
-    strokeWidth: running ? 8 : 0,
-    listening: false,
-  }
-}
-function appNodeRunBtnConfig(o) {
-  return {
-    text: o.status === 'running' ? '◉' : '▶',
-    x: o.width - 58,
-    y: o.height - 36,
-    fontSize: 16,
-    fill: o.status === 'running' ? APP_CARD.activeStroke : APP_CARD.muted,
-    listening: true,
-  }
-}
-function appNodeExpandBtnConfig(o) {
-  return {
-    text: '⚙',
-    x: o.width - 32,
-    y: o.height - 36,
-    fontSize: 15,
-    fill: appPanel.id === o.id ? APP_CARD.activeStroke : APP_CARD.faint,
-    listening: true,
-  }
-}
-
-// —— P3 AI 侧边栏节点指令（wb_canvas_ops → 人审确认卡 → 执行） ——
-const pendingAgentOps = ref(null) // Array<op> | null
-const agentOpsDiffLines = computed(() =>
-  (pendingAgentOps.value || []).map((op) => {
-    switch (op.type) {
-      case 'run_node': {
-        const n = objects.value.find((o) => o.id === op.nodeId)
-        return t('canvasAgentOpsRun').replace('{n}', n?.name || op.nodeId)
-      }
-      case 'add_app_node':
-        return t('canvasAgentOpsAdd').replace('{app}', op.name || op.appId)
-      case 'update_node':
-        return t('canvasAgentOpsUpdate').replace('{id}', op.id)
-      case 'connect_nodes':
-        return t('canvasAgentOpsConnect').replace('{f}', op.from).replace('{to}', op.to)
-      case 'select_nodes':
-        return t('canvasAgentOpsSelect').replace('{n}', String((op.ids || []).length))
-      default:
-        return String(op.type)
-    }
-  }),
-)
-
-function applyCanvasAgentOps(ops) {
-  if (!Array.isArray(ops)) return
-  beforeChange()
-  for (const op of ops) {
-    try {
-      applyOneAgentOp(op)
-    } catch (e) {
-      console.warn('[canvas] agent op failed:', op, e)
-    }
-  }
-  saveSoon()
-}
-
-function applyOneAgentOp(op) {
-  if (op.type === 'run_node') {
-    const node = objects.value.find((o) => o.id === op.nodeId)
-    if (!node || node.type !== 'app') return
-    // params 覆写：{nodeId:{widget:value}} 直写 node.params
-    if (op.params && typeof op.params === 'object') {
-      node.params = { ...node.params, ...op.params }
-    }
-    void runAppNode(node.id)
-    return
-  }
-  if (op.type === 'add_app_node') {
-    const wx = typeof op.x === 'number' ? op.x : viewportCenterWorld().x
-    const wy = typeof op.y === 'number' ? op.y : viewportCenterWorld().y
-    const node = makeAppNode(op.appId, op.name || op.appId, wx, wy)
-    if (op.params && typeof op.params === 'object') node.params = { ...op.params }
-    objects.value.push(node)
-    void ensureAppDetail(op.appId)
-    return
-  }
-  if (op.type === 'update_node') {
-    const node = objects.value.find((o) => o.id === op.id)
-    if (!node) return
-    const patch = op.patch || {}
-    if (patch.params && typeof patch.params === 'object')
-      node.params = { ...node.params, ...patch.params }
-    if (typeof patch.x === 'number') node.x = patch.x
-    if (typeof patch.y === 'number') node.y = patch.y
-    if (typeof patch.name === 'string') node.name = patch.name
-    return
-  }
-  if (op.type === 'connect_nodes') {
-    const a = objects.value.find((o) => o.id === op.from)
-    const b = objects.value.find((o) => o.id === op.to)
-    if (!a || !b) return
-    const exists = links.value.some(
-      (l) => (l.from === op.from && l.to === op.to) || (l.from === op.to && l.to === op.from),
-    )
-    if (!exists)
-      links.value.push({
-        id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5),
-        from: op.from,
-        to: op.to,
-      })
-    return
-  }
-  if (op.type === 'select_nodes') {
-    const ids = (op.ids || []).filter((id) => objects.value.some((o) => o.id === id))
-    if (ids.length) selection.value = ids
-    return
-  }
-}
-
-function confirmAgentOps() {
-  const ops = pendingAgentOps.value
-  if (!ops?.length) return
-  applyCanvasAgentOps(ops)
-  pendingAgentOps.value = null
-  message.success(t('canvasAgentOpsApplied'))
-}
-
-// 侧栏工作台 AI ops → 人审卡（不直接执行）
-const offOps = onOps((ops) => {
-  if (!Array.isArray(ops) || !ops.length) return
-  pendingAgentOps.value = ops
-})
-
 // —— 画布 → 侧栏工作台感知条（选区/物件摘要，与 C 宿主 embed 感知条同构）——
 let canvasSeq = 0
 const canvasDigest = computed(() => {
@@ -5741,119 +4700,6 @@ function onKey(e) {
 function onKeyUp(e) {
   if (e.code === 'Space') spaceDown.value = false
 }
-
-// —— 媒体节点（S4b video/audio）：拖入/上传 + overlay 播放器 + 存档 ——
-const mediaObjects = computed(() => withCull((o) => o.type === 'video' || o.type === 'audio'))
-/** 媒体节点屏幕矩形（overlay 定位） */
-function mediaPosOf(o) {
-  const tl = worldToScreen(viewport.value, o.x, o.y)
-  return {
-    x: tl.x,
-    y: tl.y,
-    w: o.width * viewport.value.scale,
-    h: o.height * viewport.value.scale,
-  }
-}
-/** 从文件建媒体节点；视频取首帧定尺寸，音频固定 280x96 */
-function addMediaFromFile(f, wx, wy, onSized) {
-  const isVideo = f.type.startsWith('video/')
-  const url = URL.createObjectURL(f)
-  const o = {
-    id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
-    type: isVideo ? 'video' : 'audio',
-    x: wx,
-    y: wy,
-    width: isVideo ? 320 : 280,
-    height: isVideo ? 180 : 96,
-    src: url,
-    persist: null,
-    name: f.name,
-  }
-  objects.value.push(o)
-  saveSoon()
-  if (isVideo) {
-    // 视频元信息定尺寸（最大 320 宽，16:9 兜底）
-    const probe = document.createElement('video')
-    probe.preload = 'metadata'
-    probe.onloadedmetadata = () => {
-      const ratio = probe.videoHeight / probe.videoWidth || 0.5625
-      o.width = Math.min(320, Math.max(160, probe.videoWidth))
-      o.height = Math.round(o.width * ratio)
-      onSized?.(o.height)
-      saveSoon()
-    }
-    probe.src = url
-  } else {
-    onSized?.(o.height)
-  }
-  // 存档：小文件 dataURL 内嵌；大文件只留会话（toast 告知刷新丢失）
-  if (f.size <= 4 * 1024 * 1024) {
-    const rd = new FileReader()
-    rd.onload = () => {
-      o.persist = rd.result
-      saveSoon()
-    }
-    rd.readAsDataURL(f)
-  } else {
-    message.warning(t('canvasMediaTooBig'))
-  }
-}
-/** 工具栏/占位点击上传媒体（替换或新建；D1b 图片同支持） */
-function uploadMediaFor(id) {
-  const o = objects.value.find((x) => x.id === id)
-  if (!o) return
-  const isImage = o.type === 'image'
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = o.type === 'video' ? 'video/*' : o.type === 'audio' ? 'audio/*' : 'image/*'
-  input.onchange = () => {
-    const f = input.files?.[0]
-    if (!f) return
-    const url = URL.createObjectURL(f)
-    beforeChange()
-    o.src = url
-    o.name = f.name
-    o.persist = null
-    // D1b：替换图片时清掉旧产物的生成元数据（mask/prompt 已不代表新图）
-    if (isImage) o.meta = undefined
-    if (isImage) {
-      // 尺寸自适应：保持显示宽度，按新图比例调整高度（对齐拖入图片的 260 上限）
-      const probe = new Image()
-      probe.onload = () => {
-        const scale = Math.min(1, 260 / probe.naturalWidth)
-        const w = Math.round(probe.naturalWidth * scale)
-        const h = Math.round(probe.naturalHeight * scale)
-        // 中心不动：x/y 按新尺寸微调，视觉上图片中心保持
-        const cx = o.x + o.width / 2
-        const cy = o.y + o.height / 2
-        o.width = w
-        o.height = h
-        o.x = Math.round(cx - w / 2)
-        o.y = Math.round(cy - h / 2)
-        persistImage(o)
-        saveSoon()
-      }
-      probe.src = url
-      return
-    }
-    if (f.size <= 4 * 1024 * 1024) {
-      const rd = new FileReader()
-      rd.onload = () => {
-        o.persist = rd.result
-        saveSoon()
-      }
-      rd.readAsDataURL(f)
-    }
-    saveSoon()
-  }
-  input.click()
-}
-/** 载入时恢复媒体 src（persist dataURL → src） */
-watch(mediaObjects, (list) => {
-  for (const o of list) {
-    if (!o.src && o.persist) o.src = o.persist
-  }
-})
 
 // —— 图片落画布：文件拖入 + 剪贴板粘贴 ——
 // —— 节点悬浮工具栏（S4a）：悬停物件上方快捷动作条 ——
@@ -6599,6 +5445,116 @@ onBeforeUnmount(() => {
   for (const nodeId of [...nodePolls.keys()]) stopNodePoll(nodeId)
   // AI ops 订阅清场
   offOps?.()
+})
+
+// —— App 节点域（composable 拆分，第五批）——
+const {
+  appNodeObjects,
+  appPanel,
+  appPanelApp,
+  appPanelFed,
+  appPanelNode,
+  appPanelPos,
+  appPicker,
+  openAppNodePanel,
+  openAppNodePanelFromKonva,
+  openAppPicker,
+  openAppPickerAtCtx,
+  onAppPicked,
+  onPanelParamUpdate,
+  openFullApp,
+  runAppNode,
+  runAppNodeFromKonva,
+  runAppNodes,
+  pickCanvasImageFor,
+  pendingAgentOps,
+  agentOpsDiffLines,
+  confirmAgentOps,
+  refreshFed,
+  nodePolls,
+  placeNodeArtifacts,
+  extractStatusFiles,
+  ensureAppDetail,
+} = useAppNodes({
+  objects,
+  selection,
+  viewport,
+  links,
+  size,
+  saveSoon: () => saveSoon(),
+  beforeChange,
+  message,
+  ctxMenu,
+  t,
+  worldToScreen,
+  clamp,
+  appStore,
+  emitPrompt,
+  onOps,
+})
+
+// —— 媒体节点（composable 拆分，第五批）——
+const { mediaObjects, mediaPosOf, addMediaFromFile, uploadMediaFor } = useMediaNodes({
+  objects,
+  viewport,
+  size,
+  worldToScreen,
+  saveSoon: () => saveSoon(),
+  beforeChange,
+  message,
+  t,
+})
+
+// —— 节点级图像编辑（composable 拆分，第五批）——
+const { splitDlg, imageToCanvasEl, rotateImageNode, splitImageNode, applySplit, cropImageNode } =
+  useImageEdit({
+    objects,
+    selection,
+    links,
+    saveSoon: () => saveSoon(),
+    beforeChange,
+    message,
+    t,
+  })
+
+// —— 蒙版编辑对话框（composable 拆分，第五批）——
+const {
+  maskDlg,
+  maskStageSize,
+  maskImageScale,
+  maskCanvasEl,
+  maskPreviewEl,
+  openMaskDialog,
+  maskFitViewport,
+  onMaskWheel,
+  maskZoom,
+  onMaskPanDown,
+  onMaskPanMove,
+  onMaskPanUp,
+  onMaskKeydown,
+  onMaskKeyup,
+  onMaskPointerDown,
+  onMaskPointerMove,
+  onMaskPointerUp,
+  undoMaskStroke,
+  redoMaskStroke,
+  resetMaskDialog,
+  startOutpaint,
+  imageToVideo,
+  setConsistencyAsset,
+  onWrapContext,
+} = useMaskDialog({
+  objects,
+  selection,
+  viewport,
+  size,
+  saveSoon: () => saveSoon(),
+  emitPrompt,
+  message,
+  ctxMenu,
+  t,
+  screenToWorld,
+  clamp,
 })
 
 // —— 提示词库（composable 拆分，第四批③）——
