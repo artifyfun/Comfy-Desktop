@@ -1749,73 +1749,21 @@ import {
   buildSelectionZip,
 } from './canvasExport'
 import { importProject as psImportProject, cloneProject as psCloneProject } from './projectStore'
+// —— 画布 composables（拆分出仓；漏 import 会导致 setup 抛 ReferenceError 整页白屏）——
+import { useCanvasProjects } from './useCanvasProjects'
+import { useAppNodes } from './useAppNodes'
+import { useMediaNodes } from './useMediaNodes'
+import { useImageEdit } from './useImageEdit'
+import { useMaskDialog } from './useMaskDialog'
+import { usePromptLibrary } from './usePromptLibrary'
+import { useCanvasAssets } from './useCanvasAssets'
+import { useCanvasMinimap } from './useCanvasMinimap'
 const { onResult, emitAttachments, emitCanvasState, emitPrompt, onOps } = useCanvasMode()
 const wbOpen = ref(true) // 工作台侧边栏开合
 const layersOpen = ref(false)
 const STORAGE_KEY = 'artify.canvas.doc.v1'
-// —— 多画布项目集（composable 拆分，第一批①c）——
-const projectStore = reactive({ version: 1, activeId: null, projects: [] })
-const {
-  exportCurrentProject,
-  activeProject,
-  projectMenuOpen,
-  syncDoc: syncActiveDocToStore,
-  openProjectById,
-  createNewProject,
-  renameActiveProject,
-  persistProjects,
-  prjBatchMode,
-  prjChecked,
-  prjRenameId,
-  prjRenameInput,
-  prjStats,
-  prjRelTime,
-  togglePrjCheck,
-  startPrjRename,
-  commitPrjRename,
-  exportProjectById,
-  deleteProjectById,
-  exitPrjBatch,
-  deleteCheckedProjects,
-  deleteActiveProject,
-} = useCanvasProjects({
-  projectStore,
-  t,
-  viewport,
-  objects,
-  links,
-  groups,
-  selection,
-  selectedLinkId,
-  appPanel,
-  beforeChange,
-  resetHistory: () => {
-    history.value = createHistory(60)
-  },
-  afterProjectSwitch: () => nextTick(() => syncDraggables()),
-  loadProjectIntoCanvas: () => loadProjectIntoCanvas(),
-  engine: {
-    psUpdateProjectDoc,
-    psSwitchProject,
-    psAddProject,
-    psRenameProject,
-    psDeleteProject,
-    psCloneProject,
-    bootProjectStore,
-    persistProjectStore,
-    normalizeStore,
-    projectCardStats,
-    buildExportPayload,
-    packExportZip,
-    makeViewport,
-  },
-})
-// 启动迁移：旧单画布档升格首个项目（幂等）
-;(function bootProjects() {
-  const { store, migrated } = bootProjectStore()
-  Object.assign(projectStore, store)
-  if (migrated) persistProjects()
-})()
+// 多画布项目集（useCanvasProjects）依赖 viewport/objects/.../appPanel（后者由
+// useAppNodes 返回），必须在这些声明之后调用 —— 见文件末尾「多画布项目集」块。
 
 // —— 导入导出（S2）：当前项目导出 ZIP（projects.json + 图片文件），导入支持 zip/json ——
 function pickImportFile() {
@@ -2116,21 +2064,8 @@ function redrawHandleHits() {
     st?.getLayers().forEach((l) => l.drawHit())
   })
 }
-watch(
-  [
-    hoverNodeId,
-    hoverFromPanel,
-    selectedLinkId,
-    () => [connectDrag.active, connectDrag.targetId],
-    () => [reconnectDrag.active, reconnectDrag.targetId],
-    // fix: 被拖节点句柄显隐随 drag.mode 变化,热区开关需要同步重绘 hit graph
-    () => drag.mode,
-  ],
-  redrawHandleHits,
-  {
-    deep: false,
-  },
-)
+// 句柄 hit graph 重绘 watch 依赖 hoverFromPanel（useCanvasAssets 返回），
+// 已下移至该 composable 之后注册 —— 见「素材库 + 图层面板」块下方。
 watch(
   () => selection.value.length,
   () => redrawHandleHits(),
@@ -5502,6 +5437,72 @@ const {
   maybeRunGenFromNote,
 })
 
+// —— 多画布项目集（composable 拆分，第一批①c）——
+// 位置约束：deps 里的 viewport/objects/links/groups/selection/selectedLinkId/history
+// 与本块上方 useAppNodes 返回的 appPanel 都必须已初始化，故放在 App 节点域之后。
+const projectStore = reactive({ version: 1, activeId: null, projects: [] })
+const {
+  exportCurrentProject,
+  activeProject,
+  projectMenuOpen,
+  syncDoc: syncActiveDocToStore,
+  openProjectById,
+  createNewProject,
+  renameActiveProject,
+  persistProjects,
+  prjBatchMode,
+  prjChecked,
+  prjRenameId,
+  prjRenameInput,
+  prjStats,
+  prjRelTime,
+  togglePrjCheck,
+  startPrjRename,
+  commitPrjRename,
+  exportProjectById,
+  deleteProjectById,
+  exitPrjBatch,
+  deleteCheckedProjects,
+  deleteActiveProject,
+} = useCanvasProjects({
+  projectStore,
+  t,
+  viewport,
+  objects,
+  links,
+  groups,
+  selection,
+  selectedLinkId,
+  appPanel,
+  beforeChange,
+  resetHistory: () => {
+    history.value = createHistory(60)
+  },
+  afterProjectSwitch: () => nextTick(() => syncDraggables()),
+  loadProjectIntoCanvas: () => loadProjectIntoCanvas(),
+  engine: {
+    psUpdateProjectDoc,
+    psSwitchProject,
+    psAddProject,
+    psRenameProject,
+    psDeleteProject,
+    psCloneProject,
+    bootProjectStore,
+    persistProjectStore,
+    normalizeStore,
+    projectCardStats,
+    buildExportPayload,
+    packExportZip,
+    makeViewport,
+  },
+})
+// 启动迁移：旧单画布档升格首个项目（幂等）
+;(function bootProjects() {
+  const { store, migrated } = bootProjectStore()
+  Object.assign(projectStore, store)
+  if (migrated) persistProjects()
+})()
+
 // —— 媒体节点（composable 拆分，第五批）——
 const { mediaObjects, mediaPosOf, addMediaFromFile, uploadMediaFor } = useMediaNodes({
   objects,
@@ -5616,6 +5617,13 @@ const {
   selectedLinkId,
   ctxMenu,
 })
+
+// —— 句柄 hit graph 重绘（依赖项 hoverFromPanel 来自上方 useCanvasAssets）——
+watch(
+  [hoverNodeId, hoverFromPanel, selectedLinkId, () => [connectDrag.active, connectDrag.targetId], () => [reconnectDrag.active, reconnectDrag.targetId], () => drag.mode],
+  redrawHandleHits,
+  { deep: false },
+)
 
 // —— minimap（composable 拆分，第四批③）——
 const { mini, miniItems, miniView, miniJump } = useCanvasMinimap({

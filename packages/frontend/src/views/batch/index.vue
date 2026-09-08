@@ -717,6 +717,18 @@ const notifyWebhookUrl = ref('') // 新增：Bark/Telegram/server酱 webhook URL
 const currentJobId = ref(null)
 const myJob = computed(() => batchTaskStore.queue.find((j) => j.id === currentJobId.value) ?? null)
 
+// 位置约束：useBatchHistory 依赖 executionProgress，须在其之前声明
+const executionProgress = reactive({
+  total: 0,
+  processed: 0,
+  success: 0,
+  failed: 0,
+  percent: 0,
+  status: 'normal',
+  strokeColor: '#4ade80',
+  currentItem: '',
+})
+
 // ---------- 执行历史（composable 拆分，第一批①b）----------
 const {
   showHistoryDialog,
@@ -727,6 +739,7 @@ const {
   upsertHistoryRecord,
   openHistoryDialog,
   deleteHistoryRecord,
+  historyKey,
 } = useBatchHistory({
   currentApp,
   currentJobId,
@@ -763,16 +776,7 @@ function statusText(status) {
   return map[status] || status
 }
 
-const executionProgress = reactive({
-  total: 0,
-  processed: 0,
-  success: 0,
-  failed: 0,
-  percent: 0,
-  status: 'normal',
-  strokeColor: '#4ade80',
-  currentItem: '',
-})
+// executionProgress 已上移至 useBatchHistory 之前（下移会踩 TDZ → 整页白屏）
 const executionLogs = ref([]) // 新增：执行日志
 // 日志上限：长任务下 unshift 无限增长会拖垮内存与渲染，超限丢弃最旧（尾部）
 const EXECUTION_LOGS_MAX = 500
@@ -1674,8 +1678,8 @@ watch(fileFilter, () => {
 })
 
 onMounted(async () => {
-  await loadQueueConfig()
-  queueConfigLoaded = true
+  await batchTaskStore.loadQueueConfig()
+  // queueConfigLoaded 已移除：全项目仅此一处赋值、无声明无读取（重构残留死代码）
   await init()
   await restoreRunningTask()
 })

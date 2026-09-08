@@ -1,61 +1,27 @@
 /**
- * Cross-platform `pnpm dev` launcher.
+ * Dev orchestrator: frontend vite + electron main/renderer.
  *
- * Why this file exists:
- * The old script `pnpm --filter artifylab-frontend dev & cross-env DEV_MODE=true electron-vite dev`
- * relies on `&` which means "background" in bash (Linux/macOS) but "sequential"
- * in Windows cmd/PowerShell — so on Windows the electron-vite part never ran.
- *
- * This script spawns both processes in parallel and forwards stdin/stdout/stderr,
- * and tears them all down together on Ctrl+C / exit.
+ * Panel URL correctness (2026-09 fix): macOS ControlCenter (AirPlay) holds
+ * IPv4 *:5000 indefinitely. The old `vite --port 5000` bound only [::1]:5000
+ * while electron's Chromium resolves localhost preferentially to IPv4 → the
+ * A-UI panel loaded the system process → blank canvas page; reload never
+ * helped because the URL itself hit the wrong stack. Now vite is pinned to
+ * 127.0.0.1:5100 with --strictPort (a collision fails loudly instead of
+ * drifting), the port is injected via ARTIFY_DEV_PANEL_PORT, and panelMode
+ * reads that env. DEV_PANEL_PORT=x overrides the port for debugging.
  */
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
+import http from 'node:http'
 import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { dirname, join, resolve } from 'node:path'
 
-const root = process.cwd()
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const root = join(__dirname, '..')
 const electronViteBin = resolve(root, 'node_modules/electron-vite/bin/electron-vite.js')
 
-if (!existsSync(electronViteBin)) {
-  console.error('[dev] electron-vite binary not found. Run "pnpm install" first.')
-  process.exit(1)
-}
-
-// electron-vite wipes `out/` before building via the OS trash, which sandboxes
-// (e.g. WorkBuddy) may block. Pre-clean it with an external command so the
-// build always proceeds. Use spawnSync so we finish cleaning before starting.
-const outDir = resolve(root, 'out')
-if (existsSync(outDir)) {
-  const isWin = process.platform === 'win32'
-  const clean = spawnSync(
-    isWin ? 'cmd' : 'rm',
-    isWin ? ['/c', 'rmdir', '/s', '/q', outDir] : ['-rf', outDir],
-    { stdio: 'ignore' }
-  )
-  if (clean.status !== 0) {
-    console.warn('[dev] warning: could not fully clean out/ before build')
-  }
-}
-
-// 防静默过期守卫：host iframe 吃的是 build:copy 部署产物（不是 vite dev）。
-// 源码新于产物 → 直接 fail（提示一条命令修复），把"改了没生效"留在启动时刻。
-// 跳过: ARTIFY_SKIP_FRESH_CHECK=1。
-if (!isElectronOnlyRun()) {
-  const check = spawnSync(
-    process.execPath,
-    [resolve(root, 'packages/frontend/scripts/check-fresh-dist.js')],
-    { stdio: 'inherit' }
-  )
-  if (check.status !== 0) {
-    console.error('[dev] 前端部署产物过期，拒绝启动（避免宿主 iframe 跑旧 bundle）。')
-    process.exit(1)
-  }
-}
-
-/** `--electron-only`：只重启 electron 侧（前端产物没动 / 不想重建前端时）。 */
-function isElectronOnlyRun() {
-  return process.argv.includes('--electron-only')
-}
+const viteOverride = Number(process.env.DEV_PANEL_PORT)
+const PANEL_PORT = Number.isInteger(viteOverride) && viteOverride > 0 ? viteOverride : 5100
 
 /** @type {import('node:child_process').ChildProcess[]} */
 const children = []
@@ -63,11 +29,9 @@ const children = []
 function run(name, command, args, options = {}) {
   console.log(`[dev] starting ${name}: ${command} ${args.join(' ')}`)
   const child = spawn(command, args, {
-    stdio: 'inherit',
+    stdio: options.stdio ?? 'inherit',
     shell: process.platform === 'win32',
-    // Use the caller-provided env as-is (it is already a full copy of
-    // process.env with modifications). Merging with process.env again here
-    // would resurrect variables the caller deliberately deleted.
+    cwd: options.cwd,
     env: options.env ?? process.env
   })
   children.push(child)
@@ -80,17 +44,78 @@ function run(name, command, args, options = {}) {
   return child
 }
 
-// 1) Frontend Vite dev server (http://localhost:5000)
-run('frontend', 'pnpm', ['--filter', 'artifylab-frontend', 'dev'])
+// ---- 1) Frontend vite dev server, pinned to 127.0.0.1:PANEL_PORT ----
+// 直接 spawn vite bin：pnpm filter 的 `--` 透传会变成位置参数被 vite 忽略。
+const feDir = join(root, 'packages/frontend')
+const viteBin = join(feDir, 'node_modules/vite/bin/vite.js')
+const viteProc = run(
+  'frontend',
+  process.execPath,
+  [
+    viteBin,
+    '--config', join(feDir, 'vite.config.js'),
+    '--host', '127.0.0.1',
+    '--port', String(PANEL_PORT),
+    '--strictPort'
+  ],
+  {
+    stdio: ['inherit', 'pipe', 'inherit'],
+    cwd: feDir,
+    env: { ...process.env }
+  }
+)
+viteProc.stdout?.on('data', (chunk) => process.stdout.write(`[vite] ${chunk}`))
+viteProc.stderr?.on('data', (chunk) => process.stderr.write(`[vite:err] ${chunk}`))
 
-// 2) Electron main + renderer dev (DEV_MODE=true)
-const electronEnv = { ...process.env, DEV_MODE: 'true' }
-// Some sandboxes (e.g. WorkBuddy) inject ELECTRON_RUN_AS_NODE=1 which makes
-// Electron run as a plain Node process (electron.app is undefined) — strip it
-// so the app window actually opens.
-delete electronEnv.ELECTRON_RUN_AS_NODE
-run('electron', process.execPath, [electronViteBin, 'dev'], {
-  env: electronEnv
+// ---- 2) Wait for vite to accept connections, then start electron ----
+async function waitForVite(port, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const ok = await new Promise((resolve) => {
+      const req = http.get(
+        { host: '127.0.0.1', port, path: '/', timeout: 1500 },
+        (res) => {
+          res.resume()
+          resolve(res.statusCode === 200)
+        }
+      )
+      req.on('error', () => resolve(false))
+      req.on('timeout', () => {
+        req.destroy()
+        resolve(false)
+      })
+    })
+    if (ok) return true
+    await new Promise((r) => setTimeout(r, 500))
+  }
+  return false
+}
+
+async function main() {
+  const ready = await waitForVite(PANEL_PORT)
+  if (!ready) {
+    console.error(
+      `[dev] ERROR: vite not reachable on 127.0.0.1:${PANEL_PORT} — aborting electron launch (port busy? DEV_PANEL_PORT to override)`
+    )
+    process.exit(1)
+  }
+  console.log(`[dev] panel vite ready on http://127.0.0.1:${PANEL_PORT} — launching electron`)
+
+  const electronEnv = {
+    ...process.env,
+    DEV_MODE: 'true',
+    ARTIFY_DEV_PANEL_PORT: String(PANEL_PORT)
+  }
+  // Some sandboxes (e.g. WorkBuddy) inject ELECTRON_RUN_AS_NODE=1 which makes
+  // Electron run as a plain Node process (electron.app is undefined) — strip it
+  // so the app window actually opens.
+  delete electronEnv.ELECTRON_RUN_AS_NODE
+  run('electron', process.execPath, [electronViteBin, 'dev'], { env: electronEnv })
+}
+
+main().catch((err) => {
+  console.error('[dev] orchestration failed:', err)
+  process.exit(1)
 })
 
 let tearingDown = false
@@ -107,10 +132,24 @@ function teardown(signal) {
       }
     }
   }
-  // Give children a moment to die, then hard-exit (in case of detached shells).
-  setTimeout(() => process.exit(0), 800).unref()
+  setTimeout(() => process.exit(0), 1500).unref()
+  process.on('exit', () => {
+    for (const child of children) {
+      if (child && !child.killed) {
+        try {
+          child.kill('SIGKILL')
+        } catch {
+          /* noop */
+        }
+      }
+    }
+  })
 }
 
 process.on('SIGINT', () => teardown('SIGINT'))
 process.on('SIGTERM', () => teardown('SIGTERM'))
-process.on('SIGQUIT', () => teardown('SIGQUIT'))
+
+if (!existsSync(electronViteBin)) {
+  console.error('[dev] electron-vite binary not found. Run `pnpm install` first.')
+  process.exit(1)
+}

@@ -1319,24 +1319,8 @@ const storedEffort =
 const reasoningEffort = ref(
   storedEffort && REASONING_EFFORT_UI.includes(storedEffort) ? storedEffort : 'auto',
 )
-const aguiBridge = createAguiBridge({
-  origin,
-  t,
-  messages,
-  pushMsg,
-  nextTurn,
-  scrollToBottom,
-  busy,
-  stopping,
-  isStopCancelled,
-  getThreadId: () => sessionId.value,
-  getApprovalMode: () => approvalMode.value,
-  getReasoningEffort: () => reasoningEffort.value,
-  curSession, // STATE_DELTA /tokenUsage 兜底同步进会话用量(aguiBridge.applyTokenUsage)
-  // 执行类副作用(审查修复 C1):wb_artifact/wb_sync/wb_canvas_exec/wb_invalid
-  // 四类 CUSTOM 走同一分派,产物卡/画布同步/执行轮询/pendingIssues 语义完整
-  applyExecutionSideEffect,
-})
+// aguiBridge 创建已下移至 useExecutionPolling 之后（依赖其返回的
+// applyExecutionSideEffect，提前引用会踩 TDZ → setup 抛错整页白屏）
 /** HITL 审批应答转发（C15）：卡片 emit → 桥 POST interaction-response */
 function onApprovalRespond(msg, payload) {
   aguiBridge.respondApproval(msg, payload)
@@ -1412,6 +1396,11 @@ const panelOpen = ref(true)
 const messagesEl = ref(null)
 const composerEl = ref(null)
 const pollTimers = new Map()
+// 画布页右侧栏嵌入模式：画布页以组件形式渲染本视图并传 prop
+// （此时 route.query 是 /canvas 的，不能靠 query 识别）
+// 位置约束：useExecutionPolling 依赖 isCanvasEmbedded，故这两行须在其之前。
+const props = defineProps({ canvasEmbedded: { type: Boolean, default: false } })
+const isCanvasEmbedded = computed(() => props.canvasEmbedded || route.query.canvas === '1')
 const {
   applyExecutionSideEffect,
   startPoll,
@@ -1441,6 +1430,24 @@ const {
   syncWorkflowToCanvas,
   runCanvasOnHost,
 })
+const aguiBridge = createAguiBridge({
+  origin,
+  t,
+  messages,
+  pushMsg,
+  nextTurn,
+  scrollToBottom,
+  busy,
+  stopping,
+  isStopCancelled,
+  getThreadId: () => sessionId.value,
+  getApprovalMode: () => approvalMode.value,
+  getReasoningEffort: () => reasoningEffort.value,
+  curSession, // STATE_DELTA /tokenUsage 兜底同步进会话用量(aguiBridge.applyTokenUsage)
+  // 执行类副作用(审查修复 C1):wb_artifact/wb_sync/wb_canvas_exec/wb_invalid
+  // 四类 CUSTOM 走同一分派,产物卡/画布同步/执行轮询/pendingIssues 语义完整
+  applyExecutionSideEffect,
+})
 const newDialogOpen = ref(false)
 const presetMgrOpen = ref(false)
 const skillMgrOpen = ref(false)
@@ -1465,7 +1472,10 @@ const sidebarSessions = computed(() =>
 onMounted(async () => {
   // 窄容器（embed 画布侧栏）会话栏默认收起，点会话头「展开」按钮唤出浮层
   if (isNarrow.value) sidebarCollapsed.value = true
-  await Promise.all([loadSessions(), loadPresets(), loadSkills(), loadAdvTemplates()])
+  // loadSkills 已移除：全项目无此函数定义（ea9358bf 引入后被删），保留会让
+  // Promise.all reject 并中断下方「恢复上次会话」逻辑；技能列表现由
+  // components/PresetManager.vue 内部 loadSkillsList 自加载。
+  await Promise.all([loadSessions(), loadPresets(), loadAdvTemplates()])
   // 恢复优先级：URL 显式 session > 上次会话（localStorage，embed iframe 重建后 URL 丢失靠它找回）
   // > 最近活跃会话（服务端兜底）。**恢复失败绝不无条件新建**：canvas 侧栏每次打开 AI 面板都
   // 重挂本组件（v-if 切换 → onMounted 重跑），而 localStorage 在多窗口/多宿主（ComfyUI 侧栏
@@ -2194,10 +2204,7 @@ const isEmbed = computed(
     (typeof window !== 'undefined' && window.parent && window.parent !== window),
 )
 
-// 画布页右侧栏嵌入模式：画布页以组件形式渲染本视图并传 prop
-// （此时 route.query 是 /canvas 的，不能靠 query 识别）
-const props = defineProps({ canvasEmbedded: { type: Boolean, default: false } })
-const isCanvasEmbedded = computed(() => props.canvasEmbedded || route.query.canvas === '1')
+// props / isCanvasEmbedded 已上移至 useExecutionPolling 之前（下移会踩 TDZ）
 // 窄栏布局：C 宿主 iframe 与画布侧边栏共用（收会话侧栏/产物右栏、紧凑高度）
 const isNarrow = computed(() => isEmbed.value || isCanvasEmbedded.value)
 
