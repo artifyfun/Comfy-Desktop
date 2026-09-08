@@ -10,7 +10,8 @@ import { ref, toRaw, onMounted, onBeforeUnmount, watch } from 'vue'
 
 // 按需加载 monaco：只引入核心 editor.api + 用到的语言 contribution，
 // 不再走 vite-plugin-monaco-editor（避免全量打包 ~170MB 的 monaco 及全部 worker）。
-const MONACO_EDITOR_API = 'monaco-editor/esm/vs/editor/editor.api'
+// 注意 import() 参数必须是字面量——用变量会让 Vite 无法静态分析，
+// 裸模块标识符在浏览器运行时解析失败（dev 和 build 都会挂）。
 
 const emit = defineEmits(['change'])
 
@@ -58,7 +59,7 @@ onMounted(async () => {
   }
 
   // 核心编辑器 API（不含语言服务）
-  const monaco = await import(MONACO_EDITOR_API)
+  const monaco = await import('monaco-editor/esm/vs/editor/editor.api')
   await loadLanguageContribution(props.language)
 
   editor.value = monaco.editor.create(editorContainerRef.value, {
