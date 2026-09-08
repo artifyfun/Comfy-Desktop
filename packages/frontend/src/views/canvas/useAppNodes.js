@@ -8,6 +8,17 @@
  */
 import { reactive, ref, computed, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import {
+  makeAppNode,
+  collectUpstream,
+  buildNodeOverrides,
+  paramFieldsFromTemplate,
+  artifactLayout,
+  imageObjectRef,
+  submitCanvasExecute,
+  pollCanvasExecuteStatus,
+} from './appNode'
+import { lodTextVisible } from './engine'
 
 export function useAppNodes(deps) {
   const {
@@ -26,6 +37,15 @@ export function useAppNodes(deps) {
     appStore,
     emitPrompt,
     onOps,
+    viewportCenterWorld,
+    closeCtxMenu,
+    setTool,
+    refOf,
+    withCull,
+    isHighlightedOf,
+    stopKonvaEvent,
+    linkFromConnect,
+    maybeRunGenFromNote,
   } = deps
   const router = useRouter()
 

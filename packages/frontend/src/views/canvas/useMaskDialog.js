@@ -6,7 +6,14 @@
  * 附件发工作台。E1：编辑视口缩放/平移（滚轮/空格/中键）。
  * 外部依赖（objects/selection/emitPrompt 等 11 个）经 deps 注入。
  */
-import { reactive, computed } from 'vue'
+import { reactive, ref, computed, nextTick } from 'vue'
+import {
+  buildInpaintMask,
+  clampBrushSize,
+  maskCanvasPoint,
+  maskHasPaint,
+  hitTest,
+} from './engine'
 
 const MASK_PREVIEW_COLOR = 'rgba(59,130,246,0.45)'
 
@@ -23,6 +30,7 @@ export function useMaskDialog(deps) {
     t,
     screenToWorld,
     clamp,
+    refOf,
   } = deps
 
   // —— D1a 蒙版编辑对话框（对齐参考 canvas-node-mask-edit-dialog）——

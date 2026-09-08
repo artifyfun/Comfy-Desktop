@@ -5491,6 +5491,15 @@ const {
   appStore,
   emitPrompt,
   onOps,
+  viewportCenterWorld,
+  closeCtxMenu,
+  setTool,
+  refOf,
+  withCull,
+  isHighlightedOf,
+  stopKonvaEvent,
+  linkFromConnect,
+  maybeRunGenFromNote,
 })
 
 // —— 媒体节点（composable 拆分，第五批）——
@@ -5503,6 +5512,8 @@ const { mediaObjects, mediaPosOf, addMediaFromFile, uploadMediaFor } = useMediaN
   beforeChange,
   message,
   t,
+  persistImage,
+  withCull,
 })
 
 // —— 节点级图像编辑（composable 拆分，第五批）——
@@ -5515,6 +5526,9 @@ const { splitDlg, imageToCanvasEl, rotateImageNode, splitImageNode, applySplit, 
     beforeChange,
     message,
     t,
+    persistImage,
+    fetchImageForCrop,
+    setTool,
   })
 
 // —— 蒙版编辑对话框（composable 拆分，第五批）——
@@ -5555,6 +5569,7 @@ const {
   t,
   screenToWorld,
   clamp,
+  refOf,
 })
 
 // —— 提示词库（composable 拆分，第四批③）——

@@ -10,7 +10,7 @@
  *  - executions[].batchJobId：批编排 job 属本机运行时状态，跨机无意义。
  */
 import { randomUUID } from 'crypto'
-import type { WorkbenchSession } from './service'
+import type { WorkbenchSession } from './sessionTypes'
 
 export const SESSION_EXPORT_SCHEMA_VERSION = 1
 

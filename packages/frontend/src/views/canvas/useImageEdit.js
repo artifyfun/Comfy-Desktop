@@ -3,9 +3,10 @@
  * 外部依赖经 deps 注入；从 canvas/index.vue 逐字搬移（第五批）。
  */
 import { reactive, ref, computed } from 'vue'
+import { splitRects, rotatedSize } from './engine'
 
 export function useImageEdit(deps) {
-  const { objects, selection, links, saveSoon, beforeChange, message, t } = deps
+  const { objects, selection, links, saveSoon, beforeChange, message, t, persistImage, fetchImageForCrop, setTool } = deps
 
   // —— S6a 节点级图像编辑：旋转 ±90°/180°（原地）、切分（横/竖 N 片→子节点）、
   // 裁剪（进 crop 模式圈选，已有 canvas 级链路复用） ——

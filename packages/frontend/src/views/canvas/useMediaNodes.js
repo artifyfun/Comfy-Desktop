@@ -2,10 +2,10 @@
  * 媒体节点（S4b video/audio composable）——拖入/上传 + overlay 播放器 + 存档。
  * 外部依赖经 deps 注入；从 canvas/index.vue 逐字搬移（第五批）。
  */
-import { reactive, ref, computed } from 'vue'
+import { reactive, ref, computed, watch } from 'vue'
 
 export function useMediaNodes(deps) {
-  const { objects, viewport, size, worldToScreen, saveSoon, beforeChange, message, t } = deps
+  const { objects, viewport, size, worldToScreen, saveSoon, beforeChange, message, t, persistImage, withCull } = deps
 
   // —— 媒体节点（S4b video/audio）：拖入/上传 + overlay 播放器 + 存档 ——
   const mediaObjects = computed(() => withCull((o) => o.type === 'video' || o.type === 'audio'))

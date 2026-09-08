@@ -11,7 +11,7 @@
  */
 import { createHash } from 'crypto'
 import { statSync, readFileSync } from 'fs'
-import type { WorkbenchSession } from './service'
+import type { WorkbenchSession } from './sessionTypes'
 import type { WorkbenchOutputFile } from './executionLog'
 import type { SESSION_EXPORT_SCHEMA_VERSION } from './sessionTransfer'
 import { exportSession, type SessionExportFile } from './sessionTransfer'
