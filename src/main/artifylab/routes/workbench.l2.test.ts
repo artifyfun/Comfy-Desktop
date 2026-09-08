@@ -55,7 +55,7 @@ vi.mock('../workbench/templates', () => ({
 
 import { workbenchService } from '../workbench/service'
 import { validateNodeOverridesLocal } from '../workbench/plan'
-import { createWorkbenchRouter } from './workbench'
+import { createWorkbenchRouter } from './workbenchRouter'
 
 const mockExecuteWorkflow = workbenchService.executeWorkflow as ReturnType<typeof vi.fn>
 const mockCloneTemplate = workbenchService.cloneTemplate as ReturnType<typeof vi.fn>
