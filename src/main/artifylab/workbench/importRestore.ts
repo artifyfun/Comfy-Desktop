@@ -35,8 +35,11 @@ export function restoreOne(
   const segs = `${subfolder}/${base}`.split('/').filter(Boolean)
   if (segs.includes('..')) return { ok: false }
   const { resolve, sep } = pathUtil
-  const full = resolve(outputDir, ...segs)
-  if (full !== outputDir && !full.startsWith(outputDir + sep)) return { ok: false }
+  // outputDir 先归一化：Windows 上 resolve('/out') 会吃当前盘符（→ D:\out\...），
+  // 不归一化则前缀比对恒假（POSIX 风格/相对 outputDir 下 restore 静默失效）。
+  const baseAbs = resolve(outputDir)
+  const full = resolve(baseAbs, ...segs)
+  if (full !== baseAbs && !full.startsWith(baseAbs + sep)) return { ok: false }
   mkdir(resolve(full, '..'))
   write(full, data)
   return { ok: true, target: { filename: base, subfolder, type: 'output' } }

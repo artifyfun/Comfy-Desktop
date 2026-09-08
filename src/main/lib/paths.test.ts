@@ -94,6 +94,7 @@ describe('windows system-drive defaults', () => {
   let homeDir = ''
   let userDataDir = ''
   let prevLocalAppData: string | undefined
+  let prevSystemDrive: string | undefined
 
   beforeEach(() => {
     homeDir = fs.mkdtempSync(path.join(tmpRoot, 'home-'))
@@ -101,6 +102,10 @@ describe('windows system-drive defaults', () => {
     exePath = path.join(driveRoot, 'Program Files', 'Artify', 'Artify.exe')
     prevLocalAppData = process.env.LOCALAPPDATA
     process.env.LOCALAPPDATA = LOCAL
+    // 锚定 exe 与"系统盘"同一卷：os.tmpdir() 未必在真实系统盘（如 TEMP 指到 D:），
+    // 不锚定则 selectedInstallDrive() 误判为重定向盘安装，走错分支。
+    prevSystemDrive = process.env.SystemDrive
+    process.env.SystemDrive = driveRoot
     vi.stubGlobal('process', { ...process, platform: 'win32' })
 
     vi.resetModules()
@@ -118,6 +123,8 @@ describe('windows system-drive defaults', () => {
   afterEach(() => {
     if (prevLocalAppData === undefined) delete process.env.LOCALAPPDATA
     else process.env.LOCALAPPDATA = prevLocalAppData
+    if (prevSystemDrive === undefined) delete process.env.SystemDrive
+    else process.env.SystemDrive = prevSystemDrive
   })
 
   afterAll(() => {

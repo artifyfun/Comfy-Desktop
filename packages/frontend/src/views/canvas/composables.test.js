@@ -9,6 +9,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ref, reactive, nextTick } from 'vue'
 
+// 本文件零组件挂载（node 环境，无 document）。useCanvasProjects/usePromptLibrary
+// 内部直接 import antd 的 message/Modal，其异步通知实例创建需要 DOM——
+// 会产生 Unhandled Rejection: document is not defined。模块级替换为 spy。
+vi.mock('ant-design-vue', async (importOriginal) => {
+  const actual = await importOriginal()
+  const messageStub = { success: vi.fn(), info: vi.fn(), error: vi.fn(), warning: vi.fn(), open: vi.fn() }
+  const modalStub = { confirm: vi.fn(), info: vi.fn(), success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+  return { ...actual, message: messageStub, Modal: modalStub }
+})
+
 // ---- 伪造页面 deps 的工厂 ----
 function makePageDeps(overrides = {}) {
   const objects = ref([])

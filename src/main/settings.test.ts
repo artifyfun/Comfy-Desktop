@@ -13,9 +13,14 @@ const xdgCacheHome = path.join(homePath, '.cache')
 const adminXdgCacheHome = path.join(adminHomePath, '.cache')
 const originalXdgConfigHome = process.env.XDG_CONFIG_HOME
 const originalXdgCacheHome = process.env.XDG_CACHE_HOME
+const originalSystemDrive = process.env.SystemDrive
 
 process.env.XDG_CONFIG_HOME = xdgConfigHome
 process.env.XDG_CACHE_HOME = xdgCacheHome
+// 将"系统盘"锚定到 tmpRoot 所在卷：exe(=userDataPath) 与系统盘同卷，
+// selectedInstallDrive() 才返回 null 走 legacy-home 分支（本文件断言的前提）。
+// 否则 os.tmpdir() 不在真实系统盘时（如 TEMP 指到 D:）会误判为重定向盘安装。
+process.env.SystemDrive = path.parse(tmpRoot).root
 fs.mkdirSync(homePath, { recursive: true })
 // A home-root footprint marks this as an existing install, so on Windows the
 // large-data defaults resolve to the home layout these tests assert (a clean
@@ -75,6 +80,8 @@ afterAll(() => {
   else process.env.XDG_CONFIG_HOME = originalXdgConfigHome
   if (originalXdgCacheHome === undefined) delete process.env.XDG_CACHE_HOME
   else process.env.XDG_CACHE_HOME = originalXdgCacheHome
+  if (originalSystemDrive === undefined) delete process.env.SystemDrive
+  else process.env.SystemDrive = originalSystemDrive
   fs.rmSync(tmpRoot, { recursive: true, force: true })
 })
 

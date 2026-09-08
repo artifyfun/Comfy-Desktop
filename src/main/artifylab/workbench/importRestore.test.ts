@@ -3,6 +3,7 @@
  * 防覆盖前缀、缺 manifest 条目兜底。
  */
 import { describe, it, expect } from 'vitest'
+import path from 'node:path'
 import { restoreBundleFiles, restoreOne } from './importRestore'
 import type { WorkbenchSession } from './service'
 
@@ -51,7 +52,8 @@ describe('restoreOne', () => {
       expect(r.target.subfolder).toBe('wb-import-a1b2c3d4/run1')
       expect(r.target.filename).toBe('a.png')
       expect(writes).toHaveLength(1)
-      expect(writes[0]![0]).toBe('/out/wb-import-a1b2c3d4/run1/a.png')
+      // 写回路径经 resolve 归一化（win32 下 '/out' 会吃当前盘符），期望值同构构造
+      expect(writes[0]![0]).toBe(path.resolve('/out', 'wb-import-a1b2c3d4', 'run1', 'a.png'))
     }
   })
   it('路径穿越拒绝：manifest 注入 .. 的 subfolder', () => {
@@ -86,7 +88,7 @@ describe('restoreBundleFiles', () => {
     )
     expect(rr.restored).toHaveLength(1)
     expect(rr.skipped).toBe(0)
-    expect(written).toEqual(['/out/wb-import-a1b2c3d4/run1/art.png'])
+    expect(written).toEqual([path.resolve('/out', 'wb-import-a1b2c3d4', 'run1', 'art.png')])
     // 回填：executions.outputs 指向新位置；字符串引用原样
     const ex = s.executions[0]!
     expect(ex.outputs[0]).toEqual({
