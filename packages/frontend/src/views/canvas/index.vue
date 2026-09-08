@@ -1766,6 +1766,30 @@ const STORAGE_KEY = 'artify.canvas.doc.v1'
 // useAppNodes 返回），必须在这些声明之后调用 —— 见文件末尾「多画布项目集」块。
 
 // —— 导入导出（S2）：当前项目导出 ZIP（projects.json + 图片文件），导入支持 zip/json ——
+
+/** 节点级导出：选中图片节点 → 纯图片 ZIP 下载。
+ *  实现随三巨石拆分下沉到 canvasExport.buildSelectionZip（纯函数），这里只保留
+ *  DOM/fetch 副作用。原函数被拆分提交删除后右键菜单仍引用了它 → 恢复。 */
+function exportSelectionZip() {
+  const picked = objects.value.filter((o) => selection.value.includes(o.id))
+  buildSelectionZip(picked, {
+    fetcher: async (url) => {
+      const r = await fetch(url)
+      return new Uint8Array(await r.arrayBuffer())
+    },
+  }).then((blob) => {
+    if (!blob) {
+      message.warning(t('canvasExportSelEmpty'))
+      return
+    }
+    const u = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = u
+    a.download = `canvas-selection-${new Date().toISOString().slice(0, 10)}.zip`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(u), 5000)
+  })
+}
 function pickImportFile() {
   const input = document.createElement('input')
   input.type = 'file'
@@ -5355,8 +5379,9 @@ onMounted(() => {
   requestAnimationFrame(applyViewport)
   // 侧边栏工作台：产物生成 → 自动落画布（window 总线，见 canvasMode.js）
   const offResult = onResult(placeFiles)
+  // 注：旧的 layersFocusAnim（图层定位 rAF 句柄）已随 edee87be 一并移除，
+  // 这里残留的引用会让卸载抛 ReferenceError → 路由切走失败，故删。
   onBeforeUnmount(() => {
-    if (layersFocusAnim) cancelAnimationFrame(layersFocusAnim)
     offResult()
   })
 })
@@ -5391,6 +5416,13 @@ const {
   appPanelNode,
   appPanelPos,
   appPicker,
+  // 以下 6 个是 Konva 配置函数，模板 v-rect/v-text 直接用，漏解构会渲染报错
+  appNodeRectConfig,
+  appNodeTitleConfig,
+  appNodeSubConfig,
+  appNodeStatusConfig,
+  appNodeRunBtnConfig,
+  appNodeExpandBtnConfig,
   openAppNodePanel,
   openAppNodePanelFromKonva,
   openAppPicker,
@@ -5406,10 +5438,13 @@ const {
   agentOpsDiffLines,
   confirmAgentOps,
   refreshFed,
+  stopNodePoll,
   nodePolls,
+  offOps, // onBeforeUnmount 里订阅清场；漏解构会让卸载抛 ReferenceError
   placeNodeArtifacts,
   extractStatusFiles,
   ensureAppDetail,
+  serverOrigin,
 } = useAppNodes({
   objects,
   selection,
@@ -5557,6 +5592,8 @@ const {
   startOutpaint,
   imageToVideo,
   setConsistencyAsset,
+  reversePrompt,
+  enhanceImage,
   onWrapContext,
 } = useMaskDialog({
   objects,

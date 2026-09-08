@@ -1365,6 +1365,7 @@ const {
   isTodoMsg,
   isActivityMsg,
   expandedToolIds,
+  expandedProcessGroups, // 模板过程组折叠态（漏解构会让含思考块的气泡渲染报错）
   toggleToolItem,
   processGroupAt,
   processGroupSkipped,

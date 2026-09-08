@@ -618,6 +618,7 @@ import { useAppStore } from '@/stores/appStore'
 import { genMeta } from '@/utils/genPrompt'
 import { t } from '@/utils/i18n'
 import { showError, showSuccess, showInfo, uuidv4, getSeed, debounce } from '@/utils'
+import { deepClone } from '@/utils/common' // 拆分出仓时随本地定义一起被删，提交队列仍要用
 import CodeEditor from '@/components/CodeEditor/index.vue'
 import { ExcelProcessor } from '@/utils/excel-utils'
 import localforage from 'localforage'

@@ -448,6 +448,9 @@ export function useMaskDialog(deps) {
     startOutpaint,
     imageToVideo,
     setConsistencyAsset,
+    // 反推提示词 / 画质增强：右键菜单 runners 需要（原在 index.vue，随第五批出仓搬来）
+    reversePrompt,
+    enhanceImage,
     onWrapContext,
   }
 }
