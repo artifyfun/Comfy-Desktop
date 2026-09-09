@@ -540,3 +540,55 @@ describe('createCodexMapper — feedStreamDelta 推理增量', () => {
     expect(done.map((e) => e.type)).toEqual(['REASONING_MESSAGE_END'])
   })
 })
+
+describe('createCodexMapper — 未知事件降级加固(OpenDesign「未知即忽略」原则)', () => {
+  /**
+   * 背景(docs/research-external-agent-integration.md §四):codex app-server
+   * 无版本协商、无 changelog——升级新增的 item type / event type 必须降级为
+   * 「少渲染一样」,绝不能 fail run。以下用未知形态逐类验证零帧、不抛。
+   */
+  it('未知 event.type(未来版本新增)零帧且不抛', () => {
+    const mapper = createCodexMapper({ threadId: 't', runId: 'r' })
+    expect(mapper.feed({ type: 'future.event' } as never)).toEqual([])
+    expect(mapper.feed({ type: 'turn/paused', params: {} } as never)).toEqual([])
+    expect(mapper.feed({ type: 'item.review' } as never)).toEqual([])
+  })
+
+  it('已知相位下的未知 item.type 零帧且不抛(started/updated/completed 三相位)', () => {
+    const mapper = createCodexMapper({ threadId: 't', runId: 'r' })
+    for (const phase of ['item.started', 'item.updated', 'item.completed'] as const) {
+      const evt = { type: phase, item: { id: 'x1', type: 'hologram_render' } } as never
+      expect(mapper.feed(evt)).toEqual([])
+    }
+  })
+
+  it('缺字段的脏事件零帧且不抛(item 缺失/id 缺失/字段类型错)', () => {
+    const mapper = createCodexMapper({ threadId: 't', runId: 'r' })
+    expect(mapper.feed({ type: 'item.completed' } as never)).toEqual([])
+    expect(mapper.feed({ type: 'item.completed', item: {} } as never)).toEqual([])
+    expect(mapper.feed({ type: 'turn.completed', usage: null } as never)).toEqual([])
+    expect(mapper.feed({ type: 'turn.failed' } as never).map((e) => e.type)).toEqual(['RUN_ERROR'])
+    expect(
+      mapper.feed({ type: 'item.updated', item: { id: 'x', type: 'reasoning' } } as never)
+    ).toHaveLength(1)
+  })
+
+  it('字符串行(原始 JSONL)恒零帧——由调用方 parsePlanFromCodex 处理', () => {
+    const mapper = createCodexMapper({ threadId: 't', runId: 'r' })
+    expect(mapper.feed('not-json')).toEqual([])
+    expect(mapper.feed('{"type":"item.completed"}')).toEqual([])
+  })
+
+  it('降级后 mapper 状态不被污染:后续正常事件仍完整映射', () => {
+    const mapper = createCodexMapper({ threadId: 't', runId: 'r' })
+    mapper.feed({ type: 'future.event' } as never)
+    mapper.feed({ type: 'item.completed', item: { id: 'x', type: 'hologram_render' } } as never)
+    // 正常事件照常工作
+    const ok = mapper.feed(itemCompleted(agentMessage('i9', '恢复渲染')))
+    expect(ok.map((e) => e.type)).toEqual([
+      'TEXT_MESSAGE_START',
+      'TEXT_MESSAGE_CONTENT',
+      'TEXT_MESSAGE_END'
+    ])
+  })
+})

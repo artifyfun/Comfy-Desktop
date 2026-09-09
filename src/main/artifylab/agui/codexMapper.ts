@@ -109,11 +109,13 @@ export function createCodexMapper(opts: CodexMapperOptions): CodexMapper {
    *   可达(消费端拼接可能出现重复尾段,优于静默丢内容)。
    */
   const diffReasoning = (id: string, next: string): string | null => {
+    // 防御:脏事件 text 缺失(非 string)按空串处理,不发帧不抛
+    const nextSafe = typeof next === 'string' ? next : ''
     const prev = reasoningSnapshots.get(id) ?? ''
-    reasoningSnapshots.set(id, next)
-    if (next === prev) return null
-    if (prev.length > 0 && !next.startsWith(prev)) return next
-    return next.slice(prev.length)
+    reasoningSnapshots.set(id, nextSafe)
+    if (nextSafe === prev) return null
+    if (prev.length > 0 && !nextSafe.startsWith(prev)) return nextSafe
+    return nextSafe.slice(prev.length)
   }
 
   /** JSON 安全序列化(MCP arguments/result 是 unknown,循环引用时降级空对象) */
@@ -388,10 +390,15 @@ export function createCodexMapper(opts: CodexMapperOptions): CodexMapper {
       case 'error':
         return [runError(event.message)]
       case 'item.started':
+        // 防御:item 缺失(传输层脏数据/codex 升级形态变化)降级零帧不抛——
+        // 抛错会炸掉路由层 decide 事件循环,违反「降级渲染不失败」原则
+        if (!event.item) return []
         return feedItem(event.item, 'started')
       case 'item.updated':
+        if (!event.item) return []
         return feedItem(event.item, 'updated')
       case 'item.completed':
+        if (!event.item) return []
         return feedItem(event.item, 'completed')
       default:
         return []
