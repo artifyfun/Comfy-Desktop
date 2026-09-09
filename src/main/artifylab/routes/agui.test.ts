@@ -767,3 +767,57 @@ describe('POST /api/workbench/agent/run', () => {
     expect(res.status).toBe(400)
   })
 })
+
+describe('外部 agent 通道事件直通(ACP/Claude,AG-UI 形态)', () => {
+  /** AG-UI 形态事件脚本(外部通道 mapper 直出,非 exec ThreadEvent) */
+  const aguiEvents = [
+    { type: 'RUN_STARTED', threadId: 's1', runId: 'r1', timestamp: 1 },
+    { type: 'REASONING_MESSAGE_START', messageId: 'think-1', role: 'reasoning', timestamp: 2 },
+    {
+      type: 'REASONING_MESSAGE_CONTENT',
+      messageId: 'think-1',
+      delta: '外部 agent 思考中',
+      timestamp: 3
+    },
+    { type: 'TEXT_MESSAGE_START', messageId: 'msg-1', role: 'assistant', timestamp: 4 },
+    {
+      type: 'TEXT_MESSAGE_CONTENT',
+      messageId: 'msg-1',
+      delta: '外部 agent 流式正文',
+      timestamp: 5
+    },
+    { type: 'TOOL_CALL_START', toolCallId: 'tc9', toolCallName: 'Bash', timestamp: 6 },
+    { type: 'RUN_ERROR', message: '外部 agent 崩了', timestamp: 7 }
+  ] as unknown as ThreadEvent[]
+
+  it('AG-UI 形态事件绕过 codexMapper 直发(RUN_STARTED 除外,防双帧)', async () => {
+    await startServer()
+    mockDecide.mockImplementation(scriptDecide(aguiEvents, null))
+    const res = await post('/api/workbench/agent/run', { ...VALID_BODY, runId: 'rx' })
+    expect(res.status).toBe(200)
+    const frames = parseSseFrames(await res.text())
+    const types = frames.map((f) => f.type)
+    // 全部 AG-UI 事件直通:REASONING/TEXT/TOOL_CALL 流式帧可见(修复前被
+    // codexMapper default 分支吞掉);RUN_STARTED 被滤(路由已发);RUN_ERROR
+    // 直通(decide 返回 plan=null 后路由补发统一 RUN_ERROR 终帧——脚本里
+    // 自带的 RUN_ERROR 也透传,前端桥对重复终帧容错)
+    expect(types).toContain('REASONING_MESSAGE_CONTENT')
+    expect(types).toContain('TEXT_MESSAGE_CONTENT')
+    expect(types).toContain('TOOL_CALL_START')
+    expect(types.filter((t) => t === 'RUN_STARTED')).toHaveLength(1)
+    expect(types).toContain('RUN_ERROR')
+  })
+
+  it('exec 形态事件(codex 通道)仍走 codexMapper 映射,互不干扰', async () => {
+    await startServer()
+    mockDecide.mockImplementation(scriptDecide(fullTurnEvents, { intent: 'chat', reply: '好' }))
+    const res = await post('/api/workbench/agent/run', { ...VALID_BODY, runId: 'rc' })
+    expect(res.status).toBe(200)
+    const frames = parseSseFrames(await res.text())
+    const types = frames.map((f) => f.type)
+    // exec 事件经 mapper 映射:工具卡/正文/终帧照常
+    expect(types).toContain('TOOL_CALL_START')
+    expect(types).toContain('TEXT_MESSAGE_CONTENT')
+    expect(types[types.length - 1]).toBe('RUN_FINISHED')
+  })
+})

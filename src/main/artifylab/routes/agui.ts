@@ -53,6 +53,7 @@ import {
   textMessageEnd,
   textMessageStart
 } from '../agui/types'
+import { AGUI_EVENT_TYPES } from '../agui/types'
 import type { AGUIEvent } from '../agui/types'
 import type { EventStore } from '../agui/eventStore'
 
@@ -300,6 +301,16 @@ export function createAguiRouter(deps: { store?: EventStore } = {}): express.Rou
             return
           }
           if (p.type !== 'thread_event') return // log 类进度不下发:AG-UI 无对应帧
+          // 外部 agent 通道(ACP/Claude,registry 驱动):事件已是 AG-UI 形态
+          // (mapper 直出,见 agentRuntime runDecideTurn 外部分支)——绕过
+          // codexMapper(它只认 exec 形态 ThreadEvent,AG-UI 事件会全部落
+          // default 被吞)。RUN_STARTED/RUN_FINISHED 生命周期帧仍归路由所有
+          // (防双帧,与 codex 通道同口径);RUN_ERROR 也归路由终帧口径,直通。
+          const peType = (p.event as { type?: string } | undefined)?.type
+          if (peType && (AGUI_EVENT_TYPES as readonly string[]).includes(peType)) {
+            if (peType !== 'RUN_STARTED' && peType !== 'RUN_FINISHED') emit(p.event as AGUIEvent)
+            return
+          }
           for (const ev of mapper.feed(p.event as ThreadEvent)) {
             // RUN_STARTED 生命周期帧归路由所有(已在 decide 前发送);mapper 对
             // thread.started 的映射服务于独立使用场景(decide 流必带 thread.started,
