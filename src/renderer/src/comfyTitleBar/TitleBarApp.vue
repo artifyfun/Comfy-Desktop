@@ -361,7 +361,7 @@ function handleResetZoom(): void {
 }
 
 // News bell with a subtle unread dot until the announcement is opened. Its state
-// lives in the `minimaxAnnouncementSeen` setting (shared with the panel view);
+// lives in the `cloudNodesAnnouncementSeen` setting (shared with the panel view);
 // opening the modal writes it, and the settings-changed broadcast clears the
 // dot here without a dedicated channel.
 const announcementUnread = ref(false)
@@ -373,7 +373,8 @@ function handleAnnouncement(): void {
 
 async function refreshAnnouncementUnread(): Promise<void> {
   try {
-    announcementUnread.value = (await window.api?.getSetting?.('minimaxAnnouncementSeen')) !== true
+    announcementUnread.value =
+      (await window.api?.getSetting?.('cloudNodesAnnouncementSeen')) !== true
   } catch {
     announcementUnread.value = false
   }
@@ -383,7 +384,7 @@ onMounted(() => {
   void refreshAnnouncementUnread()
   unsubAnnouncementSettings =
     window.api?.onSettingsChanged?.(({ key }) => {
-      if (key === 'minimaxAnnouncementSeen') void refreshAnnouncementUnread()
+      if (key === 'cloudNodesAnnouncementSeen') void refreshAnnouncementUnread()
     }) ?? null
 })
 
