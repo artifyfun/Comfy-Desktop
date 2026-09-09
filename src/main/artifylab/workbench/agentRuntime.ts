@@ -16,9 +16,11 @@ import { Codex } from '../agentDriver'
 import type { Thread, ThreadOptions } from '../vendor/codex-sdk'
 import { startWorkbenchProxy } from './workbenchProxy'
 import { createAppServerRuntime, type AppServerRuntime } from './appServerRun'
-import { createAcpRuntime, type AcpRuntime } from '../agui/acp/transport'
-import { createClaudeRuntime, type ClaudeRuntime } from '../agui/claude/transport'
-import { getApprovalGate } from '../agui/approvalRegistry'
+import {
+  findExternalTransport,
+  resolveExternalBin,
+  type ExternalAgentRuntime
+} from './externalTransports'
 import { deployWorkbenchSkills } from './skillDeploy'
 import { beginWorkbenchToolContext, endWorkbenchToolContext } from '../mcp/workbenchTools'
 import {
@@ -45,10 +47,11 @@ export interface AgentSession {
   proxy?: { server: HttpServer; baseUrl: string }
   /** C16:app-server 通道运行时(transport=appserver 时非空,随 session 回收) */
   appServer?: AppServerRuntime
-  /** ACP host 通道运行时(transport=acp 时非空,随 session 回收) */
-  acp?: AcpRuntime
-  /** Claude Code 通道运行时(transport=claude 时非空,随 session 回收) */
-  claude?: ClaudeRuntime
+  /**
+   * 外部 agent 通道运行时(transport 在 EXTERNAL_TRANSPORTS 注册表内时非空,
+   * 随 session 回收)。ACP/Claude 等外部通道统一走 registry,新增通道不改本文件。
+   */
+  external?: ExternalAgentRuntime
   lastActiveAt: number
   /** 本会话累计 agent 轮次（decide/恢复轮各 +1） */
   turns: number
@@ -276,6 +279,9 @@ export class AgentRuntime {
     // delta);默认 exec(零行为变化,红线:M3 默认不切)。两通道共用 tempHome
     // (MCP 配置/技能同构)与代理(provider base_url 同源)。
     const transport = this.resolveAgentTransport()
+    // 外部通道 def 查表:acp/claude 等注册表条目;exec/appserver 返回 null
+    // (走下方各自专用管线)
+    const externalDef = findExternalTransport(transport)
     // E1 会话级推理强度 → 引擎 config 值:具名档位原样透传,auto/缺省=undefined
     // 不注入(引擎默认,零行为变化)。appserver 通道随 configArgs 在 spawn 时注入
     // (中途变更需会话重建);exec 通道走下方 threadOptions 引用,下轮即时生效。
@@ -298,38 +304,16 @@ export class AgentRuntime {
         ]
       })
     }
-    // ACP host 通道:外部 agent CLI(kimi/qwen/gemini… 自带 ACP server 模式)
-    // 以子进程拉起,二进制从设置/配置双读(未配置时报错提示——退 codex 内置
-    // 二进制的 acp 模式没有意义)。
-    let acp: AgentSession['acp']
-    if (transport === 'acp') {
-      const acpBin = this.readExternalAgentSetting('workbenchAcpAgentBin', '').trim()
-      if (!acpBin) {
-        throw new Error(
-          'ACP 通道未配置 agent 二进制:请在 设置 → 外部 Agent 接入 中填写(如 "kimi" / "/usr/local/bin/qwen")'
-        )
-      }
-      acp = await createAcpRuntime({
-        binary: acpBin,
-        args: [],
-        env: { ...process.env },
-        threadId: sessionId,
-        runId: sessionId,
-        approvalGate: getApprovalGate()
-      })
-    }
-    // Claude Code 通道:claude CLI stream-json。二进制双读(缺省 'claude'
-    // 走 PATH;未安装时 startTurn 首轮 spawn 报错,错误经 RUN_ERROR 透出)。
-    let claude: AgentSession['claude']
-    if (transport === 'claude') {
-      const claudeBin =
-        this.readExternalAgentSetting('workbenchAcpAgentBin', 'claude').trim() || 'claude'
-      claude = await createClaudeRuntime({
-        binary: claudeBin,
-        env: { ...process.env },
-        threadId: sessionId,
-        runId: sessionId
-      })
+    // 外部 agent 通道:注册表驱动(externalTransports.ts)。新增外部通道 =
+    // 在注册表加一个 def,此处零改动。二进制缺失等配置错误经 resolveExternalBin
+    // 显式抛出(带 UI 指引);spawn 级错误经 RUN_ERROR 透出。
+    let external: AgentSession['external']
+    if (externalDef) {
+      const bin = resolveExternalBin(
+        externalDef,
+        this.readExternalAgentSetting('workbenchAcpAgentBin', '')
+      )
+      external = await externalDef.create({ sessionId, env: { ...process.env }, binary: bin })
     }
     const codex = new Codex({
       codexPathOverride: binary,
@@ -394,8 +378,7 @@ export class AgentRuntime {
       tempHome,
       proxy,
       ...(appServer ? { appServer } : {}),
-      ...(acp ? { acp } : {}),
-      ...(claude ? { claude } : {}),
+      ...(external ? { external } : {}),
       ...(engineEffort ? { reasoningEffort: engineEffort } : {}),
       threadOptions,
       lastActiveAt: Date.now(),
@@ -447,16 +430,15 @@ export class AgentRuntime {
     const rawLines: string[] = []
     agent.inFlight = true
     try {
-      if (agent.acp || agent.claude) {
-        // ACP host / Claude Code 通道:mapper 直接产 AG-UI 事件(与 codex 通道的
-        // 「exec 事件 → mapper」两跳不同,外部通道单跳直出)。rawLines 策略:
-        // PLAN 提取(parsePlanFromCodexText)认「TEXT_MESSAGE_CONTENT 事件行」——
-        // 把 AG-UI 事件 JSON 原样进 rawLines,解析器兜底 extractPlanJson(raw)
-        // 可从拼接正文里提 PLAN JSON;流末再补一行 exec 形态合成事件
-        // (item.completed + agent_message.text = 拼接正文)让解析器主路径
-        // 直接命中。
-        const external = agent.acp ?? agent.claude
-        if (!external) throw new Error('外部 agent 通道未初始化')
+      if (agent.external) {
+        // 外部 agent 通道(注册表驱动,externalTransports.ts):mapper 直接产
+        // AG-UI 事件(与 codex 通道的「exec 事件 → mapper」两跳不同,外部通道
+        // 单跳直出)。rawLines 策略:PLAN 提取(parsePlanFromCodexText)认
+        // 「TEXT_MESSAGE_CONTENT 事件行」——把 AG-UI 事件 JSON 原样进 rawLines,
+        // 解析器兜底 extractPlanJson(raw) 可从拼接正文里提 PLAN JSON;流末再补
+        // 一行 exec 形态合成事件(item.completed + agent_message.text = 拼接正文)
+        // 让解析器主路径直接命中。
+        const external = agent.external
         const { stream } = await external.startTurn(spec, signal)
         const textChunks: string[] = []
         for await (const frame of stream) {
@@ -480,7 +462,7 @@ export class AgentRuntime {
                 type: 'item.completed',
                 item: {
                   type: 'agent_message',
-                  id: agent.acp ? 'acp-synth' : 'claude-synth',
+                  id: 'external-synth',
                   text: textChunks.join('')
                 }
               })
@@ -555,11 +537,8 @@ export class AgentRuntime {
     const agent = this.sessions.get(sessionId)
     if (!agent) return
     this.sessions.delete(sessionId)
-    if (agent.acp) {
-      void agent.acp.dispose().catch(() => {})
-    }
-    if (agent.claude) {
-      void agent.claude.dispose().catch(() => {})
+    if (agent.external) {
+      void agent.external.dispose().catch(() => {})
     }
     if (agent.appServer) {
       void agent.appServer.dispose().catch(() => {})
