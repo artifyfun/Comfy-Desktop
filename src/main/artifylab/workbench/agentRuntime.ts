@@ -111,19 +111,41 @@ export class AgentRuntime {
     return this.sessions.size
   }
 
+  /** 外部 agent 配置双读(settings.json → appStore config;UI 设置面持久化在
+   * config,手改文件走 settings;对齐 readAgentAccess 的双读模式)。
+   * 非法值/缺省回退 fallback;settings 读取失败静默降级 config。 */
+  private readExternalAgentSetting<K extends 'workbenchAgentTransport' | 'workbenchAcpAgentBin'>(
+    key: K,
+    fallback: string
+  ): string {
+    try {
+      const fromSettings = getSetting(key)
+      if (fromSettings !== undefined && fromSettings !== null && fromSettings !== '') {
+        return String(fromSettings)
+      }
+    } catch {
+      /* settings 不可用,走 config */
+    }
+    try {
+      const fromConfig = appStoreManager.getConfig()[key]
+      if (fromConfig !== undefined && fromConfig !== null && fromConfig !== '') {
+        return String(fromConfig)
+      }
+    } catch {
+      /* config 也不可用,回退 */
+    }
+    return fallback
+  }
+
   /** 传输通道：appserver = codex app-server 子进程(JSON-RPC,token 级 delta)；
    * acp = 外部 ACP agent 子进程(Agent Client Protocol,见 agui/acp/)；
    * claude = Claude Code CLI(stream-json,见 agui/claude/)；
    * 默认 exec（零行为变化,红线:M3 默认不切） */
   private resolveAgentTransport(): 'exec' | 'appserver' | 'acp' | 'claude' {
-    try {
-      const t = getSetting('workbenchAgentTransport')
-      if (t === 'appserver') return 'appserver'
-      if (t === 'acp') return 'acp'
-      if (t === 'claude') return 'claude'
-    } catch {
-      /* settings 不可用时回退 exec */
-    }
+    const t = this.readExternalAgentSetting('workbenchAgentTransport', 'exec')
+    if (t === 'appserver') return 'appserver'
+    if (t === 'acp') return 'acp'
+    if (t === 'claude') return 'claude'
     return 'exec'
   }
 
@@ -277,14 +299,14 @@ export class AgentRuntime {
       })
     }
     // ACP host 通道:外部 agent CLI(kimi/qwen/gemini… 自带 ACP server 模式)
-    // 以子进程拉起,二进制从设置读取(未配置时退 codex 内置二进制的 acp 模式没有
-    // 意义——直接报错,提示用户先配置 workbenchAcpAgentBin)。
+    // 以子进程拉起,二进制从设置/配置双读(未配置时报错提示——退 codex 内置
+    // 二进制的 acp 模式没有意义)。
     let acp: AgentSession['acp']
     if (transport === 'acp') {
-      const acpBin = (getSetting('workbenchAcpAgentBin') as string | undefined)?.trim() || ''
+      const acpBin = this.readExternalAgentSetting('workbenchAcpAgentBin', '').trim()
       if (!acpBin) {
         throw new Error(
-          'ACP 通道未配置 agent 二进制:请在 settings.json 设置 workbenchAcpAgentBin(如 "kimi" / "/usr/local/bin/qwen")'
+          'ACP 通道未配置 agent 二进制:请在 设置 → 外部 Agent 接入 中填写(如 "kimi" / "/usr/local/bin/qwen")'
         )
       }
       acp = await createAcpRuntime({
@@ -296,12 +318,12 @@ export class AgentRuntime {
         approvalGate: getApprovalGate()
       })
     }
-    // Claude Code 通道:claude CLI stream-json。二进制从设置读取(缺省 'claude'
+    // Claude Code 通道:claude CLI stream-json。二进制双读(缺省 'claude'
     // 走 PATH;未安装时 startTurn 首轮 spawn 报错,错误经 RUN_ERROR 透出)。
     let claude: AgentSession['claude']
     if (transport === 'claude') {
       const claudeBin =
-        (getSetting('workbenchAcpAgentBin') as string | undefined)?.trim() || 'claude'
+        this.readExternalAgentSetting('workbenchAcpAgentBin', 'claude').trim() || 'claude'
       claude = await createClaudeRuntime({
         binary: claudeBin,
         env: { ...process.env },

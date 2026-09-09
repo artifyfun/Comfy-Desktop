@@ -1150,5 +1150,19 @@
   "progressPercent": "Progress",
   "startIndex": "Start Index",
   "lastCompleted": "Last Completed",
-  "statusRunning": "Running"
+  "statusRunning": "Running",
+  "externalAgentTitle": "External agent",
+  "externalAgentBeta": "Beta",
+  "externalAgentExec": "Built-in Codex",
+  "externalAgentExecDesc": "Default channel using in-app model config",
+  "externalAgentAppserver": "Codex app-server",
+  "externalAgentAppserverDesc": "Token-level streaming (experimental)",
+  "externalAgentAcp": "ACP protocol",
+  "externalAgentAcpDesc": "Connect Kimi / Qwen / Gemini and other CLIs",
+  "externalAgentClaude": "Claude Code",
+  "externalAgentClaudeDesc": "Connect a locally installed claude CLI",
+  "externalAgentBinLabel": "Agent binary",
+  "externalAgentBinPlaceholderAcp": "e.g. kimi, qwen, or absolute path",
+  "externalAgentBinPlaceholderClaude": "Leave empty to use claude from PATH",
+  "externalAgentBinHint": "Command name (on PATH) or absolute path. Restart the workbench session after switching channels."
 }

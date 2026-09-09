@@ -251,6 +251,64 @@
                       {{ t('workbenchAgentAccessHint') }}
                     </p>
                   </div>
+
+                  <!-- 外部 Agent 接入（实验） -->
+                  <div class="pt-4 mt-4 border-t border-[var(--wb-stroke)]">
+                    <label class="block mb-2 text-[var(--wb-text-2)]">
+                      {{ t('externalAgentTitle') }}
+                      <span
+                        class="ml-1.5 px-1.5 py-0.5 text-[10px] rounded bg-amber-500/20 text-amber-400 align-middle"
+                        >{{ t('externalAgentBeta') }}</span
+                      >
+                    </label>
+                    <div class="grid grid-cols-2 gap-2">
+                      <button
+                        v-for="opt in [
+                          { value: 'exec', label: t('externalAgentExec'), desc: t('externalAgentExecDesc') },
+                          { value: 'appserver', label: t('externalAgentAppserver'), desc: t('externalAgentAppserverDesc') },
+                          { value: 'acp', label: t('externalAgentAcp'), desc: t('externalAgentAcpDesc') },
+                          { value: 'claude', label: t('externalAgentClaude'), desc: t('externalAgentClaudeDesc') },
+                        ]"
+                        :key="opt.value"
+                        type="button"
+                        @click="state.config.workbenchAgentTransport = opt.value"
+                        :class="{
+                          'bg-[var(--wb-accent)]/20 border-[var(--wb-accent)] text-[var(--wb-accent-hover)]':
+                            (state.config.workbenchAgentTransport || 'exec') === opt.value,
+                          'border-[var(--wb-stroke)] text-[var(--wb-text-2)] hover:bg-[var(--wb-surface-hover)]':
+                            (state.config.workbenchAgentTransport || 'exec') !== opt.value,
+                        }"
+                        class="p-2.5 rounded-lg transition duration-300 text-left"
+                      >
+                        <div class="text-sm font-medium">{{ opt.label }}</div>
+                        <div class="mt-0.5 text-xs leading-4 opacity-80">{{ opt.desc }}</div>
+                      </button>
+                    </div>
+                    <div
+                      v-if="
+                        state.config.workbenchAgentTransport === 'acp' ||
+                        state.config.workbenchAgentTransport === 'claude'
+                      "
+                      class="mt-3"
+                    >
+                      <label class="block mb-2 text-[var(--wb-text-2)]">{{
+                        t('externalAgentBinLabel')
+                      }}</label>
+                      <input
+                        v-model="state.config.workbenchAcpAgentBin"
+                        type="text"
+                        class="px-4 py-2.5 w-full text-white rounded-lg tech-input focus:outline-none"
+                        :placeholder="
+                          state.config.workbenchAgentTransport === 'acp'
+                            ? t('externalAgentBinPlaceholderAcp')
+                            : t('externalAgentBinPlaceholderClaude')
+                        "
+                      />
+                      <p class="mt-1.5 text-xs text-[var(--wb-text-3)]">
+                        {{ t('externalAgentBinHint') }}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -644,6 +702,8 @@ const state = reactive({
     buildModel: 'glm-5.3-flash', // 构建应用（Codex agent）使用的模型
     buildStyleId: 'tech', // 新增构建风格ID
     workbenchAgentAccess: 'standard', // 工作台 agent 文件权限档位
+    workbenchAgentTransport: 'exec', // 外部 Agent 传输通道(实验):'exec'|'appserver'|'acp'|'claude'
+    workbenchAcpAgentBin: '', // 外部 agent 二进制(ACP 必填;claude 缺省走 PATH)
     ngrokAuthtoken: '', // 新增ngrok authtoken
   },
 })

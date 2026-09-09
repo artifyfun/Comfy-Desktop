@@ -1150,5 +1150,19 @@
   "batchResumed": "已继续执行",
   "batchDequeued": "已将该任务移出队列",
   "rerun": "重新运行",
-  "rerunQueued": "已按原配置重新入队，正在执行"
+  "rerunQueued": "已按原配置重新入队，正在执行",
+  "externalAgentTitle": "外部 Agent 接入",
+  "externalAgentBeta": "实验",
+  "externalAgentExec": "内置 Codex",
+  "externalAgentExecDesc": "默认通道，走应用内置模型配置",
+  "externalAgentAppserver": "Codex app-server",
+  "externalAgentAppserverDesc": "token 级流式输出（实验）",
+  "externalAgentAcp": "ACP 通用协议",
+  "externalAgentAcpDesc": "接入 Kimi / Qwen / Gemini 等外部 CLI",
+  "externalAgentClaude": "Claude Code",
+  "externalAgentClaudeDesc": "接入本机已安装的 claude CLI",
+  "externalAgentBinLabel": "Agent 二进制",
+  "externalAgentBinPlaceholderAcp": "如 kimi、qwen 或绝对路径",
+  "externalAgentBinPlaceholderClaude": "留空则使用 PATH 中的 claude",
+  "externalAgentBinHint": "命令名（需在 PATH 中）或绝对路径。切换通道后需重启应用内工作台会话生效。"
 }
