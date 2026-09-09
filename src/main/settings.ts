@@ -36,6 +36,14 @@ export interface KnownSettings {
    *   用户电脑任意路径(仅当用户显式开启;风险自担)
    */
   workbenchAgentAccess?: 'standard' | 'full'
+  /**
+   * 工作台 agent 传输通道(实验):'exec'(默认)| 'appserver'(codex app-server)|
+   * 'acp'(外部 ACP agent,Agent Client Protocol,见 agui/acp/)。
+   */
+  workbenchAgentTransport?: 'exec' | 'appserver' | 'acp'
+  /** ACP 通道的外部 agent 二进制(workbenchAgentTransport='acp' 时必填):
+   * 如 "kimi"、"qwen"、"/usr/local/bin/gemini" —— 二进制需自带 ACP server 模式。 */
+  workbenchAcpAgentBin?: string
   /** When true (default), Desktop updates download and install silently; when
    *  false, the user is prompted before any download/install. */
   autoInstallUpdates?: boolean

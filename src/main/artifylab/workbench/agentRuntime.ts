@@ -16,6 +16,8 @@ import { Codex } from '../agentDriver'
 import type { Thread, ThreadOptions } from '../vendor/codex-sdk'
 import { startWorkbenchProxy } from './workbenchProxy'
 import { createAppServerRuntime, type AppServerRuntime } from './appServerRun'
+import { createAcpRuntime, type AcpRuntime } from '../agui/acp/transport'
+import { getApprovalGate } from '../agui/approvalRegistry'
 import { deployWorkbenchSkills } from './skillDeploy'
 import { beginWorkbenchToolContext, endWorkbenchToolContext } from '../mcp/workbenchTools'
 import {
@@ -42,6 +44,8 @@ export interface AgentSession {
   proxy?: { server: HttpServer; baseUrl: string }
   /** C16:app-server 通道运行时(transport=appserver 时非空,随 session 回收) */
   appServer?: AppServerRuntime
+  /** ACP host 通道运行时(transport=acp 时非空,随 session 回收) */
+  acp?: AcpRuntime
   lastActiveAt: number
   /** 本会话累计 agent 轮次（decide/恢复轮各 +1） */
   turns: number
@@ -105,11 +109,13 @@ export class AgentRuntime {
   }
 
   /** 传输通道：appserver = codex app-server 子进程(JSON-RPC,token 级 delta)；
+   * acp = 外部 ACP agent 子进程(Agent Client Protocol,见 agui/acp/)；
    * 默认 exec（零行为变化,红线:M3 默认不切） */
-  private resolveAgentTransport(): 'exec' | 'appserver' {
+  private resolveAgentTransport(): 'exec' | 'appserver' | 'acp' {
     try {
       const t = getSetting('workbenchAgentTransport')
       if (t === 'appserver') return 'appserver'
+      if (t === 'acp') return 'acp'
     } catch {
       /* settings 不可用时回退 exec */
     }
@@ -265,6 +271,26 @@ export class AgentRuntime {
         ]
       })
     }
+    // ACP host 通道:外部 agent CLI(kimi/qwen/gemini… 自带 ACP server 模式)
+    // 以子进程拉起,二进制从设置读取(未配置时退 codex 内置二进制的 acp 模式没有
+    // 意义——直接报错,提示用户先配置 workbenchAcpAgentBin)。
+    let acp: AgentSession['acp']
+    if (transport === 'acp') {
+      const acpBin = (getSetting('workbenchAcpAgentBin') as string | undefined)?.trim() || ''
+      if (!acpBin) {
+        throw new Error(
+          'ACP 通道未配置 agent 二进制:请在 settings.json 设置 workbenchAcpAgentBin(如 "kimi" / "/usr/local/bin/qwen")'
+        )
+      }
+      acp = await createAcpRuntime({
+        binary: acpBin,
+        args: [],
+        env: { ...process.env },
+        threadId: sessionId,
+        runId: sessionId,
+        approvalGate: getApprovalGate()
+      })
+    }
     const codex = new Codex({
       codexPathOverride: binary,
       baseUrl: resolveCodexBaseUrl({
@@ -328,6 +354,7 @@ export class AgentRuntime {
       tempHome,
       proxy,
       ...(appServer ? { appServer } : {}),
+      ...(acp ? { acp } : {}),
       ...(engineEffort ? { reasoningEffort: engineEffort } : {}),
       threadOptions,
       lastActiveAt: Date.now(),
@@ -379,7 +406,25 @@ export class AgentRuntime {
     const rawLines: string[] = []
     agent.inFlight = true
     try {
-      if (agent.appServer) {
+      if (agent.acp) {
+        // ACP host 通道:mapper 直接产 AG-UI 事件(与 codex 通道的「exec 事件
+        // → mapper」两跳不同,ACP 单跳直出)。经 thread_event 旁路上抛时包一层
+        // {type:'__agui', event} 不行——onProgress 契约是 exec 形态;因此
+        // rawLines 收 AG-UI 事件 JSON(PLAN 解析按纯文本兜底,decide 链路的
+        // PLAN IR 红线只在 codex 通道成立,ACP 通道作为实验通道先行不落 PLAN)。
+        const { stream } = await agent.acp.startTurn(spec, signal)
+        for await (const frame of stream) {
+          if (frame.event) {
+            onProgress({ type: 'thread_event', event: frame.event })
+            try {
+              rawLines.push(JSON.stringify(frame.event))
+            } catch {
+              /* ignore */
+            }
+          }
+          onProgress({ type: 'log', text: 'deciding' })
+        }
+      } else if (agent.appServer) {
         // C16 appserver 通道:token 级 delta 经 thread_event 旁路 + stream_delta
         // 上抛(路由层 mapper.feedStreamDelta 映射 AG-UI 增量帧);exec 形态事件
         // 照常 thread_event 透传,rawLines 收 JSON.stringify(PLAN 解析同构)。
@@ -445,6 +490,9 @@ export class AgentRuntime {
     const agent = this.sessions.get(sessionId)
     if (!agent) return
     this.sessions.delete(sessionId)
+    if (agent.acp) {
+      void agent.acp.dispose().catch(() => {})
+    }
     if (agent.appServer) {
       void agent.appServer.dispose().catch(() => {})
     }
