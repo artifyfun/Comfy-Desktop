@@ -38,11 +38,12 @@ export interface KnownSettings {
   workbenchAgentAccess?: 'standard' | 'full'
   /**
    * 工作台 agent 传输通道(实验):'exec'(默认)| 'appserver'(codex app-server)|
-   * 'acp'(外部 ACP agent,Agent Client Protocol,见 agui/acp/)。
+   * 'acp'(外部 ACP agent,Agent Client Protocol,见 agui/acp/)|
+   * 'claude'(Claude Code CLI stream-json,见 agui/claude/)。
    */
-  workbenchAgentTransport?: 'exec' | 'appserver' | 'acp'
-  /** ACP 通道的外部 agent 二进制(workbenchAgentTransport='acp' 时必填):
-   * 如 "kimi"、"qwen"、"/usr/local/bin/gemini" —— 二进制需自带 ACP server 模式。 */
+  workbenchAgentTransport?: 'exec' | 'appserver' | 'acp' | 'claude'
+  /** 外部 agent 通道的二进制:'acp' 必填(如 "kimi"/"qwen");'claude' 缺省 'claude'
+   * 走 PATH。二进制需支持对应协议(ACP server 模式 / claude -p stream-json)。 */
   workbenchAcpAgentBin?: string
   /** When true (default), Desktop updates download and install silently; when
    *  false, the user is prompted before any download/install. */

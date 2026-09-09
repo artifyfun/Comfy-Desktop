@@ -17,6 +17,7 @@ import type { Thread, ThreadOptions } from '../vendor/codex-sdk'
 import { startWorkbenchProxy } from './workbenchProxy'
 import { createAppServerRuntime, type AppServerRuntime } from './appServerRun'
 import { createAcpRuntime, type AcpRuntime } from '../agui/acp/transport'
+import { createClaudeRuntime, type ClaudeRuntime } from '../agui/claude/transport'
 import { getApprovalGate } from '../agui/approvalRegistry'
 import { deployWorkbenchSkills } from './skillDeploy'
 import { beginWorkbenchToolContext, endWorkbenchToolContext } from '../mcp/workbenchTools'
@@ -46,6 +47,8 @@ export interface AgentSession {
   appServer?: AppServerRuntime
   /** ACP host 通道运行时(transport=acp 时非空,随 session 回收) */
   acp?: AcpRuntime
+  /** Claude Code 通道运行时(transport=claude 时非空,随 session 回收) */
+  claude?: ClaudeRuntime
   lastActiveAt: number
   /** 本会话累计 agent 轮次（decide/恢复轮各 +1） */
   turns: number
@@ -110,12 +113,14 @@ export class AgentRuntime {
 
   /** 传输通道：appserver = codex app-server 子进程(JSON-RPC,token 级 delta)；
    * acp = 外部 ACP agent 子进程(Agent Client Protocol,见 agui/acp/)；
+   * claude = Claude Code CLI(stream-json,见 agui/claude/)；
    * 默认 exec（零行为变化,红线:M3 默认不切） */
-  private resolveAgentTransport(): 'exec' | 'appserver' | 'acp' {
+  private resolveAgentTransport(): 'exec' | 'appserver' | 'acp' | 'claude' {
     try {
       const t = getSetting('workbenchAgentTransport')
       if (t === 'appserver') return 'appserver'
       if (t === 'acp') return 'acp'
+      if (t === 'claude') return 'claude'
     } catch {
       /* settings 不可用时回退 exec */
     }
@@ -291,6 +296,19 @@ export class AgentRuntime {
         approvalGate: getApprovalGate()
       })
     }
+    // Claude Code 通道:claude CLI stream-json。二进制从设置读取(缺省 'claude'
+    // 走 PATH;未安装时 startTurn 首轮 spawn 报错,错误经 RUN_ERROR 透出)。
+    let claude: AgentSession['claude']
+    if (transport === 'claude') {
+      const claudeBin =
+        (getSetting('workbenchAcpAgentBin') as string | undefined)?.trim() || 'claude'
+      claude = await createClaudeRuntime({
+        binary: claudeBin,
+        env: { ...process.env },
+        threadId: sessionId,
+        runId: sessionId
+      })
+    }
     const codex = new Codex({
       codexPathOverride: binary,
       baseUrl: resolveCodexBaseUrl({
@@ -355,6 +373,7 @@ export class AgentRuntime {
       proxy,
       ...(appServer ? { appServer } : {}),
       ...(acp ? { acp } : {}),
+      ...(claude ? { claude } : {}),
       ...(engineEffort ? { reasoningEffort: engineEffort } : {}),
       threadOptions,
       lastActiveAt: Date.now(),
@@ -406,16 +425,24 @@ export class AgentRuntime {
     const rawLines: string[] = []
     agent.inFlight = true
     try {
-      if (agent.acp) {
-        // ACP host 通道:mapper 直接产 AG-UI 事件(与 codex 通道的「exec 事件
-        // → mapper」两跳不同,ACP 单跳直出)。经 thread_event 旁路上抛时包一层
-        // {type:'__agui', event} 不行——onProgress 契约是 exec 形态;因此
-        // rawLines 收 AG-UI 事件 JSON(PLAN 解析按纯文本兜底,decide 链路的
-        // PLAN IR 红线只在 codex 通道成立,ACP 通道作为实验通道先行不落 PLAN)。
-        const { stream } = await agent.acp.startTurn(spec, signal)
+      if (agent.acp || agent.claude) {
+        // ACP host / Claude Code 通道:mapper 直接产 AG-UI 事件(与 codex 通道的
+        // 「exec 事件 → mapper」两跳不同,外部通道单跳直出)。rawLines 策略:
+        // PLAN 提取(parsePlanFromCodexText)认「TEXT_MESSAGE_CONTENT 事件行」——
+        // 把 AG-UI 事件 JSON 原样进 rawLines,解析器兜底 extractPlanJson(raw)
+        // 可从拼接正文里提 PLAN JSON;流末再补一行 exec 形态合成事件
+        // (item.completed + agent_message.text = 拼接正文)让解析器主路径
+        // 直接命中。
+        const external = agent.acp ?? agent.claude
+        if (!external) throw new Error('外部 agent 通道未初始化')
+        const { stream } = await external.startTurn(spec, signal)
+        const textChunks: string[] = []
         for await (const frame of stream) {
           if (frame.event) {
             onProgress({ type: 'thread_event', event: frame.event })
+            if (frame.event.type === 'TEXT_MESSAGE_CONTENT') {
+              textChunks.push(frame.event.delta)
+            }
             try {
               rawLines.push(JSON.stringify(frame.event))
             } catch {
@@ -423,6 +450,22 @@ export class AgentRuntime {
             }
           }
           onProgress({ type: 'log', text: 'deciding' })
+        }
+        if (textChunks.length > 0) {
+          try {
+            rawLines.push(
+              JSON.stringify({
+                type: 'item.completed',
+                item: {
+                  type: 'agent_message',
+                  id: agent.acp ? 'acp-synth' : 'claude-synth',
+                  text: textChunks.join('')
+                }
+              })
+            )
+          } catch {
+            /* ignore */
+          }
         }
       } else if (agent.appServer) {
         // C16 appserver 通道:token 级 delta 经 thread_event 旁路 + stream_delta
@@ -492,6 +535,9 @@ export class AgentRuntime {
     this.sessions.delete(sessionId)
     if (agent.acp) {
       void agent.acp.dispose().catch(() => {})
+    }
+    if (agent.claude) {
+      void agent.claude.dispose().catch(() => {})
     }
     if (agent.appServer) {
       void agent.appServer.dispose().catch(() => {})
