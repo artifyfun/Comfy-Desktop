@@ -304,3 +304,81 @@ describe('createAcpRuntime', () => {
     await expect(runtime.startTurn('hi')).rejects.toThrow('已销毁')
   })
 })
+
+describe('createAcpRuntime — mcpServers 注入', () => {
+  it('newSession 收到 wire 形态的 MCP server(http + headers)', async () => {
+    const mock = makeMockAgent()
+    const runtime = await createAcpRuntime({
+      ...baseOpts,
+      mcpServers: [
+        {
+          type: 'http',
+          name: 'workbench',
+          url: 'http://127.0.0.1:9/mcp?wb_session=s1',
+          headers: [
+            { name: 'Authorization', value: 'Bearer tok' },
+            { name: 'X-Workbench-Session', value: 's1' }
+          ]
+        }
+      ],
+      connect: (o) => {
+        mock.attach(o.handlers as never)
+        return mock.agent
+      }
+    })
+    const run = await runtime.startTurn('hi')
+    await collect(run.stream)
+    const newSessionCall = mock.calls.find((c) => c.method === 'newSession')
+    expect(newSessionCall).toBeTruthy()
+    const params = newSessionCall?.params as { mcpServers?: Array<Record<string, unknown>> }
+    expect(params.mcpServers).toEqual([
+      {
+        type: 'http',
+        name: 'workbench',
+        url: 'http://127.0.0.1:9/mcp?wb_session=s1',
+        headers: [
+          { name: 'Authorization', value: 'Bearer tok' },
+          { name: 'X-Workbench-Session', value: 's1' }
+        ]
+      }
+    ])
+    runtime.dispose()
+  })
+
+  it('缺省 mcpServers = 空数组(优雅降级,不注入)', async () => {
+    const mock = makeMockAgent()
+    const runtime = await createAcpRuntime({
+      ...baseOpts,
+      connect: (o) => {
+        mock.attach(o.handlers as never)
+        return mock.agent
+      }
+    })
+    const run = await runtime.startTurn('hi')
+    await collect(run.stream)
+    const newSessionCall = mock.calls.find((c) => c.method === 'newSession')
+    const params = newSessionCall?.params as { mcpServers?: unknown[] }
+    expect(params.mcpServers).toEqual([])
+    runtime.dispose()
+  })
+
+  it('headers 缺省时补空数组(SDK wire 形态 headers 必填)', async () => {
+    const mock = makeMockAgent()
+    const runtime = await createAcpRuntime({
+      ...baseOpts,
+      mcpServers: [{ name: 'bare', url: 'http://127.0.0.1:9/mcp' }],
+      connect: (o) => {
+        mock.attach(o.handlers as never)
+        return mock.agent
+      }
+    })
+    const run = await runtime.startTurn('hi')
+    await collect(run.stream)
+    const newSessionCall = mock.calls.find((c) => c.method === 'newSession')
+    const params = newSessionCall?.params as { mcpServers?: Array<Record<string, unknown>> }
+    expect(params.mcpServers).toEqual([
+      { type: 'http', name: 'bare', url: 'http://127.0.0.1:9/mcp', headers: [] }
+    ])
+    runtime.dispose()
+  })
+})

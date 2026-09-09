@@ -307,13 +307,32 @@ export class AgentRuntime {
     // 外部 agent 通道:注册表驱动(externalTransports.ts)。新增外部通道 =
     // 在注册表加一个 def,此处零改动。二进制缺失等配置错误经 resolveExternalBin
     // 显式抛出(带 UI 指引);spawn 级错误经 RUN_ERROR 透出。
+    // wb_* 工具面:MCP server 活跃时以 ACP http server 形态注入(session/new),
+    // 外部 agent 获得与 codex 通道同源的 wb_session 会话身份;不可用时
+    // undefined,通道降级纯对话。
     let external: AgentSession['external']
     if (externalDef) {
       const bin = resolveExternalBin(
         externalDef,
         this.readExternalAgentSetting('workbenchAcpAgentBin', '')
       )
-      external = await externalDef.create({ sessionId, env: { ...process.env }, binary: bin })
+      const workbenchMcpServer = serverPort
+        ? {
+            type: 'http' as const,
+            name: 'workbench',
+            url: `http://127.0.0.1:${serverPort}/mcp?wb_session=${encodeURIComponent(sessionId)}`,
+            headers: [
+              { name: 'Authorization', value: `Bearer ${getOrCreateMcpToken()}` },
+              { name: 'X-Workbench-Session', value: sessionId }
+            ]
+          }
+        : undefined
+      external = await externalDef.create({
+        sessionId,
+        env: { ...process.env },
+        binary: bin,
+        ...(workbenchMcpServer ? { workbenchMcpServer } : {})
+      })
     }
     const codex = new Codex({
       codexPathOverride: binary,

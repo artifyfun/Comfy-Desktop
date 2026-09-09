@@ -13,7 +13,7 @@
  * 内置通道(exec/appserver)走 codex 专用管线,不经此注册表——它们没有
  * 「外部二进制」概念,语义不同;注册表只收敛「外部子进程 agent」家族。
  */
-import { createAcpRuntime, type AcpRuntime } from '../agui/acp/transport'
+import { createAcpRuntime, type AcpRuntime, type AcpMcpServerInput } from '../agui/acp/transport'
 import { createClaudeRuntime, type ClaudeRuntime } from '../agui/claude/transport'
 import { getApprovalGate } from '../agui/approvalRegistry'
 import type { AGUIEvent } from '../agui/types'
@@ -32,6 +32,12 @@ export interface ExternalTransportContext {
   env: NodeJS.ProcessEnv
   /** 已解析的外部二进制(requiresBin 时由 resolveBin 保证非空) */
   binary: string
+  /**
+   * 工作台 wb_* MCP server 描述(http 回环端点 + 会话身份)。
+   * 缺省/undefined = MCP 不可用,通道优雅降级(外部 agent 无工作台工具)。
+   * 仅支持 MCP server 注入的通道消费(acp);claude CLI 无此面,忽略。
+   */
+  workbenchMcpServer?: AcpMcpServerInput
 }
 
 export interface ExternalTransportDef {
@@ -63,7 +69,10 @@ export const EXTERNAL_TRANSPORTS: readonly ExternalTransportDef[] = [
         env: ctx.env,
         threadId: ctx.sessionId,
         runId: ctx.sessionId,
-        approvalGate: getApprovalGate()
+        approvalGate: getApprovalGate(),
+        // wb_* 工具面注入(session/new 带 http 回环端点 + bearer/会话身份
+        // headers);MCP 不可用时 undefined → 空数组,外部 agent 降级纯对话
+        ...(ctx.workbenchMcpServer ? { mcpServers: [ctx.workbenchMcpServer] } : {})
       })
   },
   {

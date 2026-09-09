@@ -68,6 +68,14 @@ export interface AcpRuntime {
   dispose(): Promise<void>
 }
 
+/** session/new 注入的 MCP server(ACP wire 形态:http/sse/stdio 三选一) */
+export interface AcpMcpServerInput {
+  name: string
+  type?: 'http' | 'sse'
+  url: string
+  headers?: Array<{ name: string; value: string }>
+}
+
 export interface AcpRuntimeOptions {
   /** ACP agent 二进制绝对路径(如 kimi / qwen / gemini) */
   binary: string
@@ -81,6 +89,11 @@ export interface AcpRuntimeOptions {
   runId: string
   /** 审批门控(与 AG-UI SSE 管线共享同一实例,见 approvalRegistry) */
   approvalGate?: ApprovalGate
+  /**
+   * session/new 注入的 MCP server 列表(工作台 wb_* 工具面)。
+   * 缺省/空 = 不注入(优雅降级,外部 agent 无工作台工具但仍可对话)。
+   */
+  mcpServers?: AcpMcpServerInput[]
   /** initialize/session 阶段超时(ms),默认 30s */
   setupTimeoutMs?: number
   /** session/prompt 单 turn 超时(ms),默认 15min(对齐 AGUI_RUN_TIMEOUT_MS) */
@@ -108,6 +121,7 @@ export async function createAcpRuntime(opts: AcpRuntimeOptions): Promise<AcpRunt
     threadId,
     runId,
     approvalGate,
+    mcpServers = [],
     setupTimeoutMs = DEFAULT_SETUP_TIMEOUT_MS,
     turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS,
     connect
@@ -243,7 +257,14 @@ export async function createAcpRuntime(opts: AcpRuntimeOptions): Promise<AcpRunt
         const sessionRes = (await withTimeout(
           agent.newSession({
             cwd: process.cwd(),
-            mcpServers: []
+            // AcpMcpServerInput → ACP wire 形态(type 归一 http;SDK 的 http/sse
+            // 变体要求 headers 必填——缺省给空数组)
+            mcpServers: mcpServers.map((s) => ({
+              type: s.type ?? 'http',
+              name: s.name,
+              url: s.url,
+              headers: s.headers ?? []
+            }))
           }),
           setupTimeoutMs,
           'session/new'
