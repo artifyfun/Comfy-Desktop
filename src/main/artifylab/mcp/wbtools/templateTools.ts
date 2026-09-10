@@ -55,6 +55,10 @@ export const templateTools: Array<{ tool: Tool; fn: WBToolFn }> = [
             type: 'string',
             description: '模板 id（wb_list_templates 里查；会话变体 id 也可）'
           },
+          templateId: {
+            type: 'string',
+            description: '同 template_id（camelCase 兼容别名；二选一即可）'
+          },
           params: {
             type: 'object',
             description: '模板参数（键=参数名；仅写与默认值不同的键）',

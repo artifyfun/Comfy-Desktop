@@ -316,3 +316,17 @@ describe('workbench wb_* MCP tools', () => {
     expect(parsed.error).toBe('job not found')
   })
 })
+
+describe('toPlan — camelCase 兼容（真机 harness 冒烟回归）', () => {
+  it('templateId（camelCase）与 template_id 都能映射上', async () => {
+    const { toPlan } = await import('./wbtools/shared')
+    const a = toPlan({ template_id: 'app:t1', params: { p: 1 } })
+    expect(a.templateId).toBe('app:t1')
+    const b = toPlan({ templateId: 'app:t2', nodeOverrides: { '1': { class_type: 'KSampler' } } })
+    expect(b.templateId).toBe('app:t2')
+    expect(b.nodeOverrides).toEqual({ '1': { class_type: 'KSampler' } })
+    // template_id 优先（snake_case 是 schema 正名）
+    const c = toPlan({ template_id: 'app:a', templateId: 'app:b' })
+    expect(c.templateId).toBe('app:a')
+  })
+})

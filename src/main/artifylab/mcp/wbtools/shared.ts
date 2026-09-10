@@ -118,12 +118,16 @@ export function toPlan(args: Record<string, unknown>): WorkbenchPlan {
       sharedParams: (args.batch_shared_params as Record<string, unknown>) ?? undefined
     }
   }
+  // 兼容修复：schema 声明 template_id（snake_case），但模型实测高频输出
+  // camelCase 的 templateId/nodeOverrides —— 两键都收，避免参数静默丢失后
+  // 校验层报「必须指定 templateId」这种对用户无意义的错（真机 harness 冒烟发现）。
+  const templateIdRaw = args.template_id ?? args.templateId
   return {
     intent,
-    templateId: args.template_id ? String(args.template_id) : undefined,
+    templateId: templateIdRaw != null ? String(templateIdRaw) : undefined,
     params: (args.params as Record<string, unknown>) ?? {},
     usePreviousOutput: Boolean(args.use_previous_output),
-    nodeOverrides: args.node_overrides as WorkbenchPlan['nodeOverrides'],
+    nodeOverrides: (args.node_overrides ?? args.nodeOverrides) as WorkbenchPlan['nodeOverrides'],
     batch,
     reason: args.reason ? String(args.reason) : undefined
   }
