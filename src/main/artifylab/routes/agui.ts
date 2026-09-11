@@ -38,6 +38,7 @@ import type { AttachmentMeta } from '../workbench/presetCore'
 import type { ThreadEvent } from '../vendor/codex-sdk'
 import { createCodexMapper } from '../agui/codexMapper'
 import { getApprovalGate } from '../agui/approvalRegistry'
+import { registerCanvasOpsEmit, unregisterCanvasOpsEmit } from '../mcp/wbtools/canvasTools'
 import {
   TOOL_APPROVAL_REQUIRED,
   toolApprovalRequiredValue,
@@ -178,6 +179,12 @@ export function createAguiRouter(deps: { store?: EventStore } = {}): express.Rou
           approved: info.approved
         })
       )
+    })
+    // C-H2 wb_build_workflow:工具层直推 wb_canvas_ops CUSTOM(与审批卡同款
+    // thread 生命周期注册模式;run 结束 finally 统一注销)——模型一句话把模板
+    // 铺到画布,前端既有确认卡人审执行,零前端改动。
+    registerCanvasOpsEmit(threadId, (ops, meta) => {
+      emit(custom('wb_canvas_ops', { ops, source: meta.source }))
     })
 
     // C2 映射器:本文件内创建,单轮一个实例(diff 快照/幂等 Set 随 run 生命周期)
@@ -406,6 +413,11 @@ export function createAguiRouter(deps: { store?: EventStore } = {}): express.Rou
         gate.unregister(threadId)
       } catch (error) {
         logger.warn(`agui approval gate unregister failed (thread=${threadId})`, error)
+      }
+      try {
+        unregisterCanvasOpsEmit(threadId)
+      } catch (error) {
+        logger.warn(`agui canvas ops emit unregister failed (thread=${threadId})`, error)
       }
       try {
         workbenchService.setCanvasSyncHandler(null, threadId)
