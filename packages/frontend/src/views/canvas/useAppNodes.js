@@ -504,7 +504,7 @@ export function useAppNodes(deps) {
     void aiSnapshotVersion.value
     try {
       return listAiSnapshots(
-        aiSnapshotStorage.value,
+        aiSnapshotStorage,
         appStore.config.activeAppId || 'default',
       ).reverse()
     } catch {
@@ -515,7 +515,7 @@ export function useAppNodes(deps) {
     try {
       const doc = serializeDoc(objects.value, viewport.value, 'canvas', links.value, groups.value)
       const pid = appStore.config?.activeAppId || 'default'
-      saveAiSnapshot(aiSnapshotStorage.value, pid, label, doc)
+      saveAiSnapshot(aiSnapshotStorage, pid, label, doc)
       aiSnapshotVersion.value++
     } catch (e) {
       // 快照是安全网，失败不阻塞 AI 操作；但留 warn 便于诊断（静默吞错曾让
@@ -525,7 +525,7 @@ export function useAppNodes(deps) {
   }
   function restoreAiSnapshot(snapshotId) {
     const pid = appStore.config.activeAppId || 'default'
-    const doc = getAiSnapshot(aiSnapshotStorage.value, pid, snapshotId)
+    const doc = getAiSnapshot(aiSnapshotStorage, pid, snapshotId)
     if (!doc) return false
     try {
       beforeChange()
@@ -543,7 +543,7 @@ export function useAppNodes(deps) {
   }
   function removeAiSnapshot(snapshotId) {
     const pid = appStore.config.activeAppId || 'default'
-    const ok = deleteAiSnapshot(aiSnapshotStorage.value, pid, snapshotId)
+    const ok = deleteAiSnapshot(aiSnapshotStorage, pid, snapshotId)
     if (ok) aiSnapshotVersion.value++
     return ok
   }
@@ -572,6 +572,15 @@ export function useAppNodes(deps) {
   function applyCanvasAgentOps(ops) {
     if (!Array.isArray(ops)) return
     beforeChange()
+    // C-H3 AI 快照：批量改画布前自动打持久命名快照（安全网，失败不阻塞）
+    try {
+      const doc = serializeDoc(objects.value, viewport.value, 'canvas', links.value, groups.value)
+      const pid = appStore.config?.activeAppId || 'default'
+      saveAiSnapshot(aiSnapshotStorage, pid, `AI 操作前（${ops.length} 条指令）`, doc)
+      aiSnapshotVersion.value++
+    } catch (e) {
+      console.warn('[aiSnapshot] 快照失败:', e?.message || e)
+    }
     for (const op of ops) {
       try {
         applyOneAgentOp(op)
@@ -638,9 +647,7 @@ export function useAppNodes(deps) {
   function confirmAgentOps() {
     const ops = pendingAgentOps.value
     if (!ops?.length) return
-    // C-H3 AI 快照：批量改画布前自动打持久命名快照（恢复入口见 AI 快照面板）
-    takeAiSnapshot(`AI 操作前（${ops.length} 条指令）`)
-    applyCanvasAgentOps(ops)
+    applyCanvasAgentOps(ops) // 内部已含 AI 快照打点（C-H3）
     pendingAgentOps.value = null
     message.success(t('canvasAgentOpsApplied'))
   }
