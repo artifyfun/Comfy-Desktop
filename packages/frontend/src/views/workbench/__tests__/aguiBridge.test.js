@@ -963,16 +963,39 @@ describe('aguiBridge — STATE_DELTA /tokenUsage 接线', () => {
 })
 
 // ---------------- S5a transport seam：http.post 注入 ----------------
-describe('aguiBridge — transport seam（http.post 注入）', () => {
-  it('注入 http.post 后 runAgentTurn 走注入通道（不触全局 fetch）', async () => {
+describe('aguiBridge — transport seam（http.post/postStream 注入）', () => {
+  /** 构造 SSE Response 桩（流式契约：postStream 返回带 body.getReader 的 Response） */
+  function sseResponse(frames, ok = true, status = 200) {
+    const enc = new TextEncoder()
+    const body = frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join('')
+    return {
+      ok,
+      status,
+      body: {
+        getReader: () => {
+          let sent = false
+          return {
+            read: async () => {
+              if (sent) return { done: true, value: undefined }
+              sent = true
+              return { done: false, value: enc.encode(body) }
+            },
+          }
+        },
+      },
+      json: async () => null,
+    }
+  }
+
+  it('runAgentTurn 走 http.postStream 注入通道（流式 Response 契约；__signal 由 default 剥离）', async () => {
     const { createAguiBridge } = await import('../aguiBridge')
     const calls = []
     const pageApi = makePageApi()
     const http = {
-      post: async (path, body) => {
+      postStream: async (path, body) => {
         calls.push({ path, body })
-        // 返回空 SSE 流（立即结束，无事件）
-        return { ok: true, status: 200, json: { success: true } }
+        // 空流（立即结束，无事件）——干净截断防线应发中断气泡
+        return sseResponse([])
       },
     }
     const bridge = createAguiBridge(pageApi, http)
@@ -980,18 +1003,33 @@ describe('aguiBridge — transport seam（http.post 注入）', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0].path).toBe('/api/workbench/agent/run')
     expect(calls[0].body.input).toBe('hi')
-    // __signal 已被调用方约定剥离职责（defaultPostJson 剥），注入通道原样收到
     expect(calls[0].body.__signal).toBeInstanceOf(AbortSignal)
     // 干净截断 → 中断气泡（终帧缺失防线仍生效）
     const kinds = pageApi.messages.value.map((m) => m.kind)
     expect(kinds).toContain('error')
   })
 
-  it('注入通道 reject → 错误气泡携带 retryInput', async () => {
+  it('postStream 返回的 SSE 事件被正常消费（RUN_FINISHED 无中断气泡）', async () => {
+    const { createAguiBridge } = await import('../aguiBridge')
+    const pageApi = makePageApi()
+    const http = {
+      postStream: async () =>
+        sseResponse([
+          { type: 'RUN_STARTED', threadId: 's', runId: 'r', timestamp: 1 },
+          { type: 'RUN_FINISHED', threadId: 's', runId: 'r', timestamp: 2 },
+        ]),
+    }
+    const bridge = createAguiBridge(pageApi, http)
+    await bridge.runAgentTurn('hi', [], { userBubble: 'hi' })
+    const err = pageApi.messages.value.find((m) => m.kind === 'error')
+    expect(err).toBeUndefined()
+  })
+
+  it('postStream reject → 错误气泡携带 retryInput', async () => {
     const { createAguiBridge } = await import('../aguiBridge')
     const pageApi = makePageApi()
     const bridge = createAguiBridge(pageApi, {
-      post: async () => {
+      postStream: async () => {
         throw new Error('boom')
       },
     })

@@ -442,6 +442,10 @@ export function createAguiBridge(pageApi, http = {}) {
   // 错误形状重复四遍）。收口成一个 postJson，测试注入 http.post 即可覆盖
   // 全部交换路径，不再 mock 全局 fetch。
   const postJson = http.post || defaultPostJson(pageApi)
+  // SSE 流式 seam（/agent/run 专用）：返回原始 Response（readAguiStream 要
+  // body.getReader()）；postJson 的 res.json() 会消费/锁死 body——两者必须
+  // 分离（4dab5e1b 把 run 收口进 postJson 引入的回归，真机已复现修复）。
+  const postStream = http.postStream || defaultPostStream(pageApi)
   let activeCtl = null // 当前轮 AbortController（单飞行轮，同 legacy chatReader）
   let lastState = null
   function pushError(state, text, extra = {}) {
@@ -477,7 +481,7 @@ export function createAguiBridge(pageApi, http = {}) {
     const ctl = new AbortController()
     activeCtl = ctl
     try {
-      const res = await postJson('/api/workbench/agent/run', {
+      const res = await postStream('/api/workbench/agent/run', {
         threadId,
         runId,
         input: inputText,
@@ -496,7 +500,8 @@ export function createAguiBridge(pageApi, http = {}) {
         __signal: ctl.signal,
       })
       if (!res.ok) {
-        throw new Error((res.json && res.json.message) || `HTTP ${res.status}`)
+        const errJson = await res.json().catch(() => null)
+        throw new Error((errJson && errJson.message) || `HTTP ${res.status}`)
       }
       const ctx = createHandlerContext(createPageEmit(pageApi, state))
       await readAguiStream(res, (ev) => dispatch(ctx, ev))
@@ -532,9 +537,7 @@ export function createAguiBridge(pageApi, http = {}) {
     if (pageApi.stopping.value || !pageApi.busy.value) return
     pageApi.stopping.value = true
     try {
-      postJson('/api/workbench/agent/cancel', { threadId: pageApi.getThreadId() }).catch(
-        () => {},
-      )
+      postJson('/api/workbench/agent/cancel', { threadId: pageApi.getThreadId() }).catch(() => {})
       const ctl = activeCtl
       activeCtl = null
       if (ctl) {
@@ -738,6 +741,19 @@ function defaultPostJson(pageApi) {
     })
     const json = await res.json().catch(() => null)
     return { ok: res.ok, status: res.status, json }
+  }
+}
+
+/** SSE 流式 POST：返回原始 Response（body.getReader 交给 readAguiStream） */
+function defaultPostStream(pageApi) {
+  return async function postStream(path, body) {
+    const { __signal, ...payload } = body || {}
+    return fetch(`${pageApi.origin.value}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: __signal,
+    })
   }
 }
 

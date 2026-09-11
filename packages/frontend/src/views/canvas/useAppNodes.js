@@ -514,11 +514,13 @@ export function useAppNodes(deps) {
   function takeAiSnapshot(label) {
     try {
       const doc = serializeDoc(objects.value, viewport.value, 'canvas', links.value, groups.value)
-      const pid = appStore.config.activeAppId || 'default'
+      const pid = appStore.config?.activeAppId || 'default'
       saveAiSnapshot(aiSnapshotStorage.value, pid, label, doc)
       aiSnapshotVersion.value++
-    } catch {
-      /* 快照是安全网，失败不阻塞 */
+    } catch (e) {
+      // 快照是安全网，失败不阻塞 AI 操作；但留 warn 便于诊断（静默吞错曾让
+      // 「快照从未落盘」排查了很久——真机 harness 验收教训）
+      console.warn('[aiSnapshot] 快照失败:', e?.message || e)
     }
   }
   function restoreAiSnapshot(snapshotId) {
