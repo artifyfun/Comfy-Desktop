@@ -1215,6 +1215,41 @@
           </div>
         </div>
 
+        <!-- C-H3 AI 快照面板（AI 改画布前自动打的检查点，一键回滚） -->
+        <div v-if="aiSnapshots.length" class="agent-ops-card" @mousedown.stop>
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-medium text-[var(--wb-text-1)]">
+              <i class="fas fa-camera text-[var(--wb-text-2)] mr-1"></i
+              >{{ t('canvasAiSnapshotsTitle') }}
+            </span>
+          </div>
+          <div class="ops-lines" style="max-height: 120px; overflow-y: auto">
+            <div
+              v-for="snap in aiSnapshots"
+              :key="snap.id"
+              class="flex items-center justify-between py-0.5"
+            >
+              <span class="text-xs text-[var(--wb-text-2)] truncate">
+                {{ snap.label }} · {{ new Date(snap.at).toLocaleTimeString() }}
+              </span>
+              <span class="flex gap-1 shrink-0 ml-2">
+                <button
+                  class="px-1.5 py-0.5 rounded bg-[var(--wb-accent)]/20 text-[var(--wb-accent-hover)] text-xs"
+                  @click="restoreAiSnapshot(snap.id)"
+                >
+                  {{ t('canvasAiSnapshotsRestore') }}
+                </button>
+                <button
+                  class="px-1 py-0.5 rounded text-[var(--wb-text-3)] hover:text-red-400 text-xs"
+                  @click="removeAiSnapshot(snap.id)"
+                >
+                  <i class="fas fa-trash text-[10px]"></i>
+                </button>
+              </span>
+            </div>
+          </div>
+        </div>
+
         <!-- 缩放指示 -->
         <div
           class="absolute bottom-3 left-3 px-2 py-1 rounded bg-black/40 text-xs text-[var(--wb-text-2)] font-mono"
@@ -5437,6 +5472,9 @@ const {
   pendingAgentOps,
   agentOpsDiffLines,
   confirmAgentOps,
+  aiSnapshots,
+  restoreAiSnapshot,
+  removeAiSnapshot,
   refreshFed,
   stopNodePoll,
   nodePolls,
@@ -5450,6 +5488,7 @@ const {
   selection,
   viewport,
   links,
+  groups,
   size,
   saveSoon: () => saveSoon(),
   beforeChange,
@@ -5657,7 +5696,14 @@ const {
 
 // —— 句柄 hit graph 重绘（依赖项 hoverFromPanel 来自上方 useCanvasAssets）——
 watch(
-  [hoverNodeId, hoverFromPanel, selectedLinkId, () => [connectDrag.active, connectDrag.targetId], () => [reconnectDrag.active, reconnectDrag.targetId], () => drag.mode],
+  [
+    hoverNodeId,
+    hoverFromPanel,
+    selectedLinkId,
+    () => [connectDrag.active, connectDrag.targetId],
+    () => [reconnectDrag.active, reconnectDrag.targetId],
+    () => drag.mode,
+  ],
   redrawHandleHits,
   { deep: false },
 )

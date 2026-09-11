@@ -18,7 +18,8 @@ import {
   submitCanvasExecute,
   pollCanvasExecuteStatus,
 } from './appNode'
-import { lodTextVisible } from './engine'
+import { lodTextVisible, serializeDoc, parseDoc } from './engine'
+import { saveAiSnapshot, listAiSnapshots, deleteAiSnapshot, getAiSnapshot } from './aiSnapshots'
 
 export function useAppNodes(deps) {
   const {
@@ -26,6 +27,7 @@ export function useAppNodes(deps) {
     selection,
     viewport,
     links,
+    groups,
     size,
     saveSoon,
     beforeChange,
@@ -491,6 +493,59 @@ export function useAppNodes(deps) {
 
   // —— P3 AI 侧边栏节点指令（wb_canvas_ops → 人审确认卡 → 执行） ——
   const pendingAgentOps = ref(null) // Array<op> | null
+
+  // —— C-H3 AI 快照（AI 批量改画布前的持久检查点 + 一键恢复） ——
+  const aiSnapshotStorage = {
+    getItem: (k) => localStorage.getItem(k),
+    setItem: (k, v) => localStorage.setItem(k, v),
+  }
+  const aiSnapshotVersion = ref(0) // 面板响应式刷新键
+  const aiSnapshots = computed(() => {
+    void aiSnapshotVersion.value
+    try {
+      return listAiSnapshots(
+        aiSnapshotStorage.value,
+        appStore.config.activeAppId || 'default',
+      ).reverse()
+    } catch {
+      return []
+    }
+  })
+  function takeAiSnapshot(label) {
+    try {
+      const doc = serializeDoc(objects.value, viewport.value, 'canvas', links.value, groups.value)
+      const pid = appStore.config.activeAppId || 'default'
+      saveAiSnapshot(aiSnapshotStorage.value, pid, label, doc)
+      aiSnapshotVersion.value++
+    } catch {
+      /* 快照是安全网，失败不阻塞 */
+    }
+  }
+  function restoreAiSnapshot(snapshotId) {
+    const pid = appStore.config.activeAppId || 'default'
+    const doc = getAiSnapshot(aiSnapshotStorage.value, pid, snapshotId)
+    if (!doc) return false
+    try {
+      beforeChange()
+      const d = parseDoc(doc)
+      objects.value = d.objects
+      links.value = d.links
+      if (d.groups) groups.value = d.groups
+      if (d.viewport) viewport.value = d.viewport
+      saveSoon()
+      aiSnapshotVersion.value++
+      return true
+    } catch {
+      return false
+    }
+  }
+  function removeAiSnapshot(snapshotId) {
+    const pid = appStore.config.activeAppId || 'default'
+    const ok = deleteAiSnapshot(aiSnapshotStorage.value, pid, snapshotId)
+    if (ok) aiSnapshotVersion.value++
+    return ok
+  }
+
   const agentOpsDiffLines = computed(() =>
     (pendingAgentOps.value || []).map((op) => {
       switch (op.type) {
@@ -581,6 +636,8 @@ export function useAppNodes(deps) {
   function confirmAgentOps() {
     const ops = pendingAgentOps.value
     if (!ops?.length) return
+    // C-H3 AI 快照：批量改画布前自动打持久命名快照（恢复入口见 AI 快照面板）
+    takeAiSnapshot(`AI 操作前（${ops.length} 条指令）`)
     applyCanvasAgentOps(ops)
     pendingAgentOps.value = null
     message.success(t('canvasAgentOpsApplied'))
@@ -621,6 +678,10 @@ export function useAppNodes(deps) {
     agentOpsDiffLines,
     applyOneAgentOp,
     confirmAgentOps,
+    aiSnapshots,
+    takeAiSnapshot,
+    restoreAiSnapshot,
+    removeAiSnapshot,
     refreshFed,
     startNodePoll,
     stopNodePoll,

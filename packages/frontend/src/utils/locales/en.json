@@ -1164,5 +1164,7 @@
   "externalAgentBinLabel": "Agent binary",
   "externalAgentBinPlaceholderAcp": "e.g. kimi, qwen, or absolute path",
   "externalAgentBinPlaceholderClaude": "Leave empty to use claude from PATH",
-  "externalAgentBinHint": "Command name (on PATH) or absolute path. Restart the workbench session after switching channels."
+  "externalAgentBinHint": "Command name (on PATH) or absolute path. Restart the workbench session after switching channels.",
+  "canvasAiSnapshotsTitle": "AI snapshots (auto-saved before changes)",
+  "canvasAiSnapshotsRestore": "Restore"
 }

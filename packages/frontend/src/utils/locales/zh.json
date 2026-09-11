@@ -1164,5 +1164,7 @@
   "externalAgentBinLabel": "Agent 二进制",
   "externalAgentBinPlaceholderAcp": "如 kimi、qwen 或绝对路径",
   "externalAgentBinPlaceholderClaude": "留空则使用 PATH 中的 claude",
-  "externalAgentBinHint": "命令名（需在 PATH 中）或绝对路径。切换通道后需重启应用内工作台会话生效。"
+  "externalAgentBinHint": "命令名（需在 PATH 中）或绝对路径。切换通道后需重启应用内工作台会话生效。",
+  "canvasAiSnapshotsTitle": "AI 快照（改动前自动保存）",
+  "canvasAiSnapshotsRestore": "恢复此快照"
 }
