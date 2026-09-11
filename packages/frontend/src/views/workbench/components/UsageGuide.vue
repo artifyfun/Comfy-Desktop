@@ -37,9 +37,7 @@
                 :alt="s.title[lang]"
                 loading="lazy"
               />
-              <div
-                class="absolute inset-0 bg-[rgba(8,10,18,0.85)]"
-              ></div>
+              <div class="absolute inset-0 bg-[rgba(8,10,18,0.85)]"></div>
               <div class="absolute inset-x-0 bottom-0 p-3">
                 <div class="text-sm font-semibold text-white drop-shadow">{{ s.title[lang] }}</div>
                 <div class="mt-0.5 line-clamp-1 text-[11px] text-[var(--wb-text-2)]">

@@ -38,7 +38,10 @@
     <template v-if="isPending">
       <!-- header:状态点 + 工具名 + 倒计时 -->
       <header class="flex items-center gap-2 px-2 py-1.5">
-        <span class="inline-flex h-2 w-2 shrink-0 rounded-full bg-[var(--wb-accent)]" aria-hidden="true"></span>
+        <span
+          class="inline-flex h-2 w-2 shrink-0 rounded-full bg-[var(--wb-accent)]"
+          aria-hidden="true"
+        ></span>
         <span class="shrink-0 text-[var(--wb-accent)]">等待审批</span>
         <i class="fas fa-shield-halved shrink-0 text-[var(--wb-accent)]/80" aria-hidden="true"></i>
         <span
@@ -105,8 +108,9 @@
           data-testid="approval-error"
           class="m-0 text-[10px] text-[var(--wb-danger)]"
           role="alert"
-          >{{ editError }}</p
         >
+          {{ editError }}
+        </p>
         <div class="flex gap-1.5">
           <button
             type="button"

@@ -23,6 +23,8 @@ const ACTIONS: readonly ApprovalAction[] = ['approve', 'reject', 'edit']
 
 export interface AguiInteractionDeps {
   gate: ApprovalGate
+  /** C-H4 计划拍板解析器(pendingId + optionId 唤醒 wb_propose_plan 挂起);可选以兼容既有组装 */
+  planChoiceResolver?: (pendingId: string, optionId: string) => boolean
 }
 
 interface InteractionBody {
@@ -56,6 +58,18 @@ export function createAguiInteractionRouter(deps: AguiInteractionDeps): Router {
           .status(HTTP_STATUS.BAD_REQUEST)
           .json(createErrorResponse("action must be 'approve' | 'reject' | 'edit'"))
         return
+      }
+
+      // ---- C-H4 计划拍板：requestId 命中 plan 挂起表 → 路由到 resolver ----
+      // （wb_propose_plan 的 pendingId 直接作为 requestId 下发，前端原样回传；
+      //   先于 gate.resolve 判定，避免 plan 的 pending 误入 approval 语义）
+      if (deps.planChoiceResolver) {
+        const optArgs = (body.args ?? {}) as { optionId?: string }
+        const optionId = typeof optArgs.optionId === 'string' ? optArgs.optionId : ''
+        if (deps.planChoiceResolver(requestId, optionId)) {
+          res.status(INTERACTION_RESPONSE_ACCEPTED).json(createSuccessResponse({ accepted: true }))
+          return
+        }
       }
 
       // ---- 门控应答:edit 非对象 args 抛 ApprovalArgsError → 400(pending 不消费,可重试)----

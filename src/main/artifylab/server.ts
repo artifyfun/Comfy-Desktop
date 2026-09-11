@@ -26,6 +26,7 @@ import { createCanvasRouter } from './routes/canvas'
 import { createAguiRouter } from './routes/agui'
 import { createAguiThreadsRouter } from './routes/aguiThreads'
 import { createAguiInteractionRouter } from './routes/aguiInteraction'
+import { resolvePlanChoice } from './mcp/wbtools/planTools'
 import { createEventStore } from './agui/eventStore'
 import { getApprovalGate } from './agui/approvalRegistry'
 import { workbenchService } from './workbench/service'
@@ -116,7 +117,12 @@ app.use(createWorkbenchRouter())
 app.use(createCanvasRouter())
 // AG-UI 协议端点(全 POST /api/workbench/agent/*,不受 SPA fallback 影响;与 workbench 同层)
 // C14 HITL 交互应答端点:与 mcp 门控 registry 共享同一 gate 单例(approvalRegistry 模块级)
-app.use(createAguiInteractionRouter({ gate: getApprovalGate() }))
+app.use(
+  createAguiInteractionRouter({
+    gate: getApprovalGate(),
+    planChoiceResolver: resolvePlanChoice,
+  }),
+)
 // C4(run/cancel)+ C5(threads/历史)共享同一 C3 eventStore(userData DB 文件,需
 // electron app),异步创建后一起挂载:实时旁路落库 + 历史回放同构都依赖它。
 // 初始化失败仅告警——不拖垮旧链路(C3 容错契约),agent/* 两能力同弃。

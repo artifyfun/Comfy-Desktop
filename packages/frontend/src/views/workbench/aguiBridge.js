@@ -266,6 +266,30 @@ function applyCustom(pageApi, state, name, value) {
     }
     return
   }
+  if (name === 'plan_proposed') {
+    // C-H4 计划步骤卡：步骤列表 + 可选拍板选项（点选 → respondPlan 回传）
+    dismissProgress(pageApi, state)
+    pageApi.pushMsg({
+      role: 'agent',
+      kind: 'plan',
+      text: '',
+      plan: value,
+      planStatus: value && value.options && value.options.length ? 'pending' : 'done',
+      createdAt: Date.now(),
+    })
+    return
+  }
+  if (name === 'plan_pending') {
+    // C-H4:wb_propose_plan 挂起后回传 pendingId → 注入对应 plan 卡(拍板回传定位)
+    const target = pageApi.messages.value.find(
+      (m) => m.kind === 'plan' && m.planStatus === 'pending' && !m.requestId,
+    )
+    if (target) {
+      target.requestId = value && value.pendingId
+      target._planChoose = (p) => respondPlan(target, p)
+    }
+    return
+  }
   if (name === 'wb_plan') {
     // 落现有计划卡路径（kind:'card' + plan）
     dismissProgress(pageApi, state)
@@ -672,6 +696,44 @@ export function createAguiBridge(pageApi, http = {}) {
   }
 
   /**
+   * 计划拍板应答(C-H4):组件 emit choose({optionId}) → POST interaction-response
+   * action='edit' + args={optionId}——wb_propose_plan 工具返回用户选择继续执行。
+   * 防抖与 404 静默语义同 respondApproval。
+   */
+  async function respondPlan(msg, { optionId } = {}) {
+    const value = msg && msg.plan
+    if (!value || !value.sessionId) return
+    if (msg.planStatus && msg.planStatus !== 'pending') return
+    if (msg._planInFlight) return
+    msg._planInFlight = true
+    try {
+      const res = await postJson('/api/workbench/agent/interaction-response', {
+        threadId: value.sessionId,
+        requestId: msg.requestId,
+        action: 'edit',
+        args: { optionId },
+      })
+      if (res.status === 404) {
+        msg.planStatus = 'done'
+        return
+      }
+      if (!res.ok) {
+        throw new Error((res.json && res.json.message) || 'HTTP ' + res.status)
+      }
+      msg.planStatus = 'done'
+    } catch (e) {
+      pageApi.pushMsg({
+        role: 'agent',
+        kind: 'error',
+        text: '拍板提交失败: ' + ((e && e.message) || String(e)),
+        createdAt: Date.now(),
+      })
+    } finally {
+      msg._planInFlight = false
+    }
+  }
+
+  /**
    * 审批应答(C15):组件 emit respond({action,args?}) → POST interaction-response
    * → 成功后卡片消息翻 approved/rejected;失败(404 已终态/400 edit 参数非法/网络)
    * 保留 pending 供重试,错误走错误气泡。后端超时已按 reject 兜底,前端只管提交。
@@ -723,7 +785,7 @@ export function createAguiBridge(pageApi, http = {}) {
     }
   }
 
-  return { runAgentTurn, stopAgentRun, loadHistoryIntoPage, respondApproval }
+  return { runAgentTurn, stopAgentRun, loadHistoryIntoPage, respondApproval, respondPlan }
 }
 
 /**

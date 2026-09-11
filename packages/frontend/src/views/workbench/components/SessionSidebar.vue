@@ -11,7 +11,11 @@
           <i class="fas fa-angles-left"></i>
         </button>
       </template>
-      <button v-else class="w-full text-[var(--wb-text-2)] hover:text-white" @click="$emit('collapse')">
+      <button
+        v-else
+        class="w-full text-[var(--wb-text-2)] hover:text-white"
+        @click="$emit('collapse')"
+      >
         <i class="fas fa-angles-right"></i>
       </button>
     </div>

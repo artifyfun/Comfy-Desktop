@@ -74,8 +74,7 @@ export const templatesApi = {
 // ---------------- execute/poll 域 ----------------
 export const executeApi = {
   execute: (payload) => req('/api/workbench/execute', jsonBody(payload)),
-  poll: (sessionId, promptId) =>
-    req('/api/workbench/poll', jsonBody({ sessionId, promptId })),
+  poll: (sessionId, promptId) => req('/api/workbench/poll', jsonBody({ sessionId, promptId })),
   batchStatus: (promptId) => req(`/api/batch/status?id=${encodeURIComponent(promptId)}`),
 }
 

@@ -39,6 +39,7 @@ import type { ThreadEvent } from '../vendor/codex-sdk'
 import { createCodexMapper } from '../agui/codexMapper'
 import { getApprovalGate } from '../agui/approvalRegistry'
 import { registerCanvasOpsEmit, unregisterCanvasOpsEmit } from '../mcp/wbtools/canvasTools'
+import { registerPlanEmit, unregisterPlanEmit } from '../mcp/wbtools/planTools'
 import {
   TOOL_APPROVAL_REQUIRED,
   toolApprovalRequiredValue,
@@ -185,6 +186,10 @@ export function createAguiRouter(deps: { store?: EventStore } = {}): express.Rou
     // 铺到画布,前端既有确认卡人审执行,零前端改动。
     registerCanvasOpsEmit(threadId, (ops, meta) => {
       emit(custom('wb_canvas_ops', { ops, source: meta.source }))
+    })
+    // C-H4 wb_propose_plan:计划卡/拍板选项 CUSTOM 直推(与审批卡同生命周期)
+    registerPlanEmit(threadId, (event) => {
+      emit(event)
     })
 
     // C2 映射器:本文件内创建,单轮一个实例(diff 快照/幂等 Set 随 run 生命周期)
@@ -418,6 +423,11 @@ export function createAguiRouter(deps: { store?: EventStore } = {}): express.Rou
         unregisterCanvasOpsEmit(threadId)
       } catch (error) {
         logger.warn(`agui canvas ops emit unregister failed (thread=${threadId})`, error)
+      }
+      try {
+        unregisterPlanEmit(threadId)
+      } catch (error) {
+        logger.warn(`agui plan emit unregister failed (thread=${threadId})`, error)
       }
       try {
         workbenchService.setCanvasSyncHandler(null, threadId)

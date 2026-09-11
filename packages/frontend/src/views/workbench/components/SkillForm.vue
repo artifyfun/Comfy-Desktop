@@ -126,7 +126,7 @@ watch(
     if (!v) return
     if (props.skill) {
       const res = await fetch(
-        `${origin.value}/api/workbench/skills/read?name=${encodeURIComponent(props.skill.name)}`
+        `${origin.value}/api/workbench/skills/read?name=${encodeURIComponent(props.skill.name)}`,
       )
       const json = await res.json()
       form.value = {
@@ -137,7 +137,7 @@ watch(
     } else {
       form.value = { name: '', description: '', body: '' }
     }
-  }
+  },
 )
 
 const toolbars = [
@@ -214,15 +214,23 @@ async function save() {
   saving.value = true
   try {
     const renamed = props.skill && name !== props.skill.name
-    const res = await fetch(`${origin.value}/api/workbench/skills/${props.skill ? 'update' : 'create'}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(
-        props.skill
-          ? { name: props.skill.name, newName: renamed ? name : undefined, description: form.value.description, body: form.value.body }
-          : { name, description: form.value.description, body: form.value.body }
-      ),
-    })
+    const res = await fetch(
+      `${origin.value}/api/workbench/skills/${props.skill ? 'update' : 'create'}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          props.skill
+            ? {
+                name: props.skill.name,
+                newName: renamed ? name : undefined,
+                description: form.value.description,
+                body: form.value.body,
+              }
+            : { name, description: form.value.description, body: form.value.body },
+        ),
+      },
+    )
     const json = await res.json()
     if (!res.ok || !json?.success) throw new Error(json?.message || 'save failed')
     message.success(t('workbenchSaved'))

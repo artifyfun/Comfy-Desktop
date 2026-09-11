@@ -49,12 +49,7 @@
     </div>
 
     <!-- 新建/编辑/查看 -->
-    <SkillForm
-      v-model:open="formOpen"
-      :skill="editing"
-      :readonly="viewing"
-      @saved="onSaved"
-    />
+    <SkillForm v-model:open="formOpen" :skill="editing" :readonly="viewing" @saved="onSaved" />
 
     <!-- 导入 -->
     <SkillImportDialog v-model:open="importOpen" @imported="load" />

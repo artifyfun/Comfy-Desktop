@@ -18,7 +18,9 @@ describe('diagnosis helpers', () => {
   })
 
   it('canApplyFix：embed + 有 fixOps 才显示按钮', () => {
-    const d = { suggestion: { fixOps: [{ type: 'setWidget', nodeId: '1', widget: 's', value: 'euler' }] } }
+    const d = {
+      suggestion: { fixOps: [{ type: 'setWidget', nodeId: '1', widget: 's', value: 'euler' }] },
+    }
     expect(canApplyFix(d, true)).toBe(true)
     expect(canApplyFix(d, false)).toBe(false)
     expect(canApplyFix({ suggestion: {} }, true)).toBe(false)

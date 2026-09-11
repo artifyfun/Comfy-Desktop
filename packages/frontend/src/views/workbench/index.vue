@@ -463,6 +463,15 @@
                           @respond="(p) => onApprovalRespond(tm, p)"
                         />
                       </div>
+                      <!-- C-H4 计划步骤卡：步骤树 + 拍板选项 -->
+                      <div v-if="tm.kind === 'plan'" class="py-1">
+                        <PlanProposalCard
+                          :plan="tm.plan"
+                          :status="tm.planStatus || 'done'"
+                          :request-id="tm.requestId || ''"
+                          @choose="(p) => onPlanChoose(tm, p)"
+                        />
+                      </div>
                       <!-- 决策/执行占位（progress part） -->
                       <div v-if="tm.kind === 'progress'" class="py-0.5">
                         <a-spin size="small" />
@@ -501,7 +510,9 @@
                       @click="copyMessage(turnTailInfo(i).m, i)"
                     >
                       <i
-                        :class="copiedIdx === i ? 'fas fa-check text-[var(--wb-success)]' : 'far fa-copy'"
+                        :class="
+                          copiedIdx === i ? 'fas fa-check text-[var(--wb-success)]' : 'far fa-copy'
+                        "
                       ></i>
                     </button>
                     <span class="text-[var(--wb-text-3)]">{{
@@ -707,7 +718,9 @@
                       @click="copyMessage(m, i)"
                     >
                       <i
-                        :class="copiedIdx === i ? 'fas fa-check text-[var(--wb-success)]' : 'far fa-copy'"
+                        :class="
+                          copiedIdx === i ? 'fas fa-check text-[var(--wb-success)]' : 'far fa-copy'
+                        "
                       ></i>
                     </button>
                     <span class="text-[var(--wb-text-3)]">{{ timeLabel(m.createdAt) }}</span>
@@ -1182,7 +1195,9 @@
             {{ issue.field }}: {{ issue.message }}
           </div>
         </div>
-        <div v-else-if="advValidated" class="text-xs text-[var(--wb-success)]">{{ t('workbenchAdvOk') }}</div>
+        <div v-else-if="advValidated" class="text-xs text-[var(--wb-success)]">
+          {{ t('workbenchAdvOk') }}
+        </div>
         <div class="flex gap-2 justify-end">
           <a-button size="small" :loading="advChecking" @click="checkAdvOverrides">
             {{ t('workbenchAdvValidate') }}
@@ -1233,6 +1248,7 @@ import { useAppStore } from '@/stores/appStore'
 import SessionSidebar from './components/SessionSidebar.vue'
 import WbMarkdown from './components/WbMarkdown.vue'
 import InteractionApprovalCard from './components/InteractionApprovalCard.vue'
+import PlanProposalCard from './components/PlanProposalCard.vue'
 import ProgressCard from './components/ProgressCard.vue'
 import Composer from './components/Composer.vue'
 import NewSessionDialog from './components/NewSessionDialog.vue'
@@ -1325,6 +1341,10 @@ const reasoningEffort = ref(
 function onApprovalRespond(msg, payload) {
   aguiBridge.respondApproval(msg, payload)
 }
+/** C-H4 计划拍板转发：卡片 emit choose → 桥 POST interaction-response(edit) */
+function onPlanChoose(msg, payload) {
+  aguiBridge.respondPlan(msg, payload)
+}
 // 执行失败自动恢复：单会话最多自动重试 N 次（防死循环烧 token），切会话清零
 const recoverCount = ref(0)
 const recovering = ref(false)
@@ -1402,35 +1422,30 @@ const pollTimers = new Map()
 // 位置约束：useExecutionPolling 依赖 isCanvasEmbedded，故这两行须在其之前。
 const props = defineProps({ canvasEmbedded: { type: Boolean, default: false } })
 const isCanvasEmbedded = computed(() => props.canvasEmbedded || route.query.canvas === '1')
-const {
-  applyExecutionSideEffect,
-  startPoll,
-  stopPoll,
-  startBatchPoll,
-  stopBatchPoll,
-} = useExecutionPolling({
-  messages,
-  artifacts,
-  sessionId,
-  executingCount,
-  execProgressIndex,
-  pollTimers,
-  t,
-  pushMsg,
-  scrollToBottom: () => scrollToBottom(),
-  loadSessions,
-  sessions,
-  autoRecover: (err) => autoRecover(err),
-  diagnoseArtifact: (a) => diagnoseArtifact(a),
-  pushCardsToCanvas: (files) => pushCardsToCanvas(files),
-  executeApi,
-  pendingIssues,
-  isCanvasEmbedded,
-  emitOps,
-  dismissDecidingProgress,
-  syncWorkflowToCanvas,
-  runCanvasOnHost,
-})
+const { applyExecutionSideEffect, startPoll, stopPoll, startBatchPoll, stopBatchPoll } =
+  useExecutionPolling({
+    messages,
+    artifacts,
+    sessionId,
+    executingCount,
+    execProgressIndex,
+    pollTimers,
+    t,
+    pushMsg,
+    scrollToBottom: () => scrollToBottom(),
+    loadSessions,
+    sessions,
+    autoRecover: (err) => autoRecover(err),
+    diagnoseArtifact: (a) => diagnoseArtifact(a),
+    pushCardsToCanvas: (files) => pushCardsToCanvas(files),
+    executeApi,
+    pendingIssues,
+    isCanvasEmbedded,
+    emitOps,
+    dismissDecidingProgress,
+    syncWorkflowToCanvas,
+    runCanvasOnHost,
+  })
 const aguiBridge = createAguiBridge({
   origin,
   t,
@@ -2027,7 +2042,6 @@ async function send() {
   await runChat(inputText, attachments, { userBubble: text })
 }
 
-
 const comfyOrigin = computed(() => appStore.config?.comfyHost || 'http://127.0.0.1:8188')
 const lightboxFile = ref(null)
 
@@ -2481,14 +2495,11 @@ function syncWorkflowToCanvas({ templateId, name, workflow, ensureTab }) {
   if (!workflow || !Array.isArray(workflow.nodes))
     return Promise.reject(new Error(t('workbenchSyncNoWorkflow')))
   // callBridge 永不 reject；此调用方对外维持 throw 语义
-  return callBridge(
-    ARTIFY_MSG.CANVAS_OPS,
-    {
-      // ensureTab：桥按「当前 tab 已是目标则复用、否则开新 tab」处理
-      ops: [{ type: 'loadWorkflow', workflow, newTab: ensureTab || undefined, name }],
-      reason: 'workbench-sync-template',
-    },
-  ).then((data) => (data.ok ? data : Promise.reject(new Error(data.error || 'unknown'))))
+  return callBridge(ARTIFY_MSG.CANVAS_OPS, {
+    // ensureTab：桥按「当前 tab 已是目标则复用、否则开新 tab」处理
+    ops: [{ type: 'loadWorkflow', workflow, newTab: ensureTab || undefined, name }],
+    reason: 'workbench-sync-template',
+  }).then((data) => (data.ok ? data : Promise.reject(new Error(data.error || 'unknown'))))
 }
 
 function isVideoFile(f) {

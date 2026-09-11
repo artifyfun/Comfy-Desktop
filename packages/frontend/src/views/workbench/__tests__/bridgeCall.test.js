@@ -26,7 +26,12 @@ describe('callBridge', () => {
     expect(typeof sent.requestId).toBe('string')
     window.dispatchEvent(
       new MessageEvent('message', {
-        data: JSON.stringify({ type: 'artify:canvas-ops-result', requestId: sent.requestId, ok: true, applied: 3 }),
+        data: JSON.stringify({
+          type: 'artify:canvas-ops-result',
+          requestId: sent.requestId,
+          ok: true,
+          applied: 3,
+        }),
       }),
     )
     await expect(p).resolves.toMatchObject({ ok: true, applied: 3 })
@@ -42,7 +47,12 @@ describe('callBridge', () => {
     )
     window.dispatchEvent(
       new MessageEvent('message', {
-        data: JSON.stringify({ type: 'artify:canvas-ops-result', requestId: sent.requestId, ok: false, error: 'x' }),
+        data: JSON.stringify({
+          type: 'artify:canvas-ops-result',
+          requestId: sent.requestId,
+          ok: false,
+          error: 'x',
+        }),
       }),
     )
     await expect(p).resolves.toMatchObject({ ok: false, error: 'x' })
@@ -63,7 +73,12 @@ describe('callBridge', () => {
     await vi.advanceTimersByTimeAsync(8000)
     window.dispatchEvent(
       new MessageEvent('message', {
-        data: JSON.stringify({ type: 'artify:canvas-execute-result', requestId: sent.requestId, ok: true, promptId: 'p1' }),
+        data: JSON.stringify({
+          type: 'artify:canvas-execute-result',
+          requestId: sent.requestId,
+          ok: true,
+          promptId: 'p1',
+        }),
       }),
     )
     await expect(p).resolves.toMatchObject({ ok: true, promptId: 'p1' })
@@ -80,6 +95,9 @@ describe('callBridge', () => {
       throw new Error('dead frame')
     })
     const p = callBridge(ARTIFY_MSG.CANVAS_OPS, {})
-    await expect(p).resolves.toMatchObject({ ok: false, error: expect.stringContaining('dead frame') })
+    await expect(p).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining('dead frame'),
+    })
   })
 })
