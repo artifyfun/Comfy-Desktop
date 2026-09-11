@@ -15,6 +15,7 @@ import { Router, type Request, type Response } from 'express'
 import { createSuccessResponse, createErrorResponse } from '../utils/errorHandler'
 import { HTTP_STATUS } from '../config/constants'
 import { ApprovalArgsError, type ApprovalAction, type ApprovalGate } from '../agui/approvalGate'
+import { logger } from '../utils/logger'
 
 /** 202 Accepted:受理 ≠ 终态,工具执行结果走原 AG-UI 流回推 */
 export const INTERACTION_RESPONSE_ACCEPTED = 202
@@ -23,8 +24,8 @@ const ACTIONS: readonly ApprovalAction[] = ['approve', 'reject', 'edit']
 
 export interface AguiInteractionDeps {
   gate: ApprovalGate
-  /** C-H4 计划拍板解析器(pendingId + optionId 唤醒 wb_propose_plan 挂起);可选以兼容既有组装 */
-  planChoiceResolver?: (pendingId: string, optionId: string) => boolean
+  /** C-H4 计划拍板解析器(threadId + optionId 唤醒该会话唯一 wb_propose_plan 挂起);可选以兼容既有组装 */
+  planChoiceResolver?: (threadId: string, optionId: string) => boolean
 }
 
 interface InteractionBody {
@@ -63,10 +64,13 @@ export function createAguiInteractionRouter(deps: AguiInteractionDeps): Router {
       // ---- C-H4 计划拍板：requestId 命中 plan 挂起表 → 路由到 resolver ----
       // （wb_propose_plan 的 pendingId 直接作为 requestId 下发，前端原样回传；
       //   先于 gate.resolve 判定，避免 plan 的 pending 误入 approval 语义）
-      if (deps.planChoiceResolver) {
+      logger.info(
+        `[interaction] vote requestId=${requestId} optionId=${typeof body.args === 'object' && body.args ? JSON.stringify(body.args) : ''}`
+      )
+      if (deps.planChoiceResolver && action === 'edit') {
         const optArgs = (body.args ?? {}) as { optionId?: string }
         const optionId = typeof optArgs.optionId === 'string' ? optArgs.optionId : ''
-        if (deps.planChoiceResolver(requestId, optionId)) {
+        if (deps.planChoiceResolver(threadId, optionId)) {
           res.status(INTERACTION_RESPONSE_ACCEPTED).json(createSuccessResponse({ accepted: true }))
           return
         }

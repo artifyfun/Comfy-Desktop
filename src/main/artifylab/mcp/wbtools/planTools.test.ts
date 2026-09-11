@@ -64,7 +64,7 @@ describe('wb_propose_plan — 拍板分支（有 options，自管 pending）', (
   it('计划卡先下发（带 options），resolvePlanChoice 点选后工具返回 selectedOptionId', async () => {
     const spy = vi.fn()
     registerPlanEmit('sess-p', spy)
-    const { resolvePlanChoice } = await import('./planTools')
+    const { resolvePlanChoiceBySession } = await import('./planTools')
     const pending = tool.fn(
       {
         title: '方向确认',
@@ -89,7 +89,7 @@ describe('wb_propose_plan — 拍板分支（有 options，自管 pending）', (
     // pendingId 直接在 plan_proposed 帧里(单帧带全,前端原样回传)
     const pid = ev.value.requestId ?? ''
     expect(pid).toBeTruthy()
-    expect(resolvePlanChoice(pid, 'plan-b')).toBe(true)
+    expect(resolvePlanChoiceBySession('sess-p', 'plan-b')).toBe(true)
     const res = await pending
     const payload = JSON.parse(
       (res as { content: Array<{ text?: string }> }).content[0]?.text ?? '{}'

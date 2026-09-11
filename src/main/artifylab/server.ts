@@ -26,7 +26,7 @@ import { createCanvasRouter } from './routes/canvas'
 import { createAguiRouter } from './routes/agui'
 import { createAguiThreadsRouter } from './routes/aguiThreads'
 import { createAguiInteractionRouter } from './routes/aguiInteraction'
-import { resolvePlanChoice } from './mcp/wbtools/planTools'
+import { resolvePlanChoiceBySession } from './mcp/wbtools/planTools'
 import { createEventStore } from './agui/eventStore'
 import { getApprovalGate } from './agui/approvalRegistry'
 import { workbenchService } from './workbench/service'
@@ -120,8 +120,8 @@ app.use(createCanvasRouter())
 app.use(
   createAguiInteractionRouter({
     gate: getApprovalGate(),
-    planChoiceResolver: resolvePlanChoice,
-  }),
+    planChoiceResolver: (threadId, optionId) => resolvePlanChoiceBySession(threadId, optionId)
+  })
 )
 // C4(run/cancel)+ C5(threads/历史)共享同一 C3 eventStore(userData DB 文件,需
 // electron app),异步创建后一起挂载:实时旁路落库 + 历史回放同构都依赖它。

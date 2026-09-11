@@ -15,6 +15,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import type { WBToolFn } from './shared'
 import { requireSession, text } from './shared'
 import type { AGUIEvent } from '../../agui/types'
+import { logger } from '../../utils/logger'
 
 // ==================== SSE 桥（threadId → emit；run 生命周期注册/注销） ====================
 
@@ -48,14 +49,16 @@ const pendingChoices = new Map<string, PendingChoice>()
 /** 拍板超时（10min，对齐 approvalGate 预算） */
 const PLAN_TIMEOUT_MS = 10 * 60 * 1000
 
-/** 用户点选（interaction-response 端点调）：唤醒挂起，返回是否命中 */
-export function resolvePlanChoice(pendingId: string, optionId: string): boolean {
-  const p = pendingChoices.get(pendingId)
-  if (!p) return false
-  pendingChoices.delete(pendingId)
-  clearTimeout(p.timer)
-  p.settle({ approved: true, optionId })
-  return true
+/** 用户点选（interaction-response 端点调）：按 sessionId 命中该会话唯一挂起并唤醒 */
+export function resolvePlanChoiceBySession(sessionId: string, optionId: string): boolean {
+  for (const [id, p] of pendingChoices) {
+    if (p.sessionId !== sessionId) continue
+    pendingChoices.delete(id)
+    clearTimeout(p.timer)
+    p.settle({ approved: true, optionId })
+    return true
+  }
+  return false
 }
 
 /** run 结束收口：该会话全部挂起按取消结算（对齐 approvalGate.rejectPending） */
@@ -159,9 +162,10 @@ export const planTools: Array<{ tool: Tool; fn: WBToolFn }> = [
         })
       }
 
-      // 有分歧点：先登记挂起拿 pendingId，随计划卡一次带全下发（前端回传
-      // requestId=pendingId 原样定位，杜绝二次帧错配旧卡）
+      // 有分歧点：先收口该会话的旧挂起(防多卡并存),再登记新挂起
+      cancelAllPlans(sessionId)
       const pendingId = randomUUID()
+      logger.info(`[planTools] 挂起 pendingId=${pendingId} sessionId=${sessionId}`)
       if (emit) {
         emit({
           type: 'CUSTOM',
@@ -201,8 +205,3 @@ export const planTools: Array<{ tool: Tool; fn: WBToolFn }> = [
     }
   }
 ]
-
-/** interaction-response 端点接入（server.ts / 路由层组装时调用） */
-export function createPlanChoiceResolver() {
-  return resolvePlanChoice
-}

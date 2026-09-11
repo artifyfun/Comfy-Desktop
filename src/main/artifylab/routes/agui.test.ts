@@ -37,6 +37,16 @@ vi.mock('../workbench/service', () => ({
   }
 }))
 
+vi.mock('../mcp/wbtools/canvasTools', () => ({
+  registerCanvasOpsEmit: vi.fn(),
+  unregisterCanvasOpsEmit: vi.fn(),
+  canvasTools: []
+}))
+vi.mock('../mcp/wbtools/planTools', () => ({
+  registerPlanEmit: vi.fn(),
+  unregisterPlanEmit: vi.fn(),
+  planTools: []
+}))
 vi.mock('../mcp/executor', () => ({
   stopExecution: vi.fn(async () => undefined)
 }))

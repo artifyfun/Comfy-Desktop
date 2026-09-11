@@ -267,27 +267,18 @@ function applyCustom(pageApi, state, name, value) {
     return
   }
   if (name === 'plan_proposed') {
-    // C-H4 计划步骤卡：步骤列表 + 可选拍板选项（点选 → respondPlan 回传）
+    // C-H4 计划步骤卡：步骤列表 + 可选拍板选项（点选 → respondPlan 回传）。
+    // pendingId 随本帧的 value.requestId 带全（单帧设计，不再二次注入）
     dismissProgress(pageApi, state)
     pageApi.pushMsg({
       role: 'agent',
       kind: 'plan',
       text: '',
       plan: value,
+      requestId: (value && value.requestId) || '',
       planStatus: value && value.options && value.options.length ? 'pending' : 'done',
       createdAt: Date.now(),
     })
-    return
-  }
-  if (name === 'plan_pending') {
-    // C-H4:wb_propose_plan 挂起后回传 pendingId → 注入对应 plan 卡(拍板回传定位)
-    const target = pageApi.messages.value.find(
-      (m) => m.kind === 'plan' && m.planStatus === 'pending' && !m.requestId,
-    )
-    if (target) {
-      target.requestId = value && value.pendingId
-      target._planChoose = (p) => respondPlan(target, p)
-    }
     return
   }
   if (name === 'wb_plan') {
