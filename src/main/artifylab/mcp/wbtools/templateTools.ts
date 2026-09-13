@@ -4,6 +4,56 @@ import { requireSession, text, toPlan, pollUntilDone, pollBatchUntilDone } from 
 
 import { workbenchService } from '../../workbench/service'
 import { validatePlanLocal } from '../../workbench/plan'
+import { assetsStore, type CreativeAsset } from '../../workbench/assetsStore'
+import { mountAssetsToTemplate } from '../../workbench/assetMount'
+
+/** 资产引用参数归一：数组 / 逗号串 / 单个字符串都收（模型输出形态不一） */
+function normalizeAssetKeys(raw: unknown): string[] {
+  if (raw == null) return []
+  if (Array.isArray(raw)) return raw.map((v) => String(v).trim()).filter(Boolean)
+  return String(raw)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+/**
+ * 创作资产挂载（对标建议 #4）：把 asset_ids 指向的资产（参考图组/seed/参数）
+ * 并进本次执行参数。返回用户可见的挂载结果与 issues（issue 不阻断执行——
+ * 缺图/槽位不足时让模型据此改道，而不是整个调用失败）。
+ */
+function applyAssetMount(
+  plan: ReturnType<typeof toPlan>,
+  template: Parameters<typeof mountAssetsToTemplate>[0] | null,
+  rawKeys: unknown
+): { applied: unknown[]; issues: string[] } {
+  const keys = normalizeAssetKeys(rawKeys)
+  if (keys.length === 0) return { applied: [], issues: [] }
+
+  const resolved = keys.map((k) => assetsStore.resolve(k))
+  const missing = keys.filter((_, i) => !resolved[i])
+  const found = resolved.filter((a): a is CreativeAsset => Boolean(a))
+  const issues: string[] = []
+  if (missing.length > 0) {
+    issues.push(`未找到资产：${missing.join('、')}（可用 wb_assets action=list 查看已登记资产）`)
+  }
+  if (found.length === 0 || !template) return { applied: [], issues }
+
+  const mount = mountAssetsToTemplate(template, found, plan.params ?? {})
+  issues.push(...mount.issues)
+  if (plan.batch) {
+    // 批量：参考图/seed/参数作为共享默认值下发（行内参数优先，见 executeBatch
+    // 的「行内值优先」合并语义），使整批保持同一角色/风格
+    const injected: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(mount.params)) {
+      if (!(k in (plan.params ?? {}))) injected[k] = v
+    }
+    plan.batch.sharedParams = { ...injected, ...(plan.batch.sharedParams ?? {}) }
+  } else {
+    plan.params = mount.params
+  }
+  return { applied: mount.applied, issues }
+}
 
 export const templateTools: Array<{ tool: Tool; fn: WBToolFn }> = [
   {
@@ -70,6 +120,17 @@ export const templateTools: Array<{ tool: Tool; fn: WBToolFn }> = [
               '节点级参数覆盖：{"节点id": {"class_type": "KSampler", "widgetOverrides": {"steps": 40}}}。只改直接值字段，链接引用不能直写。可先用 wb_list_nodes 查 schema。',
             additionalProperties: true
           },
+          asset_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              '创作资产引用（wb_assets 登记的 id 或资产名，可多个）：参考图按序落素材槽、seed 自动填、资产 params 自动并（用户显式 params 优先）。多张图/多轮保持同一角色或风格时必用。'
+          },
+          assetIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '同 asset_ids（camelCase 兼容别名；二选一即可）'
+          },
           use_previous_output: {
             type: 'boolean',
             description: '链式：把本会话上一次执行的产物作为媒体输入'
@@ -99,9 +160,23 @@ export const templateTools: Array<{ tool: Tool; fn: WBToolFn }> = [
     fn: async (args, identity) => {
       const sessionId = requireSession(identity)
       const plan = toPlan(args)
-      const validation = validatePlanLocal(plan, workbenchService.listTemplates(sessionId))
+      const templates = workbenchService.listTemplates(sessionId)
+      const validation = validatePlanLocal(plan, templates)
       if (validation.issues.length > 0 || !validation.template) {
         return text({ ok: false, stage: 'validation', issues: validation.issues })
+      }
+      // 创作资产挂载（#4）：validator 通过后、提交前把资产并进参数。
+      // 挂载引入的参数（资产附带的模板参数）再过一次本地校验，把「模板不
+      // 认识该参数」等提示合成进 asset_issues 回给模型 —— 不硬拦（与既有
+      // 「未知参数宽松处理、executor 忽略」语义一致），但模型能据此改道。
+      const assetMount = applyAssetMount(plan, validation.template, args.asset_ids ?? args.assetIds)
+      if (assetMount.applied.length > 0) {
+        const recheck = validatePlanLocal(plan, templates)
+        for (const issue of recheck.issues) {
+          if (issue.field?.startsWith('params.')) {
+            assetMount.issues.push(`资产参数未被模板接受：${issue.field} ${issue.message}`)
+          }
+        }
       }
       workbenchService.markOrchestrated(sessionId)
       // ensure-tab（与路由层快路径一致）：模板执行前先把工作流同步到宿主画布
@@ -129,7 +204,9 @@ export const templateTools: Array<{ tool: Tool; fn: WBToolFn }> = [
           success: done.success,
           failed: done.failed,
           status: done.status,
-          outputs: done.results.flatMap((r) => r.files ?? [])
+          outputs: done.results.flatMap((r) => r.files ?? []),
+          assets: assetMount.applied,
+          asset_issues: assetMount.issues
         })
       }
       const execution = await workbenchService.execute(sessionId, plan, validation.template, [])
@@ -138,10 +215,16 @@ export const templateTools: Array<{ tool: Tool; fn: WBToolFn }> = [
           ok: true,
           stage: 'submitted',
           prompt_id: execution.promptId,
-          status: execution.status
+          status: execution.status,
+          assets: assetMount.applied,
+          asset_issues: assetMount.issues
         })
       }
-      return text(await pollUntilDone(sessionId, execution.promptId))
+      return text({
+        ...(await pollUntilDone(sessionId, execution.promptId)),
+        assets: assetMount.applied,
+        asset_issues: assetMount.issues
+      })
     }
   }
 ]

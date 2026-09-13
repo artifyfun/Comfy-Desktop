@@ -15,6 +15,14 @@ description: Artify 工作台多步编排与工作流创作指南。当需求需
 4. 用户偏好/硬件等跨会话事实用 `wb_remember`/`wb_forget` 沉淀。
 5. 非阻塞查询某次执行：`wb_get_outputs`（立即返回最近/指定执行的产物清单）；等跑完用 `wait=true`。
 
+## 一致性资产（wb_assets）
+
+同一**角色/风格**要出多张图或多轮迭代时，先登记资产再复用（不要每轮让用户重新贴图）：
+
+1. `wb_assets(action="save", name="小美", kind="character", refs=["已上传文件名或 http(s) URL"], seed=123, params={"lora":"触发词"})` 登记；`action="list"` 先查已有资产（避免重复建同名）。
+2. 生成时传 `asset_ids=["小美"]`（可写资产名或 id；多个资产按序占参考图位）：参考图自动落素材槽、seed 自动填、资产 params 自动并入；**用户显式 params 优先**。返回体的 `assets` / `asset_issues` 说明实际挂载结果与问题（槽位不足、参数未被模板接受等），据此改道。
+3. 更新（换参考图/调 seed）：`action="save"` 带 `id`；删除：`action="remove"`。
+
 ## 节点级控制（node_overrides）
 
 用户要求**更精细的参数**（改采样步数/CFG/尺寸/换模型/改任意节点参数，模板未暴露的）时：

@@ -45,6 +45,9 @@ export const APPROVAL_TOOL_TIERS: Record<string, ToolRiskTier> = {
   wb_clone_template: 'write',
   wb_remember: 'write',
   wb_forget: 'write',
+  // 资产库含 save/remove 写操作(单工具多 action 无法按 action 分档),整体归 write:
+  // conservative 弹卡、standard 自动(read 类 list/get 亦同档,不额外放行)
+  wb_assets: 'write',
   // —— execute:真实执行/外部副作用,两档都弹卡 ——
   wb_execute_template: 'execute',
   wb_run_workflow: 'execute',
