@@ -19,6 +19,7 @@ import {
   randomSeed,
   uploadImage
 } from '../comfyClient'
+import { previewHub, startPreviewFeed } from '../workbench/previewFeed'
 
 export interface ExecutionResult {
   prompt_id: string
@@ -30,6 +31,33 @@ export interface ExecutionResult {
 /** 提交后记录 prompt_id → app，供 getExecutionStatus 做输出过滤（M2） */
 const promptAppMap = new Map<string, ParamNode[]>()
 const MAX_PROMPT_ENTRIES = 500
+
+/** 生成过程预览总开关（#5）：默认开；失败静默，绝不影响执行与终态产物 */
+let previewEnabled = true
+
+/** 仅测试可见：开关预览采集 */
+export function setPreviewEnabledForTest(v: boolean): void {
+  previewEnabled = v
+}
+
+/**
+ * 提交执行后开始采集 ComfyUI 预览帧（#5）。帧写入 previewHub，由
+ * service.pollExecution 顺带取走——执行发生在 run 结束之后，跑不回原 SSE，
+ * 复用前端既有轮询（2–3s）是最小改动，与帧速匹配。
+ */
+function startPreviewCapture(origin: string, clientId: string, promptId: string): void {
+  if (!previewEnabled) return
+  try {
+    startPreviewFeed({
+      origin,
+      clientId,
+      promptId,
+      onFrame: (frame) => previewHub.set(frame.promptId || promptId, frame.dataUrl)
+    })
+  } catch (e) {
+    logger.warn('preview capture start failed', e)
+  }
+}
 
 /** 15 位随机整数（首位非 0）——实现已收口 comfyClient.randomSeed（候选 ④）。 */
 export function getSeed(n = 15): number {
@@ -366,6 +394,8 @@ export async function executeApp(
 
   // 4. 提交 + 记录 app 映射（只存 paramsNodes，带上限淘汰最旧条目；H2）
   const promptId = await queuePrompt(comfyOrigin, prompt, clientId)
+  // 生成过程预览（#5）：订阅该 clientId 的 latent 预览帧
+  startPreviewCapture(comfyOrigin, clientId, promptId)
   promptAppMap.set(promptId, template.paramsNodes ?? [])
   if (promptAppMap.size > MAX_PROMPT_ENTRIES) {
     const oldest = promptAppMap.keys().next().value
@@ -415,6 +445,8 @@ export async function executePrompt(
   }
 
   const promptId = await queuePrompt(comfyOrigin, prompt, clientId)
+  // 生成过程预览（#5）
+  startPreviewCapture(comfyOrigin, clientId, promptId)
   // 产物提取白名单：显式 paramsNodes 优先，缺省按输出节点推断
   const outputNodes: ParamNode[] = opts.paramsNodes?.length
     ? opts.paramsNodes

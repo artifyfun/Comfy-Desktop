@@ -276,6 +276,20 @@ export function useExecutionPolling(deps) {
             pushCardsToCanvas(doneFiles)
           }
         }
+        // 生成过程预览（#5）：把最新 latent 帧挂到执行占位消息上（卡片内实时显示）。
+        // 终态时后端不再下发（缓存已清），这里自然停止更新，占位气泡随后被
+        // 原位升级为产物/错误气泡。
+        if (r.preview && r.preview.data_url) {
+          const pKey = execProgressIndex.get(promptId)
+          const pIdx = pKey !== undefined ? messages.value.findIndex((m) => m._key === pKey) : -1
+          if (pIdx !== -1) {
+            messages.value[pIdx] = {
+              ...messages.value[pIdx],
+              preview: { dataUrl: r.preview.data_url, at: r.preview.at },
+            }
+          }
+          if (artifact) artifact.preview = { dataUrl: r.preview.data_url, at: r.preview.at }
+        }
         if (r.status === 'success' || r.status === 'error') {
           // 按 _key 原位更新执行占位气泡为最终结果；找不到（重进会话/切会话后
           // 恢复轮询/停止后清理）时兜底 push 新气泡

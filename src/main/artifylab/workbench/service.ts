@@ -121,6 +121,7 @@ import {
 import { startBatch } from '../services/batchRunner'
 import { buildBatchPayload } from './batchBridge'
 import { deriveAttachmentKind } from './presetCore'
+import { previewHub } from './previewFeed'
 
 /** decide 过程回调：log=阶段文本；thread_event=codex 结构化事件（透传 SSE）；
  * stream_delta=C16 token 级增量(appserver 通道,AG-UI TEXT/REASONING CONTENT) */
@@ -1226,7 +1227,13 @@ class WorkbenchService {
   async pollExecution(
     sessionId: string,
     promptId: string
-  ): Promise<ExecutionResult & { outputsText: string }> {
+  ): Promise<
+    ExecutionResult & {
+      outputsText: string
+      /** 生成过程预览（#5）：非终态时带最新 latent 帧 */
+      preview?: { data_url: string; at: number }
+    }
+  > {
     const comfyOrigin = appStoreManager.getConfig().comfyHost
     const result = await getExecutionStatus(comfyOrigin, promptId)
     let outputsText = ''
@@ -1279,7 +1286,16 @@ class WorkbenchService {
       })
       this.repo.flush()
     }
-    return { ...result, outputsText }
+    // 生成过程预览（#5）：非终态带最新帧；进入终态即清缓存（产物已就绪，
+    // 预览帧不再需要，避免内存里留一堆 base64）。
+    const terminal = result.status === 'success' || result.status === 'error'
+    const preview = terminal ? undefined : previewHub.get(promptId)
+    if (terminal) previewHub.clear(promptId)
+    return {
+      ...result,
+      outputsText,
+      ...(preview ? { preview: { data_url: preview.dataUrl, at: preview.at } } : {})
+    }
   }
 
   /** 从 codex exec JSONL raw 里提取最后一条可读错误（codex CLI 上游失败时

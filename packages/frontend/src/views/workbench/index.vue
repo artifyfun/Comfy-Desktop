@@ -476,6 +476,15 @@
                       <div v-if="tm.kind === 'progress'" class="py-0.5">
                         <a-spin size="small" />
                         <span class="ml-2 text-xs">{{ tm.text }}</span>
+                        <!-- 生成过程预览（#5）：本地 ComfyUI latent 帧经轮询带回 -->
+                        <div v-if="tm.preview && tm.preview.dataUrl" class="mt-1.5">
+                          <img
+                            :src="tm.preview.dataUrl"
+                            data-testid="exec-preview"
+                            alt=""
+                            class="rounded border border-[var(--wb-stroke)] max-h-52 w-auto"
+                          />
+                        </div>
                       </div>
                       <!-- 正文（text part）：markdown 渲染；error 红显 -->
                       <div
@@ -595,6 +604,15 @@
                     <template v-else-if="m.kind === 'progress'">
                       <a-spin size="small" />
                       <span class="ml-2">{{ m.text }}</span>
+                      <!-- 生成过程预览（#5） -->
+                      <div v-if="m.preview && m.preview.dataUrl" class="mt-1.5">
+                        <img
+                          :src="m.preview.dataUrl"
+                          data-testid="exec-preview"
+                          alt=""
+                          class="rounded border border-[var(--wb-stroke)] max-h-52 w-auto"
+                        />
+                      </div>
                     </template>
                     <!-- P1-B3 原生 todo 清单(独立消息,无 turn 归属的旧数据/兜底) -->
                     <ProgressCard
