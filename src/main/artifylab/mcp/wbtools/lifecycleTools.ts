@@ -52,7 +52,7 @@ export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
     tool: {
       name: 'wb_publish_workflow',
       description:
-        '把自建/修改过的 workflow 固化为新 App（进模板库，长期复用）。复用现有 app 固化链路。',
+        '把自建/修改过的 workflow 固化为新 App（进模板库，长期复用）。缺省自动推断输入参数（提示词/seed/steps/尺寸/参考图槽）与输出节点——固化后即可用 wb_execute_template 填参复跑；要精确控制参数面时用 params_nodes 显式覆盖。用户对某次画布结果满意、或某条操作链值得反复用时用它沉淀。',
       inputSchema: {
         type: 'object',
         properties: {

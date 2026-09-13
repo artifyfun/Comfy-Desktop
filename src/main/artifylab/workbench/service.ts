@@ -122,6 +122,7 @@ import { startBatch } from '../services/batchRunner'
 import { buildBatchPayload } from './batchBridge'
 import { deriveAttachmentKind } from './presetCore'
 import { previewHub } from './previewFeed'
+import { inferInputParamNodes } from './paramInfer'
 
 /** decide 过程回调：log=阶段文本；thread_event=codex 结构化事件（透传 SSE）；
  * stream_delta=C16 token 级增量(appserver 通道,AG-UI TEXT/REASONING CONTENT) */
@@ -1213,7 +1214,11 @@ class WorkbenchService {
    * paramsNodes（缺省按输出节点推断）→ createApp。复用现有 publish 链路。
    */
   publishWorkflow(name: string, workflow: ComfyPrompt, paramsNodes?: ParamNode[]): App | null {
-    const inferred = paramsNodes?.length ? paramsNodes : inferOutputParamNodes(workflow)
+    // 缺省推断 = 输入槽（#8：让沉淀出的模板真的可填参数）+ 输出节点（产物提取白名单）。
+    // 此前只推断输出节点 → 固化出的模板改不了提示词/seed/参考图，「复用」是空的。
+    const inferred = paramsNodes?.length
+      ? paramsNodes
+      : [...inferInputParamNodes(workflow), ...inferOutputParamNodes(workflow)]
     const newApp = appStoreManager.createApp({
       name,
       description: name,

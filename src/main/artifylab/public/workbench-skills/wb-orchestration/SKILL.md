@@ -41,7 +41,7 @@ description: Artify 工作台多步编排与工作流创作指南。当需求需
 2. 从「环境快照」模型清单选底模：文生图用 checkpoints 或 UNETLoader 可加载的模型 + VAE；风格化需求叠加对应 LoRA（名字含风格的优先）。
 3. `wb_validate_workflow(workflow)` 先校验 API 格式 workflow JSON（节点类型/链接完整性，可迭代修正）。
 4. `wb_run_workflow(workflow, wait=true)` 直接运行；seed/node_overrides/use_previous_output 可传。产物自动落会话。
-5. 效果好的可 `wb_publish_workflow(name, workflow)` 固化为新模板，供后续复用。
+5. 效果好的可 `wb_publish_workflow(name, workflow)` 固化为新模板，供后续复用。**缺省自动推断输入参数**（提示词 / seed / steps / cfg / 尺寸 / 参考图槽）与输出节点，固化后直接能用 `wb_execute_template` 填参复跑；要精确控制参数面时用 `params_nodes` 显式覆盖。用户对某次画布结果满意、或某条操作链值得反复用时，主动提议沉淀。
 
 API 格式：`{"节点id": {"class_type": "节点类名", "inputs": {"参数名": 值 或 ["上游id", 端口号]}}}`；链接字段值为 `["上游节点id", 输出端口下标]`。
 
