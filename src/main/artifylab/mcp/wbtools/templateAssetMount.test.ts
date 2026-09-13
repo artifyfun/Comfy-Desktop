@@ -8,6 +8,7 @@
  * 能通过本地白名单校验。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import type * as AssetsStoreModule from '../../workbench/assetsStore'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -44,7 +45,7 @@ vi.mock('../../appStore', () => ({ default: { getConfig: () => ({}) } }))
 vi.mock('../../services/batchRunner', () => ({ listBatchQueue: () => [] }))
 
 vi.mock('../../workbench/assetsStore', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../workbench/assetsStore')>()
+  const actual = await importOriginal<typeof AssetsStoreModule>()
   return { ...actual, assetsStore: new actual.AssetsStore({ storePath: () => h.file }) }
 })
 
@@ -66,8 +67,20 @@ function makeTemplate(): unknown {
       '2': { class_type: 'KSampler', inputs: { seed: 0, steps: 20 } }
     },
     paramsNodes: [
-      { id: '1', name: 'image1', category: 'input', renderComponent: 'image-uploader', type: 'string' },
-      { id: '2', name: 'image2', category: 'input', renderComponent: 'image-uploader', type: 'string' },
+      {
+        id: '1',
+        name: 'image1',
+        category: 'input',
+        renderComponent: 'image-uploader',
+        type: 'string'
+      },
+      {
+        id: '2',
+        name: 'image2',
+        category: 'input',
+        renderComponent: 'image-uploader',
+        type: 'string'
+      },
       { id: '3', name: 'seed', category: 'input', renderComponent: 'number', type: 'INT' },
       { id: '4', name: 'steps', category: 'input', renderComponent: 'number', type: 'INT' }
     ],
@@ -77,9 +90,10 @@ function makeTemplate(): unknown {
 }
 
 function payload(res: unknown): Record<string, unknown> {
-  return JSON.parse(
-    (res as { content: Array<{ text: string }> }).content[0]!.text
-  ) as Record<string, unknown>
+  return JSON.parse((res as { content: Array<{ text: string }> }).content[0]!.text) as Record<
+    string,
+    unknown
+  >
 }
 
 let dir = ''
@@ -194,9 +208,9 @@ describe('wb_execute_template × asset_ids', () => {
 
     expect(out.ok).toBe(true)
     const issues = out.asset_issues as string[]
-    expect(issues.some((s) => s.includes('资产参数未被模板接受') && s.includes('lora_trigger'))).toBe(
-      true
-    )
+    expect(
+      issues.some((s) => s.includes('资产参数未被模板接受') && s.includes('lora_trigger'))
+    ).toBe(true)
     // 参数仍被传入（宽松：executor 自行忽略）
     expect((h.executedPlan as { params: Record<string, unknown> }).params.image1).toBe('style.png')
   })
@@ -226,7 +240,9 @@ describe('wb_execute_template × asset_ids', () => {
 
   it('校验失败时不执行、不挂载（stage=validation）', async () => {
     assetsStore.save({ name: '小美', refs: ['a.png'] })
-    const out = payload(await execTool.fn({ template_id: '不存在的模板', asset_ids: ['小美'] }, 's1'))
+    const out = payload(
+      await execTool.fn({ template_id: '不存在的模板', asset_ids: ['小美'] }, 's1')
+    )
     expect(out.ok).toBe(false)
     expect(out.stage).toBe('validation')
     expect(h.executedPlan).toBeNull()

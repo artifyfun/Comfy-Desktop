@@ -283,10 +283,7 @@ describe('harness P1 ② — runDecideTurn（exec 通道）', () => {
   it('usage 缺失的 turn.completed 不污染预算；畸形字段按 0 处理', async () => {
     const rt = makeRuntime()
     const a = await rt.getOrCreate('s1', noop)
-    h.script = [
-      { type: 'turn.completed' },
-      { type: 'turn.completed', usage: { input_tokens: 5 } }
-    ]
+    h.script = [{ type: 'turn.completed' }, { type: 'turn.completed', usage: { input_tokens: 5 } }]
 
     await rt.runDecideTurn(a, 'spec', noop)
 

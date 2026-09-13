@@ -81,8 +81,7 @@ export const assetTools: Array<{ tool: Tool; fn: WBToolFn }> = [
           },
           params: {
             type: 'object',
-            description:
-              '附加模板参数（如 LoRA 触发词、固定风格参数）；用户显式 params 优先于这里',
+            description: '附加模板参数（如 LoRA 触发词、固定风格参数）；用户显式 params 优先于这里',
             additionalProperties: true
           },
           notes: { type: 'string', description: '备注（用途/来源，供人或模型回顾）' }
@@ -104,7 +103,8 @@ export const assetTools: Array<{ tool: Tool; fn: WBToolFn }> = [
         const key = pickKey(args)
         if (!key) return text({ ok: false, error: 'get 需要 id 或 name' })
         const asset = assetsStore.resolve(key)
-        if (!asset) return text({ ok: false, error: `未找到资产：${key}`, hint: '可用 action=list 查看全部' })
+        if (!asset)
+          return text({ ok: false, error: `未找到资产：${key}`, hint: '可用 action=list 查看全部' })
         return text({ ok: true, asset })
       }
 

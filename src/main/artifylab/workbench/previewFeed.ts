@@ -102,7 +102,11 @@ export function parsePreviewMessage(
     const bytes =
       raw instanceof ArrayBuffer
         ? new Uint8Array(raw)
-        : new Uint8Array((raw as ArrayBufferView).buffer, (raw as ArrayBufferView).byteOffset, (raw as ArrayBufferView).byteLength)
+        : new Uint8Array(
+            (raw as ArrayBufferView).buffer,
+            (raw as ArrayBufferView).byteOffset,
+            (raw as ArrayBufferView).byteLength
+          )
     if (bytes.length === 0) return null
     return { promptId: fallbackPromptId, dataUrl: binaryFrameToDataUrl(bytes) }
   }
@@ -154,7 +158,13 @@ export function startPreviewFeed(options: PreviewFeedOptions): PreviewFeedHandle
   const Ctor = options.WebSocketCtor ?? (globalThis as { WebSocket?: WebSocketCtor }).WebSocket
   if (!Ctor) {
     logger.warn('preview feed: 运行时不支持 WebSocket，预览不可用')
-    return { stop: () => {}, stats, get closed() { return true } }
+    return {
+      stop: () => {},
+      stats,
+      get closed() {
+        return true
+      }
+    }
   }
 
   let ws: WebSocketLike | null = null
@@ -195,7 +205,13 @@ export function startPreviewFeed(options: PreviewFeedOptions): PreviewFeedHandle
     ws = new Ctor(previewWsUrl(origin, clientId))
   } catch (e) {
     logger.warn('preview feed: 连接失败', e)
-    return { stop, stats, get closed() { return closed } }
+    return {
+      stop,
+      stats,
+      get closed() {
+        return closed
+      }
+    }
   }
 
   ws.onmessage = (ev) => {

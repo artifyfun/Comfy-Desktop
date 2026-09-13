@@ -137,12 +137,11 @@ describe('数值参数推断', () => {
       '5': node('EmptyLatentImage', { width: 1024, height: 1024, batch_size: 1 }),
       '3': node('KSampler', { shift: 1.15 })
     }
-    expect(inferInputParamNodes(p).map((n) => n.name).sort()).toEqual([
-      'batch_size',
-      'height',
-      'shift',
-      'width'
-    ])
+    expect(
+      inferInputParamNodes(p)
+        .map((n) => n.name)
+        .sort()
+    ).toEqual(['batch_size', 'height', 'shift', 'width'])
   })
 
   it('白名单外的数值键不暴露（避免参数噪音）', () => {
@@ -185,7 +184,9 @@ describe('上限与排序', () => {
 
   it('空 / 畸形 prompt → 空数组（不抛错）', () => {
     expect(inferInputParamNodes({} as ComfyPrompt)).toEqual([])
-    expect(inferInputParamNodes({ '1': { class_type: '', inputs: {} } as unknown as Node })).toEqual([])
+    expect(
+      inferInputParamNodes({ '1': { class_type: '', inputs: {} } as unknown as Node })
+    ).toEqual([])
   })
 })
 
@@ -209,7 +210,14 @@ describe('与 validatePlanLocal 的兼容性（固化后可立即执行）', () 
     paramsNodes: [
       ...inferInputParamNodes(prompt),
       // 输出节点（publishWorkflow 会合并 inferOutputParamNodes，这里等价构造）
-      { id: 9, category: 'output' as const, type: 'output', name: 'result', renderComponent: 'image-uploader', selectedWidget: { id: '9', name: 'images' } }
+      {
+        id: 9,
+        category: 'output' as const,
+        type: 'output',
+        name: 'result',
+        renderComponent: 'image-uploader',
+        selectedWidget: { id: '9', name: 'images' }
+      }
     ] as ParamNode[],
     source: 'app' as const,
     appId: 'published'
@@ -233,7 +241,14 @@ describe('与 validatePlanLocal 的兼容性（固化后可立即执行）', () 
       {
         intent: 'image',
         templateId: 'app:published',
-        params: { prompt: 'a dog', negative_prompt: 'blurry', image: 'ref.png', seed: 7, steps: 30, cfg: 6 }
+        params: {
+          prompt: 'a dog',
+          negative_prompt: 'blurry',
+          image: 'ref.png',
+          seed: 7,
+          steps: 30,
+          cfg: 6
+        }
       },
       [template]
     )

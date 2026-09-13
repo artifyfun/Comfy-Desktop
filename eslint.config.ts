@@ -21,15 +21,26 @@ const commonParserOptions = {
 export default defineConfig([
   {
     ignores: [
-      'out/*',
-      'dist/*',
-      'node_modules/*',
+      // 构建产物/依赖：必须 `**` 递归——`out/*` 只忽略第一层，曾导致 lint 扫进
+      // out/main/index.js，报一堆 window/document 未定义
+      'out/**',
+      'dist/**',
+      'node_modules/**',
       '.claude/**',
       '.worktrees/**',
       '.pnpm-store/**',
       'electron.vite.config.*.mjs',
       'packages/comfyui-desktop-bridge-types/*.d.ts',
-      'acceptance/**'
+      'acceptance/**',
+      // 前端包自带 eslint 配置（packages/frontend/eslint.config.js），独立口径
+      'packages/frontend/**',
+      // 随包分发的前端产物 + vendored 第三方代码
+      'src/main/artifylab/public/frontend/**',
+      'src/main/artifylab/vendor/mimo2codex/**',
+      // 一次性/独立 Node 脚本（.mts 未纳入 tsconfig project service）
+      'scripts/*.mts',
+      'scripts/wb-*.mjs',
+      'scripts/wb-*.cjs'
     ]
   },
   {

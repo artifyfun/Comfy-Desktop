@@ -37,13 +37,15 @@ function asset(patch: Partial<CreativeAsset> & { id: string; name: string }): Cr
 
 describe('listMediaSlots', () => {
   it('只收 input 且 rc 以 -uploader 结尾的参数，并推断类型', () => {
-    const slots = listMediaSlots(tpl([
-      { id: '1', name: 'a', category: 'input', renderComponent: 'image-uploader' },
-      { id: '2', name: 'b', category: 'input', renderComponent: 'video-uploader' },
-      { id: '3', name: 'c', category: 'input', renderComponent: 'audio-uploader' },
-      { id: '4', name: 'd', category: 'input', renderComponent: 'textarea' },
-      { id: '5', name: 'e', category: 'output', renderComponent: 'image-uploader' }
-    ]))
+    const slots = listMediaSlots(
+      tpl([
+        { id: '1', name: 'a', category: 'input', renderComponent: 'image-uploader' },
+        { id: '2', name: 'b', category: 'input', renderComponent: 'video-uploader' },
+        { id: '3', name: 'c', category: 'input', renderComponent: 'audio-uploader' },
+        { id: '4', name: 'd', category: 'input', renderComponent: 'textarea' },
+        { id: '5', name: 'e', category: 'output', renderComponent: 'image-uploader' }
+      ])
+    )
     expect(slots).toEqual([
       { name: 'a', kind: 'image' },
       { name: 'b', kind: 'video' },

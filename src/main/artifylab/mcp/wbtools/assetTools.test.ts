@@ -8,6 +8,7 @@
  * 而是把可读错误回给模型改道）。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import type * as AssetsStoreModule from '../../workbench/assetsStore'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -27,8 +28,7 @@ vi.mock('../../workbench/service', () => ({
 vi.mock('../../appStore', () => ({ default: { getConfig: () => ({}) } }))
 vi.mock('../../services/batchRunner', () => ({ listBatchQueue: () => [] }))
 vi.mock('../../workbench/assetsStore', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('../../workbench/assetsStore')>()
+  const actual = await importOriginal<typeof AssetsStoreModule>()
   return {
     ...actual,
     assetsStore: new actual.AssetsStore({ storePath: () => h.file })
@@ -81,7 +81,14 @@ describe('action=list / get', () => {
   })
 
   it('save 后 list 返回精简视图（refs_count/params_keys，不含完整 refs）', async () => {
-    await fn({ action: 'save', name: '小美', kind: 'character', refs: ['a.png', 'b.png'], seed: 7, params: { lora: 'x' } })
+    await fn({
+      action: 'save',
+      name: '小美',
+      kind: 'character',
+      refs: ['a.png', 'b.png'],
+      seed: 7,
+      params: { lora: 'x' }
+    })
     const out = payload(await fn({ action: 'list' }))
     expect(out.total).toBe(1)
     const item = (out.assets as Array<Record<string, unknown>>)[0]!

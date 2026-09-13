@@ -108,7 +108,9 @@ export function mountAssetsToTemplate(
     // 反过来丢弃主参考图去凑槽序。
     const ordered = [
       ...slots.filter((s) => want.includes(s.kind)),
-      ...slots.filter((s) => !want.includes(s.kind) && acceptsFor(s.kind).some((k) => want.includes(k)))
+      ...slots.filter(
+        (s) => !want.includes(s.kind) && acceptsFor(s.kind).some((k) => want.includes(k))
+      )
     ]
     for (const ref of asset.refs) {
       // ref 可自带类型提示：形如 "video:<file>"（少见，但允许显式指定）

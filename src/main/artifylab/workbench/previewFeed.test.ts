@@ -125,7 +125,9 @@ describe('parsePreviewMessage', () => {
     expect(parsePreviewMessage('not json', 'p')).toBeNull()
     expect(parsePreviewMessage('{"type":"status"}', 'p')).toBeNull()
     expect(parsePreviewMessage(JSON.stringify({ type: 'b64_preview', data: {} }), 'p')).toBeNull()
-    expect(parsePreviewMessage(JSON.stringify({ type: 'b64_preview', data: { image: '' } }), 'p')).toBeNull()
+    expect(
+      parsePreviewMessage(JSON.stringify({ type: 'b64_preview', data: { image: '' } }), 'p')
+    ).toBeNull()
     expect(parsePreviewMessage(123, 'p')).toBeNull()
     expect(parsePreviewMessage(new Uint8Array(0).buffer, 'p')).toBeNull()
   })
@@ -230,9 +232,13 @@ describe('startPreviewFeed', () => {
       })
     })
     const ws = FakeWS.instances[0]!
-    expect(() => ws.emit(JSON.stringify({ type: 'b64_preview', data: { image: 'A' } }))).not.toThrow()
+    expect(() =>
+      ws.emit(JSON.stringify({ type: 'b64_preview', data: { image: 'A' } }))
+    ).not.toThrow()
     vi.advanceTimersByTime(500)
-    expect(() => ws.emit(JSON.stringify({ type: 'b64_preview', data: { image: 'B' } }))).not.toThrow()
+    expect(() =>
+      ws.emit(JSON.stringify({ type: 'b64_preview', data: { image: 'B' } }))
+    ).not.toThrow()
     expect(calls).toBe(2)
     expect(feed.stats.frames).toBe(2)
     feed.stop()

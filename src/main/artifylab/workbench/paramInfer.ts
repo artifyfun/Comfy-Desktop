@@ -90,7 +90,9 @@ export function inferInputParamNodes(prompt: ComfyPrompt, max = 12): ParamNode[]
 
     // 1) 媒体槽：Load* 节点的首个非链接字符串输入（与 inferFirstMediaSlot 同源）
     if (MEDIA_LOADER_RE.test(cls)) {
-      const key = Object.keys(inputs).find((k) => typeof inputs[k] === 'string' && !isLink(inputs[k]))
+      const key = Object.keys(inputs).find(
+        (k) => typeof inputs[k] === 'string' && !isLink(inputs[k])
+      )
       if (key) {
         medias.push({ nodeId, inputKey: key, kind: 'media', mediaKind: mediaKindOf(cls) })
         continue
@@ -121,9 +123,7 @@ export function inferInputParamNodes(prompt: ComfyPrompt, max = 12): ParamNode[]
   // 排序：文本（prompt 先于 negative）→ 媒体 → seed/steps/cfg → 其他数值
   const textScore = (c: Candidate): number => (isNegativeTitle(c.title) ? 1 : 0)
   texts.sort((a, b) => textScore(a) - textScore(b))
-  numbers.sort(
-    (a, b) => (NUMERIC_PRIORITY[a.key!] ?? 9) - (NUMERIC_PRIORITY[b.key!] ?? 9)
-  )
+  numbers.sort((a, b) => (NUMERIC_PRIORITY[a.key!] ?? 9) - (NUMERIC_PRIORITY[b.key!] ?? 9))
 
   const ordered = [...texts, ...medias, ...numbers].slice(0, Math.max(0, max))
   const used = new Set<string>()

@@ -89,7 +89,9 @@ export function normalizeParams(raw: unknown): Record<string, unknown> {
 }
 
 function normalizeKind(raw: unknown, fallback: AssetKind = 'character'): AssetKind {
-  const s = String(raw ?? '').trim().toLowerCase()
+  const s = String(raw ?? '')
+    .trim()
+    .toLowerCase()
   return (ASSET_KINDS as readonly string[]).includes(s) ? (s as AssetKind) : fallback
 }
 
@@ -102,7 +104,9 @@ export function normalizeAssetInput(
   existing?: CreativeAsset
 ): { asset: CreativeAsset; issues: string[] } {
   const issues: string[] = []
-  const name = String(input.name ?? existing?.name ?? '').trim().slice(0, MAX_NAME)
+  const name = String(input.name ?? existing?.name ?? '')
+    .trim()
+    .slice(0, MAX_NAME)
   if (!name) issues.push('name 不能为空（模型/后续引用按名字或 id 定位资产）')
 
   const refsRaw = input.refs !== undefined ? input.refs : existing?.refs
