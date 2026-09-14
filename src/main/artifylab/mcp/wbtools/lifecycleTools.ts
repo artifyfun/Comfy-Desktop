@@ -6,6 +6,7 @@ import type { ComfyPrompt, ParamNode } from '../../appStore'
 import { listBatchQueue, type BatchJobSummary } from '../../services/batchRunner'
 
 import { workbenchService } from '../../workbench/service'
+import { canvasWorkflowStore } from '../../workbench/canvasWorkflowStore'
 
 export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
   {
@@ -52,15 +53,20 @@ export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
     tool: {
       name: 'wb_publish_workflow',
       description:
-        '把自建/修改过的 workflow 固化为新 App（进模板库，长期复用）。缺省自动推断输入参数（提示词/seed/steps/尺寸/参考图槽）与输出节点——固化后即可用 wb_execute_template 填参复跑；要精确控制参数面时用 params_nodes 显式覆盖。用户对某次画布结果满意、或某条操作链值得反复用时用它沉淀。',
+        '把 workflow 固化为新 App（进模板库，长期复用）。两种来源：直接给 workflow（API 格式），或给 prompt_id 沉淀「画布上刚跑通的那次执行」（用户在画布上手动搭的工作流无需重传本体）。缺省自动推断输入参数（提示词/seed/steps/尺寸/参考图槽）与输出节点——固化后即可用 wb_execute_template 填参复跑；要精确控制参数面时用 params_nodes 显式覆盖。用户对某次画布结果满意、或某条操作链值得反复用时用它沉淀。',
       inputSchema: {
         type: 'object',
         properties: {
           name: { type: 'string', description: '新 App 名称' },
           workflow: {
             type: 'object',
-            description: 'API 格式 workflow',
+            description: 'API 格式 workflow（与 prompt_id 二选一）',
             additionalProperties: true
+          },
+          prompt_id: {
+            type: 'string',
+            description:
+              '与 workflow 二选一：沉淀「某次已执行的画布工作流」。用户在画布上手动搭好并跑通后想存成模板时传它（该次执行的 promptId，服务端已存快照），无需重传 workflow。'
           },
           params_nodes: {
             type: 'array',
@@ -68,7 +74,7 @@ export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
             items: { type: 'object' }
           }
         },
-        required: ['name', 'workflow'],
+        required: ['name'],
         additionalProperties: false
       },
       annotations: { readOnlyHint: false, destructiveHint: false }
@@ -77,15 +83,39 @@ export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
       requireSession(identity)
       const name = String(args.name ?? '').trim()
       if (!name) return text({ ok: false, error: 'name required' })
-      const workflow = args.workflow as ComfyPrompt
-      if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow))
-        return text({ ok: false, error: 'workflow（API prompt 对象）required' })
+
+      // 两种来源：显式 workflow（模型自建/修改的）或 prompt_id（沉淀画布上刚跑通的
+      // 那次执行——工作流本体的暂存见 workbench/canvasWorkflowStore.ts，前端零改动）
+      let workflow = args.workflow as ComfyPrompt
+      let source: 'workflow' | 'canvas' = 'workflow'
+      const hasWorkflow = !!workflow && typeof workflow === 'object' && !Array.isArray(workflow)
+      if (!hasWorkflow) {
+        const promptId = String(args.prompt_id ?? args.promptId ?? '').trim()
+        if (!promptId) {
+          return text({ ok: false, error: 'workflow（API prompt 对象）或 prompt_id 至少提供一个' })
+        }
+        const snapshot = canvasWorkflowStore.get(promptId)
+        if (!snapshot) {
+          return text({
+            ok: false,
+            error: `未找到 prompt_id=${promptId} 的画布工作流快照（可能已过期，或该次执行来自模板）`,
+            hint: '画布快照仅保留最近 30 次执行。可请用户重新在画布上执行一次，或改用 workflow 显式传 API 格式工作流。'
+          })
+        }
+        workflow = snapshot
+        source = 'canvas'
+      }
+
       const app = workbenchService.publishWorkflow(
         name,
         workflow,
         args.params_nodes as ParamNode[] | undefined
       )
-      return text({ ok: !!app, app_id: app?.id, name })
+      // 回传固化后的可填参数名——模型据此告诉用户「这个模板以后能改哪些」
+      const inputParams = (app?.template?.paramsNodes ?? [])
+        .filter((n) => n.category === 'input')
+        .map((n) => n.name)
+      return text({ ok: !!app, app_id: app?.id, name, source, input_params: inputParams })
     }
   },
   {

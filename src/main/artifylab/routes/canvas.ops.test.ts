@@ -25,6 +25,8 @@ vi.mock('../appStore', () => ({
   default: { getConfig: vi.fn(() => ({ comfyHost: 'http://127.0.0.1:8188' })) }
 }))
 import { createCanvasRouter, type CanvasDigestStore, type CheckpointStore } from './canvas'
+import { executePrompt } from '../mcp/executor'
+import { canvasWorkflowStore } from '../workbench/canvasWorkflowStore'
 
 /**
  * /api/canvas ops 通道单测（M2）。
@@ -77,6 +79,7 @@ describe('canvas ops channel', () => {
     checkpointStore.nextId = 1
     checkpointStore.rollbackTo = null
     checkpointStore.audit = []
+    canvasWorkflowStore.clear()
   })
 
   it('queues valid ops for bridge pickup', async () => {
@@ -93,6 +96,32 @@ describe('canvas ops channel', () => {
   it('rejects invalid ops body', async () => {
     const res = await post('/api/canvas/ops', { ops: 'nope' })
     expect(res.status).toBe(400)
+  })
+
+  // 对标建议 #8：画布执行顺手暂存 workflow 快照——否则事后无法把「用户手动搭出来
+  // 并跑通的工作流」沉淀成模板（wb_publish_workflow 传 prompt_id 取的就是这里）
+  it('snapshots the executed canvas workflow for later publish', async () => {
+    vi.mocked(executePrompt).mockResolvedValueOnce({
+      prompt_id: 'p-canvas-snap',
+      status: 'queued'
+    })
+    const res = await post('/api/canvas/execute', {
+      prompt: { '1': { class_type: 'SaveImage', inputs: {} } },
+      name: 'canvas-flow'
+    })
+    expect(res.status).toBe(200)
+    const snap = canvasWorkflowStore.get('p-canvas-snap')
+    expect(snap).toMatchObject({ '1': { class_type: 'SaveImage' } })
+    expect(canvasWorkflowStore.has('p-canvas-snap')).toBe(true)
+  })
+
+  it('does not snapshot when execution fails', async () => {
+    vi.mocked(executePrompt).mockRejectedValueOnce(new Error('comfy down'))
+    const res = await post('/api/canvas/execute', {
+      prompt: { '1': { class_type: 'SaveImage', inputs: {} } }
+    })
+    expect(res.status).toBe(500)
+    expect(canvasWorkflowStore.size).toBe(0)
   })
 
   it('checkpoints and lists newest first', async () => {

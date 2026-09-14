@@ -31,6 +31,7 @@ import { getNodeObjectInfo } from '../comfyClient'
 import type { ComfyPrompt } from '../appStore'
 import { startBatch, type BatchInputNode } from '../services/batchRunner'
 import { workbenchService } from '../workbench/service'
+import { canvasWorkflowStore } from '../workbench/canvasWorkflowStore'
 import appStoreManager from '../appStore'
 import { logger } from '../utils/logger'
 
@@ -426,6 +427,9 @@ export function createCanvasRouter(
             : undefined,
         workflowKey: typeof body.name === 'string' ? body.name : 'canvas:current'
       })
+      // 工作流快照暂存（对标 #8）：画布上临时搭的 workflow 没有模板库条目，
+      // 存下来才能事后「沉淀为模板」（wb_publish_workflow 传 prompt_id）
+      canvasWorkflowStore.remember(result.prompt_id, body.prompt as ComfyPrompt)
       // 会话记录（可选）：canvas-run 链路经前端带 sessionId，重进会话可见产物
       if (typeof body.sessionId === 'string') {
         try {
