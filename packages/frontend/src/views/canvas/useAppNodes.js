@@ -18,7 +18,7 @@ import {
   submitCanvasExecute,
   pollCanvasExecuteStatus,
 } from './appNode'
-import { lodTextVisible, serializeDoc, parseDoc } from './engine'
+import { lodTextVisible, serializeDoc, parseDoc, alignObjects, distributeObjects } from './engine'
 import { saveAiSnapshot, listAiSnapshots, deleteAiSnapshot, getAiSnapshot } from './aiSnapshots'
 
 export function useAppNodes(deps) {
@@ -503,10 +503,7 @@ export function useAppNodes(deps) {
   const aiSnapshots = computed(() => {
     void aiSnapshotVersion.value
     try {
-      return listAiSnapshots(
-        aiSnapshotStorage,
-        appStore.config.activeAppId || 'default',
-      ).reverse()
+      return listAiSnapshots(aiSnapshotStorage, appStore.config.activeAppId || 'default').reverse()
     } catch {
       return []
     }
@@ -581,11 +578,30 @@ export function useAppNodes(deps) {
     } catch (e) {
       console.warn('[aiSnapshot] 快照失败:', e?.message || e)
     }
+    // C-H7 落布整理：本批 add_app_node 的节点做水平居中 + 垂直等距分布
+    // （复用画布既有 align/distribute 引擎，链式工作流视觉整齐）
+    const opAppIds = new Set(ops.filter((op) => op.type === 'add_app_node').map((op) => op.appId))
     for (const op of ops) {
       try {
         applyOneAgentOp(op)
       } catch (e) {
         console.warn('[canvas] agent op failed:', op, e)
+      }
+    }
+    const newIds = objects.value
+      .filter((o) => o.type === 'app' && opAppIds.has(o.appId))
+      .map((o) => o.id)
+    if (newIds.length >= 2) {
+      // 横向链：x 等距分布 + y 居中对齐（工作流从左到右流动）
+      const dist = distributeObjects(objects.value, newIds, 'x')
+      for (const [id, pos] of dist) {
+        const o = objects.value.find((x) => x.id === id)
+        if (o) Object.assign(o, pos)
+      }
+      const aligns = alignObjects(objects.value, newIds, 'vcenter')
+      for (const [id, pos] of aligns) {
+        const o = objects.value.find((x) => x.id === id)
+        if (o) Object.assign(o, pos)
       }
     }
     saveSoon()
