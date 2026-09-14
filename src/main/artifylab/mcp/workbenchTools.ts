@@ -16,6 +16,7 @@ import { knowledgeTools } from './wbtools/knowledgeTools'
 import { canvasTools } from './wbtools/canvasTools'
 import { planTools } from './wbtools/planTools'
 import { assetTools } from './wbtools/assetTools'
+import { versionTools } from './wbtools/versionTools'
 
 export {
   beginWorkbenchToolContext,
@@ -34,7 +35,8 @@ const WB_TOOLS: Array<{ tool: Tool; fn: WBToolFn }> = [
   ...knowledgeTools,
   ...canvasTools,
   ...planTools,
-  ...assetTools
+  ...assetTools,
+  ...versionTools
 ]
 
 /** 仅外部 MCP 客户端可见的 app 工具（与 wb_* 功能重叠，ListTools 按身份过滤） */

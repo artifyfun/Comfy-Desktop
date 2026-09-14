@@ -48,6 +48,9 @@ export const APPROVAL_TOOL_TIERS: Record<string, ToolRiskTier> = {
   // 资产库含 save/remove 写操作(单工具多 action 无法按 action 分档),整体归 write:
   // conservative 弹卡、standard 自动(read 类 list/get 亦同档,不额外放行)
   wb_assets: 'write',
+  // 模板版本历史：list/get 是读，restore 是写（单工具多 action 同样无法按 action 分档）。
+  // 归 write 而非 execute：只改本地模板库、不触发任何真实执行，且恢复本身可再撤销
+  wb_app_versions: 'write',
   // —— execute:真实执行/外部副作用,两档都弹卡 ——
   wb_execute_template: 'execute',
   wb_run_workflow: 'execute',
