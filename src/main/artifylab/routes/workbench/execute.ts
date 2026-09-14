@@ -6,6 +6,7 @@ import { logger } from '../../utils/logger'
 import { createErrorResponse, createSuccessResponse } from '../../utils/errorHandler'
 import { workbenchService } from '../../workbench/service'
 import { templateLibrary } from '../../workbench/templates'
+import { canvasWorkflowStore } from '../../workbench/canvasWorkflowStore'
 import { validateNodeOverridesLocal } from '../../workbench/plan'
 import type { ComfyPrompt } from '../../appStore'
 import appStoreManager from '../../appStore'
@@ -213,14 +214,43 @@ export function registerExecuteRoutes(router: express.Router): void {
       return
     }
     try {
+      // 画布执行（canvas-run）没有模板库条目：此前 buildAppCode / publishToApp 都会
+      // 抛 "template not found"，前端已有的「发布」按钮对画布产物因此失效。改用
+      // 执行时暂存的 workflow 快照固化（对标 #8）——参数自动推断；UI 壳不生成
+      // （与模板路径现状一致：buildAppCode 产出的 html 目前也不落库）。
+      const template = templateLibrary.get(execution.templateId)
+      if (!template) {
+        const snapshot = canvasWorkflowStore.get(promptId)
+        if (!snapshot) {
+          res
+            .status(HTTP_STATUS.NOT_FOUND)
+            .json(
+              createErrorResponse(
+                'template not found 且无画布工作流快照（快照仅保留最近 30 次执行，可重跑一次）'
+              )
+            )
+          return
+        }
+        const app = workbenchService.publishWorkflow(name, snapshot)
+        if (!app) {
+          res
+            .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
+            .json(createErrorResponse('publish canvas workflow failed'))
+          return
+        }
+        logger.info(`workbench: published app ${app.id} from canvas snapshot ${promptId}`)
+        res.status(HTTP_STATUS.CREATED).json(
+          createSuccessResponse({
+            appId: app.id,
+            source: 'canvas',
+            uiSkipped: Boolean(buildUi)
+          })
+        )
+        return
+      }
       // buildUi=true 时生成 UI 壳（复用 build-app 的 spec：设计体系注入）
       let html: string | undefined
       if (buildUi) {
-        const template = templateLibrary.get(execution.templateId)
-        if (!template) {
-          res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse('template not found'))
-          return
-        }
         html = await buildAppCode(
           {
             appId: `wb-${execution.promptId.slice(0, 8)}`,
