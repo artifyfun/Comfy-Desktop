@@ -408,6 +408,22 @@
                               class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-[var(--wb-surface)] border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
                               >{{ toolItemDetail(tm2.toolItem) }}</pre
                             >
+                            <!-- 编排路径生成预览（#5）：服务端经 SSE 推帧挂在工具
+                                 消息上，这里最多渲染一张（组内任一工具带 preview） -->
+                            <div
+                              v-for="pv in processGroupItems(processGroupAt(tmi))
+                                .filter((x) => x.preview && x.preview.dataUrl)
+                                .slice(0, 1)"
+                              :key="'pv' + pv._key"
+                              class="mt-1.5"
+                            >
+                              <img
+                                :src="pv.preview.dataUrl"
+                                data-testid="exec-preview"
+                                alt=""
+                                class="rounded border border-[var(--wb-stroke)] max-h-52 w-auto"
+                              />
+                            </div>
                           </div>
                         </template>
                         <!-- 单条目/旧数据：原标题行 -->
@@ -437,6 +453,15 @@
                             class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-[var(--wb-surface)] border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
                             >{{ toolItemDetail(tm.toolItem) }}</pre
                           >
+                          <!-- 编排路径生成预览（#5）：单条工具卡 -->
+                          <div v-if="tm.preview && tm.preview.dataUrl" class="mt-1.5">
+                            <img
+                              :src="tm.preview.dataUrl"
+                              data-testid="exec-preview"
+                              alt=""
+                              class="rounded border border-[var(--wb-stroke)] max-h-52 w-auto"
+                            />
+                          </div>
                         </template>
                       </div>
                       <!-- 计划摘要（plan part） -->

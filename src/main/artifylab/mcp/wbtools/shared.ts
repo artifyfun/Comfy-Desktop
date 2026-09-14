@@ -9,6 +9,7 @@
 import { workbenchService } from '../../workbench/service'
 import type { WorkbenchPlan } from '../../workbench/plan'
 import { listBatchQueue, type BatchJobSummary } from '../../services/batchRunner'
+import { emitSessionCustom } from '../../agui/sessionEmit'
 
 export type WBToolFn = (args: Record<string, unknown>, identity?: string) => Promise<unknown>
 
@@ -148,6 +149,17 @@ export async function pollUntilDone(
   const deadline = Date.now() + 10 * 60 * 1000
   for (;;) {
     const r = await workbenchService.pollExecution(sessionId, promptId)
+    // 生成过程预览（#5）：本函数只走「工具内 wait 阻塞」路径——此时前端不会
+    // startPoll（编排路径没有 wb_artifact 回执，产物由 flushArtifacts 后补），
+    // 预览帧只能由这里经会话 SSE 推出。3s 轮询节奏天然节流；无 SSE 通道
+    // （外部 MCP 客户端直调）时 emitSessionCustom 返回 false，静默跳过。
+    if (r.preview?.data_url) {
+      emitSessionCustom(sessionId, 'preview_frame', {
+        promptId,
+        dataUrl: r.preview.data_url,
+        at: r.preview.at
+      })
+    }
     if (r.status === 'success') {
       return {
         ok: true,

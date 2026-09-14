@@ -306,6 +306,24 @@ function applyCustom(pageApi, state, name, value) {
   // ---- 执行类副作用(审查修复 C1):与 legacy handleSse 共用页面注入的同一分派,
   // ---- 默认管线产物卡/画布同步/执行轮询/修复 UX 功能对等。
   const sideEffect = pageApi.applyExecutionSideEffect
+  // 生成过程预览（#5 编排路径）：工具内 wait 阻塞时前端不会轮询（编排没有
+  // wb_artifact 回执，产物由 flushArtifacts 后补），预览帧由服务端经会话 SSE
+  // 推出 → 挂到最近一条工具调用消息上，由工具卡渲染。快路径的轮询预览走
+  // progress 消息（useExecutionPolling），两条路径互不干扰。
+  if (name === 'preview_frame') {
+    const v = value ?? {}
+    if (v.dataUrl) {
+      const msgs = pageApi.messages.value
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i]
+        if (m && m.toolItem) {
+          msgs[i] = { ...m, preview: { dataUrl: v.dataUrl, at: v.at } }
+          break
+        }
+      }
+    }
+    return
+  }
   if (name === 'wb_artifact') {
     // value:{promptId,name,outputs,outputFiles}(flushArtifacts/单次回执同构)
     if (sideEffect) sideEffect('artifact', value)

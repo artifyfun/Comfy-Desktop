@@ -14,26 +14,22 @@ import { randomUUID } from 'node:crypto'
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import type { WBToolFn } from './shared'
 import { requireSession, text } from './shared'
-import type { AGUIEvent } from '../../agui/types'
+import {
+  registerSessionEmit,
+  unregisterSessionEmit,
+  clearSessionEmitsForTest,
+  sessionEmitFor
+} from '../../agui/sessionEmit'
 import { logger } from '../../utils/logger'
 
-// ==================== SSE 桥（threadId → emit；run 生命周期注册/注销） ====================
+// ==================== SSE 桥（共享注册表，见 agui/sessionEmit.ts） ====================
+// 原为本模块私有的 planEmits Map；抽到 agui/sessionEmit 以与「生成过程预览 #5」
+// （wbtools/shared.ts 的 pollUntilDone）共用同一张表——同一会话只有一条 SSE 流，
+// 各维护一张表会互相覆盖。导出名保持不变，routes/agui.ts 与测试零改动。
 
-type PlanEmit = (event: AGUIEvent) => void
-
-const planEmits = new Map<string, PlanEmit>()
-
-export function registerPlanEmit(threadId: string, emit: PlanEmit): void {
-  planEmits.set(threadId, emit)
-}
-
-export function unregisterPlanEmit(threadId: string): void {
-  planEmits.delete(threadId)
-}
-
-export function clearPlanEmitsForTest(): void {
-  planEmits.clear()
-}
+export const registerPlanEmit = registerSessionEmit
+export const unregisterPlanEmit = unregisterSessionEmit
+export const clearPlanEmitsForTest = clearSessionEmitsForTest
 
 // ==================== 挂起的拍板（pendingId → settle） ====================
 
@@ -144,7 +140,7 @@ export const planTools: Array<{ tool: Tool; fn: WBToolFn }> = [
           : {})
       }))
 
-      const emit = planEmits.get(sessionId)
+      const emit = sessionEmitFor(sessionId)
 
       // 无选项：纯展示（fire-and-forget），模型自行继续
       if (options.length < 2) {
