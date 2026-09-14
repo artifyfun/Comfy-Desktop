@@ -207,6 +207,12 @@ if (t.queue.length === 0) {
     })
   }
 
+  // 预览占位图：128x80 合成 PNG（对角渐变 + 中心十字），内联 base64。
+  // 真实 ComfyUI 预览帧的字节级校验在 scripts/wb-preview-verify.mjs（真机跑），
+  // 这里只需一张能被 <img> 真正解码出图像的 data URL，用于验前端渲染链路。
+  const PREVIEW_PLACEHOLDER_B64 =
+    'iVBORw0KGgoAAAANSUhEUgAAAIAAAABQCAIAAABeYuqzAAAEBElEQVR42u1dS5LTMBR8r6oPwzFYDVvYQxWHoIoNWzYMsIED8DkBR+ACcyYWwbEtW7Ys21J3oixSqWSikXr66dmvW2/82cNnMzMz9+uTufnSO27dVy4f9u9F3xkMdR3P+88H78wN1b2ITCw21MLE4msMR0teY4DP4sT6wdHw2oTX4WSFN7yqBjcSptXwOiG4uyc0vGbXeAVuOo1jyQoqvLol8OJ1OFnh3vAqG9zjL+Ke8RqscNsFxYFkxQDThleF4EbDq1hwh180Nzf4XeDVr38nXoeTFafiFaYmfbwOJyvU8fr15aWZvX33h3ozjA+F1bHI+TVe7+l4HU7WQQ4oHo/z1aHNeJkpb4aYH/1EvI7mV/cbSJPH3FDDaYAqHjPwSroXGRSFduJ1OFlRBK/BF5P5lYjXuABQdzPMIWtXCyqF1wn8CrIAS7JNrA6BKh7z8Lq8KoPX4WRFbKIZeGVXh/bg1f2l6m+GeWQFVTxm4DWeD0ey3VLK7PUAhnjMkfosMlUOXXqVrCiN1wn86nNA1c0wj6yQ9j2E9wHVk+12XRpU8ZiBV3+5pGlqCvWAWvG4By+j2QwzyIq8O1sifo1rQXImMDSTYd3gRrCUdLxIdPxpNVrLBAZ1fiXpAcSmObiIyTCqS8/VgoRMTbgBk+F1jorJA+omw6keoGVqgkqyXdCIpE1NczlAzWQY3gpLmeawMjq/ac7CW5BaJsM8skLdZDhYlaRpDuomQzNtBzFc35QZqpKVTIaZZH14/WMTXr+/vrL2WHw8fn9KJys2x2N7rD1Sd2k3N/MXb35KmFhjE3v88NzM3n/8u2czrKjjdzmgWrLdrePHVEkRUxOYfQ/pDnV3bgdxvDoEFRNrDK/RfYCaqWlRDxBxqI8rETKmphk9QNRXM6oF8TvUN9eC+E1zI1G+pskwj6wgMhlm4ZVUCyIO7jU9gN73MKmGsjrUI7p0WAuiNbGuONS9hC59hkkHbCdGNuM1EuX1TE24hWZUZromMGQfcSbhl5XF63Cy4gy8Sur4JR3qZwR3747WNWXO5ACdTnNIOeJMza9eDpPsnAZf20bJTXMJl2TUwQ0+38M2vMIcQNmZb4Gs15Pywp35pnqAUOc06HfmS9MDWIMb4/Oder6aWC2IqjPfAlmhYmJdmJi0qQkehoBaZz5bQ5A7uKHfyfD/DzN35lsgKyZHnNkd6kF1KMwBUqamQS2IvTPfSi1o/jpdIbiRdMSZm19WfTPcoeODKh4z8Pr07ckvJktBU9OwWwp1Zz4Jk2EeWZF4ldnwOknHx+wR54ZXseCGRGe+G94METvi3PAqo+ODHC+VzmnZZJ3kgDtoFkQV3PCGV1VTEyYtTxteRYMb9/UfHPlMc/8AE9g8v5I1oPYAAAAASUVORK5CYII='
+
   // ============ 场景帧构造 ============
   function nowMs() { return Date.now() }
 
@@ -234,6 +240,17 @@ if (t.queue.length === 0) {
   function frameReasoningEnd(messageId) {
     return { type: 'REASONING_MESSAGE_END', timestamp: nowMs(), messageId }
   }
+  // 工具调用三帧（契约见 utils/agui/handlers.js L20-22：ARGS 累积到 END 一次性派发
+  // tool:args，字段名 toolCallName/delta 必须与 types.ts 一致）
+  function frameToolStart(toolCallId, toolCallName) {
+    return { type: 'TOOL_CALL_START', timestamp: nowMs(), toolCallId, toolCallName }
+  }
+  function frameToolArgs(toolCallId, delta) {
+    return { type: 'TOOL_CALL_ARGS', timestamp: nowMs(), toolCallId, delta }
+  }
+  function frameToolEnd(toolCallId) {
+    return { type: 'TOOL_CALL_END', timestamp: nowMs(), toolCallId }
+  }
   function frameCustom(name, value) {
     const ev = { type: 'CUSTOM', timestamp: nowMs(), name }
     if (value !== undefined) ev.value = value
@@ -254,6 +271,8 @@ if (t.queue.length === 0) {
     const withTruncate = /断流|truncate/i.test(s)
     // W8 approval edit 参数（输入含修改参数/edit args）—— 携带可编辑参数,interaction-response action='edit' 时回写
     const withEditArgs = /修改参数|edit args/i.test(s)
+    // W9 生成过程预览（输入含预览/preview）—— 编排路径：工具卡上的 preview_frame
+    const withPreview = /预览|preview/i.test(s)
 
     const mid = 'm-' + Math.random().toString(36).slice(2, 8)
     const rid = 'r-' + Math.random().toString(36).slice(2, 8)
@@ -346,6 +365,40 @@ if (t.queue.length === 0) {
           message: '执行失败：模型推理超时（stub 演示）',
         }),
       )
+    }
+
+    // 6c) W9 生成过程预览：先发工具调用三帧占出工具卡，再推 CUSTOM preview_frame。
+    //     前端（aguiBridge applyCustom 'preview_frame'）把帧挂到**最近一条带 toolItem 的
+    //     消息**上 → 工具卡渲染 <img data-testid="exec-preview">。顺序不能反：卡先存在
+    //     帧才有落点（这正是"编排路径下用户能看到在画什么"的前端一环）。
+    if (withPreview) {
+      const toolCallId = 'tc-' + Math.random().toString(36).slice(2, 8)
+      pushFrame(threadId, frameToolStart(toolCallId, 'wb_execute_template'))
+      pushFrame(
+        threadId,
+        frameToolArgs(toolCallId, JSON.stringify({ templateId: 'portrait_lora', wait: true })),
+      )
+      pushFrame(threadId, frameToolEnd(toolCallId))
+
+      const promptId = 'p-' + Math.random().toString(36).slice(2, 8)
+      // 多帧模拟采样推进（前端逐帧原位替换 src）
+      for (let i = 0; i < 3; i++) {
+        pushFrame(
+          threadId,
+          frameCustom('preview_frame', {
+            promptId,
+            dataUrl: 'data:image/png;base64,' + PREVIEW_PLACEHOLDER_B64,
+            at: nowMs(),
+          }),
+        )
+      }
+      pushFrame(threadId, {
+        type: 'TOOL_CALL_RESULT',
+        timestamp: nowMs(),
+        toolCallId,
+        content: JSON.stringify({ ok: true, prompt_id: promptId, status: 'success' }),
+        role: 'tool',
+      })
     }
 
     // 7) W7 截断回归:不推 RUN_FINISHED,帧队列清空后 close → 前端 finally 推 workbenchStreamInterrupted
@@ -520,6 +573,36 @@ if (t.queue.length === 0) {
         'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
       ), (c) => c.charCodeAt(0))
       return new Response(png, { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=300' } })
+    }
+
+    // —— 引导期必需端点 ——
+    // 此前未 mock：fetch 落到原实现 → serve.mjs 的 SPA fallback 把 index.html 返给
+    // /api/* → 前端 JSON.parse 炸 "Unexpected token '<'"。对照实验（发一条不命中
+    // 任何场景的消息）确认该报错与场景无关，是纯 harness 缺口——补齐后验收输出才
+    // 干净，也避免这类噪音掩盖真实回归。
+    //
+    // 信封必须对齐后端真身：`createSuccessResponse(data)` = {ok,success,code,data}
+    // （src/main/artifylab/utils/errorHandler.ts:93）——appStore.initConfig 判的是
+    // `response.ok && response.data`，只给 {data} 会走到 "配置加载失败" 分支。
+    function okResp(data) {
+      return jsonResp({ ok: true, success: true, code: 200, data })
+    }
+    if (route === 'POST /api/config') {
+      return okResp({
+        comfyHost: 'http://127.0.0.1:8188',
+        serverHost: ORIGIN,
+        theme: 'dark',
+        lang: 'zh',
+        activeAppId: '',
+      })
+    }
+    // batchTaskStore.fetchQueue 读 json.data.{jobs,paused}
+    if (route === 'GET /api/batch/queue') {
+      return okResp({ jobs: [], paused: false })
+    }
+    // index.vue loadOutputDir 读 json.data
+    if (route === 'GET /api/workbench/runtime') {
+      return okResp({ outputDir: '/tmp/wb-acceptance-output' })
     }
 
     console.warn('[workbench-stub] unmocked', route)

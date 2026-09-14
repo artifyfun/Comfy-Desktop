@@ -26,6 +26,17 @@ node acceptance/workbench/serve.mjs 5175
 agent-browser open http://127.0.0.1:5175/workbench
 ```
 
+**自动复跑（推荐，无头、与用户 Chrome 隔离、跑完即退）**：
+
+```bash
+node scripts/wb-preview-ui-verify.mjs            # 默认验 W9 预览渲染，失败退出码 1
+WB_MSG="规划一个验收任务，包含 todo 步骤" WB_EXPECT=0 \
+  WB_SHOT=w1-regression node scripts/wb-preview-ui-verify.mjs   # 换消息当通用场景回归
+```
+
+脚本可参数化：`WB_MSG` 换触发消息、`WB_EXPECT=0` 只观测不断言、`WB_SHOT` 换截图基名。
+它同时会打印「被 SPA fallback 兜成 HTML 的 /api/* 请求」——stub 缺端点时会立刻显形。
+
 > 默认 seed 1 个会话 `s-seed-1 / 验收会话`（含 1 条种子用户消息），并通过 localStorage `wb-stub-persist-v2` 持久化 sessions / eventsHistory（reload 后能模拟服务端 eventStore 回放）。`window.__wbCtl.reset()` 可重载回到 seed（如需清空持久化：`localStorage.removeItem('wb-stub-persist-v2')` 再 reload）。
 
 ## 验收矩阵（8 场景全绿）
@@ -41,6 +52,9 @@ agent-browser open http://127.0.0.1:5175/workbench
 | W6 | **历史回放** — 发"历史回放：规划任务清单"（触发 todos）→ reload → 自动恢复 `s-seed-1` → selectSession → loadHistoryIntoPage 拉 records → 用户气泡按 createdAt 归并 + agent 文本 + todo 卡 4/4 重建 | w6-history-replay.png |
 | W7 | **流截断兜底** — 发"测试断流"→ stub truncateAfterFlush=true（不发 RUN_FINISHED）→ flushThread 队列空后 close → 前端 readAguiStream EOF → `!sawRunFinish` 触发 `workbenchStreamInterrupted` 红色错误气泡"对话流中断，本轮未收到完成信号" | w7-stream-interrupted.png |
 | W8 | **审批 edit-args** — 发"修改参数执行这个任务"→ tool_approval_required 带 args `{templateId,count,seed,customParam}` → 点击「修改参数」→ textarea 预填美化 JSON → 改 count 4→6 → 保存 → interaction-response action='edit' echoArgs.count=6 / originalArgs.count=4 → tool_approval_resolved 带 finalAction='edit' + finalArgs → 收尾文本"参数已编辑，按新参数放行。" | w8-approval-edit.png |
+| W9 | **生成过程直通预览（编排路径）** — 发"我要看实时预览"→ TOOL_CALL_START/ARGS/END 占出工具卡 → 3 帧 CUSTOM `preview_frame{dataUrl}` → 工具卡内渲染 `<img data-testid="exec-preview">`。断言：图在、**真的解码成功**（naturalWidth 128 / naturalHeight 80）、src 是 `data:image/*`、无页面级报错 | w9-preview.png |
+
+> W9 与 `scripts/wb-preview-verify.mjs` 互补：后者验**真机 ComfyUI**的协议与帧解码（能力协商 / 8 字节头剥离），W9 验**前端渲染链路**（AG-UI → aguiBridge → 消息 → 工具卡 `<img>`）。两段合起来才是 #5 的完整证据。
 
 ### 控制台透传证据（B1/E1 / W8 验收关键）
 
@@ -78,6 +92,12 @@ agent-browser eval 'window.__stubLogs.find(l=>/interaction-response/.test(l))'
 
 **wb_error 形状**：`{ itemId, message }` → applyCustom 'wb_error' → pushMsg `{ kind:'error', text: message }` 红色气泡。
 
+**成功信封是 `{ ok:true, success:true, code:200, data }`**（`createSuccessResponse`，`src/main/artifylab/utils/errorHandler.ts:93`）。**只给 `{data}` 会踩坑**：`appStore.initConfig` 判 `if (response.ok && response.data)`，缺 `ok` 就 `throw new Error('配置加载失败')`。注意各消费方读法不一——列表端点读 `json.data`（`listResp` 只给 `{data}` 够用），`/api/config` 必须带 `ok`。
+
+**工具调用三帧（W9 引入）**：`TOOL_CALL_START{toolCallId,toolCallName}` → `TOOL_CALL_ARGS{toolCallId,delta}`（可多次累积）→ `TOOL_CALL_END{toolCallId}`。`utils/agui/handlers.js:20-22` 映射为桥内键 `tool:start{name}` / `tool:args{args}`（**END 时才一次性派发累积值**）/ `tool:result{content}`。缺这三帧就没有带 `toolItem` 的消息，后续 `preview_frame` 无处可挂——**顺序不能反**。
+
+**preview_frame 形状**：`{ promptId, dataUrl, at }` → applyCustom 'preview_frame' → 挂到**最近一条带 `toolItem` 的消息**（`aguiBridge.js:313-326`）→ 工具卡渲染 `<img data-testid="exec-preview">`。这是"编排路径下能看到在画什么"的前端落点；快路径的轮询预览走 progress 消息（`useExecutionPolling`），两条互不干扰。
+
 ## stub 设计要点
 
 - **electronAPI mock**：8 行，`server_origin = location.origin`，保证 workbench 路由守卫不兜底跳 `/about`（与 canvas/batch 同模式）。
@@ -105,7 +125,7 @@ agent-browser eval 'window.__stubLogs.find(l=>/interaction-response/.test(l))'
 |---|---|---|---|
 | 后端契约 | batchRunner 队列状态机 | 无（纯前端 localStorage） | AG-UI SSE 21 种事件类型 + REST `{data:[]}` + OkEnvelope + localStorage 持久化 |
 | stub 复杂度 | 高（14 路由 + 状态机） | 低（seed 一次性） | 中（常驻 SSE + 同流 late-enqueue + 持久化 + 占位 /view 路由） |
-| 关键修复 | 路径前缀 `/batch` 漏配 | electronAPI mock 缺失 | type 命名小写 vs registry 大写 + todos item 字段错 + list 端点包 `{data}` + session GET 信封 + approval value.字段名（args vs arguments）+ flushThread 截断 close 分支遗漏 |
+| 关键修复 | 路径前缀 `/batch` 漏配 | electronAPI mock 缺失 | type 命名小写 vs registry 大写 + todos item 字段错 + list 端点包 `{data}` + session GET 信封 + approval value.字段名（args vs arguments）+ flushThread 截断 close 分支遗漏 + 引导期端点未 mock（SPA fallback 返 HTML → JSON.parse 炸）+ TOOL_CALL 三帧缺失致 preview_frame 无落点 |
 | 验收矩阵 | T1–T7 队列 | C0–C6 画布 | W1–W8 + B1 + E1 |
 
 ## agent-browser Windows 经验（workbench 专属）
@@ -120,9 +140,11 @@ agent-browser eval 'window.__stubLogs.find(l=>/interaction-response/.test(l))'
 ## 已知遗留 / 未覆盖
 
 - **附件流程**：composer 的 draftAttachments 流程未触发（stub 不模拟附件 → 后端 decide 路径）。
-- **wb_sync / wb_canvas_exec / wb_canvas_ops** 等执行副作用 CUSTOM 未覆盖。
+- **wb_sync / wb_canvas_exec / wb_canvas_ops** 等执行副作用 CUSTOM 未覆盖（`preview_frame` 已在 W9 覆盖）。
 - **approval 超时倒计时**：InteractionApprovalCard 倒计时 UI 已渲染但 stub 不模拟超时分支（需后端 emit 倒计时归零 reject 兜底才能验证）。
 - **多窗口审批 race**：同 threadId 两窗口同时打开、互相 approve 的 race 未验（需要 stub 支持并发流）。
+
+> 2026-09-14 补齐：此前 `/api/config`、`/api/batch/queue`、`/api/workbench/runtime` 三个引导期端点未 mock，fetch 落到 SPA fallback 拿到 index.html，前端 `JSON.parse` 抛 `Unexpected token '<'`。该报错与场景无关（对照实验：发一条不命中任何场景的消息同样出现），但会淹没真实回归信号——现已补上（信封对齐 `createSuccessResponse`）。
 
 ## 复跑验收脚本（可粘贴）
 
