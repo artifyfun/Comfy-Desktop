@@ -1166,5 +1166,18 @@
   "externalAgentBinPlaceholderClaude": "Leave empty to use claude from PATH",
   "externalAgentBinHint": "Command name (on PATH) or absolute path. Restart the workbench session after switching channels.",
   "canvasAiSnapshotsTitle": "AI snapshots (auto-saved before changes)",
-  "canvasAiSnapshotsRestore": "Restore"
+  "canvasAiSnapshotsRestore": "Restore",
+  "assetLibTitle": "Asset library",
+  "assetLibNew": "New",
+  "assetLibNamePh": "Asset name (e.g. Maya)",
+  "assetLibRefsPh": "Refs (comma separated)",
+  "assetLibSeedPh": "Fixed seed (optional)",
+  "assetLibSave": "Save",
+  "assetLibUpdate": "Update",
+  "assetLibCancel": "Cancel",
+  "assetLibEmpty": "No assets yet — say \"save this as a character asset\" in chat",
+  "assetLibRefs": "refs",
+  "assetLibEdit": "Edit",
+  "assetLibRemove": "Delete",
+  "assetLibSaved": "Saved"
 }

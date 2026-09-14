@@ -193,6 +193,12 @@
         </button>
         <button
           class="w-full text-left px-2 py-1.5 rounded text-sm text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)] flex items-center gap-2"
+          @click="$emit('manage-assets')"
+        >
+          <i class="fas fa-box-open w-4"></i>{{ t('assetLibTitle') }}
+        </button>
+        <button
+          class="w-full text-left px-2 py-1.5 rounded text-sm text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-hover)] flex items-center gap-2"
           @click="$emit('show-env')"
         >
           <i class="fas fa-microchip w-4"></i>{{ t('workbenchEnvInfo') }}
@@ -244,6 +250,7 @@ const emit = defineEmits([
   'update:showArchived',
   'manage-presets',
   'manage-skills',
+  'manage-assets',
   'show-env',
   'show-guide',
 ])

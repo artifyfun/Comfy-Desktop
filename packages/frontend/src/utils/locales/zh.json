@@ -1166,5 +1166,18 @@
   "externalAgentBinPlaceholderClaude": "留空则使用 PATH 中的 claude",
   "externalAgentBinHint": "命令名（需在 PATH 中）或绝对路径。切换通道后需重启应用内工作台会话生效。",
   "canvasAiSnapshotsTitle": "AI 快照（改动前自动保存）",
-  "canvasAiSnapshotsRestore": "恢复此快照"
+  "canvasAiSnapshotsRestore": "恢复此快照",
+  "assetLibTitle": "创作资产库",
+  "assetLibNew": "新建",
+  "assetLibNamePh": "资产名（如：小美）",
+  "assetLibRefsPh": "参考图（逗号分隔，如 artify_verify.png）",
+  "assetLibSeedPh": "固定 seed（可选）",
+  "assetLibSave": "保存",
+  "assetLibUpdate": "更新",
+  "assetLibCancel": "取消",
+  "assetLibEmpty": "暂无资产——对话里说「把这张图存为角色资产」即可创建",
+  "assetLibRefs": "参考图",
+  "assetLibEdit": "编辑",
+  "assetLibRemove": "删除",
+  "assetLibSaved": "已保存"
 }

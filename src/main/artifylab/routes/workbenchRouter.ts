@@ -22,6 +22,7 @@ import { registerSkillsRoutes } from './workbench/skills'
 import { registerCatalogRoutes } from './workbench/catalog'
 import { registerFavoritesRoutes } from './workbench/favorites'
 import { registerExecuteRoutes } from './workbench/execute'
+import { registerAssetsRoutes } from './workbench/assets'
 
 export function createWorkbenchRouter(): express.Router {
   const router = express.Router()
@@ -32,5 +33,6 @@ export function createWorkbenchRouter(): express.Router {
   registerCatalogRoutes(router)
   registerFavoritesRoutes(router)
   registerExecuteRoutes(router)
+  registerAssetsRoutes(router)
   return router
 }

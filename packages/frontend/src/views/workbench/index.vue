@@ -138,6 +138,7 @@
           @update:show-archived="(v) => (showArchived = v)"
           @manage-presets="presetMgrOpen = true"
           @manage-skills="skillMgrOpen = true"
+          @manage-assets="assetLibOpen = true"
           @show-env="showEnvDialog"
           @show-guide="guideOpen = true"
         />
@@ -172,6 +173,7 @@
             @update:show-archived="(v) => (showArchived = v)"
             @manage-presets="presetMgrOpen = true"
             @manage-skills="skillMgrOpen = true"
+            @manage-assets="assetLibOpen = true"
             @show-env="showEnvDialog"
             @show-guide="guideOpen = true"
           />
@@ -1024,6 +1026,9 @@
 
     <!-- 技能库（SKILL.md 知识技能管理） -->
     <SkillManager v-model:open="skillMgrOpen" />
+    <a-modal v-model:open="assetLibOpen" :title="t('assetLibTitle')" :footer="null" :width="420">
+      <AssetLibrary :t="t" />
+    </a-modal>
 
     <!-- 使用指南（场景速览/模式/预设/模板/技能/提示词与素材库） -->
     <UsageGuide v-model:open="guideOpen" @start="startScenario" />
@@ -1267,6 +1272,7 @@ import SessionSidebar from './components/SessionSidebar.vue'
 import WbMarkdown from './components/WbMarkdown.vue'
 import InteractionApprovalCard from './components/InteractionApprovalCard.vue'
 import PlanProposalCard from './components/PlanProposalCard.vue'
+import AssetLibrary from './components/AssetLibrary.vue'
 import ProgressCard from './components/ProgressCard.vue'
 import Composer from './components/Composer.vue'
 import NewSessionDialog from './components/NewSessionDialog.vue'
