@@ -15,15 +15,15 @@ import {
   rmSync,
   existsSync,
   statSync,
-  utimesSync
+  utimesSync,
+  accessSync
 } from 'node:fs'
+import { DEFAULT_DISABLED_BUILTIN_SKILLS, SkillLibrary } from './skillStore'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { zipSync, strToU8 } from 'fflate'
 
 vi.mock('electron', () => ({ app: { getAppPath: () => '', getPath: () => tmpdir() } }))
-
-import { SkillLibrary } from './skillStore'
 
 const SKILL = (name: string, description = 'Does X when Y.') =>
   `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n\nBody of ${name}.`
@@ -357,4 +357,51 @@ describe('SkillLibrary 导入防护', () => {
       cleanup()
     }
   })
+})
+
+describe('DEFAULT_DISABLED_BUILTIN_SKILLS — 默认禁用(C-H6 技能预算收敛)', () => {
+  it('清单内内置技能无显式状态时默认 disabled', async () => {
+    expect(DEFAULT_DISABLED_BUILTIN_SKILLS.has('ltxv2-video')).toBe(true)
+    expect(DEFAULT_DISABLED_BUILTIN_SKILLS.has('ai-toolkit-trainer')).toBe(true)
+    expect(DEFAULT_DISABLED_BUILTIN_SKILLS.has('wb-orchestration')).toBe(false)
+  })
+
+  it('deployTo 跳过默认禁用的内置技能(不进 codex 技能预算)', async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const os = await import('node:os')
+    const root = mkdtempSync(join(os.tmpdir(), 'wb-skill-dd-'))
+    const builtin = join(root, 'builtin')
+    // 造两个内置技能: 一个在默认禁用清单(ltxv2-video), 一个不在(flux-image-best-practices)
+    for (const name of ['ltxv2-video', 'flux-image-best-practices']) {
+      mkdirSync(join(builtin, name), { recursive: true })
+      writeFileSync(
+        join(builtin, name, 'SKILL.md'),
+        '---\nname: ' + name + '\ndescription: test ' + name + '\n---\nbody'
+      )
+    }
+    const lib = new SkillLibrary({
+      builtinRoot: builtin,
+      userRoot: join(root, 'user'),
+      statePath: join(root, 'states.json')
+    })
+    const dest = join(root, 'codex-home')
+    lib.deployTo(dest)
+    const deployed = join(dest, 'skills')
+    expect(defaultFsExists(join(deployed, 'flux-image-best-practices'))).toBe(true)
+    expect(defaultFsExists(join(deployed, 'ltxv2-video'))).toBe(false)
+    // 显式开启后部署
+    lib.setEnabled('ltxv2-video', true)
+    lib.deployTo(dest)
+    expect(defaultFsExists(join(deployed, 'ltxv2-video', 'SKILL.md'))).toBe(true)
+  })
+
+  function defaultFsExists(p: string): boolean {
+    try {
+      accessSync(p)
+      return true
+    } catch {
+      return false
+    }
+  }
 })

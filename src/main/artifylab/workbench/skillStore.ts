@@ -121,6 +121,34 @@ const SOURCE_LABELS: Array<{ label: string; sub: string; source: SkillSource }> 
   { label: 'Gemini CLI', sub: '.gemini/skills', source: 'local' }
 ]
 
+/**
+ * 默认禁用的内置技能（C-H6）：训练器/重模型视频类——使用门槛高（需自备训练
+ * 环境/大模型权重），且其 SKILL.md 描述体量大，默认启用会挤占 codex 技能
+ * 上下文预算。用户可在技能库面板手动开启。
+ */
+export const DEFAULT_DISABLED_BUILTIN_SKILLS: ReadonlySet<string> = new Set([
+  // —— 训练类 ——
+  'ai-toolkit-trainer',
+  'train-character-lora',
+  'anima-lora-trainer',
+  // —— 重模型视频类（LTX-2 / Wan 系）——
+  'ltxv2-video',
+  'ltx-director',
+  'wan-t2v-video',
+  'wan-flf-video',
+  'wan-multitalk',
+  'wan-scail-replacement',
+  'video-extend',
+  // —— 其它低频重型 ——
+  '3d-animation-short-generator',
+  'co-op-game-intro-generator',
+  'brand-promo-video-generator',
+  'music-video-subtitle-generator',
+  'paper-collage-explainer-generator',
+  'papercraft-stop-motion-explainer',
+  'minimalist-product-ad-generator'
+])
+
 export class SkillLibrary {
   private opts: SkillLibraryOptions
   private stateCache: Record<string, SkillState> | null = null
@@ -172,6 +200,13 @@ export class SkillLibrary {
   private stateOf(name: string, builtin: boolean): SkillState {
     const s = this.states()[name]
     if (s) return s
+    // 内置重型技能默认禁用（C-H6 技能预算收敛）：训练器/大模型视频类带
+    // 大型 reference 文档，其描述总量会挤占 codex 的技能上下文预算（触发
+    // "Skill descriptions were shortened" 降级）。用户可在技能库手动开启
+    // （显式 enabled 状态优先于本默认，且已持久化）。
+    if (builtin && DEFAULT_DISABLED_BUILTIN_SKILLS.has(name)) {
+      return { enabled: false, source: 'builtin', order: 50 }
+    }
     return builtin
       ? { enabled: true, source: 'builtin', order: 0 }
       : { enabled: true, source: 'manual', order: 100 }
