@@ -1,10 +1,19 @@
 /**
  * ComfyUI 生成过程预览（对标建议 #5）——本地引擎独有的"边算边看"。
  *
- * 背景：ComfyUI 在采样过程中通过 WebSocket（`/ws?clientId=`）推送 latent 预览帧
- * （`b64_preview` JSON 帧，或旧版的二进制 JPEG 帧）。此前我们只轮询 `/history`
- * 拿终态产物，用户看不到"正在画什么"。
+ * 背景：ComfyUI 在采样过程中通过 WebSocket（`/ws?clientId=`）推送 latent 预览帧。
+ * 此前我们只轮询 `/history` 拿终态产物，用户看不到"正在画什么"。
  *
+ * **四个真机前提（本机 ComfyUI 0.34.6 实测，缺任意一个都拿不到帧）**：
+ *  1) 【客户端】连接后必须发 `{"type":"feature_flags","data":{"supports_preview_metadata":true}}`
+ *     作为第一条消息，否则服务端推帧分支被 feature_flags.supports_feature 挡掉（静默零帧）。
+ *  2) 【客户端】`binaryType` 必须置 'arraybuffer'——默认 'blob' 时二进制帧以 Blob 到达，
+ *     解析器认不出而全部丢弃（也做了 Blob 兜底）。
+ *  3) 【服务端】必须以 `--preview-method auto`（或 latent2rgb/taesd）启动；
+ *     ComfyUI 默认是 `LatentPreviewMethod.NoPreviews`，采样器根本不生成预览图。
+ *  4) 帧是二进制的 `PREVIEW_IMAGE_WITH_METADATA`(事件 4)：
+ *     `[4B 事件][4B 元数据长度][元数据 JSON][图像字节]`，图像起始不在固定 offset。
+ *  *
  * 本模块做两件事，均为纯逻辑 + 可注入依赖（单测不需要真 ComfyUI）：
  *  1) `startPreviewFeed`：订阅某次执行（clientId）的预览帧，按 minIntervalMs
  *     节流后回调；终态/超时/帧数上限自动关闭，不重连（预览是尽力而为）。
@@ -29,6 +38,13 @@ export interface PreviewFrame {
 export interface WebSocketLike {
   readyState: number
   close(code?: number, reason?: string): void
+  /** 发送持有能力声明帧（feature_flags 握手，见 startPreviewFeed 注释） */
+  send(data: string): void
+  /**
+   * 二进制帧交付形态。**默认 'blob'**，必须置为 'arraybuffer'（见 startPreviewFeed），
+   * 否则二进制预览帧以 Blob 到达、解析器认不出而静默全丢。
+   */
+  binaryType?: string
   onopen?: ((ev: unknown) => void) | null
   onmessage?: ((ev: { data: unknown }) => void) | null
   onerror?: ((ev: unknown) => void) | null
@@ -74,6 +90,14 @@ const DEFAULT_MIN_INTERVAL_MS = 400
 const DEFAULT_MAX_FRAMES = 900
 const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000
 
+/** ComfyUI 二进制事件号（见其 protocol.py 的 BinaryEventTypes） */
+const PREVIEW_IMAGE = 1
+const UNENCODED_PREVIEW_IMAGE = 2
+const PREVIEW_IMAGE_WITH_METADATA = 4
+
+/** 结构解析失败时的兜底 magic 扫描上限（裸图像帧兜底用，防无界查找） */
+const RAW_SCAN_LIMIT = 4096
+
 /** http(s) origin → ws(s) 预览端点（带 clientId） */
 export function previewWsUrl(origin: string, clientId: string): string {
   const base = origin.replace(/\/+$/, '')
@@ -90,24 +114,56 @@ export function binaryFrameToDataUrl(bytes: Uint8Array): string {
 }
 
 /**
- * 定位图像起始字节（依据本机 ComfyUI `server.py` 真机校准）：
- *   encode_bytes(event, data) = struct.pack(">I", event) + data
- *   send_image 的 data = struct.pack(">I", type_num) + 图像字节（1=JPEG 2=PNG）
- * → **二进制 WS 帧前 8 字节是头**（4B 事件号 + 4B 图像类型），图像从 offset 8 起。
+ * 定位图像起始字节。
  *
- * 若整帧当图像处理，这 8 字节会混进 base64 → 浏览器解码失败（预览空白），
- * 这是真机才暴露的问题。裸图像帧（旧版/其他来源）也存在，故扫前 16 字节找
- * PNG/JPEG magic 定位；找不到 magic 返回 null——宁可不出帧，也不推一张解不开的图。
+ * **真机校准（本机 ComfyUI 0.34.6，2026-09-14 实测）**：新版走的是
+ * `comfy_execution/progress.py` → `BinaryEventTypes.PREVIEW_IMAGE_WITH_METADATA`(=4)，
+ * 其 `send_image_with_metadata` 拼的是**元数据前缀**：
+ *
+ *   [4B 事件号=4][4B 元数据长度][元数据 JSON(utf-8)][图像字节]
+ *
+ * 元数据约 120B，所以图像起始在 offset ≈ 128 —— 远超出"扫前 16 字节"的范围。
+ * 旧版 `PREVIEW_IMAGE`(=1) 是 [4B 事件][4B 图像类型][图像]（8B 头）。
+ *
+ * 因为元数据长度是显式字段，这里**按结构解析**而不是靠 magic 猜；
+ * 结构解析不出时再退回**有界 magic 扫描**（兼容裸图像帧 / 其他来源）。
+ * 找不到图像返回 null —— 宁可不出帧，也不推一张解不开的图。
  */
 function locateImageStart(bytes: Uint8Array): { offset: number; mime: string } | null {
-  const limit = Math.min(bytes.length, 16)
+  const readU32 = (at: number): number =>
+    ((bytes[at]! << 24) | (bytes[at + 1]! << 16) | (bytes[at + 2]! << 8) | bytes[at + 3]!) >>> 0
+
+  if (bytes.length >= 8) {
+    const event = readU32(0)
+    if (event === PREVIEW_IMAGE_WITH_METADATA) {
+      const metaLen = readU32(4)
+      const start = 8 + metaLen
+      // 元数据长度越界视为损坏帧：宁可丢弃
+      if (metaLen > 0 && start < bytes.length) return sniffAt(bytes, start)
+      return null
+    }
+    if (event === PREVIEW_IMAGE || event === UNENCODED_PREVIEW_IMAGE) {
+      return sniffAt(bytes, 8)
+    }
+  }
+
+  // 兜底：裸图像帧（旧版/第三方来源）。有界扫描，不无限找。
+  const limit = Math.min(bytes.length, RAW_SCAN_LIMIT)
   for (let i = 0; i <= limit - 3; i++) {
-    if (bytes[i] === 0x89 && bytes[i + 1] === 0x50 && bytes[i + 2] === 0x4e) {
-      return { offset: i, mime: 'image/png' }
-    }
-    if (bytes[i] === 0xff && bytes[i + 1] === 0xd8 && bytes[i + 2] === 0xff) {
-      return { offset: i, mime: 'image/jpeg' }
-    }
+    const hit = sniffAt(bytes, i)
+    if (hit) return hit
+  }
+  return null
+}
+
+/** 在指定偏移识别 PNG/JPEG magic（严格 3 字节） */
+function sniffAt(bytes: Uint8Array, at: number): { offset: number; mime: string } | null {
+  if (at < 0 || at + 3 > bytes.length) return null
+  if (bytes[at] === 0x89 && bytes[at + 1] === 0x50 && bytes[at + 2] === 0x4e) {
+    return { offset: at, mime: 'image/png' }
+  }
+  if (bytes[at] === 0xff && bytes[at + 1] === 0xd8 && bytes[at + 2] === 0xff) {
+    return { offset: at, mime: 'image/jpeg' }
   }
   return null
 }
@@ -160,6 +216,20 @@ export function parsePreviewMessage(
     return { promptId: typeof pid === 'string' && pid ? pid : fallbackPromptId, dataUrl }
   }
   return null
+}
+
+/**
+ * Blob 形状的二进制帧（WebSocket 的 binaryType 默认 'blob'）。
+ * parsePreviewMessage 是同步的，所以这类数据在消息入口先转成 ArrayBuffer。
+ */
+function isBlobLike(v: unknown): v is { arrayBuffer(): Promise<ArrayBuffer> } {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    typeof (v as { arrayBuffer?: unknown }).arrayBuffer === 'function' &&
+    !(v instanceof ArrayBuffer) &&
+    !ArrayBuffer.isView(v)
+  )
 }
 
 /**
@@ -242,9 +312,50 @@ export function startPreviewFeed(options: PreviewFeedOptions): PreviewFeedHandle
     }
   }
 
+  // binaryType 默认是 'blob'；不改成 arraybuffer 的话二进制预览帧以 Blob 到达，
+  // 解析器认不出（不是 ArrayBuffer 也不是字符串）→ 静默 0 帧。真机实测确认。
+  try {
+    ws.binaryType = 'arraybuffer'
+  } catch {
+    /* 只读实现：下面的 Blob 兜底仍能工作 */
+  }
+
+  // —— 能力协商（必需，否则一帧都收不到）——
+  // ComfyUI 0.34.x 的 comfy_execution/progress.py 只在客户端声明
+  // supports_preview_metadata 时才推 PREVIEW_IMAGE_WITH_METADATA 帧：
+  //     if feature_flags.supports_feature(sockets_metadata, client_id, "supports_preview_metadata"):
+  // 且该消息必须是本连接发出的**第一条**消息（server.py 用 first_message 判定）。
+  // 不声明 = 静默零帧（实测确认），所以它在 onopen 立即发，不做任何等待。
+  ws.onopen = () => {
+    if (closed) return
+    try {
+      ws?.send(JSON.stringify({ type: 'feature_flags', data: { supports_preview_metadata: true } }))
+    } catch (e) {
+      logger.warn('preview feed: feature_flags 握手发送失败', e)
+    }
+  }
   ws.onmessage = (ev) => {
     if (closed) return
-    const parsed = parsePreviewMessage(ev?.data, currentPromptId, (id) => {
+    const data = ev?.data
+    // 运行时若无视 binaryType（或以 Blob 交付），这里异步转成 ArrayBuffer 再解析，
+    // 不让交付形态的差异变成"静默丢帧"
+    if (isBlobLike(data)) {
+      void data
+        .arrayBuffer()
+        .then((buf) => {
+          if (closed) return
+          handleRaw(new Uint8Array(buf))
+        })
+        .catch(() => {
+          /* 读取失败视为无帧 */
+        })
+      return
+    }
+    handleRaw(data)
+  }
+  const handleRaw = (raw: unknown): void => {
+    if (closed) return
+    const parsed = parsePreviewMessage(raw, currentPromptId, (id) => {
       currentPromptId = id
     })
     if (parsed) emit(parsed)

@@ -25,6 +25,10 @@ class FakeWS implements WebSocketLike {
   static instances: FakeWS[] = []
   readyState = 1
   closed = false
+  /** 记录客户端发出的消息（用于断言 feature_flags 握手） */
+  sent: string[] = []
+  /** 模拟运行时的默认值：'blob' */
+  binaryType = 'blob'
   onopen: ((ev: unknown) => void) | null = null
   onmessage: ((ev: { data: unknown }) => void) | null = null
   onerror: ((ev: unknown) => void) | null = null
@@ -35,6 +39,14 @@ class FakeWS implements WebSocketLike {
   close(): void {
     this.closed = true
     this.readyState = 3
+  }
+  send(data: string): void {
+    this.sent.push(data)
+  }
+  /** 测试驱动：模拟连接建立 */
+  open(): void {
+    this.readyState = 1
+    this.onopen?.({})
   }
   /** 测试驱动：投递一条消息 */
   emit(data: unknown): void {
@@ -99,6 +111,47 @@ describe('binaryFrameToDataUrl', () => {
     const url = binaryFrameToDataUrl(frame)
     expect(url.startsWith('data:image/png;base64,')).toBe(true)
     expect(Array.from(Buffer.from(url.split(',')[1]!, 'base64'))).toEqual(img)
+  })
+
+  // 真机（ComfyUI 0.34.6）：progress.py 推的是
+  // PREVIEW_IMAGE_WITH_METADATA(4)，send_image_with_metadata 拼的是
+  // [4B 事件=4][4B 元数据长度][元数据 JSON][图像字节]
+  it('真机新格式（事件4 + 元数据前缀）→ 精确剥出图像字节', () => {
+    const meta = Buffer.from(
+      JSON.stringify({ node_id: '7', prompt_id: 'p', image_type: 'image/jpeg' }),
+      'utf8'
+    )
+    const img = [0xff, 0xd8, 0xff, 0xe0, 0x11, 0x22, 0x33]
+    const frame = new Uint8Array([
+      0,
+      0,
+      0,
+      4,
+      (meta.length >>> 24) & 0xff,
+      (meta.length >>> 16) & 0xff,
+      (meta.length >>> 8) & 0xff,
+      meta.length & 0xff,
+      ...meta,
+      ...img
+    ])
+    const url = binaryFrameToDataUrl(frame)
+    expect(url.startsWith('data:image/jpeg;base64,')).toBe(true)
+    expect(Array.from(Buffer.from(url.split(',')[1]!, 'base64'))).toEqual(img)
+  })
+
+  it('新格式 PNG 同样精确剥出', () => {
+    const meta = Buffer.from(JSON.stringify({ image_type: 'image/png' }), 'utf8')
+    const img = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+    const frame = new Uint8Array([0, 0, 0, 4, 0, 0, 0, meta.length, ...meta, ...img])
+    const url = binaryFrameToDataUrl(frame)
+    expect(url.startsWith('data:image/png;base64,')).toBe(true)
+    expect(Array.from(Buffer.from(url.split(',')[1]!, 'base64'))).toEqual(img)
+  })
+
+  it('元数据长度越界（损坏帧）→ 空串，不瞎猜', () => {
+    // 声明元数据 1MB，实际只有几字节
+    const frame = new Uint8Array([0, 0, 0, 4, 0, 16, 0, 0, 0x89, 0x50, 0x4e, 0x47])
+    expect(binaryFrameToDataUrl(frame)).toBe('')
   })
 
   it('无图像 magic 的二进制事件 → 空串（宁可不出帧也不推坏图）', () => {
@@ -178,6 +231,65 @@ describe('startPreviewFeed', () => {
     expect(frames).toHaveLength(1)
     expect(frames[0]!.dataUrl).toBe('data:image/jpeg;base64,A')
     expect(feed.stats.frames).toBe(1)
+    feed.stop()
+  })
+
+  // 真机前提：不声明 supports_preview_metadata 时 ComfyUI 一帧都不推（progress.py
+  // 的 feature_flags.supports_feature 门），且必须是本连接的第一条消息（server.py
+  // 的 first_message）。这条断言锁住"最容易被删掉但删了就静默零帧"的那一行。
+  it('onopen 立即发 feature_flags 能力协商（含 supports_preview_metadata）', () => {
+    const feed = startPreviewFeed(base(() => {}))
+    const ws = FakeWS.instances[0]!
+    expect(ws.sent).toHaveLength(0)
+    ws.open()
+    expect(ws.sent).toHaveLength(1)
+    expect(JSON.parse(ws.sent[0]!)).toEqual({
+      type: 'feature_flags',
+      data: { supports_preview_metadata: true }
+    })
+    feed.stop()
+  })
+
+  it('已 stop 后 onopen 不再发协商（连接已关，发送无意义）', () => {
+    const feed = startPreviewFeed(base(() => {}))
+    const ws = FakeWS.instances[0]!
+    feed.stop()
+    ws.open()
+    expect(ws.sent).toHaveLength(0)
+  })
+
+  // 真机前提：binaryType 默认 'blob'，不改会以 Blob 交付 → 解析器认不出 → 静默 0 帧
+  it('建连后立即把 binaryType 置为 arraybuffer', () => {
+    const feed = startPreviewFeed(base(() => {}))
+    expect(FakeWS.instances[0]!.binaryType).toBe('arraybuffer')
+    feed.stop()
+  })
+
+  it('binaryType 被运行时忽略时，Blob 交付的帧仍能解析（兜底）', async () => {
+    const frames: string[] = []
+    const feed = startPreviewFeed(base((f) => frames.push(f.dataUrl)))
+    const ws = FakeWS.instances[0]!
+    // 真机新格式帧：[4B 事件=4][4B 元数据长度][元数据][图像]
+    const meta = Buffer.from(JSON.stringify({ node_id: '7' }), 'utf8')
+    const img = [0xff, 0xd8, 0xff, 0xe0, 0x42]
+    const frame = new Uint8Array([0, 0, 0, 4, 0, 0, 0, meta.length, ...meta, ...img])
+    ws.emit(new Blob([frame]))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(frames).toHaveLength(1)
+    expect(Array.from(Buffer.from(frames[0]!.split(',')[1]!, 'base64'))).toEqual(img)
+    feed.stop()
+  })
+
+  it('send 抛错不影响采集（握手失败降级，不中断 feed）', () => {
+    const frames: string[] = []
+    const feed = startPreviewFeed(base((f) => frames.push(f.dataUrl)))
+    const ws = FakeWS.instances[0]!
+    ws.send = () => {
+      throw new Error('socket not open')
+    }
+    expect(() => ws.open()).not.toThrow()
+    ws.emit(JSON.stringify({ type: 'b64_preview', data: { image: 'B' } }))
+    expect(frames).toEqual(['data:image/jpeg;base64,B'])
     feed.stop()
   })
 
