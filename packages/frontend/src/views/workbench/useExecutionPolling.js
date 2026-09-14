@@ -8,8 +8,6 @@
  * - extractFiles：ComfyUI outputs → 文件引用列表
  * 依赖经 deps 注入（pushMsg/scrollToBottom/autoRecover/diagnose 等）。
  */
-import { computed } from 'vue'
-
 /** ComfyUI history outputs → 文件引用列表（images/gifs 两键） */
 export function extractFiles(outputs) {
   const files = []
@@ -48,7 +46,6 @@ export function useExecutionPolling(deps) {
     diagnoseArtifact,
     pushCardsToCanvas,
     messages,
-    executeApi,
   } = deps
 
   /**

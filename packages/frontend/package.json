@@ -50,7 +50,7 @@
     "check:fresh": "node scripts/check-fresh-dist.js",
     "check:i18n": "node scripts/check-i18n-dup.mjs",
     "preview": "vite preview",
-    "lint:oxlint": "oxlint . --fix -D correctness --ignore-path .gitignore",
+    "lint:oxlint": "oxlint . --fix -D correctness --ignore-path .gitignore --ignore-pattern public/comfy_inject.js",
     "lint:eslint": "eslint . --fix",
     "lint": "run-s lint:*",
     "format": "prettier --write src/",
