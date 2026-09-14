@@ -4,6 +4,7 @@ import { logger } from '../utils/logger'
 import { handleApiError, createErrorResponse, createSuccessResponse } from '../utils/errorHandler'
 import { fetchWithRetry } from '../utils/fetch'
 import appStoreManager from '../appStore'
+import { templateLibrary } from '../workbench/templates'
 
 /**
  * App CRUD + 市场接口（自 server.ts 平移，行为不变）。
@@ -52,6 +53,22 @@ export function createAppsRouter(): express.Router {
       const app = appStoreManager.getAppById(id)
 
       if (!app) {
+        // C-H2 wb_build_workflow 兼容：画布 App 节点可能由工作台模板铺出
+        // （id 即模板 id）。应用中心查不到时回退模板库，返回画布节点所需的
+        // 同构形状（id/name/prompt/params），「获取应用失败」不再出现。
+        const tpl = templateLibrary.list().find((t) => t.id === id)
+        if (tpl) {
+          return res.status(HTTP_STATUS.OK).json(
+            createSuccessResponse({
+              id: tpl.id,
+              name: tpl.name,
+              description: tpl.description ?? '',
+              workflow: tpl.prompt,
+              prompt: tpl.prompt,
+              params: tpl.paramsNodes ?? []
+            })
+          )
+        }
         return res.status(HTTP_STATUS.NOT_FOUND).json(createErrorResponse('App not found'))
       }
 
