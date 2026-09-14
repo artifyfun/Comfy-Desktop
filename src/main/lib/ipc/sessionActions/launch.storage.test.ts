@@ -163,11 +163,13 @@ describe('applyStorageLaunchArgs', () => {
 
     applyStorageLaunchArgs(makeInstall(), 'shared-io', launchCmd)
 
-    expect(launchCmd.args!.slice(-4)).toEqual([
+    expect(launchCmd.args!.slice(-6)).toEqual([
       '--input-directory',
       globalInput,
       '--output-directory',
-      globalOutput
+      globalOutput,
+      '--preview-method',
+      'latent2rgb'
     ])
     expect(fs.statSync(globalInput).isDirectory()).toBe(true)
     expect(fs.statSync(globalOutput).isDirectory()).toBe(true)
@@ -181,11 +183,13 @@ describe('applyStorageLaunchArgs', () => {
       'own-input',
       inputCmd
     )
-    expect(inputCmd.args!.slice(-4)).toEqual([
+    expect(inputCmd.args!.slice(-6)).toEqual([
       '--input-directory',
       ownInput,
       '--output-directory',
-      globalOutput
+      globalOutput,
+      '--preview-method',
+      'latent2rgb'
     ])
     expect(fs.statSync(ownInput).isDirectory()).toBe(true)
 
@@ -196,11 +200,13 @@ describe('applyStorageLaunchArgs', () => {
       'own-output',
       outputCmd
     )
-    expect(outputCmd.args!.slice(-4)).toEqual([
+    expect(outputCmd.args!.slice(-6)).toEqual([
       '--input-directory',
       globalInput,
       '--output-directory',
-      ownOutput
+      ownOutput,
+      '--preview-method',
+      'latent2rgb'
     ])
     expect(fs.statSync(ownOutput).isDirectory()).toBe(true)
   })
@@ -214,7 +220,7 @@ describe('applyStorageLaunchArgs', () => {
       launchCmd
     )
 
-    expect(launchCmd.args).toEqual(['main.py'])
+    expect(launchCmd.args).toEqual(['main.py', '--preview-method', 'latent2rgb'])
   })
 
   it('handles every shared input and output combination', () => {
@@ -238,7 +244,9 @@ describe('applyStorageLaunchArgs', () => {
           '--input-directory',
           useSharedInput ? globalInput : ownInput,
           '--output-directory',
-          useSharedOutput ? globalOutput : ownOutput
+          useSharedOutput ? globalOutput : ownOutput,
+          '--preview-method',
+          'latent2rgb'
         ])
       }
     }
@@ -265,5 +273,37 @@ describe('applyStorageLaunchArgs', () => {
 
     expect(launchCmd.args).toContain(settingsMock.defaults.inputDir)
     expect(fs.statSync(settingsMock.defaults.inputDir).isDirectory()).toBe(true)
+  })
+
+  // 工作台的「生成过程直通预览」依赖 ComfyUI 推 latent 预览帧，而
+  // `--preview-method` 默认是 NoPreviews（采样器不生成预览图）→ 必须注入。
+  it('injects --preview-method latent2rgb（工作台实时预览的前提）', () => {
+    const launchCmd = makeLaunchCmd()
+
+    applyStorageLaunchArgs(makeInstall(), 'preview-default', launchCmd)
+
+    const i = launchCmd.args!.indexOf('--preview-method')
+    expect(i).toBeGreaterThan(-1)
+    expect(launchCmd.args![i + 1]).toBe('latent2rgb')
+  })
+
+  it('does not override a user-provided --preview-method', () => {
+    const launchCmd = makeLaunchCmd({
+      args: ['main.py', '--preview-method', 'taesd']
+    })
+
+    applyStorageLaunchArgs(makeInstall(), 'preview-user', launchCmd)
+
+    const hits = launchCmd.args!.filter((a) => a === '--preview-method')
+    expect(hits).toHaveLength(1)
+    expect(launchCmd.args![launchCmd.args!.indexOf('--preview-method') + 1]).toBe('taesd')
+  })
+
+  it('不注入 --preview-method when shared paths are skipped', () => {
+    const launchCmd = makeLaunchCmd({ skipSharedPaths: true })
+
+    applyStorageLaunchArgs(makeInstall(), 'preview-skipped', launchCmd)
+
+    expect(launchCmd.args).not.toContain('--preview-method')
   })
 })

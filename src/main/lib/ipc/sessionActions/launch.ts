@@ -195,6 +195,17 @@ export function applyStorageLaunchArgs(
         launchCmd.args!.push('--output-directory', perInstallOutput)
       }
     }
+
+    // Artify 工作台的「生成过程直通预览」依赖 ComfyUI 的 latent 预览帧，而
+    // ComfyUI 的 `--preview-method` 默认是 `LatentPreviewMethod.NoPreviews` ——
+    // 采样器根本不生成预览图，工作台一帧都收不到（2026-09-14 真机实测确认）。
+    // 注入 latent2rgb：无需额外模型、开销极小；本机 0.34.6 的 `auto` 在
+    // latent_preview.get_previewer 里无条件降级为 Latent2RGB，故两者等价。
+    // 用户显式传了 --preview-method 时不覆盖（保持可退出）。
+    const launchArgList = launchCmd.args!
+    if (!launchArgList.includes('--preview-method')) {
+      launchArgList.push('--preview-method', 'latent2rgb')
+    }
   }
 
   return { preLaunchExtras, manageModelFolders, modelDirsForLaunch, modelSyncOptions }
