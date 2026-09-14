@@ -446,6 +446,16 @@ describe('createCodexMapper — turn 失败与轮级事件', () => {
     expect(mapper.feed(itemCompleted(errorItem('e1', 'tool errored')))).toEqual([])
   })
 
+  it('良性引擎提示(技能描述超预算)→ 静默降噪,不渲染错误气泡', () => {
+    const mapper = createCodexMapper({ threadId: 't', runId: 'r' })
+    const msg =
+      'Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill.'
+    const out = mapper.feed(itemCompleted(errorItem('e-warn', msg)))
+    expect(out).toEqual([])
+    // 重放同样静默
+    expect(mapper.feed(itemCompleted(errorItem('e-warn', msg)))).toEqual([])
+  })
+
   it('turn.started 无输出;usage 缺失的 turn.completed 无输出', () => {
     const mapper = createCodexMapper({ threadId: 't', runId: 'r' })
     expect(mapper.feed({ type: 'turn.started' })).toEqual([])

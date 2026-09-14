@@ -295,6 +295,10 @@ export function createCodexMapper(opts: CodexMapperOptions): CodexMapper {
   const feedErrorItem = (item: ErrorItem): AGUIEvent[] => {
     if (finishedIds.has(item.id)) return []
     finishedIds.add(item.id)
+    // 良性引擎提示降噪：codex 对「技能描述超预算」只发一条提示性 item error
+    // （技能仍全部可见，仅描述被截短），每次会话必现——渲染成红色错误气泡
+    // 纯属惊吓，降级为静默留痕。
+    if (/Skill descriptions were shortened/i.test(item.message ?? '')) return []
     return [custom('wb_error', { itemId: item.id, message: item.message })]
   }
 
