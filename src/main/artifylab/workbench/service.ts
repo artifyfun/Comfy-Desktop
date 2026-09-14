@@ -80,6 +80,7 @@ import {
   CANVAS_OPS_RULES
 } from './specText'
 import type { ReasoningEffort } from './reasoningEffort'
+import { contextAnchorFor } from './contextAnchor'
 import { extractDocText, isDocumentAttachment, renderDocContext } from './docContext'
 
 /* ------------------------------------------------------------------ */
@@ -813,11 +814,13 @@ class WorkbenchService {
     if (agent.totalTokens >= MAX_SESSION_TOKENS) {
       throw new Error(`本会话 token 用量已达预算上限（${MAX_SESSION_TOKENS}），请新建会话继续`)
     }
-    const spec = await this.buildDecisionSpec(effectiveInput, session, {
+    const specBase = await this.buildDecisionSpec(effectiveInput, session, {
       preset,
       attachments,
       templateShortcut
     })
+    // 长上下文锚定（真机发现：长会话工具遵循退化）——按水位注入工具纪律锚定段
+    const spec = specBase + contextAnchorFor(agent.turns, agent.totalTokens)
     // codex exec 的 JSONL 原始行（runDecideTurn 产出，parsePlanFromCodex 用）
     let rawLines: string[] = []
     try {
