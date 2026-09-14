@@ -683,6 +683,13 @@ export function createAguiBridge(pageApi, http = {}) {
     }
     // 尾部剩余用户消息(最后一轮 run 之后发的)
     flushUsersBefore(Number.MAX_SAFE_INTEGER)
+    // C-H4 回放清扫：历史里的 pending plan/approval 卡对应的挂起早已随 run
+    // 结束消失（后端 cancelAllPlans / gate.unregister），回放置 pending 会让
+    // 用户点到必然 404 的死按钮——统一翻终态。
+    for (const m of pageApi.messages.value) {
+      if (m.kind === 'plan' && m.planStatus === 'pending') m.planStatus = 'done'
+      if (m.kind === 'approval' && m.approvalStatus === 'pending') m.approvalStatus = 'expired'
+    }
     pageApi.scrollToBottom()
   }
 

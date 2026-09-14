@@ -1072,3 +1072,63 @@ describe('aguiBridge — transport seam（http.post/postStream 注入）', () =>
     expect(cancels[0].threadId).toBe('th-1')
   })
 })
+
+describe('aguiBridge — 回放清扫：历史 pending 卡置终态', () => {
+  it('回放结束后 pending plan/approval 卡统一翻终态（点击不再 404）', async () => {
+    const api = makePageApi()
+    const { createAguiBridge } = await import('../aguiBridge')
+    const bridge = createAguiBridge(api)
+    // 构造 records: 一条 plan_proposed + 一条 tool_approval_required（均 pending）
+    const events = [
+      {
+        type: 'CUSTOM',
+        name: 'plan_proposed',
+        value: {
+          title: '旧计划',
+          steps: [
+            { index: 1, title: 'a' },
+            { index: 2, title: 'b' },
+          ],
+          options: [{ optionId: 'o1', label: 'A' }],
+          sessionId: 'th-1',
+        },
+      },
+      {
+        type: 'CUSTOM',
+        name: 'tool_approval_required',
+        value: {
+          requestId: 'req-1',
+          threadId: 'th-1',
+          toolName: 'wb_x',
+          args: {},
+          timeoutMs: 600000,
+        },
+      },
+    ]
+    const records = events.map((ev, i) => ({
+      runId: 'r-h',
+      seq: i + 1,
+      eventType: ev.type,
+      content: JSON.stringify(ev),
+    }))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url, opts) => {
+        const body = JSON.parse(opts.body)
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ data: { records: body.offset === 0 ? records : [] } }),
+        }
+      }),
+    )
+    await bridge_load(api, 'th-1')
+    vi.unstubAllGlobals()
+    const plans = api.messages.value.filter((m) => m.kind === 'plan')
+    const approvals = api.messages.value.filter((m) => m.kind === 'approval')
+    expect(plans).toHaveLength(1)
+    expect(plans[0].planStatus).toBe('done')
+    expect(approvals).toHaveLength(1)
+    expect(approvals[0].approvalStatus).toBe('expired')
+  })
+})
