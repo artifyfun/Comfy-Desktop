@@ -77,9 +77,33 @@ describe('binaryFrameToDataUrl', () => {
   })
 
   it('内容可被解码回原字节', () => {
-    const bytes = new Uint8Array([0xff, 0xd8, 7, 8, 9])
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff, 7, 8, 9])
     const b64 = binaryFrameToDataUrl(bytes).split(',')[1]!
-    expect(Array.from(Buffer.from(b64, 'base64'))).toEqual([0xff, 0xd8, 7, 8, 9])
+    expect(Array.from(Buffer.from(b64, 'base64'))).toEqual([0xff, 0xd8, 0xff, 7, 8, 9])
+  })
+
+  // 真机校准（本机 ComfyUI server.py）：encode_bytes = struct.pack(">I", event)
+  // + data；send_image 的 data = struct.pack(">I", type_num) + 图像字节
+  // → 二进制 WS 帧前 8 字节是头（4B 事件号 + 4B 图像类型），图像从 offset 8 起
+  it('ComfyUI 真实帧（8B 头）→ 剥头后 payload 精确等于图像字节', () => {
+    const img = [0xff, 0xd8, 0xff, 0xe0, 9, 8, 7]
+    const frame = new Uint8Array([0, 0, 0, 1, 0, 0, 0, 1, ...img])
+    const url = binaryFrameToDataUrl(frame)
+    expect(url.startsWith('data:image/jpeg;base64,')).toBe(true)
+    expect(Array.from(Buffer.from(url.split(',')[1]!, 'base64'))).toEqual(img)
+  })
+
+  it('PNG 类型位 + PNG magic → image/png（同样剥头）', () => {
+    const img = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]
+    const frame = new Uint8Array([0, 0, 0, 1, 0, 0, 0, 2, ...img])
+    const url = binaryFrameToDataUrl(frame)
+    expect(url.startsWith('data:image/png;base64,')).toBe(true)
+    expect(Array.from(Buffer.from(url.split(',')[1]!, 'base64'))).toEqual(img)
+  })
+
+  it('无图像 magic 的二进制事件 → 空串（宁可不出帧也不推坏图）', () => {
+    expect(binaryFrameToDataUrl(new Uint8Array([0, 0, 0, 9, 1, 2, 3, 4]))).toBe('')
+    expect(binaryFrameToDataUrl(new Uint8Array([]))).toBe('')
   })
 })
 
@@ -115,7 +139,7 @@ describe('parsePreviewMessage', () => {
   })
 
   it('二进制帧 → 帧（用 fallback prompt_id）', () => {
-    const buf = new Uint8Array([0xff, 0xd8, 1, 2]).buffer
+    const buf = new Uint8Array([0xff, 0xd8, 0xff, 1, 2]).buffer
     const parsed = parsePreviewMessage(buf, 'p-abc')
     expect(parsed?.promptId).toBe('p-abc')
     expect(parsed?.dataUrl.startsWith('data:image/jpeg;base64,')).toBe(true)
@@ -129,6 +153,8 @@ describe('parsePreviewMessage', () => {
       parsePreviewMessage(JSON.stringify({ type: 'b64_preview', data: { image: '' } }), 'p')
     ).toBeNull()
     expect(parsePreviewMessage(123, 'p')).toBeNull()
+    // 非预览二进制事件（无图像 magic）：丢弃而非推出解不开的帧
+    expect(parsePreviewMessage(new Uint8Array([0, 0, 0, 9, 1, 2, 3, 4]).buffer, 'p')).toBeNull()
     expect(parsePreviewMessage(new Uint8Array(0).buffer, 'p')).toBeNull()
   })
 })

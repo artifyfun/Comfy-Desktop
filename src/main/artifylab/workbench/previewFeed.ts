@@ -83,9 +83,33 @@ export function previewWsUrl(origin: string, clientId: string): string {
 
 /** 二进制预览帧 → data URL（按magic number 判类型；ComfyUI 预览多为 JPEG） */
 export function binaryFrameToDataUrl(bytes: Uint8Array): string {
-  const isPng = bytes.length > 7 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e
-  const mime = isPng ? 'image/png' : 'image/jpeg'
-  return `data:${mime};base64,${Buffer.from(bytes).toString('base64')}`
+  const located = locateImageStart(bytes)
+  if (!located) return ''
+  const payload = bytes.subarray(located.offset)
+  return `data:${located.mime};base64,${Buffer.from(payload).toString('base64')}`
+}
+
+/**
+ * 定位图像起始字节（依据本机 ComfyUI `server.py` 真机校准）：
+ *   encode_bytes(event, data) = struct.pack(">I", event) + data
+ *   send_image 的 data = struct.pack(">I", type_num) + 图像字节（1=JPEG 2=PNG）
+ * → **二进制 WS 帧前 8 字节是头**（4B 事件号 + 4B 图像类型），图像从 offset 8 起。
+ *
+ * 若整帧当图像处理，这 8 字节会混进 base64 → 浏览器解码失败（预览空白），
+ * 这是真机才暴露的问题。裸图像帧（旧版/其他来源）也存在，故扫前 16 字节找
+ * PNG/JPEG magic 定位；找不到 magic 返回 null——宁可不出帧，也不推一张解不开的图。
+ */
+function locateImageStart(bytes: Uint8Array): { offset: number; mime: string } | null {
+  const limit = Math.min(bytes.length, 16)
+  for (let i = 0; i <= limit - 3; i++) {
+    if (bytes[i] === 0x89 && bytes[i + 1] === 0x50 && bytes[i + 2] === 0x4e) {
+      return { offset: i, mime: 'image/png' }
+    }
+    if (bytes[i] === 0xff && bytes[i + 1] === 0xd8 && bytes[i + 2] === 0xff) {
+      return { offset: i, mime: 'image/jpeg' }
+    }
+  }
+  return null
 }
 
 /**
@@ -108,7 +132,11 @@ export function parsePreviewMessage(
             (raw as ArrayBufferView).byteLength
           )
     if (bytes.length === 0) return null
-    return { promptId: fallbackPromptId, dataUrl: binaryFrameToDataUrl(bytes) }
+    // 二进制帧：ComfyUI 走 [4B 事件号][4B 图像类型][图像字节]（见 locateImageStart）；
+    // 无图像 magic 的二进制事件（非预览）直接丢弃，避免推出解不开的帧
+    const dataUrl = binaryFrameToDataUrl(bytes)
+    if (!dataUrl) return null
+    return { promptId: fallbackPromptId, dataUrl }
   }
   if (typeof raw !== 'string') return null
 
