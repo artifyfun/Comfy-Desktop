@@ -146,7 +146,9 @@ export const DEFAULT_DISABLED_BUILTIN_SKILLS: ReadonlySet<string> = new Set([
   'music-video-subtitle-generator',
   'paper-collage-explainer-generator',
   'papercraft-stop-motion-explainer',
-  'minimalist-product-ad-generator'
+  'minimalist-product-ad-generator',
+  // —— 用户不用的模型系 ——
+  'flux-image-best-practices'
 ])
 
 export class SkillLibrary {

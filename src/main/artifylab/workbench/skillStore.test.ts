@@ -363,7 +363,12 @@ describe('DEFAULT_DISABLED_BUILTIN_SKILLS — 默认禁用(C-H6 技能预算收�
   it('清单内内置技能无显式状态时默认 disabled', async () => {
     expect(DEFAULT_DISABLED_BUILTIN_SKILLS.has('ltxv2-video')).toBe(true)
     expect(DEFAULT_DISABLED_BUILTIN_SKILLS.has('ai-toolkit-trainer')).toBe(true)
+    expect(DEFAULT_DISABLED_BUILTIN_SKILLS.has('flux-image-best-practices')).toBe(true)
     expect(DEFAULT_DISABLED_BUILTIN_SKILLS.has('wb-orchestration')).toBe(false)
+    // 用户常用模型技能保持默认启用
+    expect(DEFAULT_DISABLED_BUILTIN_SKILLS.has('anima-base')).toBe(false)
+    expect(DEFAULT_DISABLED_BUILTIN_SKILLS.has('krea2-txt2img')).toBe(false)
+    expect(DEFAULT_DISABLED_BUILTIN_SKILLS.has('minimax-h3-video')).toBe(false)
   })
 
   it('deployTo 跳过默认禁用的内置技能(不进 codex 技能预算)', async () => {
@@ -372,8 +377,8 @@ describe('DEFAULT_DISABLED_BUILTIN_SKILLS — 默认禁用(C-H6 技能预算收�
     const os = await import('node:os')
     const root = mkdtempSync(join(os.tmpdir(), 'wb-skill-dd-'))
     const builtin = join(root, 'builtin')
-    // 造两个内置技能: 一个在默认禁用清单(ltxv2-video), 一个不在(flux-image-best-practices)
-    for (const name of ['ltxv2-video', 'flux-image-best-practices']) {
+    // 造两个内置技能: 一个在默认禁用清单(ltxv2-video), 一个不在(prompt-engineering)
+    for (const name of ['ltxv2-video', 'prompt-engineering']) {
       mkdirSync(join(builtin, name), { recursive: true })
       writeFileSync(
         join(builtin, name, 'SKILL.md'),
@@ -388,7 +393,7 @@ describe('DEFAULT_DISABLED_BUILTIN_SKILLS — 默认禁用(C-H6 技能预算收�
     const dest = join(root, 'codex-home')
     lib.deployTo(dest)
     const deployed = join(dest, 'skills')
-    expect(defaultFsExists(join(deployed, 'flux-image-best-practices'))).toBe(true)
+    expect(defaultFsExists(join(deployed, 'prompt-engineering'))).toBe(true)
     expect(defaultFsExists(join(deployed, 'ltxv2-video'))).toBe(false)
     // 显式开启后部署
     lib.setEnabled('ltxv2-video', true)
