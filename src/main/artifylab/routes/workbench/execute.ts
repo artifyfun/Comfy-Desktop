@@ -231,17 +231,22 @@ export function registerExecuteRoutes(router: express.Router): void {
             )
           return
         }
-        const app = workbenchService.publishWorkflow(name, snapshot)
-        if (!app) {
+        const result = workbenchService.publishWorkflow(name, snapshot)
+        if (!result) {
           res
             .status(HTTP_STATUS.INTERNAL_SERVER_ERROR)
             .json(createErrorResponse('publish canvas workflow failed'))
           return
         }
-        logger.info(`workbench: published app ${app.id} from canvas snapshot ${promptId}`)
+        logger.info(
+          `workbench: published app ${result.appId} (${result.mode} v${result.version}) from canvas snapshot ${promptId}`
+        )
         res.status(HTTP_STATUS.CREATED).json(
           createSuccessResponse({
-            appId: app.id,
+            appId: result.appId,
+            // 同名唯一时这里是迭代（旧版已快照，可在模板的版本历史里恢复）而非新建
+            mode: result.mode,
+            version: result.version,
             source: 'canvas',
             uiSkipped: Boolean(buildUi)
           })

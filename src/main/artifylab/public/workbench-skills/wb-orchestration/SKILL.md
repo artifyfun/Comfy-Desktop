@@ -41,7 +41,9 @@ description: Artify 工作台多步编排与工作流创作指南。当需求需
 2. 从「环境快照」模型清单选底模：文生图用 checkpoints 或 UNETLoader 可加载的模型 + VAE；风格化需求叠加对应 LoRA（名字含风格的优先）。
 3. `wb_validate_workflow(workflow)` 先校验 API 格式 workflow JSON（节点类型/链接完整性，可迭代修正）。
 4. `wb_run_workflow(workflow, wait=true)` 直接运行；seed/node_overrides/use_previous_output 可传。产物自动落会话。
-5. 效果好的可 `wb_publish_workflow(name, workflow)` 固化为新模板，供后续复用。**缺省自动推断输入参数**（提示词 / seed / steps / cfg / 尺寸 / 参考图槽）与输出节点，固化后直接能用 `wb_execute_template` 填参复跑；要精确控制参数面时用 `params_nodes` 显式覆盖。**用户在画布上手动搭好并跑通的工作流**无需重传本体——直接 `wb_publish_workflow(name, prompt_id=<该次执行的 promptId>)` 即可沉淀（服务端已存工作流快照，仅保留最近 30 次执行）。用户对某次画布结果满意、或某条操作链值得反复用时，主动提议沉淀。
+5. 效果好的可 `wb_publish_workflow(name, workflow)` 固化为模板，供后续复用。**缺省自动推断输入参数**（提示词 / seed / steps / cfg / 尺寸 / 参考图槽）与输出节点，固化后直接能用 `wb_execute_template` 填参复跑；要精确控制参数面时用 `params_nodes` 显式覆盖。**用户在画布上手动搭好并跑通的工作流**无需重传本体——直接 `wb_publish_workflow(name, prompt_id=<该次执行的 promptId>)` 即可沉淀（服务端已存工作流快照，仅保留最近 30 次执行）。
+   - **新建还是迭代**：同名模板**恰好一个**时视为「迭代它」，写入新版本（旧版自动快照，用户可在模板的版本历史里恢复），结果回 `mode=versioned` 与新的 `version`；没有同名则新建（`mode=created`）。所以**对同一模板改一版再沉淀就直接传同一个 name**，别起新名字（否则会攒出一堆近似重复模板）。想做**变体**而非迭代时传 `force_new=true`；要明确迭代某个模板传 `app_id`（`wb_list_templates` 可查；id 无效会报错，不会静默新建）。
+   - 用户对某次画布结果满意、或某条操作链值得反复用时，主动提议沉淀。
 
 API 格式：`{"节点id": {"class_type": "节点类名", "inputs": {"参数名": 值 或 ["上游id", 端口号]}}}`；链接字段值为 `["上游节点id", 输出端口下标]`。
 

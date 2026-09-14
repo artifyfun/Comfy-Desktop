@@ -9,7 +9,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { tmpdir } from 'node:os'
 
-const h = vi.hoisted(() => ({ created: [] as Array<Record<string, unknown>> }))
+const h = vi.hoisted(() => ({
+  created: [] as Array<Record<string, unknown>>,
+  updated: [] as Array<{ id: string; patch: Record<string, unknown> }>,
+  /** findAppsByName 的返回（模拟模板库里已有的同名模板） */
+  sameName: [] as Array<{ id: string; name: string }>,
+  /** getAppById 的可控返回值（按 id） */
+  byId: new Map<string, { id: string; name: string }>(),
+  /** currentAppVersion 的返回值 */
+  version: 1
+}))
 
 vi.mock('electron', () => ({
   app: { getAppPath: () => '', getPath: () => tmpdir(), on: vi.fn(), once: vi.fn() }
@@ -24,8 +33,18 @@ vi.mock('../appStore', () => ({
     createApp: vi.fn((input: Record<string, unknown>) => {
       h.created.push(input)
       return { id: 'app-published', ...input }
-    })
+    }),
+    updateApp: vi.fn((id: string, patch: Record<string, unknown>) => {
+      h.updated.push({ id, patch })
+      return { id, name: '迭代中的模板', ...patch }
+    }),
+    getAppById: vi.fn((id: string) => h.byId.get(id)),
+    findAppsByName: vi.fn(() => h.sameName)
   }
+}))
+// 版本号来自 gallery.db，测试里直接给定，避免碰真实用户数据
+vi.mock('../appAssets', () => ({
+  currentAppVersion: vi.fn(() => h.version)
 }))
 vi.mock('../server', () => ({
   default: {},
@@ -58,6 +77,10 @@ const workflow = {
 
 beforeEach(() => {
   h.created.length = 0
+  h.updated.length = 0
+  h.sameName = []
+  h.byId.clear()
+  h.version = 1
 })
 
 describe('publishWorkflow 缺省推断', () => {
@@ -101,5 +124,91 @@ describe('publishWorkflow 缺省推断', () => {
     workbenchService.publishWorkflow('赛博朋克人像', workflow)
     expect(h.created[0]!.name).toBe('赛博朋克人像')
     expect((h.created[0]!.template as { prompt: ComfyPrompt }).prompt).toBe(workflow)
+  })
+})
+
+/**
+ * 迭代语义（2026-09-14 修）：此前固定 createApp → 「同一模板改一版再沉淀」只会不断
+ * 产生同名重复 App，app_versions 永不累积，版本历史对 AI 沉淀的模板等于不可用。
+ */
+describe('publishWorkflow 迭代语义（同名 / 显式 app_id / force_new）', () => {
+  it('同名唯一 → 迭代既有模板（走 updateApp，不新建）', () => {
+    h.sameName = [{ id: 'app-existing', name: '我的画布工作流' }]
+    h.version = 3
+
+    const result = workbenchService.publishWorkflow('我的画布工作流', workflow)
+
+    expect(result?.mode).toBe('versioned')
+    expect(result?.appId).toBe('app-existing')
+    expect(result?.version).toBe(3)
+    expect(h.created).toHaveLength(0)
+    expect(h.updated).toHaveLength(1)
+    expect(h.updated[0]!.id).toBe('app-existing')
+    // 新 template 真的被写入，且带上了推断出的输入参数
+    const patch = h.updated[0]!.patch.template as { paramsNodes: Array<{ category: string }> }
+    expect(patch.paramsNodes.some((n) => n.category === 'input')).toBe(true)
+  })
+
+  it('同名多个 → 不猜，改为新建（历史遗留重复交给调用方用 app_id 指定）', () => {
+    h.sameName = [
+      { id: 'app-a', name: 'w' },
+      { id: 'app-b', name: 'w' }
+    ]
+
+    const result = workbenchService.publishWorkflow('w', workflow)
+
+    expect(result?.mode).toBe('created')
+    expect(h.updated).toHaveLength(0)
+    expect(h.created).toHaveLength(1)
+  })
+
+  it('force_new → 即使同名唯一也新建（做变体而非迭代）', () => {
+    h.sameName = [{ id: 'app-existing', name: 'w' }]
+
+    const result = workbenchService.publishWorkflow('w', workflow, undefined, { forceNew: true })
+
+    expect(result?.mode).toBe('created')
+    expect(h.updated).toHaveLength(0)
+    expect(h.created).toHaveLength(1)
+  })
+
+  it('显式 app_id → 迭代指定模板（同名的那一个不受影响）', () => {
+    h.sameName = [{ id: 'app-by-name', name: 'w' }]
+    h.byId.set('app-explicit', { id: 'app-explicit', name: '别的名字' })
+
+    const result = workbenchService.publishWorkflow('w', workflow, undefined, {
+      appId: 'app-explicit'
+    })
+
+    expect(result?.mode).toBe('versioned')
+    expect(result?.appId).toBe('app-explicit')
+    expect(h.updated[0]!.id).toBe('app-explicit')
+  })
+
+  it('app_id 不存在 → 返回 null，绝不静默新建', () => {
+    const result = workbenchService.publishWorkflow('w', workflow, undefined, { appId: 'nope' })
+
+    expect(result).toBeNull()
+    expect(h.created).toHaveLength(0)
+    expect(h.updated).toHaveLength(0)
+  })
+
+  it('无同名 → 新建，mode=created 且版本为 1', () => {
+    const result = workbenchService.publishWorkflow('全新模板', workflow)
+
+    expect(result?.mode).toBe('created')
+    expect(result?.version).toBe(1)
+  })
+
+  it('显式 params_nodes 在迭代路径下同样生效', () => {
+    h.sameName = [{ id: 'app-existing', name: 'w' }]
+    const explicit = [
+      { id: 6, name: 'my_prompt', category: 'input', type: 'string', renderComponent: 'textarea' }
+    ] as never
+
+    workbenchService.publishWorkflow('w', workflow, explicit)
+
+    const patch = h.updated[0]!.patch.template as { paramsNodes: unknown[] }
+    expect(patch.paramsNodes).toEqual(explicit)
   })
 })

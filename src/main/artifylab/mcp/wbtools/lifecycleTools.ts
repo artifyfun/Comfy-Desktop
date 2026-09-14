@@ -53,11 +53,15 @@ export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
     tool: {
       name: 'wb_publish_workflow',
       description:
-        '把 workflow 固化为新 App（进模板库，长期复用）。两种来源：直接给 workflow（API 格式），或给 prompt_id 沉淀「画布上刚跑通的那次执行」（用户在画布上手动搭的工作流无需重传本体）。缺省自动推断输入参数（提示词/seed/steps/尺寸/参考图槽）与输出节点——固化后即可用 wb_execute_template 填参复跑；要精确控制参数面时用 params_nodes 显式覆盖。用户对某次画布结果满意、或某条操作链值得反复用时用它沉淀。',
+        '把 workflow 固化为模板（进模板库，长期复用）。两种来源：直接给 workflow（API 格式），或给 prompt_id 沉淀「画布上刚跑通的那次执行」（用户在画布上手动搭的工作流无需重传本体）。缺省自动推断输入参数（提示词/seed/steps/尺寸/参考图槽）与输出节点——固化后即可用 wb_execute_template 填参复跑；要精确控制参数面时用 params_nodes 显式覆盖。\n\n新建还是迭代：默认按 name 判断——若模板库里**恰好有一个同名模板**，则视为「迭代它」，写入其新版本（旧版本自动快照，用户可在模板的版本历史里恢复），返回 mode=versioned 与新的 version；没有同名则新建（mode=created）。要强制新建变体而非迭代，传 force_new=true；要明确迭代某个模板，传 app_id（wb_list_templates 可查 id）。\n\n用户对某次画布结果满意、或某条操作链值得反复用时用它沉淀。',
       inputSchema: {
         type: 'object',
         properties: {
-          name: { type: 'string', description: '新 App 名称' },
+          name: {
+            type: 'string',
+            description:
+              '模板名称。同名唯一时会被视为「迭代既有模板」的判定依据；想另起一个独立模板就换个名字。'
+          },
           workflow: {
             type: 'object',
             description: 'API 格式 workflow（与 prompt_id 二选一）',
@@ -72,6 +76,16 @@ export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
             type: 'array',
             description: '可选：显式参数 schema（缺省按输出节点推断）',
             items: { type: 'object' }
+          },
+          app_id: {
+            type: 'string',
+            description:
+              '可选：明确要迭代（写入新版本）的既有模板 id。给了它就不再看 name 同名。id 不存在会明确报错，不会静默新建。'
+          },
+          force_new: {
+            type: 'boolean',
+            description:
+              '可选：即使存在同名模板也强制新建一个独立模板（做变体用）。默认 false = 同名唯一时迭代。'
           }
         },
         required: ['name'],
@@ -106,16 +120,30 @@ export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
         source = 'canvas'
       }
 
-      const app = workbenchService.publishWorkflow(
+      const result = workbenchService.publishWorkflow(
         name,
         workflow,
-        args.params_nodes as ParamNode[] | undefined
+        args.params_nodes as ParamNode[] | undefined,
+        {
+          appId: (args.app_id as string | undefined) ?? (args.appId as string | undefined),
+          forceNew: args.force_new === true || args.forceNew === true
+        }
       )
       // 回传固化后的可填参数名——模型据此告诉用户「这个模板以后能改哪些」
-      const inputParams = (app?.template?.paramsNodes ?? [])
+      const inputParams = (result?.app?.template?.paramsNodes ?? [])
         .filter((n) => n.category === 'input')
         .map((n) => n.name)
-      return text({ ok: !!app, app_id: app?.id, name, source, input_params: inputParams })
+      return text({
+        ok: !!result,
+        app_id: result?.appId,
+        name,
+        source,
+        // created / versioned 让模型（与用户）明确刚才发生的是新建还是迭代
+        mode: result?.mode,
+        version: result?.version,
+        input_params: inputParams,
+        ...(result ? {} : { error: '目标 App 不存在（app_id 无效），或固化失败' })
+      })
     }
   },
   {

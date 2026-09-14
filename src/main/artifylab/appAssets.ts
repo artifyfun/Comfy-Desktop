@@ -151,3 +151,18 @@ export function getAppVersion(appId: string, version: number): Record<string, un
   if (!row) return null
   return JSON.parse(row.app_json) as Record<string, unknown>
 }
+
+/**
+ * 当前（生效）版本号。
+ *
+ * 语义关键：`app_versions` 里存的是**被替换掉的旧状态**（`snapshotAppVersion` 在
+ * update 覆盖前调用），所以生效版本 = 最大快照号 + 1。没有任何快照时说明从未被
+ * 更新过，生效版本为 1。
+ */
+export function currentAppVersion(appId: string): number {
+  initAppVersionsTable()
+  const row = getGalleryDb()
+    .prepare('SELECT MAX(version) AS v FROM app_versions WHERE app_id = ?')
+    .get(appId) as { v: number | null }
+  return (row.v ?? 0) + 1
+}

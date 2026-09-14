@@ -10,7 +10,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { tmpdir } from 'node:os'
 
 const h = vi.hoisted(() => ({
-  published: [] as Array<{ name: string; workflow: unknown }>
+  published: [] as Array<{ name: string; workflow: unknown; opts?: Record<string, unknown> }>,
+  /** 工具结果里的 mode/version 由 mock 决定，便于断言透传 */
+  resultMode: 'created' as 'created' | 'versioned',
+  resultVersion: 1,
+  /** 设为 true 模拟「目标 App 不存在」的失败返回 */
+  failPublish: false
 }))
 
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir(), getAppPath: () => '' } }))
@@ -20,20 +25,28 @@ vi.mock('../../../utils/logger', () => ({
 vi.mock('../../workbench/service', () => ({
   workbenchService: {
     getSession: vi.fn((id: string) => (id ? { id } : null)),
-    publishWorkflow: vi.fn((name: string, workflow: unknown) => {
-      h.published.push({ name, workflow })
-      return {
-        id: 'app-published',
-        name,
-        template: {
-          paramsNodes: [
-            { name: 'prompt', category: 'input' },
-            { name: 'seed', category: 'input' },
-            { name: 'result', category: 'output' }
-          ]
+    publishWorkflow: vi.fn(
+      (name: string, workflow: unknown, _paramsNodes?: unknown, opts?: Record<string, unknown>) => {
+        h.published.push({ name, workflow, opts })
+        if (h.failPublish) return null
+        return {
+          app: {
+            id: 'app-published',
+            name,
+            template: {
+              paramsNodes: [
+                { name: 'prompt', category: 'input' },
+                { name: 'seed', category: 'input' },
+                { name: 'result', category: 'output' }
+              ]
+            }
+          },
+          appId: 'app-published',
+          mode: h.resultMode,
+          version: h.resultVersion
         }
       }
-    })
+    )
   }
 }))
 vi.mock('../../appStore', () => ({ default: { getConfig: () => ({}) } }))
@@ -65,6 +78,9 @@ function payload(res: unknown): Record<string, unknown> {
 
 beforeEach(() => {
   h.published.length = 0
+  h.resultMode = 'created'
+  h.resultVersion = 1
+  h.failPublish = false
   canvasWorkflowStore.clear()
   endWorkbenchToolContext('s1')
   beginWorkbenchToolContext('s1')
@@ -148,5 +164,59 @@ describe('未在 decide 会话内调用', () => {
     await expect(publishTool.fn({ name: 'w', prompt_id: 'p1' })).rejects.toThrow(
       /outside decide session/
     )
+  })
+})
+
+/**
+ * 迭代语义（2026-09-14）：工具要把「新建 or 迭代」与生效版本号如实回传，
+ * 并把 app_id / force_new 透传到 service——否则模型无法知道刚才发生了什么，
+ * 也无法定向迭代某个模板。
+ */
+describe('迭代语义透传（mode / version / app_id / force_new）', () => {
+  it('回传 mode 与 version（迭代时为 versioned + 递增版本号）', async () => {
+    h.resultMode = 'versioned'
+    h.resultVersion = 4
+    canvasWorkflowStore.remember('p1', canvasWorkflow)
+
+    const out = payload(await publishTool.fn({ name: 'w', prompt_id: 'p1' }, 's1'))
+
+    expect(out.ok).toBe(true)
+    expect(out.mode).toBe('versioned')
+    expect(out.version).toBe(4)
+  })
+
+  it('app_id 透传到 publishWorkflow（定向迭代）', async () => {
+    canvasWorkflowStore.remember('p1', canvasWorkflow)
+
+    await publishTool.fn({ name: 'w', prompt_id: 'p1', app_id: 'app-target' }, 's1')
+
+    expect(h.published[0]!.opts).toEqual({ appId: 'app-target', forceNew: false })
+  })
+
+  it('app_id 驼峰别名同样可用', async () => {
+    canvasWorkflowStore.remember('p1', canvasWorkflow)
+
+    await publishTool.fn({ name: 'w', prompt_id: 'p1', appId: 'app-camel' }, 's1')
+
+    expect(h.published[0]!.opts).toEqual({ appId: 'app-camel', forceNew: false })
+  })
+
+  it('force_new 透传（强制新建变体）', async () => {
+    canvasWorkflowStore.remember('p1', canvasWorkflow)
+
+    await publishTool.fn({ name: 'w', prompt_id: 'p1', force_new: true }, 's1')
+
+    expect(h.published[0]!.opts).toEqual({ appId: undefined, forceNew: true })
+  })
+
+  it('service 返回 null（app_id 无效等）→ ok=false 且给出可读原因，不假装成功', async () => {
+    h.failPublish = true
+    canvasWorkflowStore.remember('p1', canvasWorkflow)
+
+    const out = payload(await publishTool.fn({ name: 'w', prompt_id: 'p1', app_id: 'nope' }, 's1'))
+
+    expect(out.ok).toBe(false)
+    expect(String(out.error)).toContain('app_id')
+    expect(out.app_id).toBeUndefined()
   })
 })

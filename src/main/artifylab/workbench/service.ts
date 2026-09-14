@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, readdirSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import appStoreManager, { type App, type ComfyPrompt, type ParamNode } from '../appStore'
+import { currentAppVersion } from '../appAssets'
 import { logger } from '../utils/logger'
 import { AgentRuntime, type AgentProgressCallback as DecideProgressCallback } from './agentRuntime'
 import {
@@ -131,6 +132,16 @@ export type {
   DecideProgressEvent,
   AgentProgressCallback as DecideProgressCallback
 } from './agentRuntime'
+
+/** publishWorkflow 的结果：区分「新建」与「迭代既有模板」并回报生效版本号 */
+export interface PublishWorkflowResult {
+  app: App
+  /** created = 新建 App；versioned = 迭代既有 App（旧版本已自动快照，可恢复） */
+  mode: 'created' | 'versioned'
+  /** 写入后的生效版本号（新建为 1；迭代则递增） */
+  version: number
+  appId: string
+}
 
 /** 会话内保留的最大调试日志条数（每条 ~10KB，防 workbench-sessions.json 膨胀） */
 const MAX_DEBUG_LOGS = 10
@@ -1213,22 +1224,56 @@ class WorkbenchService {
   }
 
   /**
-   * 固化为新 App（wb_publish_workflow / 前端固化）：workflow prompt + 可选
-   * paramsNodes（缺省按输出节点推断）→ createApp。复用现有 publish 链路。
+   * 固化为 App（wb_publish_workflow / 前端固化 / 画布产物发布）：workflow prompt +
+   * 可选 paramsNodes（缺省自动推断输入槽与输出节点）。
+   *
+   * **迭代语义（2026-09-14 修）**：此前固定走 `createApp`，于是「同一模板改一版再沉淀」
+   * 只会不断产生同名重复 App，`app_versions` 永远不累积——版本历史（已存在于
+   * gallery.db + 前端 VersionModal）对 AI 沉淀出的模板等于不可用。现在：
+   *   - 显式 `opts.appId` → 版本化更新那个 App
+   *   - 未给 appId 且**同名 App 恰好一个** → 视为迭代，版本化更新它
+   *   - 其余（无同名 / 同名多个）→ 新建
+   *   - `opts.forceNew` → 强制新建（想做「变体」而非「迭代」时用）
+   * 版本化走 `updateApp`，覆盖前会自动快照旧版本，所以每次迭代都可回滚。
    */
-  publishWorkflow(name: string, workflow: ComfyPrompt, paramsNodes?: ParamNode[]): App | null {
+  publishWorkflow(
+    name: string,
+    workflow: ComfyPrompt,
+    paramsNodes?: ParamNode[],
+    opts: { appId?: string; forceNew?: boolean } = {}
+  ): PublishWorkflowResult | null {
     // 缺省推断 = 输入槽（#8：让沉淀出的模板真的可填参数）+ 输出节点（产物提取白名单）。
     // 此前只推断输出节点 → 固化出的模板改不了提示词/seed/参考图，「复用」是空的。
     const inferred = paramsNodes?.length
       ? paramsNodes
       : [...inferInputParamNodes(workflow), ...inferOutputParamNodes(workflow)]
-    const newApp = appStoreManager.createApp({
-      name,
-      description: name,
-      template: { prompt: workflow, paramsNodes: inferred, workflow: undefined }
-    })
+    const template = { prompt: workflow, paramsNodes: inferred, workflow: undefined }
+
+    const explicitId = opts.appId?.trim()
+    let target: App | undefined
+    if (explicitId) {
+      target = appStoreManager.getAppById(explicitId)
+      if (!target) {
+        logger.warn(`workbench: publish target app "${explicitId}" not found`)
+        return null
+      }
+    } else if (!opts.forceNew) {
+      // 同名唯一 = 迭代；同名多个说明历史上已经产生了重复，不再猜（交给调用方传 app_id）
+      const sameName = appStoreManager.findAppsByName(name)
+      if (sameName.length === 1) target = sameName[0]
+    }
+
+    if (target) {
+      const updated = appStoreManager.updateApp(target.id, { template })
+      if (!updated) return null
+      const version = currentAppVersion(target.id)
+      logger.info(`workbench: versioned app ${target.id} ("${name}") → v${version}`)
+      return { app: updated, appId: target.id, mode: 'versioned', version }
+    }
+
+    const newApp = appStoreManager.createApp({ name, description: name, template })
     logger.info(`workbench: published app ${newApp.id} from raw workflow "${name}"`)
-    return newApp
+    return { app: newApp, appId: newApp.id, mode: 'created', version: currentAppVersion(newApp.id) }
   }
 
   /** 查询执行状态并回填产物（SSE 轮询用） */

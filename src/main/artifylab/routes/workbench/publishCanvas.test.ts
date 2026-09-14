@@ -46,7 +46,12 @@ vi.mock('../../workbench/service', () => ({
     }),
     publishWorkflow: vi.fn((name: string, workflow: unknown) => {
       h.publishedWorkflow.push({ name, workflow })
-      return { id: 'app-from-canvas', name, template: { paramsNodes: [] } }
+      return {
+        app: { id: 'app-from-canvas', name, template: { paramsNodes: [] } },
+        appId: 'app-from-canvas',
+        mode: 'created',
+        version: 1
+      }
     })
   }
 }))

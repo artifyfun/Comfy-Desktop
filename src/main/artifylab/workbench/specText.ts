@@ -30,7 +30,7 @@ const MAIN_RULES = `规则：
      （UNETLoader+CLIPLoader=分离系走各自规则；CheckpointLoader 按
      「环境快照」模型清单里的家族名）。
    - 校验执行：wb_validate_workflow → wb_run_workflow(workflow, wait=true)；产物自动落会话；
-   - 效果好可 wb_publish_workflow 固化供复用。
+   - 效果好可 wb_publish_workflow 固化供复用；**迭代同一模板就沿用同一个 name**（同名唯一时会写入新版本并可回滚，不是新建重复模板），要做变体则传 force_new=true。
    自组才是「根据需求建工作流」，宁可多调几次工具，也别为了省事硬套不合适的固化模板。
 1.2 **模型知识查询**（涉及 lora/模型选型或写提示词没把握时）：wb_query_models 查本机模型的 civitai 触发词/用法提示/官方示例提示词（action=search 搜清单，action=detail 拿单模型详情）——用 lora 前先看触发词与示例提示词，别凭空猜触发词；用法细则见 wb-model-knowledge skill。
 2. intent=text 走纯文本生成（文案/起名/总结等），把生成结果放 reply。

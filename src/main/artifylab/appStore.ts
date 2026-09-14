@@ -102,6 +102,14 @@ class AppStoreManager extends EventEmitter {
     return apps.find((app) => app.id === id)
   }
 
+  /**
+   * 按名称精确查找（同名可能不止一个——历史遗留的重复固化）。
+   * 调用方通常只关心 id，故用序列化视图即可。
+   */
+  findAppsByName(name: string): App[] {
+    return this.getAllApps().filter((app) => app.name === name)
+  }
+
   // 创建app
   createApp(appData: Omit<App, 'id' | 'createdAt' | 'updatedAt'>): App {
     const apps = this.getAllRawApps()
