@@ -237,6 +237,38 @@ describe('aguiBridge — emit 序列 → 页面消息模型', () => {
     expect(pageApi.messages.value[1].text).toBe('生成失败')
   })
 
+  /**
+   * 传输层（2026-09-15）：工具 → SSE 的 CUSTOM `wb_canvas_ops` 到页面副作用的这一段。
+   * 桥按 pageApi.applyExecutionSideEffect 分派；载荷必须**原样**带过去（含 ops 与 source），
+   * 否则画布页拿不到 ops（此前这一段完全没有测试）。
+   * 上游一半见 src/main/artifylab/routes/agui.test.ts 的 wb_canvas_ops 帧断言。
+   */
+  it("wb_canvas_ops CUSTOM → pageApi.applyExecutionSideEffect('canvas-ops', value) 原样透传", () => {
+    const sideEffect = vi.fn()
+    pageApi.applyExecutionSideEffect = sideEffect
+    const value = {
+      ops: [
+        { type: 'add_app_node', appId: 'app:aaa', name: '文生图', nodeId: 'wf-m-0-a1' },
+        { type: 'select_nodes', ids: ['wf-m-0-a1'] },
+      ],
+      source: 'wb_build_workflow',
+    }
+    feed([{ type: 'CUSTOM', timestamp: 1, name: 'wb_canvas_ops', value }], pageApi, state)
+    expect(sideEffect).toHaveBeenCalledTimes(1)
+    expect(sideEffect).toHaveBeenCalledWith('canvas-ops', value)
+  })
+
+  it('wb_canvas_ops 无 applyExecutionSideEffect 时不炸（独立页/降级）', () => {
+    // pageApi 不带该钩子：桥必须静默容忍，不能抛
+    expect(() =>
+      feed(
+        [{ type: 'CUSTOM', timestamp: 1, name: 'wb_canvas_ops', value: { ops: [] } }],
+        pageApi,
+        state,
+      ),
+    ).not.toThrow()
+  })
+
   it('RUN_ERROR → 错误气泡并收掉进度气泡', () => {
     const prog = pageApi.pushMsg({
       role: 'agent',

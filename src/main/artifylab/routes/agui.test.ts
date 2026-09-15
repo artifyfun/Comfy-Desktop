@@ -59,6 +59,7 @@ vi.mock('../appStore', () => ({
 
 import { workbenchService } from '../workbench/service'
 import { stopExecution } from '../mcp/executor'
+import { registerCanvasOpsEmit } from '../mcp/wbtools/canvasTools'
 import type {
   WorkbenchSession,
   WorkbenchExecution,
@@ -344,6 +345,53 @@ describe('POST /api/workbench/agent/run', () => {
     expect(mockSetCanvasSyncHandler).toHaveBeenCalledTimes(2)
     expect(mockSetCanvasSyncHandler.mock.calls[0]![1]).toBe('s1')
     expect(mockSetCanvasSyncHandler.mock.calls[1]![0]).toBe(null)
+  })
+
+  it('wb_build_workflow 的 ops 经 CUSTOM wb_canvas_ops 帧下发（工具 → SSE 传输层）', async () => {
+    await startServer()
+    mockDecide.mockImplementation(
+      scriptDecide(fullTurnEvents, { intent: 'image', templateId: 't1' })
+    )
+
+    // 工具产出的 ops 形状（与 canvasTools 一致：appId 是模板 id，节点引用走 nodeId）
+    const toolOps = [
+      { type: 'add_app_node', appId: 'app:aaa', name: '文生图', nodeId: 'wf-m-0-a1', x: 80, y: 80 },
+      {
+        type: 'add_app_node',
+        appId: 'app:bbb',
+        name: '图生视频',
+        nodeId: 'wf-m-1-b2',
+        x: 440,
+        y: 80
+      },
+      {
+        type: 'connect_nodes',
+        from: 'wf-m-0-a1',
+        to: 'wf-m-1-b2',
+        fromName: '文生图',
+        toName: '图生视频'
+      },
+      { type: 'select_nodes', ids: ['wf-m-0-a1', 'wf-m-1-b2'] }
+    ]
+
+    // 真实时机：wb_build_workflow 在 run 进行中被调用 → 经注册的 emit 直推。
+    // 这里在 execute 期间触发，验证「注册的 emit 产出的确实是 wb_canvas_ops 帧、载荷原样」。
+    mockExecute.mockImplementation(async () => {
+      const last = (
+        registerCanvasOpsEmit as unknown as { mock: { calls: unknown[][] } }
+      ).mock.calls.at(-1)
+      const push = last?.[1] as ((ops: unknown, meta: { source: string }) => void) | undefined
+      push?.(toolOps, { source: 'wb_build_workflow' })
+      return makeExecution()
+    })
+
+    const res = await post('/api/workbench/agent/run', VALID_BODY)
+    const frames = parseSseFrames(await res.text())
+
+    const opsFrames = frames.filter((f) => f.type === 'CUSTOM' && f.name === 'wb_canvas_ops')
+    expect(opsFrames).toHaveLength(1)
+    // 载荷原样透传——前端 aguiBridge 靠 value.ops 走 sideEffect('canvas-ops')
+    expect(opsFrames[0]!.value).toEqual({ ops: toolOps, source: 'wb_build_workflow' })
   })
 
   it('plan 为 null:不发 wb_plan,RUN_ERROR 即终帧(终帧统一口径,无 RUN_FINISHED)', async () => {
