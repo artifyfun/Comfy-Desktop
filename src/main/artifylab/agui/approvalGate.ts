@@ -184,7 +184,15 @@ export interface ApprovalGate {
    * 且不消费 pending,可重新应答);reject → 拒绝。超时由内部 timer 按 reject 兜底。
    * 未知 threadId/requestId 或已终态 → 返回 false(幂等忽略)。
    */
-  resolve(threadId: string, requestId: string, action: ApprovalAction, args?: unknown): boolean
+  resolve(
+    threadId: string,
+    requestId: string,
+    action: ApprovalAction,
+    args?: unknown,
+    opts?: { alwaysAllow?: boolean }
+  ): boolean
+  /** 该 thread 是否已对某工具授予「总是允许」(前端卡片可据此隐藏按钮) */
+  isAlwaysAllowed(threadId: string, toolName: string): boolean
 }
 
 // ==================== 实现 ====================
@@ -236,6 +244,8 @@ export function createApprovalGate(opts: {
   const onResolvedHooks = new Map<string, (r: ApprovalResolvedInfo) => void>()
   /** threadId → requestId → 挂起审批(同 thread 并发多 pending;跨 thread 隔离) */
   const pendings = new Map<string, Map<string, PendingApproval>>()
+  // C-H10 Always Allow:threadId → 用户点过「总是允许」的工具名集合(会话级记忆)
+  const alwaysAllowed = new Map<string, Set<string>>()
 
   /** 消费一个 pending:摘表 + 清 timer + settle;不存在返回 false(幂等/未知) */
   function finish(threadId: string, requestId: string, result: InterceptResult): boolean {
@@ -299,6 +309,13 @@ export function createApprovalGate(opts: {
       // 防御归一化:MCP 入参顶层必须是对象,否则按空参处理(不阻断白名单语义)
       const safeArgs = isPlainObject(args) ? args : {}
 
+      // C-H10 Always Allow:用户在本会话对该工具点过「总是允许」→ 直通。
+      // 会话级记忆(随 Electron 进程存活,不跨会话),红线不变:每会话首次
+      // execute 仍必弹卡——执行类工具永不全局静默。
+      if (alwaysAllowed.get(threadId)?.has(toolName)) {
+        return Promise.resolve({ suspended: false, approved: true, args: safeArgs })
+      }
+
       // B1 低危自动放行:该工具在当前 thread 审批模式下无需人审
       // (read 永不审;write 在 standard 下自动;execute 两档都审)→ 直通,
       // 不挂起、不通知——与 C14 引入前「白名单外直通」的行为等价。
@@ -350,7 +367,7 @@ export function createApprovalGate(opts: {
       })
     },
 
-    resolve(threadId, requestId, action, args) {
+    resolve(threadId, requestId, action, args, opts) {
       const byRequest = pendings.get(threadId)
       const pending = byRequest?.get(requestId)
       // 未知 threadId/requestId / 已终态 → 幂等忽略(路由层映射 404)
@@ -362,10 +379,23 @@ export function createApprovalGate(opts: {
         return finish(threadId, requestId, { suspended: true, approved: true, args })
       }
       if (action === 'approve') {
+        // C-H10 Always Allow:批准时勾选 → 本会话对该工具后续调用直通
+        if (opts?.alwaysAllow) {
+          let set = alwaysAllowed.get(threadId)
+          if (!set) {
+            set = new Set()
+            alwaysAllowed.set(threadId, set)
+          }
+          set.add(pending.toolName)
+        }
         return finish(threadId, requestId, { suspended: true, approved: true, args: pending.args })
       }
       // reject(含超时兜底语义):拒绝执行,不回带 args
       return finish(threadId, requestId, { suspended: true, approved: false })
+    },
+
+    isAlwaysAllowed(threadId, toolName) {
+      return alwaysAllowed.get(threadId)?.has(toolName) ?? false
     }
   }
 }

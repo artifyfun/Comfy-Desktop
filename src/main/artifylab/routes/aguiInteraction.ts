@@ -33,6 +33,8 @@ interface InteractionBody {
   requestId?: unknown
   action?: unknown
   args?: unknown
+  /** C-H10:approve 时勾选「总是允许」→ 本会话对该工具记忆放行 */
+  alwaysAllow?: unknown
 }
 
 export function createAguiInteractionRouter(deps: AguiInteractionDeps): Router {
@@ -77,9 +79,17 @@ export function createAguiInteractionRouter(deps: AguiInteractionDeps): Router {
       }
 
       // ---- 门控应答:edit 非对象 args 抛 ApprovalArgsError → 400(pending 不消费,可重试)----
+      // C-H10 Always Allow:approve 携带 alwaysAllow=true → 本会话对该工具记忆放行
+      const approveOpts = { alwaysAllow: body.alwaysAllow === true }
       let resolved: boolean
       try {
-        resolved = deps.gate.resolve(threadId, requestId, action as ApprovalAction, body.args)
+        resolved = deps.gate.resolve(
+          threadId,
+          requestId,
+          action as ApprovalAction,
+          body.args,
+          approveOpts
+        )
       } catch (e) {
         if (e instanceof ApprovalArgsError) {
           res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse(e.message))

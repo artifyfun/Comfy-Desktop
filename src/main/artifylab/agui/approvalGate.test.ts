@@ -523,3 +523,71 @@ describe('B1:低危自动放行(风险级×审批模式)', () => {
     expect(APPROVAL_MODE_DEFAULT).toBe('standard')
   })
 })
+
+describe('C-H10 Always Allow — 会话级工具记忆放行', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('approve + alwaysAllow → 同工具后续调用直通不弹卡', async () => {
+    const notify = vi.fn()
+    const gate = createApprovalGate({ whitelist: ['wb_execute_template'] })
+    gate.register('t1', notify)
+
+    // 首次:挂起弹卡
+    const p1 = gate.intercept('t1', 'wb_execute_template', {})
+    expect(notify).toHaveBeenCalledTimes(1)
+    const req = notify.mock.calls[0]![0] as ApprovalRequest
+    gate.resolve('t1', req.requestId, 'approve', undefined, { alwaysAllow: true })
+    await expect(p1).resolves.toMatchObject({ approved: true })
+
+    // 二次:直通不弹卡
+    notify.mockClear()
+    const r2 = await gate.intercept('t1', 'wb_execute_template', { id: 'x' })
+    expect(r2).toEqual({ suspended: false, approved: true, args: { id: 'x' } })
+    expect(notify).not.toHaveBeenCalled()
+    expect(gate.isAlwaysAllowed('t1', 'wb_execute_template')).toBe(true)
+  })
+
+  it('未勾选 alwaysAllow → 后续仍弹卡(默认行为不变)', async () => {
+    const notify = vi.fn()
+    const gate = createApprovalGate({ whitelist: ['wb_execute_template'] })
+    gate.register('t1', notify)
+
+    const p1 = gate.intercept('t1', 'wb_execute_template', {})
+    const req = notify.mock.calls[0]![0] as ApprovalRequest
+    gate.resolve('t1', req.requestId, 'approve')
+    await expect(p1).resolves.toMatchObject({ approved: true })
+
+    notify.mockClear()
+    const p2 = gate.intercept('t1', 'wb_execute_template', {})
+    expect(notify).toHaveBeenCalledTimes(1)
+    gate.resolve('t1', (notify.mock.calls[0]![0] as ApprovalRequest).requestId, 'approve')
+    await p2
+    expect(gate.isAlwaysAllowed('t1', 'wb_execute_template')).toBe(false)
+  })
+
+  it('记忆按会话隔离:t1 授权不影响 t2', async () => {
+    const notify = vi.fn()
+    const gate = createApprovalGate({ whitelist: ['wb_execute_template'] })
+    gate.register('t1', notify)
+    const p1 = gate.intercept('t1', 'wb_execute_template', {})
+    gate.resolve(
+      't1',
+      (notify.mock.calls[0]![0] as ApprovalRequest).requestId,
+      'approve',
+      undefined,
+      { alwaysAllow: true }
+    )
+    await p1
+
+    gate.register('t2', notify)
+    const p2 = gate.intercept('t2', 'wb_execute_template', {})
+    expect(notify).toHaveBeenCalledTimes(2) // t2 首次仍弹
+    gate.resolve('t2', (notify.mock.calls[1]![0] as ApprovalRequest).requestId, 'reject')
+    await expect(p2).resolves.toMatchObject({ approved: false })
+  })
+})

@@ -131,6 +131,14 @@
         </div>
       </div>
 
+      <!-- C-H10 Always Allow:本会话对该工具记忆放行 -->
+      <label
+        class="flex cursor-pointer select-none items-center gap-1.5 px-2 pb-1 text-[11px] text-[var(--wb-text-2)]"
+        data-testid="approval-always-wrap"
+      >
+        <input v-model="alwaysAllow" type="checkbox" class="accent-[var(--wb-accent)]" />
+        本会话内总是允许此工具
+      </label>
       <!-- 三操作:批准 / 拒绝 / 修改参数 -->
       <footer class="flex items-center gap-1.5 px-2 pb-2">
         <button
@@ -308,11 +316,13 @@ function submitEdit() {
 // ---------- 三操作(approve/reject 不带 args;超时后禁用不 emit) ----------
 /** 审查修复 M3:提交在途禁点(桥 respondApproval 亦有终态防抖,双保险) */
 const inFlight = computed(() => !!(props.message && props.message._approvalInFlight))
+/** C-H10 Always Allow:批准时一并请求本会话对该工具记忆放行 */
+const alwaysAllow = ref(false)
 
 function respond(action) {
   if (inFlight.value) return
   if (!isPending.value || timedOut.value) return
-  emit('respond', { action })
+  emit('respond', { action, alwaysAllow: action === 'approve' ? alwaysAllow.value : false })
 }
 
 // ---------- 终态单行结果条 ----------

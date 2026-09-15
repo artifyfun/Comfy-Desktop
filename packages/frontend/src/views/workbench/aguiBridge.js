@@ -756,7 +756,7 @@ export function createAguiBridge(pageApi, http = {}) {
    * 审查修复 M3:非 pending(已终态/在途)直接忽略;404 视为「已在他处解决」
    * 静默置终态不弹错;请求期间 _approvalInFlight 供卡片禁用按钮。
    */
-  async function respondApproval(msg, { action, args } = {}) {
+  async function respondApproval(msg, { action, args, alwaysAllow } = {}) {
     const value = msg && msg.approval
     if (!value || !value.requestId) return
     // 终态/在途防抖:双击第二下与后端已超时后的盲点都会打 404 误导用户
@@ -769,6 +769,7 @@ export function createAguiBridge(pageApi, http = {}) {
         requestId: value.requestId,
         action,
         ...(action === 'edit' ? { args } : {}),
+        ...(action === 'approve' && alwaysAllow ? { alwaysAllow: true } : {}),
       })
       if (res.status === 404) {
         // 已在他处解决(超时兜底 reject/另开窗口应答过):静默置终态,不再重试
