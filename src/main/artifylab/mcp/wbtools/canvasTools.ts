@@ -52,10 +52,24 @@ export interface BuiltWorkflow {
 }
 
 /**
+ * 批内节点引用名。**必须全局唯一**——它会被前端采纳为画布对象的真实 id，
+ * 而画布 doc 是持久化的，跨批重名会坏掉查找与 Vue key。故带时间戳 + 随机尾。
+ */
+function makeNodeRef(index: number): string {
+  return `wf-${Date.now().toString(36)}-${index}-${Math.random().toString(36).slice(2, 6)}`
+}
+
+/**
  * 模板 id 列表 → canvasOps。
  * - 每个 id 一个 add_app_node（网格坐标；会话变体 id 与库 id 同样接受）
  * - 多于 1 个时按顺序 connect_nodes 成链（A→B→C），并把全部节点 select_nodes
  *   （前端确认卡应用后用户视线直接落在成品上）
+ *
+ * **id 口径（2026-09-15 修正）**：`appId` 用模板 id（`app:<uuid>`），而
+ * `connect_nodes.from/to` 与 `select_nodes.ids` 必须引用**本批 add 的 nodeId**
+ * ——前端 `objects.find(o => o.id === ...)` 要的是画布对象 id，不是模板 id。
+ * 此前这里发 `app:${appId}`（且 appId 已带前缀 → `app:app:...`），前端永远匹配不到，
+ * 连线被静默丢弃（节点建出来、线是断的）。
  */
 export function buildCanvasOpsFromTemplateIds(
   sessionId: string,
@@ -68,7 +82,9 @@ export function buildCanvasOpsFromTemplateIds(
   templateIds.forEach((rawId, index) => {
     const id = String(rawId ?? '').trim()
     if (!id) return
-    const t = workbenchService.listTemplates(sessionId).find((x) => x.id === id)
+    // 经 resolveTemplate（内部 templateLibrary.get）解析：容忍 `app:<uuid>` 与裸 uuid
+    // 两种写法，同时覆盖本会话派生的 session: 变体。
+    const t = workbenchService.resolveTemplate(sessionId, id)
     if (!t) {
       missing.push(id)
       return
@@ -77,26 +93,35 @@ export function buildCanvasOpsFromTemplateIds(
     // 这里的 id 仅用于 ops 间引用与 select 定位语义；前端 add 后按 name 匹配）
     const col = index % GRID_COLS
     const row = Math.floor(index / GRID_COLS)
+    const nodeRef = makeNodeRef(index)
     placed.push({
       appId: t.id,
       name: t.name || t.id,
-      nodeId: `wf-${index}-${t.id.slice(-8)}`
+      nodeId: nodeRef
     })
     ops.push({
       type: 'add_app_node',
       appId: t.id,
       name: t.name || t.id,
+      // AI 侧引用名：前端优先采纳为对象 id，同批 connect/select 靠它落位
+      nodeId: nodeRef,
       x: ORIGIN_X + col * CELL_W,
       y: ORIGIN_Y + row * CELL_H
     })
   })
 
-  // 链式连接（≥2 个成功放置时）：按输入顺序 A→B
+  // 链式连接（≥2 个成功放置时）：按输入顺序 A→B，引用本批 nodeId
   for (let i = 1; i < placed.length; i++) {
     const prev = placed[i - 1]
     const cur = placed[i]
     if (!prev || !cur) continue
-    ops.push({ type: 'connect_nodes', from: `app:${prev.appId}`, to: `app:${cur.appId}` })
+    ops.push({
+      type: 'connect_nodes',
+      from: prev.nodeId,
+      to: cur.nodeId,
+      fromName: prev.name,
+      toName: cur.name
+    })
   }
   if (placed.length > 0) {
     ops.push({ type: 'select_nodes', ids: placed.map((p) => p.nodeId) })
@@ -158,7 +183,12 @@ export const canvasTools: Array<{ tool: Tool; fn: WBToolFn }> = [
         return text({
           ok: true,
           dispatched: true,
-          nodes: built.placed.map((p) => ({ name: p.name, template_id: p.appId })),
+          nodes: built.placed.map((p) => ({
+            name: p.name,
+            template_id: p.appId,
+            // node_id 回传：模型可据此在同一批之后引用具体节点（update_node / run_node）
+            node_id: p.nodeId
+          })),
           missing: built.missing,
           note: '已下发画布确认卡，用户确认后落布'
         })
@@ -167,7 +197,12 @@ export const canvasTools: Array<{ tool: Tool; fn: WBToolFn }> = [
         ok: true,
         dispatched: false,
         ops,
-        nodes: built.placed.map((p) => ({ name: p.name, template_id: p.appId })),
+        nodes: built.placed.map((p) => ({
+          name: p.name,
+          template_id: p.appId,
+          // node_id 回传：模型可据此在同一批之后引用具体节点（update_node / run_node）
+          node_id: p.nodeId
+        })),
         missing: built.missing,
         note: '当前无活跃画布会话通道，ops 原样返回（可经 wb_canvas_ops PLAN intent 下发）'
       })

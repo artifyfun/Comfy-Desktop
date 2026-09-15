@@ -14,8 +14,20 @@ import { ref, reactive, nextTick } from 'vue'
 // 会产生 Unhandled Rejection: document is not defined。模块级替换为 spy。
 vi.mock('ant-design-vue', async (importOriginal) => {
   const actual = await importOriginal()
-  const messageStub = { success: vi.fn(), info: vi.fn(), error: vi.fn(), warning: vi.fn(), open: vi.fn() }
-  const modalStub = { confirm: vi.fn(), info: vi.fn(), success: vi.fn(), error: vi.fn(), warning: vi.fn() }
+  const messageStub = {
+    success: vi.fn(),
+    info: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+    open: vi.fn(),
+  }
+  const modalStub = {
+    confirm: vi.fn(),
+    info: vi.fn(),
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+  }
   return { ...actual, message: messageStub, Modal: modalStub }
 })
 
@@ -45,8 +57,8 @@ function makePageDeps(overrides = {}) {
 
 // ---- useAppNodes：agent ops 指令序列 ----
 describe('useAppNodes.applyOneAgentOp', () => {
-  async function setup(initialObjects = [], initialLinks = []) {
-    const deps = makePageDeps()
+  async function setup(initialObjects = [], initialLinks = [], depOverrides = {}) {
+    const deps = makePageDeps(depOverrides)
     deps.objects.value = initialObjects
     deps.links.value = initialLinks
     const runAppNode = vi.fn()
@@ -75,8 +87,14 @@ describe('useAppNodes.applyOneAgentOp', () => {
   }
 
   it('update_node：params 深合并 + x/y/name 覆写；目标不存在 → no-op', async () => {
-    const { c, deps } = await setup([{ id: 'n1', type: 'app', params: { a: 1 }, x: 0, y: 0, name: '旧' }])
-    c.applyOneAgentOp({ type: 'update_node', id: 'n1', patch: { params: { b: 2 }, x: 10, name: '新' } })
+    const { c, deps } = await setup([
+      { id: 'n1', type: 'app', params: { a: 1 }, x: 0, y: 0, name: '旧' },
+    ])
+    c.applyOneAgentOp({
+      type: 'update_node',
+      id: 'n1',
+      patch: { params: { b: 2 }, x: 10, name: '新' },
+    })
     const n = deps.objects.value[0]
     expect(n.params).toEqual({ a: 1, b: 2 })
     expect(n.x).toBe(10)
@@ -87,8 +105,11 @@ describe('useAppNodes.applyOneAgentOp', () => {
 
   it('connect_nodes：建 link 且双向去重', async () => {
     const { c, deps } = await setup(
-      [{ id: 'a', type: 'app' }, { id: 'b', type: 'note' }],
-      []
+      [
+        { id: 'a', type: 'app' },
+        { id: 'b', type: 'note' },
+      ],
+      [],
     )
     c.applyOneAgentOp({ type: 'connect_nodes', from: 'a', to: 'b' })
     expect(deps.links.value).toHaveLength(1)
@@ -123,7 +144,10 @@ describe('useAppNodes.applyOneAgentOp', () => {
   })
 
   it('run_node：非 app 节点 / 不存在 → no-op；params 合并后触发 run', async () => {
-    const { c, deps } = await setup([{ id: 'n1', type: 'image' }, { id: 'n2', type: 'app', params: {} }])
+    const { c, deps } = await setup([
+      { id: 'n1', type: 'image' },
+      { id: 'n2', type: 'app', params: {} },
+    ])
     c.applyOneAgentOp({ type: 'run_node', nodeId: 'n1' })
     c.applyOneAgentOp({ type: 'run_node', nodeId: 'ghost' })
     expect(deps.objects.value[1].params).toEqual({})
@@ -142,12 +166,20 @@ describe('useAppNodes pendingAgentOps（人审确认卡）', () => {
     const c = useAppNodes({
       ...deps,
       viewportCenterWorld: () => ({ x: 0, y: 0 }),
-      closeCtxMenu: vi.fn(), setTool: vi.fn(), refOf: vi.fn(), withCull: vi.fn(),
-      isHighlightedOf: vi.fn(), stopKonvaEvent: vi.fn(), linkFromConnect: vi.fn(),
+      closeCtxMenu: vi.fn(),
+      setTool: vi.fn(),
+      refOf: vi.fn(),
+      withCull: vi.fn(),
+      isHighlightedOf: vi.fn(),
+      stopKonvaEvent: vi.fn(),
+      linkFromConnect: vi.fn(),
       maybeRunGenFromNote: vi.fn(),
       appStore: { config: {}, getAppById: vi.fn(async () => null) },
       emitPrompt: vi.fn(),
-      onOps: (fn) => { opsSink = fn; return () => {} },
+      onOps: (fn) => {
+        opsSink = fn
+        return () => {}
+      },
     })
     opsSink([{ type: 'select_nodes', ids: ['x'] }])
     expect(c.pendingAgentOps.value).toEqual([{ type: 'select_nodes', ids: ['x'] }])
@@ -155,6 +187,103 @@ describe('useAppNodes pendingAgentOps（人审确认卡）', () => {
     await c.confirmAgentOps()
     expect(c.pendingAgentOps.value).toBeNull()
     expect(deps.beforeChange).toHaveBeenCalled()
+  })
+
+  /** 走 onOps → pending → confirm 全链路的实例（工具产出的 ops 就走这条） */
+  async function setupBatch(depsOverrides = {}) {
+    let opsSink = null
+    const deps = makePageDeps(depsOverrides)
+    const { useAppNodes } = await import('./useAppNodes')
+    const c = useAppNodes({
+      ...deps,
+      viewportCenterWorld: () => ({ x: 0, y: 0 }),
+      closeCtxMenu: vi.fn(),
+      setTool: vi.fn(),
+      refOf: vi.fn(),
+      withCull: vi.fn(),
+      isHighlightedOf: vi.fn(),
+      stopKonvaEvent: vi.fn(),
+      linkFromConnect: vi.fn(),
+      maybeRunGenFromNote: vi.fn(),
+      appStore: { config: {}, getAppById: vi.fn(async () => null) },
+      emitPrompt: vi.fn(),
+      onOps: (fn) => {
+        opsSink = fn
+        return () => {}
+      },
+    })
+    return { c, deps, deliver: (ops) => opsSink(ops) }
+  }
+
+  /**
+   * 跨边界契约（2026-09-15）：直接喂**主进程 wb_build_workflow 真实产出的 ops 形状**。
+   *
+   * 此前两侧各自都绿、集成却是坏的：主进程测试把 `from: 'app:app:aaa'` 写进了期望值
+   * （画布对象 id 空间里根本不存在这种 id），而本文件只用 'a'/'b' 这种对象 id →
+   * 谁都没发现 connect_nodes 在真实链路上永远匹配不到、**连线被静默丢弃**。
+   * 主进程侧对应半边见 src/main/artifylab/mcp/wbtools/canvasTools.test.ts 的
+   * 「canvas ops id 空间契约（主进程侧半边）」。两半合起来才是完整契约。
+   */
+  it('工具产出批次（add 带 nodeId + connect/select 引用 nodeId）→ 节点落地且**连线真的建出来**', async () => {
+    const { c, deps, deliver } = await setupBatch()
+    deliver([
+      {
+        type: 'add_app_node',
+        appId: 'app:aaa',
+        name: '文生图',
+        nodeId: 'wf-m1-0-ab12',
+        x: 80,
+        y: 80,
+      },
+      {
+        type: 'add_app_node',
+        appId: 'app:bbb',
+        name: '图生视频',
+        nodeId: 'wf-m1-1-cd34',
+        x: 440,
+        y: 80,
+      },
+      {
+        type: 'connect_nodes',
+        from: 'wf-m1-0-ab12',
+        to: 'wf-m1-1-cd34',
+        fromName: '文生图',
+        toName: '图生视频',
+      },
+      { type: 'select_nodes', ids: ['wf-m1-0-ab12', 'wf-m1-1-cd34'] },
+    ])
+    await c.confirmAgentOps()
+
+    const objs = deps.objects.value
+    expect(objs).toHaveLength(2)
+    // AI 侧引用名被采纳为对象 id —— 同批的 connect/select 才引用得到
+    expect(objs.map((o) => o.id)).toEqual(['wf-m1-0-ab12', 'wf-m1-1-cd34'])
+    expect(objs.map((o) => o.appId)).toEqual(['app:aaa', 'app:bbb'])
+    // 连线落到**真实对象 id** 上（下游 subtreeOf / 渲染 / 子树重跑才认）
+    expect(deps.links.value).toHaveLength(1)
+    expect(deps.links.value[0].from).toBe('wf-m1-0-ab12')
+    expect(deps.links.value[0].to).toBe('wf-m1-1-cd34')
+    expect(deps.selection.value).toEqual(['wf-m1-0-ab12', 'wf-m1-1-cd34'])
+  })
+
+  it('nodeId 已被占用 → 退回自造对象 id，但连线仍靠批内映射落位', async () => {
+    const { c, deps, deliver } = await setupBatch()
+    deps.objects.value = [{ id: 'wf-taken', type: 'app', appId: 'app:old', x: 0, y: 0 }]
+
+    deliver([
+      { type: 'add_app_node', appId: 'app:aaa', name: 'A', nodeId: 'wf-taken', x: 10, y: 10 },
+      { type: 'add_app_node', appId: 'app:bbb', name: 'B', nodeId: 'wf-free', x: 400, y: 10 },
+      { type: 'connect_nodes', from: 'wf-taken', to: 'wf-free' },
+    ])
+    await c.confirmAgentOps()
+
+    const fresh = deps.objects.value.find((o) => o.appId === 'app:aaa')
+    expect(fresh).toBeTruthy()
+    expect(fresh.id).not.toBe('wf-taken') // 没有覆盖既有节点
+    expect(deps.objects.value).toHaveLength(3) // 既有 + 两个新节点
+    expect(deps.links.value).toHaveLength(1)
+    expect(deps.links.value[0].from).toBe(fresh.id) // 映射到实际对象 id
+    expect(deps.links.value[0].to).toBe('wf-free')
   })
 })
 
@@ -188,7 +317,10 @@ describe('useCanvasMinimap 投影', () => {
 describe('usePromptLibrary promptTarget 优先级', () => {
   it('gen 对话框 > rewrite > 选中 note > 悬停 note', async () => {
     const { usePromptLibrary } = await import('./usePromptLibrary')
-    const objects = ref([{ id: 'n1', type: 'note', text: '' }, { id: 'n2', type: 'note', text: '' }])
+    const objects = ref([
+      { id: 'n1', type: 'note', text: '' },
+      { id: 'n2', type: 'note', text: '' },
+    ])
     const selection = ref(['n1'])
     const hoverNodeId = ref('n2')
     const genNode = ref(null)
@@ -235,7 +367,6 @@ describe('usePromptLibrary promptTarget 优先级', () => {
     expect(c.promptLib.open).toBe(false)
   })
 })
-
 
 // ---- useMaskDialog：笔触栈 ----
 describe('useMaskDialog 笔触 undo/redo 栈', () => {
@@ -289,9 +420,17 @@ describe('useMaskDialog 笔触 undo/redo 栈', () => {
 describe('useCanvasProjects 删除语义', () => {
   async function setup() {
     const { useCanvasProjects } = await import('./useCanvasProjects')
-    const projectStore = reactive({ version: 1, activeId: 'p1', projects: [
-      { id: 'p1', title: '一', doc: { objects: [], links: [], groups: [], viewport: { scale: 1, x: 0, y: 0 } } },
-    ] })
+    const projectStore = reactive({
+      version: 1,
+      activeId: 'p1',
+      projects: [
+        {
+          id: 'p1',
+          title: '一',
+          doc: { objects: [], links: [], groups: [], viewport: { scale: 1, x: 0, y: 0 } },
+        },
+      ],
+    })
     const deps = {
       projectStore,
       t: (k) => k,
@@ -307,15 +446,42 @@ describe('useCanvasProjects 删除语义', () => {
       afterProjectSwitch: vi.fn(),
       loadProjectIntoCanvas: vi.fn(),
       engine: {
-        psUpdateProjectDoc: (s, id, doc) => ({ ...s, projects: s.projects.map((p) => (p.id === id ? { ...p, doc } : p)) }),
+        psUpdateProjectDoc: (s, id, doc) => ({
+          ...s,
+          projects: s.projects.map((p) => (p.id === id ? { ...p, doc } : p)),
+        }),
         psSwitchProject: (s, id) => ({ ...s, activeId: id }),
-        psAddProject: (s, name) => ({ ...s, projects: [...s.projects, { id: 'new', title: name, doc: { objects: [], links: [], groups: [], viewport: { scale: 1, x: 0, y: 0 } } }], activeId: 'new' }),
-        psRenameProject: (s, id, title) => ({ ...s, projects: s.projects.map((p) => (p.id === id ? { ...p, title } : p)) }),
+        psAddProject: (s, name) => ({
+          ...s,
+          projects: [
+            ...s.projects,
+            {
+              id: 'new',
+              title: name,
+              doc: { objects: [], links: [], groups: [], viewport: { scale: 1, x: 0, y: 0 } },
+            },
+          ],
+          activeId: 'new',
+        }),
+        psRenameProject: (s, id, title) => ({
+          ...s,
+          projects: s.projects.map((p) => (p.id === id ? { ...p, title } : p)),
+        }),
         // 删唯一项目：兜底新建未命名（新 id）——E4 修复注释的语义
         psDeleteProject: (s, id) => {
           const projects = s.projects.filter((p) => p.id !== id)
           if (!projects.length) {
-            return { ...s, projects: [{ id: 'fallback', title: '未命名画布', doc: { objects: [], links: [], groups: [], viewport: { scale: 1, x: 0, y: 0 } } }], activeId: 'fallback' }
+            return {
+              ...s,
+              projects: [
+                {
+                  id: 'fallback',
+                  title: '未命名画布',
+                  doc: { objects: [], links: [], groups: [], viewport: { scale: 1, x: 0, y: 0 } },
+                },
+              ],
+              activeId: 'fallback',
+            }
           }
           return { ...s, projects, activeId: s.activeId === id ? projects[0].id : s.activeId }
         },
@@ -344,7 +510,16 @@ describe('useCanvasProjects 删除语义', () => {
 
   it('openProjectById 切换：旧 doc 入库 + 新 doc 装载 + history 重置', async () => {
     const { c, deps } = await setup()
-    deps.projectStore.projects.push({ id: 'p2', title: '二', doc: { objects: [{ id: 'x', type: 'note' }], links: [], groups: [], viewport: { scale: 2, x: 5, y: 5 } } })
+    deps.projectStore.projects.push({
+      id: 'p2',
+      title: '二',
+      doc: {
+        objects: [{ id: 'x', type: 'note' }],
+        links: [],
+        groups: [],
+        viewport: { scale: 2, x: 5, y: 5 },
+      },
+    })
     c.openProjectById('p2')
     expect(deps.projectStore.activeId).toBe('p2')
     expect(deps.objects.value).toEqual([{ id: 'x', type: 'note' }])
@@ -366,9 +541,39 @@ describe('useAppNodes.rerunFrom — 步级重跑下游(C-H11)', () => {
   async function setupChain() {
     const deps = makePageDeps()
     deps.objects.value = [
-      { id: 'n1', type: 'app', name: '上游', appId: 'x', x: 0, y: 0, width: 220, height: 120, status: 'idle' },
-      { id: 'n2', type: 'app', name: '中游', appId: 'x', x: 300, y: 0, width: 220, height: 120, status: 'idle' },
-      { id: 'n3', type: 'app', name: '下游', appId: 'x', x: 600, y: 0, width: 220, height: 120, status: 'idle' },
+      {
+        id: 'n1',
+        type: 'app',
+        name: '上游',
+        appId: 'x',
+        x: 0,
+        y: 0,
+        width: 220,
+        height: 120,
+        status: 'idle',
+      },
+      {
+        id: 'n2',
+        type: 'app',
+        name: '中游',
+        appId: 'x',
+        x: 300,
+        y: 0,
+        width: 220,
+        height: 120,
+        status: 'idle',
+      },
+      {
+        id: 'n3',
+        type: 'app',
+        name: '下游',
+        appId: 'x',
+        x: 600,
+        y: 0,
+        width: 220,
+        height: 120,
+        status: 'idle',
+      },
       { id: 'n4', type: 'note', x: 900, y: 0, width: 120, height: 80, text: '非app' },
     ]
     deps.links.value = [
@@ -399,9 +604,7 @@ describe('useAppNodes.rerunFrom — 步级重跑下游(C-H11)', () => {
     const { c, deps } = await setupChain()
     c.rerunFrom('n1')
     // 测试 deps.t 为直通/无替换 → 断言 key 被调用且带 {n} 替换参数
-    expect(deps.message.info).toHaveBeenCalledWith(
-      expect.stringContaining('canvasRerunFromQueued'),
-    )
+    expect(deps.message.info).toHaveBeenCalledWith(expect.stringContaining('canvasRerunFromQueued'))
   })
 
   it('从 n2 重跑: 只排 n2+n3(替换参数含 2)', async () => {

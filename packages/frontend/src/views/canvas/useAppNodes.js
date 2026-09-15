@@ -583,7 +583,11 @@ export function useAppNodes(deps) {
         case 'update_node':
           return t('canvasAgentOpsUpdate').replace('{id}', op.id)
         case 'connect_nodes':
-          return t('canvasAgentOpsConnect').replace('{f}', op.from).replace('{to}', op.to)
+          // 确认卡在**应用之前**渲染，此时节点还没建出来，无法反查名字 →
+          // 优先用 AI 侧给的 fromName/toName，缺失才退回 id（避免露出内部 id）
+          return t('canvasAgentOpsConnect')
+            .replace('{f}', op.fromName || op.from)
+            .replace('{to}', op.toName || op.to)
         case 'select_nodes':
           return t('canvasAgentOpsSelect').replace('{n}', String((op.ids || []).length))
         default:
@@ -595,6 +599,12 @@ export function useAppNodes(deps) {
   async function applyCanvasAgentOps(ops) {
     if (!Array.isArray(ops)) return
     beforeChange()
+    // 批内引用映射：AI 侧（wb_build_workflow 等）用它自己的 nodeId 引用「同批刚建出来的
+    // 节点」，而对象 id 是前端 makeAppNode 生成的（'a'+ts+rand）——两者是不同的 id 空间。
+    // 这里在批内建立 nodeId → 实际对象 id 的映射，连接/选中/更新才能落位。
+    // （此前 connect_nodes 直接用 AI 侧 id 去 find(o.id === op.from)，永远匹配不到 →
+    //   连线被静默丢弃：节点建出来了、线是断的。）
+    agentRefMap = new Map()
     // C-H3 AI 快照：批量改画布前自动打持久命名快照（安全网，失败不阻塞）
     try {
       const doc = serializeDoc(objects.value, viewport.value, 'canvas', links.value, groups.value)
@@ -633,9 +643,17 @@ export function useAppNodes(deps) {
     saveSoon()
   }
 
+  /**
+   * 批内引用映射（AI 侧 nodeId → 前端实际对象 id）。
+   * 每次 applyCanvasAgentOps 开头重置；单条 op 直接调用（测试/兼容路径）时为空 map，
+   * 此时 resolveAgentRef 退化为原值——既有按对象 id 传 op 的调用方行为不变。
+   */
+  let agentRefMap = new Map()
+  const resolveAgentRef = (id) => agentRefMap.get(id) ?? id
+
   function applyOneAgentOp(op) {
     if (op.type === 'run_node') {
-      const node = objects.value.find((o) => o.id === op.nodeId)
+      const node = objects.value.find((o) => o.id === resolveAgentRef(op.nodeId))
       if (!node || node.type !== 'app') return
       // params 覆写：{nodeId:{widget:value}} 直写 node.params
       if (op.params && typeof op.params === 'object') {
@@ -647,14 +665,26 @@ export function useAppNodes(deps) {
     if (op.type === 'add_app_node') {
       const wx = typeof op.x === 'number' ? op.x : viewportCenterWorld().x
       const wy = typeof op.y === 'number' ? op.y : viewportCenterWorld().y
-      const node = makeAppNode(op.appId, op.name || op.appId, wx, wy)
+      // AI 侧可自带 nodeId：采纳为对象 id，好让同批的 connect_nodes / select_nodes
+      // 能引用到它。已被占用（同 doc 重复 id 会坏 Vue key 与查找）时才退回自造 id，
+      // 并把映射记到实际 id 上，引用依然落位。
+      const wantId = typeof op.nodeId === 'string' && op.nodeId ? op.nodeId : ''
+      const taken = wantId !== '' && objects.value.some((o) => o.id === wantId)
+      const node = makeAppNode(
+        op.appId,
+        op.name || op.appId,
+        wx,
+        wy,
+        wantId && !taken ? { id: wantId } : {},
+      )
+      if (wantId) agentRefMap.set(wantId, node.id)
       if (op.params && typeof op.params === 'object') node.params = { ...op.params }
       objects.value.push(node)
       void ensureAppDetail(op.appId)
       return
     }
     if (op.type === 'update_node') {
-      const node = objects.value.find((o) => o.id === op.id)
+      const node = objects.value.find((o) => o.id === resolveAgentRef(op.id))
       if (!node) return
       const patch = op.patch || {}
       if (patch.params && typeof patch.params === 'object')
@@ -665,22 +695,28 @@ export function useAppNodes(deps) {
       return
     }
     if (op.type === 'connect_nodes') {
-      const a = objects.value.find((o) => o.id === op.from)
-      const b = objects.value.find((o) => o.id === op.to)
+      // 全部落到**实际对象 id** 上再建 link——AI 侧传的可能是自己的 nodeId，
+      // 直接存进去会让下游（subtreeOf / 渲染 / 子树重跑）永远匹配不到。
+      const fromId = resolveAgentRef(op.from)
+      const toId = resolveAgentRef(op.to)
+      const a = objects.value.find((o) => o.id === fromId)
+      const b = objects.value.find((o) => o.id === toId)
       if (!a || !b) return
       const exists = links.value.some(
-        (l) => (l.from === op.from && l.to === op.to) || (l.from === op.to && l.to === op.from),
+        (l) => (l.from === fromId && l.to === toId) || (l.from === toId && l.to === fromId),
       )
       if (!exists)
         links.value.push({
           id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5),
-          from: op.from,
-          to: op.to,
+          from: fromId,
+          to: toId,
         })
       return
     }
     if (op.type === 'select_nodes') {
-      const ids = (op.ids || []).filter((id) => objects.value.some((o) => o.id === id))
+      const ids = (op.ids || [])
+        .map((id) => resolveAgentRef(id))
+        .filter((id) => objects.value.some((o) => o.id === id))
       if (ids.length) selection.value = ids
       return
     }
@@ -731,6 +767,9 @@ export function useAppNodes(deps) {
     pendingAgentOps,
     pendingAgentOpsAt,
     agentOpsDiffLines,
+    // 整批入口（确认卡走 confirmAgentOps → 这里）；导出以便对「工具产出的 ops 批次」
+    // 做跨边界契约测试（批内 nodeId 映射只在这条路径上建立）
+    applyCanvasAgentOps,
     applyOneAgentOp,
     confirmAgentOps,
     aiSnapshots,

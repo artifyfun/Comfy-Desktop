@@ -79,7 +79,18 @@ export interface WorkbenchPlan {
   canvasOps?: Array<CanvasAgentOp>
 }
 
-/** A 画布节点指令（与前端 appNode.js/宿主画布页 applyCanvasAgentOps 对应） */
+/**
+ * A 画布节点指令（与前端 appNode.js/宿主画布页 applyCanvasAgentOps 对应）。
+ *
+ * **id 空间（2026-09-15 修正）**：画布节点的对象 id 由前端 `makeAppNode` 生成
+ * （`'a'+ts+rand`），AI 侧拿不到。因此：
+ * - `add_app_node.nodeId` 是 **AI 侧引用名**：前端采纳为对象 id；若该 id 已被占用
+ *   则退回自造 id，并在批内记住 map（引用仍能落位）。
+ * - `connect_nodes.from/to`、`select_nodes.ids`、`update_node.id`、`run_node.nodeId`
+ *   既可以是**同批 add 过的 nodeId**，也可以是既有对象的真实 id。
+ * 此前 AI 侧把模板 id（`app:<uuid>`）当节点引用用，前端 `find(o => o.id === ...)`
+ * 永远匹配不到 → 连线被静默丢弃。
+ */
 export type CanvasAgentOp =
   | { type: 'run_node'; nodeId: string; params?: Record<string, Record<string, unknown>> }
   | {
@@ -89,9 +100,18 @@ export type CanvasAgentOp =
       x?: number
       y?: number
       params?: Record<string, Record<string, unknown>>
+      /** AI 侧引用名（见上方 id 空间说明）：前端优先采纳为对象 id */
+      nodeId?: string
     }
   | { type: 'update_node'; id: string; patch?: Record<string, unknown> }
-  | { type: 'connect_nodes'; from: string; to: string }
+  | {
+      type: 'connect_nodes'
+      from: string
+      to: string
+      /** 确认卡文案用（应用前节点尚未创建，无法反查名字） */
+      fromName?: string
+      toName?: string
+    }
   | { type: 'select_nodes'; ids: string[] }
 
 export interface PlanValidationIssue {
