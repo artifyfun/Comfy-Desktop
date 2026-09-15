@@ -514,6 +514,9 @@ export function useAppNodes(deps) {
 
   // —— P3 AI 侧边栏节点指令（wb_canvas_ops → 人审确认卡 → 执行） ——
   const pendingAgentOps = ref(null) // Array<op> | null
+  /** C-H18 确认卡 TTL:挂起时刻;超过 PENDING_OPS_TTL 自动过期(防陈旧卡悬挂) */
+  const PENDING_OPS_TTL = 10 * 60 * 1000
+  const pendingAgentOpsAt = ref(0)
   /** C-H16 过程高亮: agent 当前正在操作的节点 id(短暂驻留,画布描边) */
   const spotlightId = ref(null)
 
@@ -695,6 +698,7 @@ export function useAppNodes(deps) {
   const offOps = onOps((ops) => {
     if (!Array.isArray(ops) || !ops.length) return
     pendingAgentOps.value = ops
+    pendingAgentOpsAt.value = Date.now()
   })
 
   return {
@@ -725,6 +729,7 @@ export function useAppNodes(deps) {
     spotlightId,
     pickCanvasImageFor,
     pendingAgentOps,
+    pendingAgentOpsAt,
     agentOpsDiffLines,
     applyOneAgentOp,
     confirmAgentOps,

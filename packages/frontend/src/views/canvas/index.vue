@@ -1254,7 +1254,12 @@
         <AppPickerModal v-if="appPicker.open" @close="appPicker.open = false" @pick="onAppPicked" />
 
         <!-- AI 节点指令确认卡（P3：侧栏工作台 wb_canvas_ops → 人审 → 执行） -->
-        <div v-if="pendingAgentOps" class="agent-ops-card" @mousedown.stop>
+        <div
+          v-if="pendingAgentOps"
+          class="agent-ops-card"
+          :class="{ 'ops-expired': opsExpired }"
+          @mousedown.stop
+        >
           <div class="flex items-center justify-between mb-1.5">
             <span class="text-xs font-medium text-[var(--wb-text-1)]">
               <i class="fas fa-robot text-[var(--wb-accent)] mr-1"></i
@@ -1272,16 +1277,23 @@
           </div>
           <div class="flex gap-2 mt-2">
             <button
-              class="flex-1 py-1.5 rounded-lg bg-[var(--wb-accent)] text-white text-xs"
-              @click="confirmAgentOps"
+              class="flex-1 py-1.5 rounded-lg text-xs"
+              :class="
+                opsExpired
+                  ? 'bg-[var(--wb-surface-hover)] text-[var(--wb-text-3)] cursor-not-allowed'
+                  : 'bg-[var(--wb-accent)] text-white'
+              "
+              :disabled="opsExpired"
+              :title="opsExpired ? '该确认卡已超时(10 分钟),请重新发起请求' : ''"
+              @click="opsExpired || confirmAgentOps()"
             >
-              {{ t('canvasAgentOpsConfirm') }}
+              {{ opsExpired ? '已过期,请重新发起' : t('canvasAgentOpsConfirm') }}
             </button>
             <button
               class="flex-1 py-1.5 rounded-lg border border-[var(--wb-stroke)] text-[var(--wb-text-2)] text-xs"
               @click="pendingAgentOps = null"
             >
-              {{ t('canvasAgentOpsReject') }}
+              {{ opsExpired ? '关闭' : t('canvasAgentOpsReject') }}
             </button>
           </div>
         </div>
@@ -3763,6 +3775,15 @@ function gridArrangeSelected() {
 }
 
 /** 多选对齐（左/右/上/下/水平居中/垂直居中）：应用坐标映射 */
+// C-H18 确认卡 TTL:10 分钟未确认自动过期(陈旧卡不再悬挂误导)
+const nowTick = ref(Date.now())
+setInterval(() => (nowTick.value = Date.now()), 30_000)
+const PENDING_OPS_TTL = 10 * 60 * 1000
+const opsExpired = computed(() => {
+  if (!pendingAgentOps.value || !pendingAgentOpsAt.value) return false
+  return nowTick.value - pendingAgentOpsAt.value > PENDING_OPS_TTL
+})
+
 // C-H13 多选浮动操作栏: 选区上方跟随的快捷批量操作(Figma 式)
 const selBar = computed(() => {
   const ids = selection.value
@@ -4421,6 +4442,25 @@ function deleteSelected() {
     .filter((g) => g.members.length > 1)
   selection.value = []
   saveSoon()
+  // C-H19 删除 toast 内嵌撤销(Figma 式):快捷键存在但不可见,给一键恢复
+  message.info({
+    content: h('span', null, [
+      `已删除 ${gone.size} 个对象 `,
+      h(
+        'a',
+        {
+          style: 'margin-left:8px;text-decoration:underline;cursor:pointer',
+          onClick: () => {
+            undoLast()
+            message.destroy('canvas-delete-undo')
+          },
+        },
+        '撤销',
+      ),
+    ]),
+    key: 'canvas-delete-undo',
+    duration: 5,
+  })
 }
 
 // —— 组合与解组 ——
@@ -5334,6 +5374,19 @@ const dragOver = ref(false)
 
 // 项目下拉外点关闭（capture 阶段判定；项目栏自身 mousedown.stop 不影响 document 捕获）
 onMounted(() => {
+  // C-H17 视口 sanity：打开画布时若缩放异常(过小/过大)或对象完全不在视野，
+  // 自动 fitAll 一次——用户上次会话的离谱缩放不该由下一次会话继承(真机 UX 走查 P0-2)
+  setTimeout(() => {
+    if (!objects.value.length) return
+    const v = viewport.value
+    const b = bboxOf(objects.value)
+    // 对象集合中心是否在可视范围(以可视宽高的 1.5 倍为容差)
+    const cx = v.x + (b.x + b.width / 2) * v.scale
+    const cy = v.y + (b.y + b.height / 2) * v.scale
+    const offscreen =
+      cx < -size.w * 0.75 || cx > size.w * 1.75 || cy < -size.h * 0.75 || cy > size.h * 1.75
+    if (v.scale < 0.3 || v.scale > 3 || offscreen) fitAll()
+  }, 600)
   // D1c：Shift/Ctrl 全局键态追踪（resize 比例锁实时切换；capture 确保先于组件逻辑）
   window.addEventListener(
     'keydown',
@@ -5641,6 +5694,7 @@ const {
   spotlightId,
   pickCanvasImageFor,
   pendingAgentOps,
+  pendingAgentOpsAt,
   agentOpsDiffLines,
   confirmAgentOps,
   aiSnapshots,
