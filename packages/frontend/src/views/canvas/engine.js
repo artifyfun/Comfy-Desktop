@@ -172,6 +172,19 @@ export function bezierLinkPath(x1, y1, x2, y2) {
 }
 
 /**
+ * 正交连线几何（C-H9：横平竖直直角线，对标 RunningHub/Coze 节点图）。
+ * 中点竖直折线：从源端口水平出 24px → 竖直走到目标 y → 水平进目标端口；
+ * 目标 y 与源 y 相同时退化为直线。返回 Konva.Path SVG d。
+ */
+export function orthogonalLinkPath(x1, y1, x2, y2) {
+  const STUB = 24
+  if (Math.abs(y2 - y1) < 1) return `M ${x1} ${y1} L ${x2} ${y2}`
+  const dir = x2 >= x1 ? 1 : -1
+  const mx = x2 >= x1 ? Math.max(x1 + STUB, x2 - STUB) : x1 - STUB
+  return `M ${x1} ${y1} L ${mx} ${y1} L ${mx} ${y2} L ${x2} ${y2}`
+}
+
+/**
  * 命中点 (px,py) 到线段 (x1,y1)-(x2,y2) 的距离（世界坐标）。
  * 连线点击删除/选中用，阈值由调用方按缩放换算。
  */
@@ -663,7 +676,6 @@ export function lodNoteRectStyle(scale) {
   if (lodTextVisible(scale)) return null
   return { opacity: 1, cornerRadius: 0 }
 }
-
 
 export function visibleIds(objects, viewport, size, margin = 200) {
   if (!viewport || !size || size.w <= 0 || size.h <= 0) return new Set(objects.map((o) => o.id))

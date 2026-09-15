@@ -66,7 +66,7 @@
               <v-path
                 :config="{
                   id: seg.id,
-                  data: bezierLinkPath(seg.x1, seg.y1, seg.x2, seg.y2),
+                  data: linkPath(seg.x1, seg.y1, seg.x2, seg.y2),
                   stroke: 'transparent',
                   strokeWidth: 16 / viewport.scale,
                   hitStrokeWidth: 16 / viewport.scale,
@@ -77,7 +77,7 @@
               />
               <v-path
                 :config="{
-                  data: bezierLinkPath(seg.x1, seg.y1, seg.x2, seg.y2),
+                  data: linkPath(seg.x1, seg.y1, seg.x2, seg.y2),
                   stroke: selectedLinkId === seg.id ? '#ffffff' : 'rgba(160,160,160,0.6)',
                   strokeWidth: (selectedLinkId === seg.id ? 3 : 2) / viewport.scale,
                   opacity: reconnectDrag.active && reconnectDrag.linkId === seg.id ? 0.25 : 1,
@@ -89,7 +89,7 @@
             <v-path
               v-if="connectDrag.seg"
               :config="{
-                data: bezierLinkPath(
+                data: linkPath(
                   connectDrag.seg.x1,
                   connectDrag.seg.y1,
                   connectDrag.seg.x2,
@@ -105,7 +105,7 @@
             <v-path
               v-if="reconnectDrag.seg"
               :config="{
-                data: bezierLinkPath(
+                data: linkPath(
                   reconnectDrag.seg.x1,
                   reconnectDrag.seg.y1,
                   reconnectDrag.seg.x2,
@@ -1558,6 +1558,20 @@
           >
             <i class="fas fa-expand"></i>
           </button>
+          <!-- C-H9 连线风格切换：正交直角线 / 贝塞尔曲线 -->
+          <button
+            class="w-8 h-8 rounded-lg transition flex items-center justify-center"
+            :class="
+              linkOrtho
+                ? 'bg-[var(--wb-accent)]/15 text-[var(--wb-accent)]'
+                : 'text-[var(--wb-text-2)] hover:bg-[var(--wb-accent)]/10'
+            "
+            :title="linkOrtho ? t('canvasLinkStyleOrtho') : t('canvasLinkStyleBezier')"
+            data-testid="link-style-toggle"
+            @click="setLinkStyle(!linkOrtho)"
+          >
+            <i class="fas fa-bezier-curve"></i>
+          </button>
           <input
             type="range"
             min="10"
@@ -1711,6 +1725,7 @@ import {
   screenToWorld,
   worldToScreen,
   zoomAtPoint,
+  orthogonalLinkPath,
   hitTest,
   hitTestRect,
   snapDelta,
@@ -1914,6 +1929,14 @@ const wrapEl = ref(null)
 const stageEl = ref(null)
 const size = reactive({ w: 800, h: 600 })
 const viewport = ref(makeViewport())
+// C-H9 连线风格：'bezier'(默认) | 'ortho'(横平竖直直角线)——持久化到 localStorage
+const linkOrtho = ref(localStorage.getItem('artify.canvas.linkStyle') === 'ortho')
+function setLinkStyle(ortho) {
+  linkOrtho.value = ortho
+  localStorage.setItem('artify.canvas.linkStyle', ortho ? 'ortho' : 'bezier')
+}
+const linkPath = (x1, y1, x2, y2) =>
+  linkOrtho.value ? orthogonalLinkPath(x1, y1, x2, y2) : bezierLinkPath(x1, y1, x2, y2)
 const objects = ref([])
 const links = ref([]) // {id, from, to} 物件 id；渲染为箭头，级联删除
 const groups = ref([]) // {id, members:[objectId]} 组合；成员联动拖动/选择/删除

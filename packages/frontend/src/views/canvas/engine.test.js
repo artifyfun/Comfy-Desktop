@@ -669,3 +669,27 @@ describe('lodTextVisible / lodImageVisible', () => {
     expect(lodImageVisible(undefined)).toBe(true)
   })
 })
+
+describe('orthogonalLinkPath — 正交连线几何(C-H9)', () => {
+  const { orthogonalLinkPath } = require('./engine')
+
+  it('同水平线退化为直线', () => {
+    expect(orthogonalLinkPath(0, 100, 300, 100)).toBe('M 0 100 L 300 100')
+  })
+
+  it('目标在右下：水平出 stub → 竖直 → 水平进入', () => {
+    const d = orthogonalLinkPath(100, 100, 400, 300)
+    // mx = max(x1+24, x2-24) = 376（目标足够远时竖直段贴近目标侧）
+    expect(d).toBe('M 100 100 L 376 100 L 376 300 L 400 300')
+  })
+
+  it('目标在左上(回连)：stub 向左避让', () => {
+    const d = orthogonalLinkPath(400, 300, 100, 100)
+    expect(d).toContain('L 376 300') // 400 - 24
+    expect(d.startsWith('M 400 300')).toBe(true)
+  })
+
+  it('y 差极小(<1)视为同水平', () => {
+    expect(orthogonalLinkPath(0, 100, 300, 100.5)).toBe('M 0 100 L 300 100.5')
+  })
+})

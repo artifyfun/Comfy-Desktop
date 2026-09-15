@@ -1179,5 +1179,7 @@
   "assetLibRefs": "refs",
   "assetLibEdit": "Edit",
   "assetLibRemove": "Delete",
-  "assetLibSaved": "Saved"
+  "assetLibSaved": "Saved",
+  "canvasLinkStyleOrtho": "Link style: orthogonal (click for bezier)",
+  "canvasLinkStyleBezier": "Link style: bezier (click for orthogonal)"
 }

@@ -1179,5 +1179,7 @@
   "assetLibRefs": "参考图",
   "assetLibEdit": "编辑",
   "assetLibRemove": "删除",
-  "assetLibSaved": "已保存"
+  "assetLibSaved": "已保存",
+  "canvasLinkStyleOrtho": "连线风格：直角（点击切换为曲线）",
+  "canvasLinkStyleBezier": "连线风格：曲线（点击切换为直角）"
 }
