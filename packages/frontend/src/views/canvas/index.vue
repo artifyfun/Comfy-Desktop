@@ -247,6 +247,7 @@
               :key="o.id"
               :config="groupConfig(o)"
               :draggable="true"
+              :listening="nodesListening"
             >
               <v-rect :config="appNodeRectConfig(o)" />
               <v-text :config="appNodeTitleConfig(o)" />
@@ -2037,6 +2038,7 @@ onMounted(() => {
   breathRaf = requestAnimationFrame(breathLoop)
 })
 onBeforeUnmount(() => cancelAnimationFrame(breathRaf))
+
 // C-H9 连线风格：'bezier'(默认) | 'ortho'(横平竖直直角线)——持久化到 localStorage
 const linkOrtho = ref(localStorage.getItem('artify.canvas.linkStyle') === 'ortho')
 function setLinkStyle(ortho) {
@@ -2051,6 +2053,7 @@ const linkPath = (x1, y1, x2, y2, excludeIds = []) => {
   return orthogonalLinkPathAvoid(x1, y1, x2, y2, obstacles)
 }
 const objects = ref([])
+
 const links = ref([]) // {id, from, to} 物件 id；渲染为箭头，级联删除
 const groups = ref([]) // {id, members:[objectId]} 组合；成员联动拖动/选择/删除
 const selection = ref([]) // 选中的 object id 列表
@@ -2219,6 +2222,63 @@ function createNodeFromConnect(kind) {
 
 const selectedLinkId = ref(null) // 选中的连线 id（参考 selectedConnectionId）
 const hoverNodeId = ref(null) // 悬停物件 id（句柄显现条件，参考 hovered || isSelected || isConnecting）
+
+// ── C-H21 千级画布静态缓存(对标 tldraw 分层渲染) ──
+// idle 且非选中/悬停的 app 节点 Group 栅格化: Konva 绘制从解析 N 个 Group
+// 树变为贴位图。失效时机: 缩放跨 LOD 界(±15%)、对象数变化、选中/悬停变化。
+const staticCacheIds = ref(new Set())
+let lastCacheScale = 1
+let lastCacheCount = 0
+let cacheTimer = 0
+/** 判定: 该节点当前是否可安全栅格化 */
+function cacheable(id) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || o.type !== 'app' || o.status !== 'idle') return false
+  if (selection.value.includes(id) || hoverNodeId.value === id) return false
+  return true
+}
+/** 周期对账: 应用缓存到新进入静态集的节点,从已变化节点摘除缓存 */
+function reconcileStaticCache() {
+  const stage = stageEl.value?.getStage?.()
+  if (!stage) return
+  // LOD 界跨越或对象增删 → 全量失效重建
+  const scaleJump = Math.abs(viewport.value.scale - lastCacheScale) / lastCacheScale > 0.15
+  const countChanged = objects.value.length !== lastCacheCount
+  if (scaleJump || countChanged) {
+    for (const id of staticCacheIds.value) {
+      stage.find('#' + id).forEach((n) => n.clearCache())
+    }
+    staticCacheIds.value = new Set()
+    lastCacheScale = viewport.value.scale
+    lastCacheCount = objects.value.length
+  }
+  // 选中/悬停的节点摘缓存(要动态描边)
+  for (const id of [...staticCacheIds.value]) {
+    if (!cacheable(id)) {
+      stage.find('#' + id).forEach((n) => n.clearCache())
+      staticCacheIds.value.delete(id)
+    }
+  }
+  // 新的 idle 节点上缓存
+  for (const o of objects.value) {
+    if (o.type !== 'app' || staticCacheIds.value.has(o.id) || !cacheable(o.id)) continue
+    const g = stage.find('#' + o.id)[0]
+    if (!g) continue
+    try {
+      // offscreen 参数避免绘制到主画布;pixelRatio 按当前缩放限 1(全览态分辨率足够)
+      g.cache({ pixelRatio: Math.min(1, viewport.value.scale + 0.25), drawBorder: false })
+      staticCacheIds.value.add(o.id)
+    } catch {
+      /* 空节点缓存失败无碍 */
+    }
+  }
+}
+function scheduleCacheReconcile() {
+  clearTimeout(cacheTimer)
+  cacheTimer = setTimeout(reconcileStaticCache, 500)
+}
+watch([objects.value.length, selection.value, hoverNodeId], scheduleCacheReconcile)
+watch(viewport, scheduleCacheReconcile, { deep: false })
 /** 高亮判定（含图层面板行悬停联动）：画布悬停或面板行悬停都算 */
 function isHighlightedOf(o) {
   return hoverNodeId.value === o.id || hoverFromPanel.value === o.id
@@ -2461,6 +2521,9 @@ const imageObjects = computed(() => withCull((o) => o.type === 'image'))
 /** 全类型裁剪集（连接句柄层用） */
 /** 句柄层 LOD：低缩放整组隐藏（全览 875 物件 1752 圆点无意义且是大头）；命中检测不受影响（hitFunc 本就仅悬停时开） */
 const lodHandlesVisible = computed(() => lodTextVisible(viewport.value.scale))
+// C-H21 全览态命中降级: scale<0.3 时 app 节点层 listening=false,
+// 省 hit graph 维护;用户需要操作时滚轮放大即恢复(LOD 界与文本可见一致)
+const nodesListening = computed(() => lodTextVisible(viewport.value.scale))
 const culledObjects = computed(() => withCull(() => true))
 const noteObjects = computed(() => withCull((o) => o.type === 'note'))
 
