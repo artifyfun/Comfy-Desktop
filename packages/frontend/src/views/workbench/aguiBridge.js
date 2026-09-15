@@ -370,6 +370,17 @@ export function createPageEmit(pageApi, state) {
       case 'run:error':
         state.sawRunError = true
         dismissProgress(pageApi, state)
+        // C-H20 预算触顶:引导性文案 + 新会话动作(不再是死报错)
+        if (payload.code === 'BUDGET_EXHAUSTED') {
+          pageApi.pushMsg({
+            role: 'agent',
+            kind: 'card',
+            text: payload.message || '会话预算已用完',
+            budgetExhausted: true,
+            createdAt: Date.now(),
+          })
+          break
+        }
         pageApi.pushMsg({
           role: 'agent',
           kind: 'error',

@@ -515,11 +515,31 @@
                       </div>
                       <!-- 正文（text part）：markdown 渲染；error 红显 -->
                       <div
-                        v-if="(tm.kind === 'chat' || tm.kind === 'error') && tm.role === 'agent'"
+                        v-if="
+                          (tm.kind === 'chat' || tm.kind === 'error' || tm.budgetExhausted) &&
+                          tm.role === 'agent'
+                        "
                         class="pt-0.5"
                         :class="tm.kind === 'error' ? 'text-[var(--wb-danger)]' : ''"
                       >
                         <WbMarkdown :source="tm.text" :streaming="busy && tm._streaming" />
+                      </div>
+                      <!-- C-H20 预算触顶引导卡：一键延续到新会话 -->
+                      <div
+                        v-if="tm.budgetExhausted"
+                        class="mt-2 flex items-center gap-2 rounded-lg border border-[var(--wb-accent)]/40 bg-[var(--wb-accent)]/10 px-2.5 py-2"
+                      >
+                        <i class="fas fa-forward text-[var(--wb-accent)]"></i>
+                        <span class="text-xs text-[var(--wb-text-1)]"
+                          >画布、资产与模板会完整保留</span
+                        >
+                        <button
+                          class="ml-auto rounded bg-[var(--wb-accent)] px-2.5 py-1 text-xs text-white hover:opacity-90"
+                          data-testid="budget-new-session"
+                          @click="newSessionFromBudget"
+                        >
+                          延续到新会话
+                        </button>
                       </div>
                       <!-- 断线重试（D 线）：中断错误气泡携带原文时提供一键重发（用户触发，
                            后端断连即杀 run，自动重发有双跑风险） -->

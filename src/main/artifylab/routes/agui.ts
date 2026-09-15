@@ -379,6 +379,16 @@ export function createAguiRouter(deps: { store?: EventStore } = {}): express.Rou
         }
       }
     } catch (error) {
+      // C-H20 预算触顶:结构化错误 → 前端渲染「延续到新会话」引导而非死报错
+      if ((error as { code?: string })?.code === 'BUDGET_EXHAUSTED') {
+        note(
+          'error',
+          `${(error as Error).message}。请在侧栏新建会话继续;画布/资产/模板不受影响,重要偏好可用 wb_remember 带入新会话。`
+        )
+        flushArtifacts()
+        emit(runError((error as Error).message, 'BUDGET_EXHAUSTED'))
+        return
+      }
       if (ac.signal.aborted) {
         // 中断来源三分:用户 cancel / 15min 超时 / SSE close。
         // cancel 误报抑制:用户主动取消不发「超时」RUN_ERROR(前端由 cancel 响应呈现);

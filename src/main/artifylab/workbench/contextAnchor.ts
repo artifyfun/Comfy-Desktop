@@ -61,3 +61,25 @@ export function contextAnchorText(watermark: ContextWatermark): string {
 export function contextAnchorFor(turns: number, totalTokens: number): string {
   return contextAnchorText(contextWatermark(turns, totalTokens))
 }
+
+// ─────────────── C-H20 会话预算软水位(对标 Manus 长会话管理) ───────────────
+
+/** 软警告水位:预算的 90% —— spec 注入「收敛输出」提示 */
+export const BUDGET_WARN_RATIO = 0.9
+
+/**
+ * 预算临近提示(注入 spec,让模型知道快到顶了):
+ * - 收敛输出长度,避免长篇 explanation
+ * - 不要发起大规模批量/多步任务(执行不完就被迫迁移)
+ */
+export function budgetWarnText(maxTokens: number, totalTokens: number): string {
+  const remain = Math.max(0, maxTokens - totalTokens)
+  return `
+## 会话预算提示
+本会话 token 预算剩余约 ${Math.round(remain / 1000)}k。请收敛输出长度；避免发起
+大规模批量或多步任务；用户的重要偏好请用 wb_remember 记入长期记忆（跨会话有效）。`
+}
+
+/** 触顶时的用户提示(前端据此引导一键迁移) */
+export const BUDGET_EXHAUSTED_HINT =
+  '本会话 token 预算已用完。点击「延续到新会话」——重要偏好已可自动带入，画布与资产不受影响。'

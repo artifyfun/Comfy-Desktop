@@ -81,7 +81,7 @@ import {
   CANVAS_OPS_RULES
 } from './specText'
 import type { ReasoningEffort } from './reasoningEffort'
-import { contextAnchorFor } from './contextAnchor'
+import { contextAnchorFor, BUDGET_WARN_RATIO, budgetWarnText } from './contextAnchor'
 import { extractDocText, isDocumentAttachment, renderDocContext } from './docContext'
 
 /* ------------------------------------------------------------------ */
@@ -823,7 +823,15 @@ class WorkbenchService {
       throw new Error(`本会话 agent 轮次已达上限（${MAX_AGENT_TURNS} 轮），请新建会话继续`)
     }
     if (agent.totalTokens >= MAX_SESSION_TOKENS) {
-      throw new Error(`本会话 token 用量已达预算上限（${MAX_SESSION_TOKENS}），请新建会话继续`)
+      // C-H20 触顶:抛结构化错误(route 层映射 BUDGET_EXHAUSTED 事件,
+      // 前端渲染「延续到新会话」引导而非死报错)
+      const err = new Error(`本会话 token 用量已达预算上限（${MAX_SESSION_TOKENS}）`) as Error & {
+        code?: string
+        hint?: string
+      }
+      err.code = 'BUDGET_EXHAUSTED'
+      err.hint = '延续到新会话即可继续——重要偏好请确认已 wb_remember,画布与资产不受影响'
+      throw err
     }
     const specBase = await this.buildDecisionSpec(effectiveInput, session, {
       preset,
@@ -831,7 +839,12 @@ class WorkbenchService {
       templateShortcut
     })
     // 长上下文锚定（真机发现：长会话工具遵循退化）——按水位注入工具纪律锚定段
-    const spec = specBase + contextAnchorFor(agent.turns, agent.totalTokens)
+    // C-H20 软水位:预算 90% 起 spec 注入收敛提示(模型自己控制输出与任务规模)
+    const budgetWarn =
+      agent.totalTokens >= MAX_SESSION_TOKENS * BUDGET_WARN_RATIO
+        ? budgetWarnText(MAX_SESSION_TOKENS, agent.totalTokens)
+        : ''
+    const spec = specBase + contextAnchorFor(agent.turns, agent.totalTokens) + budgetWarn
     // codex exec 的 JSONL 原始行（runDecideTurn 产出，parsePlanFromCodex 用）
     let rawLines: string[] = []
     try {
