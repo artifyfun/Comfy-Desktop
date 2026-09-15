@@ -235,8 +235,8 @@ function onEnterKey(e) {
 }
 
 function onEnter() {
-  if (slashOpen.value && filteredSkills.value.length) {
-    onSkillPick(filteredSkills.value[activeIndex.value])
+  if (slashOpen.value && filteredTemplates.value.length) {
+    onSkillPick(filteredTemplates.value[activeIndex.value])
   } else if (props.busy) {
     // 执行中 Enter = 停止（与按钮一致）
     emit('stop')
@@ -251,13 +251,13 @@ function onKeydown(e) {
   if (!slashOpen.value) return
   if (e.key === 'ArrowDown') {
     e.preventDefault()
-    activeIndex.value = Math.min(activeIndex.value + 1, filteredSkills.value.length - 1)
+    activeIndex.value = Math.min(activeIndex.value + 1, filteredTemplates.value.length - 1)
   } else if (e.key === 'ArrowUp') {
     e.preventDefault()
     activeIndex.value = Math.max(activeIndex.value - 1, 0)
   } else if (e.key === 'Tab') {
     e.preventDefault()
-    if (filteredSkills.value.length) onSkillPick(filteredSkills.value[activeIndex.value])
+    if (filteredTemplates.value.length) onSkillPick(filteredTemplates.value[activeIndex.value])
   } else if (e.key === 'Escape') {
     slashOpen.value = false
   }

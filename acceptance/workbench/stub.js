@@ -676,6 +676,42 @@ if (t.queue.length === 0) {
       })
     }
 
+    // —— W11（资产库弹窗 / 画布添加节点）所需端点 ——
+    // POST /api/apps：应用列表（appStore.loadApps 读 json.data）。画布「添加 app 节点」
+    // 的拾取器只列**带工作流**的应用（template.prompt 非空），故这里故意给一个空
+    // template 的项，用来顺带断言过滤生效。
+    if (route === 'POST /api/apps') {
+      return okResp([
+        {
+          id: 'app:e2e-aaa',
+          name: 'E2E 文生图',
+          description: '画布拾取用',
+          template: { prompt: { 1: { class_type: 'KSampler' } }, paramsNodes: [] },
+        },
+        {
+          id: 'app:e2e-bbb',
+          name: 'E2E 无工作流',
+          description: '应被拾取器过滤掉',
+          template: {},
+        },
+      ])
+    }
+    // GET /api/workbench/assets：创作资产库内容（AssetLibrary.api() 读 json.data → .assets）
+    if (route === 'GET /api/workbench/assets') {
+      return okResp({
+        total: 1,
+        assets: [
+          { id: 'asset:e2e-1', kind: 'character', name: 'E2E 角色', refs_count: 2, seed: 12345 },
+        ],
+      })
+    }
+    // GET /api/workbench/skills：技能库内容（SkillManager 读 json.data）
+    if (route === 'GET /api/workbench/skills') {
+      return okResp([
+        { name: 'e2e-skill', description: '验收用技能', enabled: true, builtin: false, size: 1 },
+      ])
+    }
+
     console.warn('[workbench-stub] unmocked', route)
     return origFetch(input, init)
   }

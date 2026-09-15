@@ -170,7 +170,7 @@ export default {
           ...(form.seed !== '' ? { seed: Number(form.seed) } : {}),
           ...(editingId.value ? { id: editingId.value } : {}),
         })
-        msg.value = t('assetLibSaved')
+        msg.value = props.t('assetLibSaved')
         resetForm()
         formOpen.value = false
         await refresh()

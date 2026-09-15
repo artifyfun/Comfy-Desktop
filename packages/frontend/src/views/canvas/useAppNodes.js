@@ -55,6 +55,11 @@ export function useAppNodes(deps) {
     stopKonvaEvent,
     linkFromConnect,
     maybeRunGenFromNote,
+    // 页级状态（非本 composable 所有）：由 index.vue 注入。
+    // 重构把 onAppPicked 搬进来时漏了这两个，导致「选完 app 不落节点」——
+    // 赋值/读取未声明标识符会在**加节点之前**抛 ReferenceError。
+    connectCreate,
+    genFromNote,
   } = deps
   const router = useRouter()
 

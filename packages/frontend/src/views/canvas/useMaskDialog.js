@@ -7,13 +7,7 @@
  * 外部依赖（objects/selection/emitPrompt 等 11 个）经 deps 注入。
  */
 import { reactive, ref, computed, nextTick } from 'vue'
-import {
-  buildInpaintMask,
-  clampBrushSize,
-  maskCanvasPoint,
-  maskHasPaint,
-  hitTest,
-} from './engine'
+import { buildInpaintMask, clampBrushSize, maskCanvasPoint, maskHasPaint, hitTest } from './engine'
 
 const MASK_PREVIEW_COLOR = 'rgba(59,130,246,0.45)'
 
@@ -31,6 +25,11 @@ export function useMaskDialog(deps) {
     screenToWorld,
     clamp,
     refOf,
+    // 页级状态/写入点（本轮修复）：容器 ref 与「溯源 id」回写。
+    // 第五批出仓时漏了这两个 —— onWrapContext 每次右键都抛 ReferenceError；
+    // 五个右键 runner 的 lastSourceIds 赋值同样抛错（该 `let` 属 index.vue）。
+    wrapEl,
+    setLastSourceIds,
   } = deps
 
   // —— D1a 蒙版编辑对话框（对齐参考 canvas-node-mask-edit-dialog）——
@@ -353,14 +352,14 @@ export function useMaskDialog(deps) {
       }
     }
     refs.push({ filename: maskFile.name, file: maskFile })
-    lastSourceIds = [objId]
+    setLastSourceIds([objId])
     emitPrompt(prompt, { autoSend: true, attachments: refs })
     message.success(t('canvasAiQueued'))
   }
 
   // （D1a 起局部重绘改走 openMaskDialog 蒙版编辑器，旧的直发工作台路径已删）
   function startOutpaint(objId) {
-    lastSourceIds = [objId]
+    setLastSourceIds([objId])
     emitPrompt(t('canvasOutpaintPrompt'), {
       autoSend: true,
       attachments: [refOf(objId)].filter(Boolean),
@@ -370,7 +369,7 @@ export function useMaskDialog(deps) {
   async function enhanceImage(objId) {
     const o = objects.value.find((x) => x.id === objId)
     if (!o) return
-    lastSourceIds = [objId]
+    setLastSourceIds([objId])
     emitPrompt(t('canvasEnhancePrompt'), {
       autoSend: true,
       attachments: [refOf(objId)].filter(Boolean),
@@ -378,7 +377,7 @@ export function useMaskDialog(deps) {
     message.info(t('canvasAiQueued'))
   }
   async function reversePrompt(objId) {
-    lastSourceIds = [objId]
+    setLastSourceIds([objId])
     emitPrompt(t('canvasReversePrompt'), {
       autoSend: true,
       attachments: [refOf(objId)].filter(Boolean),
@@ -386,7 +385,7 @@ export function useMaskDialog(deps) {
     message.info(t('canvasAiQueued'))
   }
   function imageToVideo(objId) {
-    lastSourceIds = [objId]
+    setLastSourceIds([objId])
     emitPrompt(t('canvasVideoPrompt'), {
       autoSend: true,
       attachments: [refOf(objId)].filter(Boolean),

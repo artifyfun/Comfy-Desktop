@@ -1536,6 +1536,10 @@ const aguiBridge = createAguiBridge({
 const newDialogOpen = ref(false)
 const presetMgrOpen = ref(false)
 const skillMgrOpen = ref(false)
+// 创作资产库弹窗。此前**只**在模板里引用（@manage-assets 赋值 + a-modal v-model），
+// script 里从未声明 → 赋值落到渲染 ctx 上不触发重渲染，于是「点资产库不弹、
+// 点技能库时才随那次重渲染一起冒出来、关闭也关不掉」。声明在此即可。
+const assetLibOpen = ref(false)
 const guideOpen = ref(false)
 // 首次进入自动弹出使用指南（只弹一次；localStorage 标记）
 const GUIDE_SEEN_KEY = 'artify.workbench.guideSeen.v1'

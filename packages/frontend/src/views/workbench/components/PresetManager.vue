@@ -405,6 +405,10 @@ const sortedPresets = computed(() =>
 const copyFrom = ref('')
 const copyId = ref('')
 const copyName = ref('')
+// 复制预设时要一并写入的模板/技能。copyTemplates 此前只在模板里被 v-model 引用、
+// script 里从未声明（同 assetLibOpen 型缺陷）：勾选落不进状态，且复制分支读
+// copyTemplates.value 会抛 ReferenceError。
+const copyTemplates = ref([])
 const copySkills = ref([])
 const copying = ref(false)
 

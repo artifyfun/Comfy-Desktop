@@ -5797,6 +5797,12 @@ const {
   stopKonvaEvent,
   linkFromConnect,
   maybeRunGenFromNote,
+  // 页级状态（本轮修复）：composable 里 onAppPicked 需要读/写它们——
+  // connectCreate.pickLink（拖线新建 app 时的待连线）与 genFromNote（note→生图编排请求）。
+  // 此前 composable 直接引用这两个标识符但从未注入 → ReferenceError，
+  // 「选完 app 不落节点」的根因。
+  connectCreate,
+  genFromNote,
 })
 
 // —— 多画布项目集（composable 拆分，第一批①c）——
@@ -5935,6 +5941,14 @@ const {
   screenToWorld,
   clamp,
   refOf,
+  // 页级状态/写入点（本轮修复）：composable 里 onWrapContext 要读容器 ref，
+  // 五个右键 runner 要写「溯源 id」供产物回落后连线（lastSourceIds 的 `let`
+  // 在本文件 5593 行，composable 无法跨模块赋值 → 用 setter 回写）。
+  // 此前两者都没注入，onWrapContext 每次右键必抛 ReferenceError。
+  wrapEl,
+  setLastSourceIds: (ids) => {
+    lastSourceIds = ids
+  },
 })
 
 // —— 提示词库（composable 拆分，第四批③）——

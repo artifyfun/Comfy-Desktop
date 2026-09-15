@@ -51,6 +51,10 @@ function makePageDeps(overrides = {}) {
     screenToWorld: (vp, sx, sy) => ({ x: sx - vp.x, y: sy - vp.y }),
     worldToScreen: (vp, wx, wy) => ({ x: wx + vp.x, y: wy + vp.y }),
     clamp: (v, a, b) => Math.min(b, Math.max(a, v)),
+    // 页级状态：index.vue 通过 deps 注入（本轮修复的接线）。测试与真实注入
+    // 保持同形——否则「composable 里引用未注入的页级变量」这类缺陷测不出来。
+    connectCreate: reactive({ pickLink: null }),
+    genFromNote: ref(null),
     ...overrides,
   }
 }
@@ -627,5 +631,97 @@ describe('useAppNodes.rerunFrom — 步级重跑下游(C-H11)', () => {
     const { c, deps } = await setupChain()
     c.rerunFrom('n4')
     expect(deps.message.info).not.toHaveBeenCalled()
+  })
+})
+
+// 手动添加 app 节点（工具栏 fa-cube / 拖线新建 / 右键菜单三条入口都汇到 onAppPicked）。
+// 回归背景：onAppPicked 曾引用两个**未注入**的页级变量（connectCreate / genFromNote）→
+// 「选完 app 不落节点」（ReferenceError 发生在加节点之前）。下面锁住落布与三条分支。
+describe('useAppNodes.onAppPicked — 手动添加 app 节点', () => {
+  const APP = {
+    id: 'app:aaaa-bbbb-cccc',
+    name: '探针应用',
+    template: { prompt: { 1: { class_type: 'KSampler' } } },
+  }
+
+  async function setup() {
+    const deps = makePageDeps({
+      linkFromConnect: vi.fn(),
+      maybeRunGenFromNote: vi.fn(),
+    })
+    const { useAppNodes } = await import('./useAppNodes')
+    const c = useAppNodes({
+      ...deps,
+      viewportCenterWorld: () => ({ x: 400, y: 300 }),
+      closeCtxMenu: vi.fn(),
+      setTool: vi.fn(),
+      refOf: vi.fn(() => null),
+      withCull: (fn) => (obj) => (fn(obj) ? [obj] : []),
+      isHighlightedOf: vi.fn(() => false),
+      stopKonvaEvent: vi.fn(),
+      appStore: { config: { activeAppId: 'app-1' }, getAppById: vi.fn(async () => null) },
+      emitPrompt: vi.fn(),
+      onOps: vi.fn(() => () => {}),
+    })
+    return { c, deps }
+  }
+
+  it('拾取后落一个 app 节点：appId/name 正确、以拾取点为中心、被选中、进撤销栈', async () => {
+    const { c, deps } = await setup()
+    c.openAppPicker(400, 300)
+    expect(c.appPicker.open).toBe(true)
+
+    c.onAppPicked(APP)
+
+    expect(c.appPicker.open).toBe(false)
+    expect(deps.objects.value).toHaveLength(1)
+    const node = deps.objects.value[0]
+    expect(node.type).toBe('app')
+    expect(node.appId).toBe(APP.id)
+    expect(node.name).toBe(APP.name)
+    // 拾取器存的是世界坐标，节点以自身尺寸居中落位
+    expect(node.x).toBe(400 - node.width / 2)
+    expect(node.y).toBe(300 - node.height / 2)
+    expect(deps.selection.value).toEqual([node.id])
+    expect(deps.beforeChange).toHaveBeenCalledTimes(1)
+    expect(deps.saveSoon).toHaveBeenCalled()
+    // 手动路径的节点 id 由前端自造（'a' 前缀），不采用 AI 侧的引用名
+    expect(node.id.startsWith('a')).toBe(true)
+  })
+
+  it('拖线新建（connectCreate.pickLink 有值）→ 建节点并补上连线，且清掉待连线状态', async () => {
+    const { c, deps } = await setup()
+    deps.connectCreate.pickLink = { from: 'n-src', to: null }
+    c.openAppPicker(100, 100)
+
+    c.onAppPicked(APP)
+
+    const node = deps.objects.value[0]
+    expect(deps.linkFromConnect).toHaveBeenCalledWith(node.id, 'n-src', null)
+    expect(deps.connectCreate.pickLink).toBe(null)
+  })
+
+  it('note→生图编排（genFromNote 有值）→ 不展开参数面板，改走自动运行', async () => {
+    const { c, deps } = await setup()
+    deps.genFromNote.value = { noteId: 'n1' }
+    c.openAppPicker(200, 200)
+
+    c.onAppPicked(APP)
+
+    const node = deps.objects.value[0]
+    expect(c.appPanel.id).toBe(null)
+    expect(deps.maybeRunGenFromNote).toHaveBeenCalledWith(node)
+    expect(deps.genFromNote.value).toEqual({ noteId: 'n1' }) // 由 maybeRunGenFromNote 负责清理
+  })
+
+  it('拾取物缺 id（异常数据）→ 不落节点，但拾取器照常关闭', async () => {
+    const { c, deps } = await setup()
+    c.openAppPicker(0, 0)
+
+    c.onAppPicked({ name: '没有 id' })
+
+    expect(c.appPicker.open).toBe(false)
+    expect(deps.objects.value).toHaveLength(0)
+    expect(deps.beforeChange).not.toHaveBeenCalled()
   })
 })
