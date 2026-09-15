@@ -38,7 +38,11 @@ function resolveApp(args: Record<string, unknown>): { app?: App; error?: string;
   if (!key) return { error: '需要 app_id（或 id）或 name 来定位模板' }
 
   if (!byName) {
-    const app = appStoreManager.getAppById(key)
+    // wb_list_templates 下发的 id 带 app: 前缀（模板库命名空间），而版本
+    // 历史键控在 appStore 的裸 uuid 上——两种口径都要能解析，否则模型拿
+    // 列表 id 查版本必然「未找到模板」（回归测试 R-B2 真机抓到）。
+    const app =
+      appStoreManager.getAppById(key) ?? appStoreManager.getAppById(key.replace(/^app:/, ''))
     if (!app) return { error: `未找到模板：${key}`, hint: '可用 wb_list_templates 查 id' }
     return { app }
   }

@@ -253,6 +253,15 @@ describe('wb_app_versions 定位口径', () => {
     expect(String(out.hint)).toContain('app-1')
   })
 
+  it('app_id 带 app: 前缀(模板库口径)→ 剥前缀解析到 appStore 裸 uuid', async () => {
+    seedApp('bare-uuid', '前缀模板', { current: 2, snapshotVersions: [1] })
+
+    const out = payload(await tool.fn({ action: 'list', app_id: 'app:bare-uuid' }))
+
+    expect(out.ok).toBe(true)
+    expect(out.app_id).toBe('bare-uuid')
+  })
+
   it('app_id 不存在 → 报错并指向 wb_list_templates', async () => {
     const out = payload(await tool.fn({ action: 'list', app_id: 'nope' }))
 
