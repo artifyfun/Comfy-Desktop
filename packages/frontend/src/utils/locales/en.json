@@ -1181,5 +1181,7 @@
   "assetLibRemove": "Delete",
   "assetLibSaved": "Saved",
   "canvasLinkStyleOrtho": "Link style: orthogonal (click for bezier)",
-  "canvasLinkStyleBezier": "Link style: bezier (click for orthogonal)"
+  "canvasLinkStyleBezier": "Link style: bezier (click for orthogonal)",
+  "canvasRerunFrom": "Rerun downstream from here",
+  "canvasRerunFromQueued": "Queued {n} nodes (with downstream) for rerun"
 }

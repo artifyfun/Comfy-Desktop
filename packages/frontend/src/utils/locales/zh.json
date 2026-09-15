@@ -1181,5 +1181,7 @@
   "assetLibRemove": "删除",
   "assetLibSaved": "已保存",
   "canvasLinkStyleOrtho": "连线风格：直角（点击切换为曲线）",
-  "canvasLinkStyleBezier": "连线风格：曲线（点击切换为直角）"
+  "canvasLinkStyleBezier": "连线风格：曲线（点击切换为直角）",
+  "canvasRerunFrom": "从此节点重跑下游",
+  "canvasRerunFromQueued": "已排队重跑 {n} 个节点(含下游)"
 }

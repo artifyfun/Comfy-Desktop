@@ -18,7 +18,14 @@ import {
   submitCanvasExecute,
   pollCanvasExecuteStatus,
 } from './appNode'
-import { lodTextVisible, serializeDoc, parseDoc, alignObjects, distributeObjects } from './engine'
+import {
+  lodTextVisible,
+  serializeDoc,
+  parseDoc,
+  alignObjects,
+  distributeObjects,
+  subtreeOf
+} from './engine'
 import { saveAiSnapshot, listAiSnapshots, deleteAiSnapshot, getAiSnapshot } from './aiSnapshots'
 
 export function useAppNodes(deps) {
@@ -284,6 +291,20 @@ export function useAppNodes(deps) {
       node.statusText = String(e?.message || e).slice(0, 120)
       saveSoon()
     }
+  }
+
+  /** C-H11 步级重跑：从某节点起重跑其下游闭包(含自身)。对标 RHTV「改一步,往下重跑」 */
+  function rerunFrom(nodeId) {
+    const root = objects.value.find((x) => x.id === nodeId)
+    if (!root || root.type !== 'app') return
+    // 下游闭包(subtreeOf 含根) → 只保留 app 节点且未在跑的
+    const chainIds = subtreeOf(links.value, nodeId).filter((id) => {
+      const o = objects.value.find((x) => x.id === id)
+      return o?.type === 'app' && o.status !== 'running'
+    })
+    if (!chainIds.length) return
+    message.info(t('canvasRerunFromQueued').replace('{n}', String(chainIds.length)))
+    for (const id of chainIds) void runAppNode(id)
   }
 
   /** 批量运行：选中多个 app 节点依次触发（服务端排队天然并行） */
@@ -698,6 +719,7 @@ export function useAppNodes(deps) {
     runAppNode,
     runAppNodeFromKonva,
     runAppNodes,
+    rerunFrom,
     pickCanvasImageFor,
     pendingAgentOps,
     agentOpsDiffLines,

@@ -19,6 +19,7 @@ export const CANVAS_CTX_ACTIONS = [
   { key: 'frame-rename', icon: 'fa-pen', labelKey: 'canvasRenameFrame', when: 'singleFrame' },
   { key: 'gen-info', icon: 'fa-circle-info', labelKey: 'canvasGenInfoTitle', when: 'anyImageMeta' },
   { key: 'app-run', icon: 'fa-play', labelKey: 'canvasCtxRunApp', when: 'anyApp' },
+  { key: 'app-rerun', icon: 'fa-rotate-right', labelKey: 'canvasRerunFrom', when: 'anyApp' },
   { key: 'app-panel', icon: 'fa-gear', labelKey: 'canvasCtxAppPanel', when: 'anyApp' },
   {
     key: 'app-full',

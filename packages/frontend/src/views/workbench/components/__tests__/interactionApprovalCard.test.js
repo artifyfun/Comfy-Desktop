@@ -83,13 +83,14 @@ describe('InteractionApprovalCard — 三按钮 emit 载荷', () => {
   it('批准:emit respond({ action: "approve" }),不带 args', async () => {
     const w = mountCard({})
     await w.find('[data-testid="approval-approve"]').trigger('click')
-    expect(w.emitted('respond')).toEqual([[{ action: 'approve' }]])
+    // C-H10: 勾选框默认不勾 → alwaysAllow: false 随载荷透传
+    expect(w.emitted('respond')).toEqual([[{ action: 'approve', alwaysAllow: false }]])
   })
 
   it('拒绝:emit respond({ action: "reject" }),不带 args', async () => {
     const w = mountCard({})
     await w.find('[data-testid="approval-reject"]').trigger('click')
-    expect(w.emitted('respond')).toEqual([[{ action: 'reject' }]])
+    expect(w.emitted('respond')).toEqual([[{ action: 'reject', alwaysAllow: false }]])
   })
 })
 

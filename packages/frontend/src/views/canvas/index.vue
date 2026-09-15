@@ -3552,6 +3552,10 @@ const ctxItems = computed(() => {
       runAppNodes(
         ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app'),
       ),
+    'app-rerun': () => {
+      const firstApp = ids.find((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app')
+      if (firstApp) rerunFrom(firstApp)
+    },
     'app-panel': () =>
       openAppNodePanel(
         ids.find((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app'),
@@ -5077,6 +5081,11 @@ function buildToolbarItems(o, id) {
     items.push(
       { icon: 'fas fa-play', title: t('canvasRunAppNodes'), action: () => runAppNode(id) },
       {
+        icon: 'fas fa-rotate-right',
+        title: t('canvasRerunFrom'),
+        action: () => rerunFrom(id),
+      },
+      {
         icon: 'fas fa-sliders',
         title: t('canvasCtxAppPanel'),
         action: () => {
@@ -5494,6 +5503,7 @@ const {
   runAppNode,
   runAppNodeFromKonva,
   runAppNodes,
+  rerunFrom,
   pickCanvasImageFor,
   pendingAgentOps,
   agentOpsDiffLines,
