@@ -152,7 +152,7 @@ describe('useAppNodes pendingAgentOps（人审确认卡）', () => {
     opsSink([{ type: 'select_nodes', ids: ['x'] }])
     expect(c.pendingAgentOps.value).toEqual([{ type: 'select_nodes', ids: ['x'] }])
     // confirm：执行（select_nodes 对 ghost id 过滤后空 → selection 不变）并清空
-    c.confirmAgentOps()
+    await c.confirmAgentOps()
     expect(c.pendingAgentOps.value).toBeNull()
     expect(deps.beforeChange).toHaveBeenCalled()
   })

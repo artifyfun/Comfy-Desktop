@@ -185,6 +185,40 @@ export function orthogonalLinkPath(x1, y1, x2, y2) {
 }
 
 /**
+ * 正交连线绕障变体(C-H15): 基础折线的竖直段若穿过任一障碍矩形,则把竖直
+ * 段平移到该障碍上边界上方(或下边界下方,取更近者),并在出入点加两个折弯。
+ * obstacles: [{x,y,width,height}] 世界坐标;只对正交模式生效。
+ */
+export function orthogonalLinkPathAvoid(x1, y1, x2, y2, obstacles = []) {
+  const base = orthogonalLinkPath(x1, y1, x2, y2)
+  if (!obstacles.length) return base
+  const dir = x2 >= x1 ? 1 : -1
+  const stub = 24
+  let mx = x2 >= x1 ? Math.max(x1 + stub, x2 - stub) : x1 - stub
+  // 找出竖直段(mx, y1→y2)穿过的障碍
+  const segTop = Math.min(y1, y2)
+  const segBot = Math.max(y1, y2)
+  let shifted = mx
+  let shiftedAtAll = false
+  for (const o of obstacles) {
+    const overlapsX = mx >= o.x && mx <= o.x + o.width
+    const overlapsY = segBot > o.y + 4 && segTop < o.y + o.height - 4
+    if (!overlapsX || !overlapsY) continue
+    // 平移到上边上方或下边下方,取距原 mx 更近的一侧
+    const toTop = Math.abs(mx - (o.x - 16))
+    const toBot = Math.abs(o.x + o.width + 16 - mx)
+    const candidate = toTop <= toBot ? o.x - 16 : o.x + o.width + 16
+    if (!shiftedAtAll || Math.abs(candidate - mx) < Math.abs(shifted - mx)) {
+      shifted = candidate
+      shiftedAtAll = true
+    }
+  }
+  if (!shiftedAtAll) return base
+  mx = shifted
+  return `M ${x1} ${y1} L ${mx} ${y1} L ${mx} ${y2} L ${x2} ${y2}`
+}
+
+/**
  * 命中点 (px,py) 到线段 (x1,y1)-(x2,y2) 的距离（世界坐标）。
  * 连线点击删除/选中用，阈值由调用方按缩放换算。
  */

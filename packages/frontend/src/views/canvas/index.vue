@@ -122,7 +122,7 @@
               <v-path
                 :config="{
                   id: seg.id,
-                  data: linkPath(seg.x1, seg.y1, seg.x2, seg.y2),
+                  data: linkPath(seg.x1, seg.y1, seg.x2, seg.y2, [seg.from, seg.to]),
                   stroke: 'transparent',
                   strokeWidth: 16 / viewport.scale,
                   hitStrokeWidth: 16 / viewport.scale,
@@ -175,6 +175,18 @@
             />
           </v-layer>
           <v-layer>
+            <!-- C-H16 agent 过程高亮: 当前操作节点描边 -->
+            <v-rect
+              v-if="spotlightRect"
+              :config="{
+                ...spotlightRect,
+                stroke: '#409eff',
+                strokeWidth: 3 / viewport.scale,
+                cornerRadius: 10,
+                listening: false,
+                dash: [8 / viewport.scale, 5 / viewport.scale],
+              }"
+            />
             <!-- 对齐参考线 -->
             <v-line v-for="(g, i) in guides.v" :key="'gv' + i" :config="guideConfig(g, 'v')" />
             <v-line v-for="(g, i) in guides.h" :key="'gh' + i" :config="guideConfig(g, 'h')" />
@@ -239,7 +251,10 @@
               <v-rect :config="appNodeRectConfig(o)" />
               <v-text :config="appNodeTitleConfig(o)" />
               <v-text :config="appNodeSubConfig(o)" />
-              <v-circle :config="appNodeStatusConfig(o)" />
+              <v-circle
+                :ref="(el) => statusCircleRefs.set(o.id, el)"
+                :config="appNodeStatusConfig(o)"
+              />
               <v-text
                 :config="appNodeRunBtnConfig(o)"
                 @mousedown="runAppNodeFromKonva(o.id, $event)"
@@ -1782,6 +1797,7 @@ import {
   worldToScreen,
   zoomAtPoint,
   orthogonalLinkPath,
+  orthogonalLinkPathAvoid,
   hitTest,
   hitTestRect,
   snapDelta,
@@ -1985,14 +2001,43 @@ const wrapEl = ref(null)
 const stageEl = ref(null)
 const size = reactive({ w: 800, h: 600 })
 const viewport = ref(makeViewport())
+// C-H15: running 节点状态圆点呼吸动画——单 rAF 循环只改 opacity,随节点卸载自动出列
+const statusCircleRefs = reactive(new Map())
+let breathRaf = 0
+function breathLoop(t) {
+  const op = 0.35 + 0.35 * Math.sin(t / 240)
+  let dirty = false
+  for (const el of statusCircleRefs.values()) {
+    const node = el?.getNode?.()
+    if (node && node.getAttrs().stroke) {
+      node.opacity(op)
+      dirty = true
+    }
+  }
+  if (dirty) {
+    for (const el of statusCircleRefs.values()) {
+      el?.getNode?.()?.getLayer()?.batchDraw()
+    }
+  }
+  breathRaf = requestAnimationFrame(breathLoop)
+}
+onMounted(() => {
+  breathRaf = requestAnimationFrame(breathLoop)
+})
+onBeforeUnmount(() => cancelAnimationFrame(breathRaf))
 // C-H9 连线风格：'bezier'(默认) | 'ortho'(横平竖直直角线)——持久化到 localStorage
 const linkOrtho = ref(localStorage.getItem('artify.canvas.linkStyle') === 'ortho')
 function setLinkStyle(ortho) {
   linkOrtho.value = ortho
   localStorage.setItem('artify.canvas.linkStyle', ortho ? 'ortho' : 'bezier')
 }
-const linkPath = (x1, y1, x2, y2) =>
-  linkOrtho.value ? orthogonalLinkPath(x1, y1, x2, y2) : bezierLinkPath(x1, y1, x2, y2)
+const linkPath = (x1, y1, x2, y2, excludeIds = []) => {
+  if (!linkOrtho.value) return bezierLinkPath(x1, y1, x2, y2)
+  const obstacles = objects.value
+    .filter((o) => (o.type === 'app' || o.type === 'image') && !excludeIds.includes(o.id))
+    .map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height }))
+  return orthogonalLinkPathAvoid(x1, y1, x2, y2, obstacles)
+}
 const objects = ref([])
 const links = ref([]) // {id, from, to} 物件 id；渲染为箭头，级联删除
 const groups = ref([]) // {id, members:[objectId]} 组合；成员联动拖动/选择/删除
@@ -3732,6 +3777,11 @@ const selBar = computed(() => {
     count: ids.length,
     apps: picked.filter((o) => o.type === 'app').length,
   }
+})
+const spotlightRect = computed(() => {
+  const o = objects.value.find((x) => x.id === spotlightId.value)
+  if (!o) return null
+  return { x: o.x - 6, y: o.y - 6, width: o.width + 12, height: o.height + 12 }
 })
 function selBarRunApps() {
   runAppNodes(
@@ -5588,6 +5638,7 @@ const {
   runAppNodeFromKonva,
   runAppNodes,
   rerunFrom,
+  spotlightId,
   pickCanvasImageFor,
   pendingAgentOps,
   agentOpsDiffLines,

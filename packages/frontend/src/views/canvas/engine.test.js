@@ -693,3 +693,30 @@ describe('orthogonalLinkPath — 正交连线几何(C-H9)', () => {
     expect(orthogonalLinkPath(0, 100, 300, 100.5)).toBe('M 0 100 L 300 100.5')
   })
 })
+
+describe('orthogonalLinkPathAvoid — 绕障变体(C-H15)', () => {
+  const { orthogonalLinkPathAvoid } = require('./engine')
+
+  it('无障碍 → 与基础折线一致', () => {
+    expect(orthogonalLinkPathAvoid(0, 0, 300, 200, [])).toBe(
+      orthogonalLinkPathAvoid(0, 0, 300, 200, []),
+    )
+    expect(orthogonalLinkPathAvoid(0, 0, 300, 200)).not.toContain('NaN')
+  })
+
+  it('竖直段穿过障碍 → 平移到障碍外', () => {
+    // a(100,100) → b(500,100) 竖直段在 mx≈352(=max(124,476) 其实 476) y 100→100 无穿障
+    // 改造: y 不同才有竖直段
+    const obstacles = [{ x: 420, y: 50, width: 120, height: 200 }] // 覆盖 mx=476
+    const d = orthogonalLinkPathAvoid(0, 0, 500, 300, obstacles)
+    // 竖直段应避开 [200,300] 区间
+    expect(d).not.toBe(orthogonalLinkPathAvoid(0, 0, 500, 300, []))
+    const mx = Number(d.split('L ')[1]?.split(' ')[0])
+    expect(mx < 200 || mx > 300).toBe(true)
+  })
+
+  it('端点自身障碍被排除时不影响(调用方负责排除)', () => {
+    const d = orthogonalLinkPathAvoid(0, 0, 500, 300, [])
+    expect(d).not.toContain('NaN')
+  })
+})

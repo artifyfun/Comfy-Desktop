@@ -24,7 +24,7 @@ import {
   parseDoc,
   alignObjects,
   distributeObjects,
-  subtreeOf
+  subtreeOf,
 } from './engine'
 import { saveAiSnapshot, listAiSnapshots, deleteAiSnapshot, getAiSnapshot } from './aiSnapshots'
 
@@ -514,6 +514,8 @@ export function useAppNodes(deps) {
 
   // —— P3 AI 侧边栏节点指令（wb_canvas_ops → 人审确认卡 → 执行） ——
   const pendingAgentOps = ref(null) // Array<op> | null
+  /** C-H16 过程高亮: agent 当前正在操作的节点 id(短暂驻留,画布描边) */
+  const spotlightId = ref(null)
 
   // —— C-H3 AI 快照（AI 批量改画布前的持久检查点 + 一键恢复） ——
   const aiSnapshotStorage = {
@@ -587,7 +589,7 @@ export function useAppNodes(deps) {
     }),
   )
 
-  function applyCanvasAgentOps(ops) {
+  async function applyCanvasAgentOps(ops) {
     if (!Array.isArray(ops)) return
     beforeChange()
     // C-H3 AI 快照：批量改画布前自动打持久命名快照（安全网，失败不阻塞）
@@ -681,10 +683,10 @@ export function useAppNodes(deps) {
     }
   }
 
-  function confirmAgentOps() {
+  async function confirmAgentOps() {
     const ops = pendingAgentOps.value
     if (!ops?.length) return
-    applyCanvasAgentOps(ops) // 内部已含 AI 快照打点（C-H3）
+    await applyCanvasAgentOps(ops) // 内部已含 AI 快照打点（C-H3）
     pendingAgentOps.value = null
     message.success(t('canvasAgentOpsApplied'))
   }
@@ -720,6 +722,7 @@ export function useAppNodes(deps) {
     runAppNodeFromKonva,
     runAppNodes,
     rerunFrom,
+    spotlightId,
     pickCanvasImageFor,
     pendingAgentOps,
     agentOpsDiffLines,
