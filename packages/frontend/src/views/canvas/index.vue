@@ -37,6 +37,62 @@
             @close="layersOpen = false"
           />
         </div>
+        <!-- C-H13 多选浮动操作栏：选区上方跟随的快捷批量操作(Figma 式) -->
+        <div
+          v-if="selBar"
+          class="absolute z-30 flex items-center gap-1 rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] px-1.5 py-1 shadow-lg"
+          :style="{ left: selBar.x + 'px', top: selBar.y + 'px' }"
+          data-testid="selection-bar"
+          @mousedown.stop
+          @contextmenu.prevent.stop
+        >
+          <span class="px-1 text-[11px] text-[var(--wb-text-2)]">{{ selBar.count }}</span>
+          <button
+            v-if="selBar.apps >= 1"
+            class="rounded px-1.5 py-0.5 text-[11px] text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10"
+            :title="t('canvasRunAppNodes')"
+            data-testid="selbar-run"
+            @click="selBarRunApps"
+          >
+            <i class="fas fa-play"></i>
+          </button>
+          <button
+            class="rounded px-1.5 py-0.5 text-[11px] text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10"
+            :title="t('canvasAlignLeft')"
+            @click="alignSel('left')"
+          >
+            <i class="fas fa-align-left"></i>
+          </button>
+          <button
+            class="rounded px-1.5 py-0.5 text-[11px] text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10"
+            :title="t('canvasAlignHCenter')"
+            @click="alignSel('hcenter')"
+          >
+            <i class="fas fa-align-center"></i>
+          </button>
+          <button
+            class="rounded px-1.5 py-0.5 text-[11px] text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10"
+            :title="t('canvasFitAll')"
+            @click="fitAll"
+          >
+            <i class="fas fa-expand"></i>
+          </button>
+          <button
+            class="rounded px-1.5 py-0.5 text-[11px] text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10"
+            :title="t('canvasGroupSel')"
+            @click="groupSelected"
+          >
+            <i class="fas fa-object-group"></i>
+          </button>
+          <button
+            class="rounded px-1.5 py-0.5 text-[11px] text-[var(--wb-danger)] hover:bg-[var(--wb-danger)]/10"
+            :title="t('canvasDeleteSelected')"
+            data-testid="selbar-delete"
+            @click="selBarDelete"
+          >
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
         <!-- 素材库面板（P2）：左下浮动，点击/拖入画布 -->
         <div
           v-if="assetsOpen"
@@ -3553,7 +3609,9 @@ const ctxItems = computed(() => {
         ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app'),
       ),
     'app-rerun': () => {
-      const firstApp = ids.find((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app')
+      const firstApp = ids.find(
+        (id) => (objects.value.find((o) => o.id === id) || {}).type === 'app',
+      )
       if (firstApp) rerunFrom(firstApp)
     },
     'app-panel': () =>
@@ -3660,6 +3718,32 @@ function gridArrangeSelected() {
 }
 
 /** 多选对齐（左/右/上/下/水平居中/垂直居中）：应用坐标映射 */
+// C-H13 多选浮动操作栏: 选区上方跟随的快捷批量操作(Figma 式)
+const selBar = computed(() => {
+  const ids = selection.value
+  if (ids.length < 2) return null
+  const picked = objects.value.filter((o) => ids.includes(o.id))
+  if (!picked.length) return null
+  const b = bboxOf(picked)
+  const tl = worldToScreen(viewport.value, b.x, b.y)
+  return {
+    x: Math.max(12, tl.x),
+    y: Math.max(TOOLBAR_H + 12, tl.y - 44),
+    count: ids.length,
+    apps: picked.filter((o) => o.type === 'app').length,
+  }
+})
+function selBarRunApps() {
+  runAppNodes(
+    objects.value
+      .filter((o) => selBar.value && selection.value.includes(o.id) && o.type === 'app')
+      .map((o) => o.id),
+  )
+}
+function selBarDelete() {
+  deleteSelected()
+}
+
 function alignSel(mode) {
   if (selection.value.length < 2) return
   const moves = alignObjects(objects.value, selection.value, mode)
