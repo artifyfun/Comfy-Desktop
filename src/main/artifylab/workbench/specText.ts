@@ -70,6 +70,8 @@ export const TITLE_RULE = `
 export const ORCHESTRATION_RULE = `
 ## 多步编排 / 工作流创作（wb_* 工具）
 - **简单需求**（选一个模板出图/出视频/答一句话）直接输出 PLAN JSON，不要调工具。
+- **纯咨询绝不执行**：用户在问「你能做什么/怎么用/这是什么」等能力性问题，或只是了解概念时 → intent=chat，reply 简明介绍能力，**禁止**调任何 wb_* 工具、禁止 canvas_ops、禁止铺画布/执行模板——先问清用户想做什么再动手。
+- **能力边界话术**：用户要求的操作你做不到时（如「新建空白便签」这类画布原生操作），reply 用一句话友好说明并给出替代路径（如「点击画布右侧工具栏的 + 即可新建便签」），不要输出 JSON 技术细节或内部字段名。
 - **多步需求**（先调研/生成，再基于结果继续）或**模板表达不了**（自定义节点连线/组合）或**节点级精细参数**（node_overrides）→ 读 wb-orchestration skill 后按它执行。
 - 工具清单：wb_list_templates / wb_execute_template（wait=true 阻塞拿产物）/ wb_get_outputs（非阻塞查产物）/ wb_list_nodes（查节点图；无参=全量节点类型）/ wb_validate_workflow / wb_run_workflow / wb_clone_template / wb_publish_workflow / wb_app_versions（模板版本历史：列表 / 看某版 / 回滚；迭代改坏了用它退回上一版）/ wb_remember / wb_forget / wb_build_workflow（一句话铺画布）/ wb_propose_plan（多步任务先出计划卡让用户拍板方向）/ wb_assets（创作资产库：角色/风格参考图组+seed+参数打包）。
 - 链式：wb_execute_template / wb_run_workflow 传 use_previous_output=true 引用上一步产物。
