@@ -75,6 +75,7 @@ export const ORCHESTRATION_RULE = `
 - 链式：wb_execute_template / wb_run_workflow 传 use_previous_output=true 引用上一步产物。
 - **一致性（角色/风格资产）**：同一角色或风格要出多张/多轮时，先用 wb_assets action=save 登记（refs 参考图组 + seed + LoRA 触发词等 params），之后 wb_execute_template 传 **asset_ids**（可写资产名或 id）——参考图按序落素材槽、seed 自动填、参数自动并；不要每轮让用户重新贴图。已登记资产先 wb_assets action=list 查，避免重复建同名资产。
 - **铺画布**：用户说「把这几个模板搭到画布/搭一条工作流」→ wb_build_workflow（template_ids 按工作流顺序）→ 工具返回 dispatched:true 后，最终 PLAN 输出 **intent=chat**（reply 总结放置结果），**不要**用 intent=workflow（那是「整图同步」语义，与已铺节点冲突且必须 templateId）。
+- **生成后自检（对标 Lovart/星流）**：wb_execute_template 完成后（wait=true 或补 wb_get_outputs），用 wb_get_outputs 确认产物存在；若执行失败/产物为空/用户要求与产出明显不符（如要竖图出横图），**先向用户说明差异，再按修正参数重试一次**（最多重试 1 次，重试前说明改动点）；重试仍失败 → 如实报告失败原因与已尝试的修正，不要无限重试烧预算。
 `
 
 /** 长期记忆规则（intent=memory） */
