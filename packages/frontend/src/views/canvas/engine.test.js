@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   makeViewport,
+  centerViewport,
   clampScale,
   screenToWorld,
   worldToScreen,
@@ -78,6 +79,42 @@ describe('canvas engine: viewport', () => {
   it('zoomAtPoint 触顶后 scale 封顶', () => {
     const vp = zoomAtPoint(makeViewport(3.9, 10, 10), 10, 0, 0)
     expect(vp.scale).toBe(4)
+  })
+
+  // resetView / fitAll 共用的锚点算术。回归背景：resetView 曾直接置
+  // {scale:1,x:0,y:0}（世界原点钉在画布左上角），内容在远处负坐标时点它
+  // 画布只剩网格 —— 用户报障「重置视图看起来不太对」。
+  describe('centerViewport（把世界坐标 anchor 摆到视口中心）', () => {
+    const size = { w: 1000, h: 800 }
+
+    it('anchor 落在视口正中心', () => {
+      const vp = centerViewport({ x: 300, y: 200 }, size, 1)
+      expect(worldToScreen(vp, 300, 200)).toEqual({ x: 500, y: 400 })
+    })
+
+    it('缩放为 100% 时：内容在远处负坐标也仍在画面中央（不会被甩出去）', () => {
+      const vp = centerViewport({ x: -2691, y: -1756 }, size, 1)
+      expect(vp.scale).toBe(1)
+      const s = worldToScreen(vp, -2691, -1756)
+      expect(s).toEqual({ x: 500, y: 400 })
+      // 关键：该点必须落在容器内（旧实现下这里是 (-2691,-1756) → 完全在画面外）
+      expect(s.x).toBeGreaterThanOrEqual(0)
+      expect(s.x).toBeLessThanOrEqual(size.w)
+      expect(s.y).toBeGreaterThanOrEqual(0)
+      expect(s.y).toBeLessThanOrEqual(size.h)
+    })
+
+    it('带缩放时中心不变（fitAll 用它摆包围盒中心）', () => {
+      const vp = centerViewport({ x: 100, y: 50 }, size, 2.5)
+      expect(vp.scale).toBe(2.5)
+      expect(worldToScreen(vp, 100, 50)).toEqual({ x: 500, y: 400 })
+    })
+
+    it('原点居中 ≠ 旧口径（旧实现 x/y 恒为 0，原点贴左上角）', () => {
+      const vp = centerViewport({ x: 0, y: 0 }, size, 1)
+      expect(vp).toEqual({ scale: 1, x: 500, y: 400 })
+      expect(makeViewport()).toEqual({ scale: 1, x: 0, y: 0 }) // 默认视口仍保持原语义
+    })
   })
 })
 

@@ -10,6 +10,22 @@ export function makeViewport(scale = 1, x = 0, y = 0) {
   return { scale, x, y }
 }
 
+/**
+ * 构造「把世界坐标 anchor 摆到视口正中心」的视口。
+ *
+ * fitAll（anchor=内容包围盒中心，scale=适配缩放）与 resetView（anchor=内容中心
+ * 或原点，scale=1）共用这套算术——此前 resetView 直接 `{scale:1,x:0,y:0}`，
+ * 等于把**世界原点钉在画布左上角**：内容一旦不在原点附近（平移后新建的节点常带
+ * 大负坐标），点「重置视图」画布就只剩网格，看起来像内容丢了。
+ */
+export function centerViewport(anchor, size, scale = 1) {
+  return {
+    scale,
+    x: size.w / 2 - anchor.x * scale,
+    y: size.h / 2 - anchor.y * scale,
+  }
+}
+
 /** 限制缩放范围 */
 export function clampScale(scale, min = 0.1, max = 4) {
   return Math.min(max, Math.max(min, scale))

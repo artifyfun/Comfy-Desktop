@@ -68,12 +68,17 @@ CUSTOM `wb_canvas_ops`，整条 embed 链路（桥 → poller → canvasMode 总
 | W8 | **审批 edit-args** — 发"修改参数执行这个任务"→ tool_approval_required 带 args `{templateId,count,seed,customParam}` → 点击「修改参数」→ textarea 预填美化 JSON → 改 count 4→6 → 保存 → interaction-response action='edit' echoArgs.count=6 / originalArgs.count=4 → tool_approval_resolved 带 finalAction='edit' + finalArgs → 收尾文本"参数已编辑，按新参数放行。" | w8-approval-edit.png |
 | W9 | **生成过程直通预览（编排路径）** — 发"我要看实时预览"→ TOOL_CALL_START/ARGS/END 占出工具卡 → 3 帧 CUSTOM `preview_frame{dataUrl}` → 工具卡内渲染 `<img data-testid="exec-preview">`。断言：图在、**真的解码成功**（naturalWidth 128 / naturalHeight 80）、src 是 `data:image/*`、无页面级报错 | w9-preview.png |
 | W10 | **画布 ops 全链 + DOM 级确认卡** — 在 **`/canvas`** 发"帮我把模板铺画布搭成工作流"→ stub 推 CUSTOM `wb_canvas_ops{ops,source}`（ops 为 canvasTools 真实形状：`appId` 是模板 id、节点引用走本批 `nodeId`）→ 画布页 `.agent-ops-card` 渲染出「新建应用节点：E2E 文生图 / 图生视频 · 连线 E2E 文生图 → E2E 图生视频 · 选中 2 个物件」。断言：卡文案含节点名且**不暴露内部 nodeId**、确认前节点未落布（人审门有效）→ 点「执行」→ `artify.canvas.projects.v1` 出现 **2 个节点（id 恰为 AI 侧 nodeId）+ 1 条连线** | w10-canvas-ops-card.png / w10-canvas-ops-applied.png |
-| W11 | **两个用户报障的回归**（`scripts/wb-ui-regress-verify.mjs`）— ① 点侧栏「创作资产库」→ 弹窗**当次**可见、点关闭**能关**、点「技能库」**不再连带**弹出资产库；② `/canvas` 点「添加 App 节点」→ 拾取器弹出且**只列带工作流的应用**（空 `template` 被过滤）→ 点一项 → `artify.canvas.projects.v1` 的 `project.doc.objects` 出现 1 个 `type:'app'`、`appId` 正确的节点 | w11-assetlib-open.png / w11-apppicker.png / w11-canvas-node-added.png |
+| W11 | **两个用户报障的回归 + 视图按钮口径**（`scripts/wb-ui-regress-verify.mjs`）— ① 点侧栏「创作资产库」→ 弹窗**当次**可见、点关闭**能关**、点「技能库」**不再连带**弹出资产库；② `/canvas` 点「添加 App 节点」→ 拾取器弹出且**只列带工作流的应用**（空 `template` 被过滤）→ 点一项 → `artify.canvas.projects.v1` 的 `project.doc.objects` 出现 1 个 `type:'app'`、`appId` 正确的节点；③ 枚举四个视图入口断言 **icon↔行为口径一致**（准星=全部适配视图 / expand=重置视图，两栏都是），随后累计平移 4 次把内容推到远处负坐标、新建节点 → 缩放滑杆降到 40% → 点「重置视图」→ 断言 100%、**视口中心世界坐标不变**、正在看的节点仍在画面内 | w11-assetlib-open.png / w11-apppicker.png / w11-canvas-node-added.png / w11-reset-before.png / w11-reset-after.png |
 
 > W10 补的是**渲染层**：单元/契约测试已钉住载荷与语义（`routes/agui.test.ts` / `__tests__/aguiBridge.test.js` / `__tests__/useExecutionPolling.test.js` / `canvas/composables.test.js`），但「画布页真的弹出卡、确认后**连线真的建出来**」需要浏览器证据。变异验证：把 stub 的 CUSTOM 帧改名 → 脚本立刻报「未出现确认卡」。
 
 > **W11 的两个坑（照抄别踩）**：① 首屏会自动弹「使用指南」（`GUIDE_SEEN_KEY` localStorage 标记），遮罩会拦住所有点击 → 每次 `goto` 后先点掉 `.ant-modal-close`；② 画布顶部提示条（z-20，如"检测到软件渲染已降级"）会压住工具栏 → 工具栏按钮用 `evaluate(el => el.click())` 直接分发，别用 `locator.click()`（会一直等 actionability 超时）。③ 读画布状态必须走 **`project.doc.objects`**（不是 `project.objects`）——形状按 `projectStore.js` 来，猜形状会读出一片空、把产品 bug 误判成"没落节点"（本轮就自摆了一次）。
 > 变异验证：删掉 `assetLibOpen` 声明（还原原始缺陷）→ 脚本立刻报「点『创作资产库』当次没弹出」。
+> **W11 ③ 的测量要点**：视图状态有「实时（响应式 `viewport`）」与「落盘（`project.doc.viewport`）」两份，读错那一份会得出相反结论——
+> - 状态栏的 `NN%` 读数是**实时**缩放的可靠探针（`readZoomPct`）；落盘值只在 `saveSoon`（500ms 防抖）之后才更新
+> - 平移/缩放不落盘、而 `resetView`/`fitAll` 现在会调 `saveSoon` → 断言「重置后落盘视口 = 新值」本身就是**持久化生效**的验证
+> - 造「内容远离原点」必须**累计平移**（单次拖拽受窗口边界限制，最多几百像素）；判据用「视口中心世界坐标不变 + 正在看的节点仍在画面内」，不要用「内容包围盒中心可见」——内容散布很开时包围盒中心恰是空白区，那条判据会放过一个看起来仍然是空画布的坏实现
+> 变异验证：把 `resetView` 还原成 `makeViewport()`（`{1,0,0}`）→ 脚本报「重置视图移动了视口中心」，节点屏幕位置 (-2691,-1756) 在画面外。
 
 > W9 与 `scripts/wb-preview-verify.mjs` 互补：后者验**真机 ComfyUI**的协议与帧解码（能力协商 / 8 字节头剥离），W9 验**前端渲染链路**（AG-UI → aguiBridge → 消息 → 工具卡 `<img>`）。两段合起来才是 #5 的完整证据。
 

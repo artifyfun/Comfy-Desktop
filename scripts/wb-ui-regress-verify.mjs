@@ -78,9 +78,14 @@ async function readCanvasDoc(page) {
             objects: (active.doc?.objects || []).map((o) => ({
               id: o.id,
               type: o.type,
-              appId: o.appId
+              appId: o.appId,
+              x: o.x,
+              y: o.y,
+              width: o.width,
+              height: o.height
             })),
-            links: active.doc?.links || []
+            links: active.doc?.links || [],
+            viewport: active.doc?.viewport || null
           }
         : { objects: [], links: [] }
     } catch {
@@ -88,6 +93,16 @@ async function readCanvasDoc(page) {
     }
   })
 }
+
+/** 状态栏的实时缩放读数（直接来自响应式 viewport） */
+const readZoomPct = (page) =>
+  page.evaluate(() => {
+    for (const s of document.querySelectorAll('span')) {
+      const m = /^(\d+)%$/.exec((s.textContent || '').trim())
+      if (m) return Number(m[1])
+    }
+    return null
+  })
 
 const browser = await chromium.launch({ headless: true })
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
@@ -189,7 +204,148 @@ try {
   console.log('② 拾取器已关闭:', (await page.locator('.picker-mask:visible').count()) === 0)
   await page.screenshot({ path: SHOT_DIR + 'w11-canvas-node-added.png' })
 
-  console.log('\n✅ 两项都通过：资产库当次可弹可关；画布选完应用真的落节点')
+  // ══════════ ③ 视图按钮：图标口径一致 + 重置视图不把内容甩出画面 ══════════
+  // 背景：① 同一对图标在两栏里含义相反（状态栏 准星=重置、工具栏 准星=适配），
+  //       ② 重置视图曾直接置 {1,0,0}（原点贴左上角），内容在远处负坐标时点它画布只剩网格。
+  const entries = await page.evaluate(() => {
+    const out = []
+    for (const el of document.querySelectorAll('[title]')) {
+      const t = el.getAttribute('title') || ''
+      if (!/重置视图|全部适配视图/.test(t)) continue
+      const r = el.getBoundingClientRect()
+      if (r.width === 0) continue
+      const i = el.querySelector('i')
+      out.push({
+        title: t,
+        icon: i ? [...i.classList].find((c) => c.startsWith('fa-')) : '',
+        y: Math.round(r.y),
+      })
+    }
+    return out
+  })
+  const badIcon = entries.filter(
+    (e) => !(
+      (e.title === '全部适配视图' && e.icon === 'fa-crosshairs') ||
+      (e.title === '重置视图' && e.icon === 'fa-expand')
+    ),
+  )
+  console.log(`③ 视图按钮入口数: ${entries.length}（两栏各两个），图标口径不一致的: ${badIcon.length}`)
+  for (const e of entries) console.log(`   ${e.title} → ${e.icon} @y=${e.y}`)
+  if (entries.length < 4) throw new Error(`视图按钮入口少于 4 个（两栏各 2）：${entries.length}`)
+  if (badIcon.length) {
+    throw new Error(
+      `图标口径不一致（icon↔行为互换）：${badIcon.map((e) => `${e.title}=${e.icon}`).join(', ')}`,
+    )
+  }
+
+  // 把内容推到远处负坐标：累计平移 4 次
+  const stage = page.locator('.konvajs-content').first()
+  const sb = await stage.boundingBox()
+  const scx = sb.x + sb.width / 2
+  const scy = sb.y + sb.height / 2
+  for (let k = 0; k < 4; k++) {
+    await page.keyboard.down('Space')
+    await page.mouse.move(scx - 380, scy - 260)
+    await page.mouse.down()
+    await page.mouse.move(scx + 380, scy + 260, { steps: 14 })
+    await page.mouse.up()
+    await page.keyboard.up('Space')
+    await page.waitForTimeout(150)
+  }
+  await page.waitForTimeout(1300) // saveSoon 防抖 500ms
+
+  // 在该处再放一个节点（世界坐标为负）
+  for (let i = 0; i < (await addBtn.count()); i++) {
+    const t = (await addBtn.nth(i).getAttribute('title')) || ''
+    if (/添加/.test(t)) {
+      await addBtn.nth(i).evaluate((el) => el.click())
+      break
+    }
+  }
+  await page.waitForTimeout(900)
+  await page.locator('.picker-mask .card:visible').first().click()
+  await page.waitForTimeout(1300)
+
+  const far = await readCanvasDoc(page)
+  const farNodes = (far?.objects || []).filter((o) => o.type === 'app')
+  // 取**最新**一个（平移后新建的那个），不是列表里第一个
+  const farNode = farNodes[farNodes.length - 1]
+  console.log(
+    `③ 画布上 app 节点数=${farNodes.length}，最新节点世界坐标: (${farNode?.x}, ${farNode?.y})`,
+  )
+  if (farNodes.length < 2) {
+    throw new Error(`没造出第二个节点（app 节点数=${farNodes.length}）`)
+  }
+  if (!farNode || farNode.x >= 0 || farNode.y >= 0) {
+    throw new Error(`没造出"内容远离原点"的场景（最新节点坐标 ${farNode?.x},${farNode?.y}）`)
+  }
+  await page.screenshot({ path: SHOT_DIR + 'w11-reset-before.png' })
+
+  // 先记下「用户正在看的内容」：最新节点的屏幕位置 + 视口中心的世界坐标
+  const docBefore = await readCanvasDoc(page)
+  const vpBefore = docBefore.viewport
+  const box = await page.evaluate(() => {
+    const r = document.querySelector('.konvajs-content')?.getBoundingClientRect()
+    return r ? { w: Math.round(r.width), h: Math.round(r.height) } : null
+  })
+  const centerWorld = {
+    x: (box.w / 2 - vpBefore.x) / vpBefore.scale,
+    y: (box.h / 2 - vpBefore.y) / vpBefore.scale,
+  }
+  const posBefore = {
+    x: farNode.x * vpBefore.scale + vpBefore.x,
+    y: farNode.y * vpBefore.scale + vpBefore.y,
+  }
+  console.log(`③ 重置前: 视口=${JSON.stringify(vpBefore)} 最新节点屏幕=(${Math.round(posBefore.x)},${Math.round(posBefore.y)})`)
+
+  // 先用缩放滑杆把缩放降到 40%（滑杆绕视口中心缩放，与重置视图同口径）
+  await page.evaluate(() => {
+    const el = document.querySelector('input[type=range]')
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    setter.call(el, '40')
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await page.waitForTimeout(900)
+  const pctZoomed = await readZoomPct(page)
+  console.log(`③ 滑杆降到 ${pctZoomed}%`)
+  if (pctZoomed !== 40) throw new Error(`缩放滑杆没生效（读数 ${pctZoomed}%）`)
+
+  // 点「重置视图」→ 缩放回 100%，且**视口中心不动、正在看的节点仍在画面内**
+  await page.locator('button[title="重置视图"]').first().evaluate((el) => el.click())
+  await page.waitForTimeout(1300)
+  const afterReset = await readCanvasDoc(page)
+  const vp = afterReset?.viewport
+  const pct = await readZoomPct(page)
+  const centerWorldAfter = {
+    x: (box.w / 2 - vp.x) / vp.scale,
+    y: (box.h / 2 - vp.y) / vp.scale,
+  }
+  const posAfter = { x: farNode.x * vp.scale + vp.x, y: farNode.y * vp.scale + vp.y }
+  const visible =
+    posAfter.x + (farNode.width || 300) > 0 &&
+    posAfter.x < box.w &&
+    posAfter.y + (farNode.height || 190) > 0 &&
+    posAfter.y < box.h
+  const centerKept =
+    Math.abs(centerWorldAfter.x - centerWorld.x) < 2 && Math.abs(centerWorldAfter.y - centerWorld.y) < 2
+  console.log(`③ 重置后: 缩放读数=${pct}% 落盘视口=${JSON.stringify(vp)}`)
+  console.log(`   最新节点屏幕=(${Math.round(posAfter.x)},${Math.round(posAfter.y)}) 在画面内=${visible}`)
+  console.log(
+    `   视口中心世界坐标: 前(${centerWorld.x.toFixed(1)},${centerWorld.y.toFixed(1)}) → 后(${centerWorldAfter.x.toFixed(1)},${centerWorldAfter.y.toFixed(1)}) 保持=${centerKept}`,
+  )
+  if (pct !== 100 || vp.scale !== 1) {
+    throw new Error(`重置视图后缩放不是 100%：读数 ${pct}% / 视口 ${vp.scale}`)
+  }
+  if (!centerKept) throw new Error('重置视图移动了视口中心（应保持"你正在看的位置"不动）')
+  if (!visible) {
+    throw new Error('重置视图把正在看的内容甩出了画面（旧缺陷：视口置为 {1,0,0}，原点贴左上角）')
+  }
+  if (vp.x === 0 && vp.y === 0) {
+    throw new Error('重置后视口仍是 {x:0,y:0}——没走新口径（未落盘或未生效）')
+  }
+  await page.screenshot({ path: SHOT_DIR + 'w11-reset-after.png' })
+
+  console.log('\n✅ 三项都通过：资产库当次可弹可关；画布选完应用真的落节点；重置视图 100% 且内容不飞出画面')
 } catch (e) {
   failed = true
   console.error('\n❌ 失败:', e.message)

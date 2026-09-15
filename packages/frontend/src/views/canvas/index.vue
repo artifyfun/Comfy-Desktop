@@ -1633,14 +1633,14 @@
             :title="t('canvasResetView')"
             @click="resetView"
           >
-            <i class="fas fa-crosshairs"></i>
+            <i class="fas fa-expand"></i>
           </button>
           <button
             class="w-8 h-8 rounded-lg text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10 transition flex items-center justify-center"
             :title="t('canvasFitAll')"
             @click="fitAll"
           >
-            <i class="fas fa-expand"></i>
+            <i class="fas fa-crosshairs"></i>
           </button>
           <!-- C-H9 连线风格切换：正交直角线 / 贝塞尔曲线 -->
           <button
@@ -1851,6 +1851,7 @@ import {
   lodImageVisible,
   freeResizeRect,
   ratioResizeRect,
+  centerViewport,
 } from './engine'
 
 const { t } = useI18n()
@@ -4471,17 +4472,28 @@ function fitAll() {
     MIN_SCALE,
     MAX_SCALE,
   )
-  viewport.value = {
-    scale,
-    x: size.w / 2 - (b.x + b.width / 2) * scale,
-    y: size.h / 2 - (b.y + b.height / 2) * scale,
-  }
+  viewport.value = centerViewport({ x: b.x + b.width / 2, y: b.y + b.height / 2 }, size, scale)
   applyViewport()
+  saveSoon()
 }
 
+/**
+ * 重置视图 = 缩放回 100%，**保持你当前看的位置不动**（Figma `Ctrl+0` 口径）。
+ *
+ * 此前是 `viewport = {scale:1, x:0, y:0}` —— 等于把世界原点钉在画布**左上角**。
+ * 内容一旦不在原点附近（平移后新建的节点常带大负坐标，例如 -2691,-1756），点它
+ * 画布就只剩网格，看着像内容丢了（用户报障：「重置视图看起来不太对」）。
+ * 也试过"锚到内容包围盒中心"，但内容散布很开时（例如两节点相距 3340）包围盒中心
+ * 恰是**空白区**，看着还是空——所以最稳的口径是**不改变视口中心**：
+ * 只重置缩放，绝不把你挪走；要找内容用「全部适配视图」。
+ */
 function resetView() {
-  viewport.value = makeViewport()
+  const center = screenToWorld(viewport.value, size.w / 2, size.h / 2)
+  viewport.value = centerViewport(center, size, 1)
   applyViewport()
+  // 视图改动要落盘（与滚轮缩放同口径，见 onWheel 的 C-H8 修复）：
+  // 否则刷新后视图又跳回旧值，「重置」等于没生效。
+  saveSoon()
 }
 
 function applyViewport() {
