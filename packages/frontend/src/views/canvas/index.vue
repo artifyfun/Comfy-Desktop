@@ -2776,6 +2776,9 @@ function onWheel(e) {
   st.scale({ x: viewport.value.scale, y: viewport.value.scale })
   st.position({ x: viewport.value.x, y: viewport.value.y })
   st.batchDraw()
+  // C-H8 回归修复：缩放结果持久化（此前只改响应式值，刷新后视口位置丢失回 100%）。
+  // 连续滚轮经 saveSoon 防抖合并为一次写。
+  saveSoon()
 }
 
 function onItemDown(i, e) {
