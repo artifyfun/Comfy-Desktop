@@ -27,6 +27,53 @@ describe('builtinLibrary', () => {
       for (const it of cat.items) expect(it.text.trim()).toBeTruthy()
     }
   })
+
+  // 2026-09 重写：从"按词性分类"改成"按工作流分类"，五大模态必须都覆盖
+  it('覆盖五类工作流（分类名可检索）', () => {
+    const cats = builtinLibrary().map((c) => c.category)
+    const joined = cats.join('|')
+    for (const kw of ['文生图', '文生视频', '图生视频', '图生图', '图像编辑']) {
+      expect(joined).toContain(kw)
+    }
+    // 模型分档排在最前（先定档再挑词）
+    expect(cats[0]).toContain('模型分档')
+  })
+
+  it('全库无重复 text（同名条目会让面板 key 冲突）', () => {
+    const texts = builtinLibrary().flatMap((c) => c.items.map((i) => i.text))
+    expect(new Set(texts).size).toBe(texts.length)
+  })
+
+  it('每条都带 hint（最佳实践/适用模型就放在 hint 里）', () => {
+    const missing = builtinLibrary()
+      .flatMap((c) => c.items.map((i) => ({ cat: c.category, ...i })))
+      .filter((i) => !(i.hint || '').trim())
+    expect(missing.map((i) => i.text)).toEqual([])
+  })
+
+  it('模型分档要点在场：Flux 无负面 / Krea2 不吃质量词 / 视频负面含 motionless image', () => {
+    const all = builtinLibrary()
+      .flatMap((c) => c.items.map((i) => `${i.text} ${i.hint || ''}`))
+      .join('\n')
+    expect(all).toMatch(/Flux 没有负面/)
+    expect(all).toMatch(/Krea2[\s\S]{0,80}不吃/)
+    expect(all).toMatch(/motionless image/)
+  })
+
+  it('编辑类骨架在场：先锁不变项再写唯一改动', () => {
+    const all = builtinLibrary()
+      .flatMap((c) => c.items.map((i) => i.text))
+      .join('\n')
+    expect(all).toMatch(/Keep .*exactly the same/i)
+    expect(all).toMatch(/Preserve exactly/)
+  })
+
+  it('有可直接填空的模板（含 {} 占位符）', () => {
+    const tpl = builtinLibrary()
+      .flatMap((c) => c.items)
+      .filter((i) => i.text.includes('{') && i.text.includes('}'))
+    expect(tpl.length).toBeGreaterThanOrEqual(8)
+  })
 })
 
 describe('custom prompts storage', () => {
