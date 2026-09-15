@@ -21,10 +21,13 @@ await context.addInitScript(() => {
       get: (t, prop) => {
         if (prop === 'then') return undefined
         if (prop === 'getConfig')
-          return async () => ({ comfyHost: 'http://127.0.0.1:8188', serverHost: 'http://127.0.0.1:3008' })
+          return async () => ({
+            comfyHost: 'http://127.0.0.1:8188',
+            serverHost: 'http://127.0.0.1:3008'
+          })
         return async () => null
-      },
-    },
+      }
+    }
   )
   window.isElectron = true
 })
@@ -39,7 +42,10 @@ async function closeModals() {
   }
 }
 
-await page.goto(`${BASE}/canvas?interaction=${Date.now()}`, { waitUntil: 'networkidle', timeout: 30000 })
+await page.goto(`${BASE}/canvas?interaction=${Date.now()}`, {
+  waitUntil: 'networkidle',
+  timeout: 30000
+})
 await page.waitForTimeout(3000)
 await closeModals()
 
@@ -49,9 +55,14 @@ async function readState() {
     const proj = JSON.parse(localStorage.getItem('artify.canvas.projects.v1') || '{"projects":[]}')
     const p = proj.projects?.[0]
     return {
-      objects: (p?.doc?.objects || []).map((o) => ({ id: o.id, type: o.type, x: Math.round(o.x), y: Math.round(o.y) })),
+      objects: (p?.doc?.objects || []).map((o) => ({
+        id: o.id,
+        type: o.type,
+        x: Math.round(o.x),
+        y: Math.round(o.y)
+      })),
       links: p?.doc?.links || [],
-      viewport: p?.doc?.viewport,
+      viewport: p?.doc?.viewport
     }
   })
 }
@@ -69,7 +80,7 @@ await page.evaluate(() => {
   doc.objects = [
     { id: 'r1', type: 'rect', x: 100, y: 100, width: 120, height: 80, fill: '#334' },
     { id: 'r2', type: 'rect', x: 300, y: 100, width: 120, height: 80, fill: '#445' },
-    { id: 'r3', type: 'rect', x: 500, y: 300, width: 120, height: 80, fill: '#556' },
+    { id: 'r3', type: 'rect', x: 500, y: 300, width: 120, height: 80, fill: '#556' }
   ]
   localStorage.setItem('artify.canvas.projects.v1', JSON.stringify(proj))
 })
@@ -111,7 +122,11 @@ const r1 = s2.objects.find((o) => o.id === 'r1')
 record('对象坐标修改持久化', dragDone && r1?.x === 150 && r1?.y === 180, `r1=(${r1?.x},${r1?.y})`)
 
 // ── 5. 撤销/重做(引擎 history 栈——通过页面键盘快捷键) ──
-await page.locator('canvas').first().click({ button: 'left' }).catch(() => {})
+await page
+  .locator('canvas')
+  .first()
+  .click({ button: 'left' })
+  .catch(() => {})
 await page.keyboard.press('Meta+z').catch(() => {})
 await page.waitForTimeout(600)
 record('撤销快捷键不报错(Cmd+Z)', true, '无 JS 崩溃即通过')
