@@ -92,11 +92,16 @@
       </button>
     </div>
 
-    <!-- About 组件 -->
-    <About v-if="showAboutModal" @clickClose="toggleAboutModal" />
-
-    <!-- 配置组件 -->
-    <Config v-if="showConfigModal" @cancel="toggleConfigModal" @confirm="handleUpdateConfig" />
+    <!-- About / Config 弹窗：必须 Teleport 到 body。
+         header 根元素是 `relative z-20` —— 自己建立了 stacking context，
+         挂在里面的弹窗无论 z-index 多高，对外都只等效 z=20；而画布等页面
+         存在 z-30/z-40/z-80 的浮层，会把弹窗整个盖住（用户报障：画布页打开
+         关于/设置时画布元素飘在弹窗上）。Teleport 后弹窗直接参与根层比较，
+         自身的 z-index(100/500) 才真正生效。 -->
+    <Teleport to="body">
+      <About v-if="showAboutModal" @clickClose="toggleAboutModal" />
+      <Config v-if="showConfigModal" @cancel="toggleConfigModal" @confirm="handleUpdateConfig" />
+    </Teleport>
   </header>
 </template>
 

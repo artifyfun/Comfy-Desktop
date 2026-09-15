@@ -71,6 +71,10 @@ CUSTOM `wb_canvas_ops`，整条 embed 链路（桥 → poller → canvasMode 总
 | W11 | **两个用户报障的回归 + 视图按钮口径**（`scripts/wb-ui-regress-verify.mjs`）— ① 点侧栏「创作资产库」→ 弹窗**当次**可见、点关闭**能关**、点「技能库」**不再连带**弹出资产库；② `/canvas` 点「添加 App 节点」→ 拾取器弹出且**只列带工作流的应用**（空 `template` 被过滤）→ 点一项 → `artify.canvas.projects.v1` 的 `project.doc.objects` 出现 1 个 `type:'app'`、`appId` 正确的节点；③ 枚举四个视图入口断言 **icon↔行为口径一致**（准星=全部适配视图 / expand=重置视图，两栏都是），随后累计平移 4 次把内容推到远处负坐标、新建节点 → 缩放滑杆降到 40% → 点「重置视图」→ 断言 100%、**视口中心世界坐标不变**、正在看的节点仍在画面内 | w11-assetlib-open.png / w11-apppicker.png / w11-canvas-node-added.png / w11-reset-before.png / w11-reset-after.png |
 | W12 | **提示词库重写后的渲染与回填**（`scripts/wb-promptlib-ui-verify.mjs`，打开 `/canvas`）— ① 点工具栏「提示词库」→ 面板按**工作流分类**渲染：断言分类数 ≥14、含「模型分档 / 文生图 / 文生视频 / 图生视频 / 图生图 / 图像编辑」、条目 ≥100、**每条都有 hint**；② 搜索「Krea2」→ 条目数从 136 降到 10（验证搜索能命中 hint 里的模型名）；③ 添加便签（自动选中）→ 点「先锁不变项」那条词条 → `project.doc.objects` 里 note.text 追加成功、面板自动关闭 | w12-promptlib-open.png / w12-promptlib-applied.png |
 
+| W13 | **header 弹窗层级（stacking context）**（`scripts/wb-modal-zindex-verify.mjs`，打开 `/canvas`）— ① 画布内开 z-30 浮层（提示词库面板）→ 点 header「关于」→ 断言弹窗遮罩的 **SC 祖先链里没有 header** + 重叠点 `elementsFromPoint` 最上层属于弹窗子树；② 「设置」弹窗同断言 | w13-about-above-canvas.png / w13-config-above-canvas.png |
+
+> **W13 的坑（stacking context 陷阱）**：弹窗 z-index 数字再大也可能输——AppHeader 根元素 `relative z-20` 建立了 stacking context，挂在 header **内部**的弹窗对外只等效 z=20，画布页的 z-30/z-40/z-[80] 浮层全部盖住它。修法是弹窗 `<Teleport to="body">`（与 antd modal 同思路）。诊断时别只读 computed z-index，要看**祖先链上谁建立了 SC**（`elementsFromPoint` 是最可靠的最终判据）。变异验证：去掉 Teleport → 脚本立刻报「弹窗仍挂在 header 的 stacking context 里」。
+
 > **W12 的坑**：工具栏「提示词库」按钮是**开关**（`promptLib.open = !promptLib.open`）——面板已开时再点会关掉。脚本里必须先判断面板是否已开再决定点不点（本轮就因此误判过一次"找不到词条"）。
 
 > W10 补的是**渲染层**：单元/契约测试已钉住载荷与语义（`routes/agui.test.ts` / `__tests__/aguiBridge.test.js` / `__tests__/useExecutionPolling.test.js` / `canvas/composables.test.js`），但「画布页真的弹出卡、确认后**连线真的建出来**」需要浏览器证据。变异验证：把 stub 的 CUSTOM 帧改名 → 脚本立刻报「未出现确认卡」。
