@@ -1475,8 +1475,8 @@ async function handleMoveTop(id) {
 async function handleClearFinished() {
   await batchTaskStore.clearFinished()
 }
-function goQueueDetail() {
-  router.push('/batch/detail')
+function goQueueDetail(id) {
+  router.push(id ? `/batch/detail?id=${encodeURIComponent(id)}` : '/batch/detail')
 }
 
 /** 一键重跑：完整复刻原配置重新入队（无需重新编排队列） */

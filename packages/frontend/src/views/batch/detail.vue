@@ -183,20 +183,47 @@
               </div>
               <div class="detail-section" v-if="(job.results || []).length">
                 <div class="detail-title">{{ t('jobResults') }}</div>
-                <div class="result-list">
-                  <div
-                    v-for="(r, i) in job.results.slice(0, 20)"
-                    :key="i"
-                    class="result-line"
-                    :class="r.success ? 'ok' : 'fail'"
-                  >
-                    <span class="result-index">#{{ r.index }}</span>
-                    <span class="result-status">{{ r.success ? '✓' : '✗' }}</span>
-                    <span class="result-msg" v-if="!r.success && r.error">{{ r.error }}</span>
-                    <span class="result-ms" v-if="r.durationMs">{{ r.durationMs }}ms</span>
-                  </div>
-                  <div v-if="job.results.length > 20" class="log-more">…仅显示前 20 条</div>
-                </div>
+                <!-- C-H14 结果表格(Genspark 式): 行号/状态/产物缩略/错误/耗时,全量不截断 -->
+                <a-table
+                  :data-source="job.results"
+                  :columns="resultColumns"
+                  row-key="index"
+                  size="small"
+                  :pagination="{ pageSize: 20, showSizeChanger: false }"
+                  class="result-table"
+                >
+                  <template #bodyCell="{ column, record }">
+                    <template v-if="column.key === 'index'">#{{ record.index }}</template>
+                    <template v-else-if="column.key === 'success'">
+                      <span :class="record.success ? 'result-ok' : 'result-fail'">
+                        {{ record.success ? '✓ 成功' : '✗ 失败' }}
+                      </span>
+                    </template>
+                    <template v-else-if="column.key === 'files'">
+                      <div class="result-files">
+                        <img
+                          v-for="f in record.files || []"
+                          :key="f.filename"
+                          :src="`/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder || '')}&type=${encodeURIComponent(f.type || 'output')}`"
+                          class="result-thumb"
+                          :alt="f.filename"
+                          loading="lazy"
+                        />
+                        <span v-if="!(record.files || []).length" class="text-[var(--wb-text-3)]"
+                          >—</span
+                        >
+                      </div>
+                    </template>
+                    <template v-else-if="column.key === 'error'">
+                      <span class="result-fail" :title="record.error">{{
+                        record.error || '—'
+                      }}</span>
+                    </template>
+                    <template v-else-if="column.key === 'durationMs'">
+                      {{ record.durationMs ? record.durationMs + 'ms' : '—' }}
+                    </template>
+                  </template>
+                </a-table>
               </div>
               <div
                 class="detail-section"
@@ -213,6 +240,14 @@
 </template>
 
 <script setup>
+// C-H14 结果表格列定义(Genspark 式行级结果)
+const resultColumns = [
+  { title: '行', dataIndex: 'index', key: 'index', width: 60 },
+  { title: '状态', dataIndex: 'success', key: 'success', width: 90 },
+  { title: '产物', dataIndex: 'files', key: 'files' },
+  { title: '错误', dataIndex: 'error', key: 'error', ellipsis: true },
+  { title: '耗时', dataIndex: 'durationMs', key: 'durationMs', width: 90 },
+]
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { Modal } from 'ant-design-vue'
@@ -225,6 +260,17 @@ const store = useBatchTaskStore()
 const router = useRouter()
 
 const expandedJobId = ref(null)
+// C-H14: 支持 /batch/detail?id=xxx 直达定位(列表页「结果」入口/外部链接)
+const route = router.currentRoute.value
+onMounted(async () => {
+  const qid = typeof route.query.id === 'string' ? route.query.id : ''
+  if (qid && !store.queue.length) {
+    try {
+      await store.fetchQueue()
+    } catch {}
+  }
+  if (qid && store.queue.some((j) => j.id === qid)) expandedJobId.value = qid
+})
 const cfgShutdown = ref(false)
 const cfgNotify = ref(false)
 const cfgNotifyUrl = ref('')
@@ -809,5 +855,23 @@ onBeforeUnmount(() => {
       }
     }
   }
+}
+.result-table :deep(.result-ok) {
+  color: var(--wb-success, #52c41a);
+}
+.result-table :deep(.result-fail) {
+  color: var(--wb-danger, #ff4d4f);
+}
+.result-table :deep(.result-files) {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.result-table :deep(.result-thumb) {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--wb-stroke, #333);
 }
 </style>
