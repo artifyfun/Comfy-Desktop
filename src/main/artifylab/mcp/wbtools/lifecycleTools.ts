@@ -219,6 +219,11 @@ export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
           job_id: {
             type: 'string',
             description: '可选：只看某个任务的详情（含最近日志尾部与失败样本）；缺省返回全队列'
+          },
+          include_results: {
+            type: 'boolean',
+            description:
+              '配合 job_id：返回该任务的逐行结果表（行号/成败/产物文件/错误/耗时）——行级重跑或批量质检前先看这个，不要凭记忆猜行号'
           }
         },
         additionalProperties: false
@@ -245,6 +250,24 @@ export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
       if (jobId) {
         const job = queue.find((j) => j.id === jobId)
         if (!job) return text({ ok: false, error: 'job not found' })
+        // C-H14 行级结果表: agent 批量质检/行级重跑的数据源(Genspark 表格语义的 agent 侧)
+        if (args.include_results === true) {
+          const rows = job.results.map((r) => ({
+            index: r.index,
+            success: r.success,
+            files: (r.files ?? []).map((f) => f.filename),
+            ...(r.error ? { error: r.error } : {}),
+            duration_ms: r.durationMs
+          }))
+          return text({
+            ok: true,
+            job_id: job.id,
+            app_name: job.appName ?? job.appId ?? '',
+            status: job.status,
+            total: job.total,
+            rows
+          })
+        }
         const failedSamples = job.results
           .filter((r) => !r.success)
           .slice(0, 5)
