@@ -37,6 +37,20 @@ WB_MSG="规划一个验收任务，包含 todo 步骤" WB_EXPECT=0 \
 脚本可参数化：`WB_MSG` 换触发消息、`WB_EXPECT=0` 只观测不断言、`WB_SHOT` 换截图基名。
 它同时会打印「被 SPA fallback 兜成 HTML 的 /api/* 请求」——stub 缺端点时会立刻显形。
 
+**W10 画布 ops 的 DOM 级验收（打开的是 `/canvas`，不是 `/workbench`）**：
+
+```bash
+node acceptance/workbench/serve.mjs 5177
+node scripts/wb-canvas-ops-ui-verify.mjs 5177   # 失败退出码 1；截图落 acceptance/workbench/screenshots/w10-*
+```
+
+之所以复用本 harness 却能跑画布：画布页内联渲染了 `<Workbench :canvas-embedded="true" />`
+侧栏（`canvas/index.vue:11`，`wbOpen` 默认 true），所以 stub 的 SSE 一推
+CUSTOM `wb_canvas_ops`，整条 embed 链路（桥 → poller → canvasMode 总线 → 画布页确认卡 →
+人审 → 落布）就在一次浏览器里跑通。**必须带 `?session=`**（与 `wb-headless-verify.mjs` 同款开法），
+否则内嵌侧栏挂不起来。断言读的是 `artify.canvas.projects.v1`（画布是 Konva 渲染，
+数 DOM 拿不到节点/连线）。
+
 > 默认 seed 1 个会话 `s-seed-1 / 验收会话`（含 1 条种子用户消息），并通过 localStorage `wb-stub-persist-v2` 持久化 sessions / eventsHistory（reload 后能模拟服务端 eventStore 回放）。`window.__wbCtl.reset()` 可重载回到 seed（如需清空持久化：`localStorage.removeItem('wb-stub-persist-v2')` 再 reload）。
 
 ## 验收矩阵（8 场景全绿）
@@ -53,6 +67,9 @@ WB_MSG="规划一个验收任务，包含 todo 步骤" WB_EXPECT=0 \
 | W7 | **流截断兜底** — 发"测试断流"→ stub truncateAfterFlush=true（不发 RUN_FINISHED）→ flushThread 队列空后 close → 前端 readAguiStream EOF → `!sawRunFinish` 触发 `workbenchStreamInterrupted` 红色错误气泡"对话流中断，本轮未收到完成信号" | w7-stream-interrupted.png |
 | W8 | **审批 edit-args** — 发"修改参数执行这个任务"→ tool_approval_required 带 args `{templateId,count,seed,customParam}` → 点击「修改参数」→ textarea 预填美化 JSON → 改 count 4→6 → 保存 → interaction-response action='edit' echoArgs.count=6 / originalArgs.count=4 → tool_approval_resolved 带 finalAction='edit' + finalArgs → 收尾文本"参数已编辑，按新参数放行。" | w8-approval-edit.png |
 | W9 | **生成过程直通预览（编排路径）** — 发"我要看实时预览"→ TOOL_CALL_START/ARGS/END 占出工具卡 → 3 帧 CUSTOM `preview_frame{dataUrl}` → 工具卡内渲染 `<img data-testid="exec-preview">`。断言：图在、**真的解码成功**（naturalWidth 128 / naturalHeight 80）、src 是 `data:image/*`、无页面级报错 | w9-preview.png |
+| W10 | **画布 ops 全链 + DOM 级确认卡** — 在 **`/canvas`** 发"帮我把模板铺画布搭成工作流"→ stub 推 CUSTOM `wb_canvas_ops{ops,source}`（ops 为 canvasTools 真实形状：`appId` 是模板 id、节点引用走本批 `nodeId`）→ 画布页 `.agent-ops-card` 渲染出「新建应用节点：E2E 文生图 / 图生视频 · 连线 E2E 文生图 → E2E 图生视频 · 选中 2 个物件」。断言：卡文案含节点名且**不暴露内部 nodeId**、确认前节点未落布（人审门有效）→ 点「执行」→ `artify.canvas.projects.v1` 出现 **2 个节点（id 恰为 AI 侧 nodeId）+ 1 条连线** | w10-canvas-ops-card.png / w10-canvas-ops-applied.png |
+
+> W10 补的是**渲染层**：单元/契约测试已钉住载荷与语义（`routes/agui.test.ts` / `__tests__/aguiBridge.test.js` / `__tests__/useExecutionPolling.test.js` / `canvas/composables.test.js`），但「画布页真的弹出卡、确认后**连线真的建出来**」需要浏览器证据。变异验证：把 stub 的 CUSTOM 帧改名 → 脚本立刻报「未出现确认卡」。
 
 > W9 与 `scripts/wb-preview-verify.mjs` 互补：后者验**真机 ComfyUI**的协议与帧解码（能力协商 / 8 字节头剥离），W9 验**前端渲染链路**（AG-UI → aguiBridge → 消息 → 工具卡 `<img>`）。两段合起来才是 #5 的完整证据。
 
@@ -97,6 +114,10 @@ agent-browser eval 'window.__stubLogs.find(l=>/interaction-response/.test(l))'
 **工具调用三帧（W9 引入）**：`TOOL_CALL_START{toolCallId,toolCallName}` → `TOOL_CALL_ARGS{toolCallId,delta}`（可多次累积）→ `TOOL_CALL_END{toolCallId}`。`utils/agui/handlers.js:20-22` 映射为桥内键 `tool:start{name}` / `tool:args{args}`（**END 时才一次性派发累积值**）/ `tool:result{content}`。缺这三帧就没有带 `toolItem` 的消息，后续 `preview_frame` 无处可挂——**顺序不能反**。
 
 **preview_frame 形状**：`{ promptId, dataUrl, at }` → applyCustom 'preview_frame' → 挂到**最近一条带 `toolItem` 的消息**（`aguiBridge.js:313-326`）→ 工具卡渲染 `<img data-testid="exec-preview">`。这是"编排路径下能看到在画什么"的前端落点；快路径的轮询预览走 progress 消息（`useExecutionPolling`），两条互不干扰。
+
+**wb_canvas_ops 形状**：`{ ops, source }` → applyCustom 'wb_canvas_ops' → `pageApi.applyExecutionSideEffect('canvas-ops', value)`（`sideEffect` 来自 **pageApi**，`aguiBridge.js:308`，不是桥的独立参数）→ `useExecutionPolling` 分支：**仅 `isCanvasEmbedded` 才 `emitOps`**（`utils/canvasMode` 的**页内总线**，不是 postMessage），否则推「无宿主画布」错误气泡。`ops` 元素形状见 `workbench/plan.ts` 的 `CanvasAgentOp`——关键：`add_app_node.nodeId` 是 AI 侧引用名，`connect_nodes.from/to` 与 `select_nodes.ids` 引用**同批 nodeId**（画布对象 id 由前端 `makeAppNode` 生成，AI 侧拿不到）。
+
+**`POST /api/apps/detail` 必须 mock**（W10 需要）：画布 App 节点挂载时拉详情，id 是**模板 id**（`app:<uuid>`）。真实路由在应用中心查不到时会**回退模板库**（`routes/apps.ts:56-70`，注释写明专为 `wb_build_workflow` 铺出的节点而加）——stub 不 mock 的话这条路会落到 SPA fallback 拿到 HTML，前端弹**两条红色「获取应用失败」**，验收截图看起来像产品故障（其实是 harness 缺口）。
 
 ## stub 设计要点
 
@@ -144,7 +165,7 @@ agent-browser eval 'window.__stubLogs.find(l=>/interaction-response/.test(l))'
 - **approval 超时倒计时**：InteractionApprovalCard 倒计时 UI 已渲染但 stub 不模拟超时分支（需后端 emit 倒计时归零 reject 兜底才能验证）。
 - **多窗口审批 race**：同 threadId 两窗口同时打开、互相 approve 的 race 未验（需要 stub 支持并发流）。
 
-> 2026-09-14 补齐：此前 `/api/config`、`/api/batch/queue`、`/api/workbench/runtime` 三个引导期端点未 mock，fetch 落到 SPA fallback 拿到 index.html，前端 `JSON.parse` 抛 `Unexpected token '<'`。该报错与场景无关（对照实验：发一条不命中任何场景的消息同样出现），但会淹没真实回归信号——现已补上（信封对齐 `createSuccessResponse`）。
+> 2026-09-15 补齐（两批）：① `/api/config`、`/api/batch/queue`、`/api/workbench/runtime` 三个引导期端点此前未 mock，fetch 落到 SPA fallback 拿到 index.html，前端 `JSON.parse` 抛 `Unexpected token '<'`。该报错与场景无关（对照实验：发一条不命中任何场景的消息同样出现），但会淹没真实回归信号——现已补上。② `POST /api/apps/detail`（W10 需要）同上，不补会让画布节点弹两条红色「获取应用失败」。
 
 ## 复跑验收脚本（可粘贴）
 

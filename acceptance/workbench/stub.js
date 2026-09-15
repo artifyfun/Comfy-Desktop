@@ -273,6 +273,9 @@ if (t.queue.length === 0) {
     const withEditArgs = /修改参数|edit args/i.test(s)
     // W9 生成过程预览（输入含预览/preview）—— 编排路径：工具卡上的 preview_frame
     const withPreview = /预览|preview/i.test(s)
+    // W10 画布 AI 节点指令（输入含铺画布/画布指令）—— canvas-embedded 模式：
+    // CUSTOM wb_canvas_ops 经 canvasMode 总线到宿主画布页 → 人审确认卡 → 执行
+    const withCanvasOps = /铺画布|画布指令|canvas.?ops|build_workflow/i.test(s)
 
     const mid = 'm-' + Math.random().toString(36).slice(2, 8)
     const rid = 'r-' + Math.random().toString(36).slice(2, 8)
@@ -397,6 +400,56 @@ if (t.queue.length === 0) {
         timestamp: nowMs(),
         toolCallId,
         content: JSON.stringify({ ok: true, prompt_id: promptId, status: 'success' }),
+        role: 'tool',
+      })
+    }
+
+    // 6d) W10 画布 AI 节点指令：工具调用帧 + CUSTOM wb_canvas_ops（渲染宿主画布页的
+    //     人审确认卡）。ops 形状与 canvasTools.buildCanvasOpsFromTemplateIds 一致：
+    //     appId 是模板 id，节点引用走本批 nodeId。
+    if (withCanvasOps) {
+      const toolCallId = 'tc-' + Math.random().toString(36).slice(2, 8)
+      pushFrame(threadId, frameToolStart(toolCallId, 'wb_build_workflow'))
+      pushFrame(
+        threadId,
+        frameToolArgs(
+          toolCallId,
+          JSON.stringify({ template_ids: ['app:e2e-aaa', 'app:e2e-bbb'] }),
+        ),
+      )
+      pushFrame(threadId, frameToolEnd(toolCallId))
+      const ops = [
+        {
+          type: 'add_app_node',
+          appId: 'app:e2e-aaa',
+          name: 'E2E 文生图',
+          nodeId: 'wf-e2e-0-a1',
+          x: 80,
+          y: 80,
+        },
+        {
+          type: 'add_app_node',
+          appId: 'app:e2e-bbb',
+          name: 'E2E 图生视频',
+          nodeId: 'wf-e2e-1-b2',
+          x: 440,
+          y: 80,
+        },
+        {
+          type: 'connect_nodes',
+          from: 'wf-e2e-0-a1',
+          to: 'wf-e2e-1-b2',
+          fromName: 'E2E 文生图',
+          toName: 'E2E 图生视频',
+        },
+        { type: 'select_nodes', ids: ['wf-e2e-0-a1', 'wf-e2e-1-b2'] },
+      ]
+      pushFrame(threadId, frameCustom('wb_canvas_ops', { ops, source: 'wb_build_workflow' }))
+      pushFrame(threadId, {
+        type: 'TOOL_CALL_RESULT',
+        timestamp: nowMs(),
+        toolCallId,
+        content: JSON.stringify({ ok: true, dispatched: true, nodes: ops.length }),
         role: 'tool',
       })
     }
@@ -603,6 +656,24 @@ if (t.queue.length === 0) {
     // index.vue loadOutputDir 读 json.data
     if (route === 'GET /api/workbench/runtime') {
       return okResp({ outputDir: '/tmp/wb-acceptance-output' })
+    }
+
+    // POST /api/apps/detail：画布 App 节点挂载时拉详情（appStore.getAppById）。
+    // 真实路由在应用中心查不到时**回退模板库**（routes/apps.ts:56-70，注释写明专为
+    // wb_build_workflow 铺出的节点而加）——这里照做，否则节点会弹「获取应用失败」，
+    // 验收截图里多两条红 toast，看起来像产品故障。
+    if (route === 'POST /api/apps/detail') {
+      const body = init?.body ? JSON.parse(init.body) : {}
+      const id = String(body.id ?? '')
+      const known = { 'app:e2e-aaa': 'E2E 文生图', 'app:e2e-bbb': 'E2E 图生视频' }
+      return okResp({
+        id,
+        name: known[id] ?? '验收模板',
+        description: '',
+        workflow: {},
+        prompt: {},
+        params: [],
+      })
     }
 
     console.warn('[workbench-stub] unmocked', route)
