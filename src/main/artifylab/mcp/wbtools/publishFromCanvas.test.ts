@@ -31,7 +31,7 @@ vi.mock('../../workbench/service', () => ({
         if (h.failPublish) return null
         return {
           app: {
-            id: 'app-published',
+            id: 'bare-published',
             name,
             template: {
               paramsNodes: [
@@ -41,7 +41,7 @@ vi.mock('../../workbench/service', () => ({
               ]
             }
           },
-          appId: 'app-published',
+          appId: 'bare-published',
           mode: h.resultMode,
           version: h.resultVersion
         }
@@ -96,7 +96,7 @@ describe('prompt_id 模式：沉淀画布执行', () => {
 
     expect(out.ok).toBe(true)
     expect(out.source).toBe('canvas')
-    expect(out.app_id).toBe('app-published')
+    expect(out.app_id).toBe('app:bare-published') // 输出规范模板 id（可直喂 wb_execute_template）
     // 关键：传给 publishWorkflow 的正是画布那份快照（不是空对象/别的）
     expect(h.published[0]!.workflow).toBe(canvasWorkflow)
     // 只回传 input 类参数（output 节点不混进来）

@@ -109,9 +109,9 @@ beforeEach(() => {
 
 describe('wb_app_versions action=list', () => {
   it('列出历史版本并回报当前生效版本号', async () => {
-    seedApp('app-1', '模板A', { current: 4, snapshotVersions: [3, 2, 1] })
+    seedApp('bare-1', '模板A', { current: 4, snapshotVersions: [3, 2, 1] })
 
-    const out = payload(await tool.fn({ action: 'list', app_id: 'app-1' }))
+    const out = payload(await tool.fn({ action: 'list', app_id: 'bare-1' }))
 
     expect(out.ok).toBe(true)
     expect(out.current_version).toBe(4)
@@ -119,9 +119,9 @@ describe('wb_app_versions action=list', () => {
   })
 
   it('从未迭代过 → 明确说明没有历史（当前即第 1 版）', async () => {
-    seedApp('app-1', '模板A', { current: 1, snapshotVersions: [] })
+    seedApp('bare-1', '模板A', { current: 1, snapshotVersions: [] })
 
-    const out = payload(await tool.fn({ action: 'list', app_id: 'app-1' }))
+    const out = payload(await tool.fn({ action: 'list', app_id: 'bare-1' }))
 
     expect(out.ok).toBe(true)
     expect(out.count).toBe(0)
@@ -129,9 +129,9 @@ describe('wb_app_versions action=list', () => {
   })
 
   it('limit 生效', async () => {
-    seedApp('app-1', '模板A', { current: 6, snapshotVersions: [5, 4, 3, 2, 1] })
+    seedApp('bare-1', '模板A', { current: 6, snapshotVersions: [5, 4, 3, 2, 1] })
 
-    const out = payload(await tool.fn({ action: 'list', app_id: 'app-1', limit: 2 }))
+    const out = payload(await tool.fn({ action: 'list', app_id: 'bare-1', limit: 2 }))
 
     expect((out.versions as unknown[]).length).toBe(2)
   })
@@ -139,9 +139,9 @@ describe('wb_app_versions action=list', () => {
 
 describe('wb_app_versions action=get', () => {
   it('给出该版摘要（节点数 / 可填输入参数 / 输出数）', async () => {
-    seedApp('app-1', '模板A', { current: 3, snapshotVersions: [2, 1] })
+    seedApp('bare-1', '模板A', { current: 3, snapshotVersions: [2, 1] })
 
-    const out = payload(await tool.fn({ action: 'get', app_id: 'app-1', version: 2 }))
+    const out = payload(await tool.fn({ action: 'get', app_id: 'bare-1', version: 2 }))
 
     expect(out.ok).toBe(true)
     expect(out.version).toBe(2)
@@ -152,9 +152,9 @@ describe('wb_app_versions action=get', () => {
   })
 
   it('查当前生效版本 → 说明它不在快照表里（避免误以为数据丢了）', async () => {
-    seedApp('app-1', '模板A', { current: 3, snapshotVersions: [2, 1] })
+    seedApp('bare-1', '模板A', { current: 3, snapshotVersions: [2, 1] })
 
-    const out = payload(await tool.fn({ action: 'get', app_id: 'app-1', version: 3 }))
+    const out = payload(await tool.fn({ action: 'get', app_id: 'bare-1', version: 3 }))
 
     expect(out.ok).toBe(true)
     expect(out.current_version).toBe(3)
@@ -162,18 +162,18 @@ describe('wb_app_versions action=get', () => {
   })
 
   it('版本不存在 → 报错并给出可用范围', async () => {
-    seedApp('app-1', '模板A', { current: 3, snapshotVersions: [2, 1] })
+    seedApp('bare-1', '模板A', { current: 3, snapshotVersions: [2, 1] })
 
-    const out = payload(await tool.fn({ action: 'get', app_id: 'app-1', version: 99 }))
+    const out = payload(await tool.fn({ action: 'get', app_id: 'bare-1', version: 99 }))
 
     expect(out.ok).toBe(false)
     expect(String(out.error)).toContain('v1–v2')
   })
 
   it('缺 version → 报错', async () => {
-    seedApp('app-1', '模板A', { current: 2, snapshotVersions: [1] })
+    seedApp('bare-1', '模板A', { current: 2, snapshotVersions: [1] })
 
-    const out = payload(await tool.fn({ action: 'get', app_id: 'app-1' }))
+    const out = payload(await tool.fn({ action: 'get', app_id: 'bare-1' }))
 
     expect(out.ok).toBe(false)
     expect(String(out.error)).toContain('version')
@@ -182,16 +182,16 @@ describe('wb_app_versions action=get', () => {
 
 describe('wb_app_versions action=restore', () => {
   it('回滚：写入快照内容，且**只回写可变字段**（不得覆盖 id/createdAt）', async () => {
-    seedApp('app-1', '模板A', { current: 3, snapshotVersions: [2, 1] })
+    seedApp('bare-1', '模板A', { current: 3, snapshotVersions: [2, 1] })
 
-    const out = payload(await tool.fn({ action: 'restore', app_id: 'app-1', version: 2 }))
+    const out = payload(await tool.fn({ action: 'restore', app_id: 'bare-1', version: 2 }))
 
     expect(out.ok).toBe(true)
     expect(out.restored_from).toBe(2)
     expect(out.previous_version).toBe(3)
     expect(h.updates).toHaveLength(1)
     const patch = h.updates[0]!.patch
-    expect(h.updates[0]!.id).toBe('app-1')
+    expect(h.updates[0]!.id).toBe('bare-1')
     expect(patch.name).toBe('旧名 v2')
     expect(patch.description).toBe('旧描述 v2')
     expect(patch.template).toBeTruthy()
@@ -202,9 +202,9 @@ describe('wb_app_versions action=restore', () => {
   })
 
   it('回滚后给出「撤销本次回滚」的指引（回滚本身可再撤销）', async () => {
-    seedApp('app-1', '模板A', { current: 3, snapshotVersions: [2, 1] })
+    seedApp('bare-1', '模板A', { current: 3, snapshotVersions: [2, 1] })
 
-    const out = payload(await tool.fn({ action: 'restore', app_id: 'app-1', version: 2 }))
+    const out = payload(await tool.fn({ action: 'restore', app_id: 'bare-1', version: 2 }))
 
     // 回滚前是 v3，updateApp 又把它快照进来 → 生效版本升到 v4
     expect(out.previous_version).toBe(3)
@@ -213,19 +213,19 @@ describe('wb_app_versions action=restore', () => {
   })
 
   it('回滚到当前版本 → 拒绝且不写（无意义的写操作）', async () => {
-    seedApp('app-1', '模板A', { current: 3, snapshotVersions: [2, 1] })
+    seedApp('bare-1', '模板A', { current: 3, snapshotVersions: [2, 1] })
 
-    const out = payload(await tool.fn({ action: 'restore', app_id: 'app-1', version: 3 }))
+    const out = payload(await tool.fn({ action: 'restore', app_id: 'bare-1', version: 3 }))
 
     expect(out.ok).toBe(false)
     expect(h.updates).toHaveLength(0)
   })
 
   it('updateApp 返回 null（模板已不存在等）→ 如实报错', async () => {
-    seedApp('app-1', '模板A', { current: 3, snapshotVersions: [2, 1] })
+    seedApp('bare-1', '模板A', { current: 3, snapshotVersions: [2, 1] })
     h.updateReturnsNull = true
 
-    const out = payload(await tool.fn({ action: 'restore', app_id: 'app-1', version: 2 }))
+    const out = payload(await tool.fn({ action: 'restore', app_id: 'bare-1', version: 2 }))
 
     expect(out.ok).toBe(false)
     expect(String(out.error)).toContain('恢复失败')
@@ -234,32 +234,35 @@ describe('wb_app_versions action=restore', () => {
 
 describe('wb_app_versions 定位口径', () => {
   it('按唯一同名定位可用', async () => {
-    seedApp('app-1', '唯一模板', { current: 2, snapshotVersions: [1] })
+    seedApp('bare-1', '唯一模板', { current: 2, snapshotVersions: [1] })
 
     const out = payload(await tool.fn({ action: 'list', name: '唯一模板' }))
 
     expect(out.ok).toBe(true)
-    expect(out.app_id).toBe('app-1')
+    expect(out.app_id).toBe('app:bare-1') // 输出统一为规范模板 id
   })
 
   it('同名多个 → 拒绝并要求传 app_id（不猜）', async () => {
-    seedApp('app-1', '撞名', { current: 1 })
-    seedApp('app-2', '撞名', { current: 1 })
+    seedApp('bare-1', '撞名', { current: 1 })
+    seedApp('bare-2', '撞名', { current: 1 })
 
     const out = payload(await tool.fn({ action: 'list', name: '撞名' }))
 
     expect(out.ok).toBe(false)
     expect(String(out.error)).toContain('2 个同名')
-    expect(String(out.hint)).toContain('app-1')
+    expect(String(out.hint)).toContain('bare-1')
   })
 
-  it('app_id 带 app: 前缀(模板库口径)→ 剥前缀解析到 appStore 裸 uuid', async () => {
+  it('输入两种口径皆可：app: 前缀(模板库)与裸 uuid 都解析到同一模板，输出统一规范口径', async () => {
     seedApp('bare-uuid', '前缀模板', { current: 2, snapshotVersions: [1] })
 
     const out = payload(await tool.fn({ action: 'list', app_id: 'app:bare-uuid' }))
 
     expect(out.ok).toBe(true)
-    expect(out.app_id).toBe('bare-uuid')
+    expect(out.app_id).toBe('app:bare-uuid')
+    // 裸 uuid 输入同样解析到同一实体（appStore 键控）
+    const bare = payload(await tool.fn({ action: 'list', app_id: 'bare-uuid' }))
+    expect(bare.app_id).toBe('app:bare-uuid')
   })
 
   it('app_id 不存在 → 报错并指向 wb_list_templates', async () => {
@@ -277,9 +280,9 @@ describe('wb_app_versions 定位口径', () => {
   })
 
   it('未知 action → 列出允许值', async () => {
-    seedApp('app-1', '模板A', { current: 1 })
+    seedApp('bare-1', '模板A', { current: 1 })
 
-    const out = payload(await tool.fn({ action: 'oops', app_id: 'app-1' }))
+    const out = payload(await tool.fn({ action: 'oops', app_id: 'bare-1' }))
 
     expect(out.ok).toBe(false)
     expect(out.allowed).toEqual(['list', 'get', 'restore'])

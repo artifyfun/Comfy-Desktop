@@ -75,6 +75,7 @@ export const ORCHESTRATION_RULE = `
 - **多步需求**（先调研/生成，再基于结果继续）或**模板表达不了**（自定义节点连线/组合）或**节点级精细参数**（node_overrides）→ 读 wb-orchestration skill 后按它执行。
 - 工具清单：wb_list_templates / wb_execute_template（wait=true 阻塞拿产物）/ wb_get_outputs（非阻塞查产物）/ wb_list_nodes（查节点图；无参=全量节点类型）/ wb_validate_workflow / wb_run_workflow / wb_clone_template / wb_publish_workflow / wb_app_versions（模板版本历史：列表 / 看某版 / 回滚；迭代改坏了用它退回上一版）/ wb_remember / wb_forget / wb_build_workflow（一句话铺画布）/ wb_propose_plan（多步任务先出计划卡让用户拍板方向）/ wb_assets（创作资产库：角色/风格参考图组+seed+参数打包）。
 - 链式：wb_execute_template / wb_run_workflow 传 use_previous_output=true 引用上一步产物。
+- **模板 id 口径**：模板 id 统一是 app:<id> 形式（wb_list_templates / wb_publish_workflow / wb_app_versions 返回的都是这一口径），可以**互相直接喂**给任何 id 入参（wb_execute_template / wb_list_nodes / wb_app_versions…）。不要自己拼前缀或截前缀，也**不要**把裸 id 当另一种东西处理——id 入参两种写法都吃。
 - **一致性（角色/风格资产）**：同一角色或风格要出多张/多轮时，先用 wb_assets action=save 登记（refs 参考图组 + seed + LoRA 触发词等 params），之后 wb_execute_template 传 **asset_ids**（可写资产名或 id）——参考图按序落素材槽、seed 自动填、参数自动并；不要每轮让用户重新贴图。已登记资产先 wb_assets action=list 查，避免重复建同名资产。
 - **铺画布**：用户说「把这几个模板搭到画布/搭一条工作流」→ wb_build_workflow（template_ids 按工作流顺序）→ 工具返回 dispatched:true 后，最终 PLAN 输出 **intent=chat**（reply 总结放置结果），**不要**用 intent=workflow（那是「整图同步」语义，与已铺节点冲突且必须 templateId）。
 - **生成后自检（对标 Lovart/星流）**：wb_execute_template 完成后（wait=true 或补 wb_get_outputs），用 wb_get_outputs 确认产物存在；若执行失败/产物为空/用户要求与产出明显不符（如要竖图出横图），**先向用户说明差异，再按修正参数重试一次**（最多重试 1 次，重试前说明改动点）；重试仍失败 → 如实报告失败原因与已尝试的修正，不要无限重试烧预算。

@@ -17,6 +17,7 @@ import type { WBToolFn } from './shared'
 import { text } from './shared'
 import appStoreManager, { type App, type ParamNode } from '../../appStore'
 import { currentAppVersion, getAppVersion, listAppVersions } from '../../appAssets'
+import { toAppId, toTemplateId } from '../../workbench/templateCore'
 
 /** 模板库默认保留的版本数（与 appAssets 的 MAX_VERSIONS 一致） */
 const DEFAULT_LIMIT = 20
@@ -38,11 +39,10 @@ function resolveApp(args: Record<string, unknown>): { app?: App; error?: string;
   if (!key) return { error: '需要 app_id（或 id）或 name 来定位模板' }
 
   if (!byName) {
-    // wb_list_templates 下发的 id 带 app: 前缀（模板库命名空间），而版本
-    // 历史键控在 appStore 的裸 uuid 上——两种口径都要能解析，否则模型拿
-    // 列表 id 查版本必然「未找到模板」（回归测试 R-B2 真机抓到）。
-    const app =
-      appStoreManager.getAppById(key) ?? appStoreManager.getAppById(key.replace(/^app:/, ''))
+    // 输入两种口径都吃：规范模板 id `app:<uuid>`（wb_list_templates 下发的形状）
+    // 与裸 uuid（appStore 键控）。转换统一走 toAppId，不手写正则——见
+    // templateCore.ts 的口径约定注释（回归 R-B2 真机抓到本工具只认裸 uuid）。
+    const app = appStoreManager.getAppById(toAppId(key))
     if (!app) return { error: `未找到模板：${key}`, hint: '可用 wb_list_templates 查 id' }
     return { app }
   }
@@ -85,7 +85,7 @@ export const versionTools: Array<{ tool: Tool; fn: WBToolFn }> = [
     tool: {
       name: 'wb_app_versions',
       description:
-        '查看/回滚模板（App）的版本历史。用 wb_publish_workflow 迭代过某个模板后，每次写入都会把上一版自动快照——用本工具可以看到改过几版、每版长什么样，并把模板退回某一版。\n\naction=list 看版本列表（含当前生效版本号）；get 看某一版的摘要（节点数、可填参数名）；restore 把模板退回该版本。restore 之后当前版本也会被快照，所以误退也能再退回来。定位模板传 app_id（推荐，wb_list_templates / wb_publish_workflow 都会返回）或用唯一同名。',
+        '查看/回滚模板（App）的版本历史。用 wb_publish_workflow 迭代过某个模板后，每次写入都会把上一版自动快照——用本工具可以看到改过几版、每版长什么样，并把模板退回某一版。\n\naction=list 看版本列表（含当前生效版本号）；get 看某一版的摘要（节点数、可填参数名）；restore 把模板退回该版本。restore 之后当前版本也会被快照，所以误退也能再退回来。定位模板传 app_id（推荐，wb_list_templates / wb_publish_workflow 都会返回）或用唯一同名。返回的 app_id 与 wb_list_templates 同一口径（app:<id> 命名空间），可直接互相喂给 wb_execute_template / wb_list_nodes 等 id 入参；本工具输入同时容忍裸 id 与带前缀两种写法。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -144,7 +144,7 @@ export const versionTools: Array<{ tool: Tool; fn: WBToolFn }> = [
         const versions = listAppVersions(app.id).slice(0, limit)
         return text({
           ok: true,
-          app_id: app.id,
+          app_id: toTemplateId(app.id),
           name: app.name,
           // 当前生效版本不在快照表里（表里存的是被替换掉的旧态），单独回报
           current_version: currentVersion,
@@ -170,7 +170,7 @@ export const versionTools: Array<{ tool: Tool; fn: WBToolFn }> = [
       if (version === currentVersion) {
         return text({
           ok: action === 'restore' ? false : true,
-          app_id: app.id,
+          app_id: toTemplateId(app.id),
           name: app.name,
           current_version: currentVersion,
           version,
@@ -192,7 +192,7 @@ export const versionTools: Array<{ tool: Tool; fn: WBToolFn }> = [
       if (action === 'get') {
         return text({
           ok: true,
-          app_id: app.id,
+          app_id: toTemplateId(app.id),
           current_version: currentVersion,
           ...summarizeSnapshot(version, snapshot)
         })
@@ -215,7 +215,7 @@ export const versionTools: Array<{ tool: Tool; fn: WBToolFn }> = [
         return text({
           ok: true,
           restored_from: version,
-          app_id: app.id,
+          app_id: toTemplateId(app.id),
           name: updated.name,
           previous_version: currentVersion,
           current_version: newCurrent,

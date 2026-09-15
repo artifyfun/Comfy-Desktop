@@ -7,6 +7,7 @@ import { listBatchQueue, type BatchJobSummary } from '../../services/batchRunner
 
 import { workbenchService } from '../../workbench/service'
 import { canvasWorkflowStore } from '../../workbench/canvasWorkflowStore'
+import { toTemplateId } from '../../workbench/templateCore'
 
 export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
   {
@@ -135,7 +136,9 @@ export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
         .map((n) => n.name)
       return text({
         ok: !!result,
-        app_id: result?.appId,
+        // 输出统一用规范模板 id（app:<uuid>，与 wb_list_templates 同口径）——
+        // 裸 uuid 喂不进 wb_execute_template（它按 templateLibrary 精确匹配）
+        app_id: result ? toTemplateId(result.appId) : undefined,
         name,
         source,
         // created / versioned 让模型（与用户）明确刚才发生的是新建还是迭代

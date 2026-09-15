@@ -23,6 +23,35 @@ export interface WorkflowTemplate {
   appId?: string
 }
 
+/**
+ * 模板 id 的命名空间前缀（见上方 `WorkflowTemplate.id` 注释：builtin:<name> | app:<appId>）。
+ *
+ * **口径约定（2026-09-15 统一；此前靠各处手写字符串拼接，出过 bug）**：
+ * - **规范模板 id = `app:<uuid>`** —— 模板库精确匹配（`templateLibrary.get`）、
+ *   `wb_list_templates` 下发、executor 的工作流指纹、画布 ops 全用这一口径。
+ * - **裸 uuid = appStore 内部键** —— `getAppById`/`updateApp`/`app_versions.app_id` 列。
+ * - 两者是**同一实体的两种表示**。跨边界必须用下面两个函数转换，**不要手写 `app:${x}`**
+ *   —— x 若已带前缀就会产出 `app:app:...`（画布连线就这么静默丢过）。
+ */
+export const APP_TEMPLATE_PREFIX = 'app:'
+
+/** 裸 appId → 规范模板 id（幂等：已带前缀原样返回） */
+export function toTemplateId(appId: string): string {
+  const s = String(appId ?? '').trim()
+  if (!s) return ''
+  return s.startsWith(APP_TEMPLATE_PREFIX) ? s : APP_TEMPLATE_PREFIX + s
+}
+
+/**
+ * 规范模板 id → 裸 appId（幂等：无前缀原样返回）。
+ * 用 while 剥尽前缀——`app:app:x` 这类历史脏值也能归一。
+ */
+export function toAppId(templateId: string): string {
+  let s = String(templateId ?? '').trim()
+  while (s.startsWith(APP_TEMPLATE_PREFIX)) s = s.slice(APP_TEMPLATE_PREFIX.length)
+  return s
+}
+
 /** 从 app 推断产物媒体类型：输出 renderComponent 优先，class_type 兜底 */
 export function inferMediaType(app: App): WorkbenchMediaType {
   const outs = (app.template?.paramsNodes ?? []).filter((n) => n.category === 'output')

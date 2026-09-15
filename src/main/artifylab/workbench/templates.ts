@@ -11,7 +11,12 @@
 import { EventEmitter } from 'events'
 import appStoreManager from '../appStore'
 import { logger } from '../utils/logger'
-import { templateFromApp, type WorkflowTemplate, type WorkbenchMediaType } from './templateCore'
+import {
+  templateFromApp,
+  toTemplateId,
+  type WorkflowTemplate,
+  type WorkbenchMediaType
+} from './templateCore'
 
 export type { WorkflowTemplate, WorkbenchMediaType }
 export { templateFromApp, toPseudoApp, inferMediaType, extractRequiredModels } from './templateCore'
@@ -45,8 +50,17 @@ class TemplateLibrary extends EventEmitter {
     return this.cache
   }
 
+  /**
+   * 按 id 取模板。**容忍两种口径**（2026-09-15 统一）：
+   * 规范 `app:<uuid>` 精确命中；万一拿到的是裸 appId（appStore 层的键、旧客户端值）
+   * 自动补前缀再试一次。会话变体 `session:*` 与内置 `builtin:*` 仍精确匹配、不受影响。
+   *
+   * 放在这一层而不是各调用点：`wb_execute_template` / `wb_clone_template` /
+   * `wb_list_nodes` / 画布 ops 都经这里解析，一处容忍即全族受益。
+   */
   get(id: string): WorkflowTemplate | null {
-    return this.list().find((t) => t.id === id) ?? null
+    const list = this.list()
+    return list.find((t) => t.id === id) ?? list.find((t) => t.id === toTemplateId(id)) ?? null
   }
 
   /** 供内置模板注册（后续精选官方库填充时使用） */

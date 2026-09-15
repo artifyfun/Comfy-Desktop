@@ -44,6 +44,7 @@ description: Artify 工作台多步编排与工作流创作指南。当需求需
 5. 效果好的可 `wb_publish_workflow(name, workflow)` 固化为模板，供后续复用。**缺省自动推断输入参数**（提示词 / seed / steps / cfg / 尺寸 / 参考图槽）与输出节点，固化后直接能用 `wb_execute_template` 填参复跑；要精确控制参数面时用 `params_nodes` 显式覆盖。**用户在画布上手动搭好并跑通的工作流**无需重传本体——直接 `wb_publish_workflow(name, prompt_id=<该次执行的 promptId>)` 即可沉淀（服务端已存工作流快照，仅保留最近 30 次执行）。
    - **新建还是迭代**：同名模板**恰好一个**时视为「迭代它」，写入新版本（旧版自动快照，用户可在模板的版本历史里恢复），结果回 `mode=versioned` 与新的 `version`；没有同名则新建（`mode=created`）。所以**对同一模板改一版再沉淀就直接传同一个 name**，别起新名字（否则会攒出一堆近似重复模板）。想做**变体**而非迭代时传 `force_new=true`；要明确迭代某个模板传 `app_id`（`wb_list_templates` 可查；id 无效会报错，不会静默新建）。
    - 用户对某次画布结果满意、或某条操作链值得反复用时，主动提议沉淀。
+   - **模板 id 只有一种口径**：`app:<id>`。`wb_list_templates` / `wb_publish_workflow` / `wb_app_versions` 返回的 id 都可以**直接互喂**给任何接 id 的工具（`wb_execute_template` / `wb_list_nodes` / `wb_clone_template` / `wb_app_versions`），不需要自己加或去前缀。id 入参两种写法都接受，但**回传/记录时用工具给的原值**，不要手工拼 `app:`。
    - **迭代改坏了就自己退回去**：每次迭代写入都会把上一版自动快照，用 `wb_app_versions` 查历史（`action=list` 定位模板传 app_id 或唯一同名）→ `action=get version=N` 看那版长什么样 → `action=restore version=N` 退回。恢复前的那一版也会被快照，所以误退可以再退回来；回滚只改本地模板库、不触发执行，标准审批档位下自动放行。发现自己刚沉淀的模板跑不通时，先回滚再改，不要留在坏版本上继续叠。
 
 API 格式：`{"节点id": {"class_type": "节点类名", "inputs": {"参数名": 值 或 ["上游id", 端口号]}}}`；链接字段值为 `["上游节点id", 输出端口下标]`。
