@@ -2,6 +2,29 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { ref, computed } from 'vue'
 import { useCanvasIntegration } from './useCanvasIntegration'
 
+// 本文件零组件挂载（node 环境，无 document）。useCanvasIntegration 内部直接 import
+// antd 的 message，其异步通知实例创建需要 DOM —— 会在 deliverArtifact 走的路径上
+// 产生 Unhandled Rejection: document is not defined（测试仍绿但会污染整轮运行，
+// 且可能掩盖真实失败）。与 composables.test.js 保持同一处理：模块级替换为 spy。
+vi.mock('ant-design-vue', async (importOriginal) => {
+  const actual = await importOriginal()
+  const messageStub = {
+    success: vi.fn(),
+    info: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+    open: vi.fn(),
+  }
+  const modalStub = {
+    confirm: vi.fn(),
+    info: vi.fn(),
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+  }
+  return { ...actual, message: messageStub, Modal: modalStub }
+})
+
 const MSG = {
   DISPLAY_CARD: 'artify:display-card',
   CANVAS_STATE: 'artify:canvas-state',

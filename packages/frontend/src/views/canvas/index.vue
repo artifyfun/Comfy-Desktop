@@ -3668,6 +3668,20 @@ const selBar = computed(() => {
     apps: picked.filter((o) => o.type === 'app').length,
   }
 })
+/** 框选命中后浮出选区指令条（A14）。随 selection 数量变化由 onMouseUp 调用。
+ *  注：本函数在 01e637e0「AI 指令编排抽 useCanvasAiActions」时被一并删除，但 onMouseUp
+ *  的调用点留着 —— 框选命中即抛 ReferenceError，还会连带跳过紧随其后的
+ *  `drag.mode = null` / `saveSoon()`，连带表现为「框选之后空格+拖 平移失灵」。 */
+function openSelPrompt() {
+  if (!selection.value.length) return
+  const b = bboxOf(objects.value.filter((o) => selection.value.includes(o.id)))
+  const tl = worldToScreen(viewport.value, b.x, b.y)
+  selPrompt.value = {
+    x: clamp(tl.x, 8, size.w - 380),
+    y: clamp(tl.y - 52, 8, size.h - 60),
+    text: '',
+  }
+}
 const spotlightRect = computed(() => {
   const o = objects.value.find((x) => x.id === spotlightId.value)
   if (!o) return null
