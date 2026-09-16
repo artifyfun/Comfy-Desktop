@@ -9,18 +9,43 @@
  *   W14.5 点遮罩空白区关闭
  *   W14.6 空画布 CTA 入口 → 打开 → Esc 关闭
  *
- * 前置：
- *   1) cd <repo> && pnpm run build:frontend
- *   2) cd acceptance/canvas && node serve.mjs 5174
- *   3) node scripts/wb-canvas-guide-verify.mjs [port]
+ * 两种跑法（同一套断言，两条渲染链路都盖）：
+ *
+ *   A. 构建产物 + acceptance 静态服务器（默认）
+ *      1) cd <repo> && pnpm run build:frontend
+ *      2) cd acceptance/canvas && node serve.mjs 5174
+ *      3) node scripts/wb-canvas-guide-verify.mjs 5174
+ *
+ *   B. dev server（`pnpm dev` 起的 5100，验证未打包的 vite dev 链路）
+ *      node scripts/wb-canvas-guide-verify.mjs --base http://127.0.0.1:5100 --inject-stub
+ *      dev server 不注入 stub，故改由 addInitScript 直接跑 acceptance/canvas/stub.js。
  */
 import { mkdir } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
-const PORT = Number(process.argv[2] || 5174)
-const BASE = `http://127.0.0.1:${PORT}`
+const argv = process.argv.slice(2)
+const opt = (name, fallback) => {
+  const i = argv.indexOf(name)
+  return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback
+}
+const positionalPort = argv.find((a) => /^\d+$/.test(a))
+const PORT = Number(opt('--port', positionalPort || 5174))
+const BASE = opt('--base', `http://127.0.0.1:${PORT}`)
+/** dev server 模式：HTML 不经过 serve.mjs，stub 由 addInitScript 注入 */
+const INJECT_STUB = argv.includes('--inject-stub')
+/** 产物模式与 dev 模式的截图分开，避免互相覆盖 */
+const SHOT_PREFIX = INJECT_STUB ? 'w14-dev-' : 'w14-'
 const SHOTS = new URL('../acceptance/workbench/screenshots/', import.meta.url)
+const STUB_PATH = fileURLToPath(new URL('../acceptance/canvas/stub.js', import.meta.url))
 await mkdir(SHOTS, { recursive: true })
+
+/** 把 activeId 切到 p-empty（空画布项目）——stub 每次加载都会重写 localStorage，故必须注入 */
+const EMPTY_PROJECT_SRC =
+  `;(function(){try{const K='artify.canvas.projects.v1';` +
+  `const s=JSON.parse(localStorage.getItem(K));s.activeId='p-empty';` +
+  `localStorage.setItem(K,JSON.stringify(s));` +
+  `console.log('[w14] forced activeId=p-empty')}catch(e){console.warn('[w14] force empty failed',e)}})()`
 
 const MODAL = '[data-testid="canvas-guide-modal"]'
 const OPEN_BTN = '[data-testid="canvas-guide-btn"]'
@@ -32,11 +57,15 @@ function record(name, pass, evidence) {
   console.log(`${pass ? '✅' : '❌'} ${name}${evidence ? ' — ' + evidence : ''}`)
 }
 async function shot(page, file) {
-  await page.screenshot({ path: new URL(file, SHOTS).pathname.replace(/^\//, '') })
+  await page.screenshot({
+    path: new URL(`${SHOT_PREFIX}${file}`, SHOTS).pathname.replace(/^\//, '')
+  })
 }
 
 const browser = await chromium.launch({ headless: true })
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+// dev server 模式：stub.js 直接跑在页面上下文（无需 serve.mjs 改 HTML）
+if (INJECT_STUB) await context.addInitScript({ path: STUB_PATH })
 const page = await context.newPage()
 
 const pageErrors = []
@@ -47,7 +76,8 @@ page.on('response', (res) => {
   const url = res.url()
   if (!url.includes('/api/')) return
   const ct = res.headers()['content-type'] || ''
-  if (ct.includes('text/html')) htmlApiHits.add(`${res.request().method()} ${new URL(url).pathname}`)
+  if (ct.includes('text/html'))
+    htmlApiHits.add(`${res.request().method()} ${new URL(url).pathname}`)
 })
 
 /** 首屏会自动弹「使用指南」（GUIDE_SEEN_KEY），遮罩会拦住所有点击，先点掉 */
@@ -97,7 +127,7 @@ record(
   firstTitle.length > 0 && figureNodes > 5,
   `标题=${firstTitle}, figure 元素=${figureNodes}`
 )
-await shot(page, 'w14-guide-open.png')
+await shot(page, 'guide-open.png')
 
 // ---------- W14.2 侧栏切页 ----------
 const target = page.locator(`${MODAL} .guide-nav`, { hasText: '文生图' }).first()
@@ -111,7 +141,7 @@ if (await target.count()) {
   const active = (await page.locator(`${MODAL} .guide-nav.active`).innerText()).trim()
   switchOk = t2 !== firstTitle && steps > 0
   switchEvidence = `标题 ${firstTitle} → ${t2}, 步骤=${steps}, active=${active}`
-  await shot(page, 'w14-guide-page-switch.png')
+  await shot(page, 'guide-page-switch.png')
 }
 record('W14.2 切页正文随之切换', switchOk, switchEvidence)
 
@@ -119,7 +149,7 @@ record('W14.2 切页正文随之切换', switchOk, switchEvidence)
 await page.keyboard.press('Escape')
 await page.waitForTimeout(500)
 record('W14.3a Esc 一次关闭', (await modal.count()) === 0, `残留=${await modal.count()}`)
-await shot(page, 'w14-guide-closed.png')
+await shot(page, 'guide-closed.png')
 
 const guidePhaseErrors = pageErrors.length - phaseBase
 record(
@@ -144,20 +174,18 @@ record('W14.5 点遮罩关闭', (await modal.count()) === 0, `残留=${await mod
 
 // ---------- W14.6 空画布 CTA ----------
 // stub 每次加载都会重写 localStorage（activeId 回到 p-main），所以不能靠 evaluate 切项目，
-// 改为在 stub 响应末尾追加一段「切到 p-empty」的脚本 —— 不改动 acceptance/canvas/stub.js。
-await context.route('**/__canvas_stub.js', async (route) => {
-  const res = await route.fetch()
-  const body = await res.text()
-  await route.fulfill({
-    response: res,
-    body:
-      body +
-      `\n;(function(){try{const K='artify.canvas.projects.v1';` +
-      `const s=JSON.parse(localStorage.getItem(K));s.activeId='p-empty';` +
-      `localStorage.setItem(K,JSON.stringify(s));` +
-      `console.log('[w14] forced activeId=p-empty')}catch(e){console.warn('[w14] force empty failed',e)}})()\n`,
+// 必须在 stub 之后追加一段「切到 p-empty」的脚本 —— 不改动 acceptance/canvas/stub.js。
+if (INJECT_STUB) {
+  // dev 模式：addInitScript 按注册顺序执行，这段跑在 stub.js 之后
+  await context.addInitScript(EMPTY_PROJECT_SRC)
+} else {
+  // 产物模式：stub 由 serve.mjs 以 <script src> 注入，改写它的响应体
+  await context.route('**/__canvas_stub.js', async (route) => {
+    const res = await route.fetch()
+    const body = await res.text()
+    await route.fulfill({ response: res, body: `${body}\n${EMPTY_PROJECT_SRC}\n` })
   })
-})
+}
 await page.reload({ waitUntil: 'networkidle' })
 await page.waitForTimeout(2500)
 await closeModals()
@@ -168,7 +196,7 @@ record('W14.6a 空画布 CTA 存在', emptyBtnCount === 1, `count=${emptyBtnCoun
 let emptyOk = false
 let emptyEvidence = 'CTA 未出现，后续跳过'
 if (emptyBtnCount === 1) {
-  await shot(page, 'w14-empty-cta.png')
+  await shot(page, 'empty-cta.png')
   await page.locator(EMPTY_BTN).click()
   await page.waitForTimeout(600)
   const opened = (await modal.count()) === 1
@@ -177,7 +205,7 @@ if (emptyBtnCount === 1) {
   const closed = (await modal.count()) === 0
   emptyOk = opened && closed
   emptyEvidence = `打开=${opened}, Esc 关闭=${closed}`
-  await shot(page, 'w14-empty-cta-closed.png')
+  await shot(page, 'empty-cta-closed.png')
 }
 record('W14.6b 空画布 CTA → 打开 → Esc 关闭', emptyOk, emptyEvidence)
 
@@ -192,6 +220,8 @@ record(
 await browser.close()
 
 const failed = results.filter((r) => !r.pass)
-console.log(`\n${failed.length ? '❌' : '✅'} ${results.length - failed.length}/${results.length} 通过`)
-console.log('截图目录：acceptance/workbench/screenshots/')
+console.log(
+  `\n${failed.length ? '❌' : '✅'} ${results.length - failed.length}/${results.length} 通过`
+)
+console.log(`截图目录：acceptance/workbench/screenshots/（前缀 ${SHOT_PREFIX}）`)
 process.exit(failed.length ? 1 : 0)
