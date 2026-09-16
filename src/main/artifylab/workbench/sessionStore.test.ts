@@ -115,4 +115,74 @@ describe('SessionStoreRepo', () => {
     expect(r.ok).toBe(false)
     expect(r.session).toBeUndefined()
   })
+
+  // ---------------- repo seam 收编后的显式方法（A1刀1） ----------------
+
+  it('memories：upsert 幂等覆盖 / remove 不存在返回 false', () => {
+    const repo = mkRepo()
+    repo.upsertMemory('k1', 'v1')
+    repo.upsertMemory('k1', 'v2')
+    expect(repo.listMemories()['k1']?.value).toBe('v2')
+    expect(repo.removeMemory('nope')).toBe(false)
+    expect(repo.removeMemory('k1')).toBe(true)
+    expect(repo.listMemories()['k1']).toBeUndefined()
+  })
+
+  it('favorites：add / findFavorite 同文件去重键 / remove', () => {
+    const repo = mkRepo()
+    const fav = {
+      id: 'f1',
+      sessionId: 's1',
+      promptId: 'p1',
+      templateId: 't1',
+      file: { filename: 'a.png', subfolder: 'x' },
+      createdAt: 1
+    }
+    repo.addFavorite(fav)
+    expect(repo.findFavorite('s1', { filename: 'a.png', subfolder: 'x' })?.id).toBe('f1')
+    // subfolder 不同 = 不同收藏
+    expect(repo.findFavorite('s1', { filename: 'a.png', subfolder: 'y' })).toBeUndefined()
+    expect(repo.removeFavorite('f1')).toBe(true)
+    expect(repo.removeFavorite('f1')).toBe(false)
+  })
+
+  it('userPresets：add / update / map（返回变化数）/ delete / default', () => {
+    const mkName = (n: string) => ({ zh: n, en: n })
+    const repo = mkRepo()
+    repo.addUserPreset({
+      id: 'u1',
+      name: mkName('P1'),
+      description: mkName(''),
+      builtin: false,
+      templateIds: []
+    })
+    const updated = repo.updateUserPreset('u1', { name: mkName('P1b') })
+    expect(updated?.name.zh).toBe('P1b')
+    expect(repo.updateUserPreset('nope', { name: mkName('x') })).toBeNull()
+
+    let mapped = repo.mapUserPresets((p) =>
+      p.skillIds?.includes('old') ? { ...p, skillIds: ['new'] } : p
+    )
+    expect(mapped).toBe(0)
+    repo.addUserPreset({
+      id: 'u2',
+      name: mkName('P2'),
+      description: mkName(''),
+      builtin: false,
+      templateIds: [],
+      skillIds: ['old']
+    })
+    mapped = repo.mapUserPresets((p) =>
+      p.skillIds?.includes('old') ? { ...p, skillIds: ['new'] } : p
+    )
+    expect(mapped).toBe(1)
+    expect(repo.listUserPresets().find((p) => p.id === 'u2')?.skillIds).toEqual(['new'])
+
+    repo.setDefaultPreset('u2')
+    expect(repo.getDefaultPresetId('fallback')).toBe('u2')
+    // 删除默认预设 → default 清空回退 fallback
+    expect(repo.deleteUserPreset('u2')).toBe(true)
+    expect(repo.getDefaultPresetId('fallback')).toBe('fallback')
+    expect(repo.deleteUserPreset('nope')).toBe(false)
+  })
 })

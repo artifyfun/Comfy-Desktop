@@ -12,7 +12,13 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { exportSession, importSession as importSessionCore } from './sessionTransfer'
-import type { SessionStore, WorkbenchSession, SessionModelOverride } from './sessionTypes'
+import type {
+  SessionStore,
+  WorkbenchSession,
+  SessionModelOverride,
+  WorkbenchPreset,
+  WorkbenchFavorite
+} from './sessionTypes'
 import { logger } from '../utils/logger'
 
 const MAX_SESSIONS = 50
@@ -177,5 +183,116 @@ export class SessionStoreRepo {
     this.store.sessions.unshift(r.session)
     this.flush()
     return { ok: true, session: r.session }
+  }
+
+  // ---------------- 跨会话长期记忆（memories） ----------------
+  // service 不再直改 store.memories；读写收口到这些显式方法（含落盘）。
+
+  listMemories(): Record<string, { value: string; updatedAt: number }> {
+    return { ...(this.store.memories ?? {}) }
+  }
+
+  upsertMemory(key: string, value: string): void {
+    this.store.memories = {
+      ...(this.store.memories ?? {}),
+      [key]: { value, updatedAt: Date.now() }
+    }
+    this.flush()
+  }
+
+  removeMemory(key: string): boolean {
+    if (!this.store.memories || !(key in this.store.memories)) return false
+    const next = { ...this.store.memories }
+    delete next[key]
+    this.store.memories = next
+    this.flush()
+    return true
+  }
+
+  // ---------------- 收藏（favorites） ----------------
+
+  listFavorites(): WorkbenchFavorite[] {
+    return [...(this.store.favorites ?? [])]
+  }
+
+  findFavorite(
+    sessionId: string,
+    file: { filename: string; subfolder?: string }
+  ): WorkbenchFavorite | undefined {
+    return (this.store.favorites ?? []).find(
+      (f) =>
+        f.sessionId === sessionId &&
+        f.file.filename === file.filename &&
+        (f.file.subfolder ?? '') === (file.subfolder ?? '')
+    )
+  }
+
+  addFavorite(fav: WorkbenchFavorite): void {
+    this.store.favorites = [...(this.store.favorites ?? []), fav]
+    this.flush()
+  }
+
+  removeFavorite(id: string): boolean {
+    const before = this.store.favorites?.length ?? 0
+    this.store.favorites = (this.store.favorites ?? []).filter((f) => f.id !== id)
+    const changed = (this.store.favorites?.length ?? 0) !== before
+    if (changed) this.flush()
+    return changed
+  }
+
+  // ---------------- 预设（用户自定义 presets + 默认项） ----------------
+  // 内置预设（BUILTIN_PRESETS）不落 store；这里只管用户预设的持久化形态。
+
+  listUserPresets(): WorkbenchPreset[] {
+    return [...(this.store.presets ?? [])]
+  }
+
+  addUserPreset(preset: WorkbenchPreset): void {
+    this.store.presets = [...(this.store.presets ?? []), preset]
+    this.flush()
+  }
+
+  updateUserPreset(id: string, patch: Partial<WorkbenchPreset>): WorkbenchPreset | null {
+    const list = this.store.presets ?? []
+    const idx = list.findIndex((p) => p.id === id)
+    if (idx === -1) return null
+    const updated = { ...list[idx]!, ...patch }
+    this.store.presets = list.with(idx, updated)
+    this.flush()
+    return updated
+  }
+
+  /** 对全部用户预设做映射变换，返回发生变化的条数（技能改名修引用用） */
+  mapUserPresets(fn: (p: WorkbenchPreset) => WorkbenchPreset): number {
+    let changed = 0
+    this.store.presets = (this.store.presets ?? []).map((p) => {
+      const next = fn(p)
+      if (next !== p) changed++
+      return next
+    })
+    if (changed) this.flush()
+    return changed
+  }
+
+  deleteUserPreset(id: string): boolean {
+    const before = this.store.presets?.length ?? 0
+    this.store.presets = (this.store.presets ?? []).filter((p) => p.id !== id)
+    const ok = (this.store.presets?.length ?? 0) < before
+    if (this.repoDefaultNeedsClear(id)) this.store.presetDefault = undefined
+    if (ok) this.flush()
+    return ok
+  }
+
+  getDefaultPresetId(fallback: string): string {
+    return this.store.presetDefault ?? fallback
+  }
+
+  setDefaultPreset(id: string): void {
+    this.store.presetDefault = id
+    this.flush()
+  }
+
+  private repoDefaultNeedsClear(id: string): boolean {
+    return this.store.presetDefault === id
   }
 }

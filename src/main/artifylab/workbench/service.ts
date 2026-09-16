@@ -364,27 +364,18 @@ class WorkbenchService {
   // ---------------- 跨会话长期记忆（dsh memory 语义） ----------------
 
   listMemories(): Record<string, { value: string; updatedAt: number }> {
-    return { ...(this.repo.store.memories ?? {}) }
+    return this.repo.listMemories()
   }
 
   /** 写入/更新(幂等,同 key 覆盖);工作台自我更新与用户指令共用此口 */
   rememberMemory(key: string, value: string): void {
     const k = key.trim().slice(0, 64)
     if (!k) throw new Error('memory key 不能为空')
-    this.repo.store.memories = {
-      ...(this.repo.store.memories ?? {}),
-      [k]: { value: value.trim().slice(0, 500), updatedAt: Date.now() }
-    }
-    this.repo.flush()
+    this.repo.upsertMemory(k, value.trim().slice(0, 500))
   }
 
   forgetMemory(key: string): boolean {
-    if (!this.repo.store.memories || !(key in this.repo.store.memories)) return false
-    const next = { ...this.repo.store.memories }
-    delete next[key]
-    this.repo.store.memories = next
-    this.repo.flush()
-    return true
+    return this.repo.removeMemory(key)
   }
 
   // ---------------- 编排去重（wb_* 工具真实执行过 → 最终 PLAN 跳过执行） ----------------
@@ -403,7 +394,7 @@ class WorkbenchService {
 
   /** decide spec 的「用户长期记忆」注入段(空记忆返回空串) */
   renderMemoryContext(): string {
-    const entries = Object.entries(this.repo.store.memories ?? {})
+    const entries = Object.entries(this.repo.listMemories())
     if (entries.length === 0) return ''
     const lines = entries
       .sort((a, b) => b[1].updatedAt - a[1].updatedAt)
@@ -1506,7 +1497,7 @@ class WorkbenchService {
   // ---------------- 收藏（产物收藏夹，跨会话） ----------------
 
   listFavorites(sessionId?: string): WorkbenchFavorite[] {
-    const all = this.repo.store.favorites ?? []
+    const all = this.repo.listFavorites()
     return sessionId ? all.filter((f) => f.sessionId === sessionId) : all
   }
 
@@ -1529,24 +1520,14 @@ class WorkbenchService {
       createdAt: Date.now()
     }
     // 去重:同会话同文件重复收藏视为幂等
-    const dup = (this.repo.store.favorites ?? []).find(
-      (f) =>
-        f.sessionId === fav.sessionId &&
-        f.file.filename === fav.file.filename &&
-        (f.file.subfolder ?? '') === (fav.file.subfolder ?? '')
-    )
+    const dup = this.repo.findFavorite(fav.sessionId, fav.file)
     if (dup) return dup
-    this.repo.store.favorites = [...(this.repo.store.favorites ?? []), fav]
-    this.repo.flush()
+    this.repo.addFavorite(fav)
     return fav
   }
 
   removeFavorite(id: string): boolean {
-    const before = (this.repo.store.favorites ?? []).length
-    this.repo.store.favorites = (this.repo.store.favorites ?? []).filter((f) => f.id !== id)
-    const changed = this.repo.store.favorites.length !== before
-    if (changed) this.repo.flush()
-    return changed
+    return this.repo.removeFavorite(id)
   }
 
   publishToApp(
@@ -1577,7 +1558,7 @@ class WorkbenchService {
 
   listPresets(): WorkbenchPreset[] {
     // dsh preset.yml order 语义：按 order 升序，缺省排 100
-    return [...BUILTIN_PRESETS, ...(this.repo.store.presets ?? [])].sort(
+    return [...BUILTIN_PRESETS, ...this.repo.listUserPresets()].sort(
       (a, b) => (a.order ?? 100) - (b.order ?? 100)
     )
   }
@@ -1590,8 +1571,7 @@ class WorkbenchService {
     const existing = new Set(this.listPresets().map((p) => p.id))
     const preset = clonePreset(opts.from ?? 'standard', opts.id, opts.name ?? '', existing)
     if (!preset) throw new Error('预设 id 非法或已存在')
-    this.repo.store.presets = [...(this.repo.store.presets ?? []), preset]
-    this.repo.flush()
+    this.repo.addUserPreset(preset)
     return preset
   }
 
@@ -1600,15 +1580,11 @@ class WorkbenchService {
    */
   updatePresetTemplates(id: string, templateIds: string[]): WorkbenchPreset {
     if (BUILTIN_PRESETS.some((p) => p.id === id)) throw new Error('builtin preset is readonly')
-    const list = this.repo.store.presets ?? []
-    const idx = list.findIndex((p) => p.id === id)
-    if (idx === -1) throw new Error(`preset not found: ${id}`)
     // 只保留真实存在的模板 id
     const valid = new Set(templateLibrary.list().map((t) => t.id))
     const next = [...new Set(templateIds)].filter((s) => valid.has(s))
-    const updated = { ...list[idx]!, templateIds: next }
-    this.repo.store.presets = list.with(idx, updated)
-    this.repo.flush()
+    const updated = this.repo.updateUserPreset(id, { templateIds: next })
+    if (!updated) throw new Error(`preset not found: ${id}`)
     return updated
   }
 
@@ -1617,31 +1593,23 @@ class WorkbenchService {
    */
   updatePresetSkills(id: string, skillIds: string[]): WorkbenchPreset {
     if (BUILTIN_PRESETS.some((p) => p.id === id)) throw new Error('builtin preset is readonly')
-    const list = this.repo.store.presets ?? []
-    const idx = list.findIndex((p) => p.id === id)
-    if (idx === -1) throw new Error(`preset not found: ${id}`)
     const valid = new Set(
       defaultSkillLibrary()
         .list()
         .map((s) => s.name)
     )
     const next = [...new Set(skillIds)].filter((s) => valid.has(s))
-    const updated = { ...list[idx]!, skillIds: next }
-    this.repo.store.presets = list.with(idx, updated)
-    this.repo.flush()
+    const updated = this.repo.updateUserPreset(id, { skillIds: next })
+    if (!updated) throw new Error(`preset not found: ${id}`)
     return updated
   }
 
   /** 技能改名后修正所有预设的捆绑引用（改名不失效）；供路由层在 update 改名后调用 */
   fixPresetSkillRefs(oldName: string, newName: string): number {
-    let changed = 0
-    this.repo.store.presets = (this.repo.store.presets ?? []).map((p) => {
+    return this.repo.mapUserPresets((p) => {
       if (!p.skillIds?.includes(oldName)) return p
-      changed++
       return { ...p, skillIds: p.skillIds.map((s) => (s === oldName ? newName : s)) }
     })
-    if (changed) this.repo.flush()
-    return changed
   }
 
   // ---------------- 技能库（Agent Skills 开放标准，SKILL.md 知识文档） ----------------
@@ -1653,23 +1621,17 @@ class WorkbenchService {
   deletePreset(id: string): boolean {
     // 内置不可删（dsh 同款：shipped preset 不归用户管理）
     if (BUILTIN_PRESETS.some((p) => p.id === id)) return false
-    const before = this.repo.store.presets?.length ?? 0
-    this.repo.store.presets = (this.repo.store.presets ?? []).filter((p) => p.id !== id)
-    const ok = (this.repo.store.presets?.length ?? 0) < before
-    if (ok) this.repo.flush()
-    if (this.repo.store.presetDefault === id) this.repo.store.presetDefault = undefined
-    return ok
+    return this.repo.deleteUserPreset(id)
   }
 
   setDefaultPreset(id: string): boolean {
     if (!this.listPresets().some((p) => p.id === id)) return false
-    this.repo.store.presetDefault = id
-    this.repo.flush()
+    this.repo.setDefaultPreset(id)
     return true
   }
 
   getDefaultPresetId(): string {
-    return this.repo.store.presetDefault ?? BUILTIN_PRESETS[0]!.id
+    return this.repo.getDefaultPresetId(BUILTIN_PRESETS[0]!.id)
   }
 
   // ---------------- 环境快照（前端「能力说明」可视化用，与决策注入同源） ----------------
