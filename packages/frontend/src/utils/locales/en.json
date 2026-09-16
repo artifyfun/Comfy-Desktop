@@ -367,6 +367,7 @@
   "canvasMiniMapToggle": "Minimap",
   "canvasZoomSlider": "Zoom",
   "canvasShortcuts": "Shortcuts",
+  "canvasGuideBtn": "Canvas Guide (nodes & scenarios)",
   "canvasScWheel": "Zoom canvas",
   "canvasScSpaceDrag": "Pan canvas",
   "canvasScCtrlDrag": "Box select / copy nodes",

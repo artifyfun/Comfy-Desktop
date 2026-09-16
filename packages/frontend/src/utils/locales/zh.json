@@ -367,6 +367,7 @@
   "canvasMiniMapToggle": "小地图",
   "canvasZoomSlider": "缩放",
   "canvasShortcuts": "快捷键",
+  "canvasGuideBtn": "画布指南（节点与场景用法）",
   "canvasScWheel": "缩放画布",
   "canvasScSpaceDrag": "平移画布",
   "canvasScCtrlDrag": "框选 / 复制节点",

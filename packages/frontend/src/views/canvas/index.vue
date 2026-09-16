@@ -1671,12 +1671,23 @@
           >
           <button
             class="w-8 h-8 rounded-lg text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10 transition flex items-center justify-center"
+            :title="t('canvasGuideBtn')"
+            data-testid="canvas-guide-btn"
+            @click="guideOpen = true"
+          >
+            <i class="fas fa-compass"></i>
+          </button>
+          <button
+            class="w-8 h-8 rounded-lg text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10 transition flex items-center justify-center"
             :title="t('canvasShortcuts')"
             @click="shortcutsOpen = true"
           >
             <i class="fas fa-circle-question"></i>
           </button>
         </div>
+
+        <!-- 用法指南弹窗（节点类型 × 场景玩法） -->
+        <CanvasGuideModal v-if="guideOpen" @close="guideOpen = false" />
 
         <!-- 快捷键面板 -->
         <div
@@ -1793,6 +1804,7 @@ import CanvasSidePanel from './CanvasSidePanel.vue'
 import CanvasAssetsPanel from './CanvasAssetsPanel.vue'
 import MediaNodeCard from './MediaNodeCard.vue'
 import AppPickerModal from './AppPickerModal.vue'
+import CanvasGuideModal from './CanvasGuideModal.vue'
 import {
   makeAppNode,
   collectUpstream,
@@ -5413,6 +5425,7 @@ watch(
 
 const miniOpen = ref(true) // 小地图开关（缩放控件条内切换）
 const shortcutsOpen = ref(false) // 快捷键面板
+const guideOpen = ref(false) // 用法指南弹窗（节点类型 × 场景玩法）
 /** 滑杆缩放：以画布中心为锚（与滚轮一致的锚点语义） */
 function onZoomSlider(e) {
   const target = Number(e.target.value) / 100
