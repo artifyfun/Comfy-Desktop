@@ -107,7 +107,7 @@ export function useAppNodes(deps) {
     // 拾取即展开参数面板
     nextTick(() => openAppNodePanel(node.id))
     // S5a 编排流：note 生图 → 连线 + 自动运行（不展开面板避免遮挡）
-    if (genFromNote.value) {
+    if (genFromNote?.value) {
       appPanel.id = null
       maybeRunGenFromNote(node)
     }
