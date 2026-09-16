@@ -73,6 +73,11 @@ CUSTOM `wb_canvas_ops`，整条 embed 链路（桥 → poller → canvasMode 总
 
 | W13 | **header 弹窗层级（stacking context）**（`scripts/wb-modal-zindex-verify.mjs`，打开 `/canvas`）— ① 画布内开 z-30 浮层（提示词库面板）→ 点 header「关于」→ 断言弹窗遮罩的 **SC 祖先链里没有 header** + 重叠点 `elementsFromPoint` 最上层属于弹窗子树；② 「设置」弹窗同断言 | w13-about-above-canvas.png / w13-config-above-canvas.png |
 
+| W14 | **画布指南弹窗（`scripts/wb-canvas-guide-verify.mjs`，打开 `/canvas`）** — ① 点缩放条罗盘 `[data-testid="canvas-guide-btn"]` → 弹窗 `[data-testid="canvas-guide-modal"]` 出现：侧栏 **2 组 / 12 篇**、正文标题 + 内嵌 SVG 示意图（元素数 > 5）；② 侧栏点「文生图」→ 正文标题随之切换、步骤列表非空、`active` 跟随；③④⑤ **三种关闭口径**各断言残留 = 0：Esc 一次 / `.guide-close` 按钮 / 点遮罩空白区；⑥ 空画布 `[data-testid="canvas-empty-guide-btn"]` → 打开 → Esc 关闭；⑦ 两段加载各自「无新增页面错误」（分段基线对比） | w14-guide-open.png / w14-guide-page-switch.png / w14-guide-closed.png / w14-empty-cta.png / w14-empty-cta-closed.png |
+
+> **W14 的两个坑**：① **stub 每次加载都会重写 localStorage**（`stub.js` 在 boot 时无条件 `setItem`，`activeId` 恒回 `p-main`）——想把 activeId 切到 `p-empty`（空画布）不能靠 `page.evaluate` 改 key 再 `reload`，会被 stub 覆盖。解法：`context.route('**/__canvas_stub.js')` 取原始响应体后**在末尾追加**一段切项目的脚本再 fulfill，**不改动 acceptance/canvas/stub.js**（其他用例仍要默认 seed）。② 页面错误要**分段记账**：stub 未 mock 的 8 个 `/api` 端点（`POST /api/config`、`GET /api/batch/queue`、`GET /api/workbench/{sessions,presets,templates,runtime}`、`POST /api/workbench/sessions/create`、`POST /api/canvas/snapshot`）每次 boot 都会因 SPA fallback 返回 HTML 而抛 `Unexpected token '<'`，属既有噪音 → 每段 `reload` 后重置基线，只断言「指南交互本身不新增错误」。
+> 另注：罗盘按钮在**底部缩放条**（不是被 z-20 提示条压住的顶部工具栏），所以这里 `locator.click()` 可用，不必像 W11 那样强制 `evaluate(el => el.click())`。
+
 > **W13 的坑（stacking context 陷阱）**：弹窗 z-index 数字再大也可能输——AppHeader 根元素 `relative z-20` 建立了 stacking context，挂在 header **内部**的弹窗对外只等效 z=20，画布页的 z-30/z-40/z-[80] 浮层全部盖住它。修法是弹窗 `<Teleport to="body">`（与 antd modal 同思路）。诊断时别只读 computed z-index，要看**祖先链上谁建立了 SC**（`elementsFromPoint` 是最可靠的最终判据）。变异验证：去掉 Teleport → 脚本立刻报「弹窗仍挂在 header 的 stacking context 里」。
 
 > **W12 的坑**：工具栏「提示词库」按钮是**开关**（`promptLib.open = !promptLib.open`）——面板已开时再点会关掉。脚本里必须先判断面板是否已开再决定点不点（本轮就因此误判过一次"找不到词条"）。
