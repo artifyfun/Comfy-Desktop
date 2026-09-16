@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   applyNodeOverrides,
   executeApp,
@@ -36,6 +39,12 @@ beforeEach(() => {
     if (url.startsWith('data:')) return new Response(new Blob(['x']), { status: 200 })
     if (url.includes('/free')) {
       return new Response('{}', { status: 200 })
+    }
+    if (url.includes('/upload/image')) {
+      return new Response(JSON.stringify({ name: 'upload.png', subfolder: '', type: 'input' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
     }
     if (url.includes('/prompt')) {
       return new Response(JSON.stringify({ prompt_id: 'p-test-1' }), {
@@ -142,6 +151,52 @@ describe('executeApp', () => {
     await expect(executeApp(app, { img: 'http://192.168.1.1/evil.png' }, ORIGIN)).rejects.toThrow(
       /host not allowed/
     )
+  })
+
+  // 2026-09-16 真机验证抓到的缺陷回归：媒体槽传 data:/http(s) 时
+  // 旧实现把 URL 交给 comfyFetch（无条件拼 `${origin}${path}`）→ 请求变成
+  // `http://127.0.0.1:8188data:image/png;base64,…`，直接 500。
+  const mediaApp = () =>
+    makeApp({ '3': { class_type: 'LoadImage', inputs: { image: 'default.png' } } }, [
+      {
+        id: 3,
+        category: 'input',
+        type: 'LoadImage',
+        name: 'img',
+        renderComponent: 'image-uploader',
+        selectedWidget: { name: 'image' }
+      }
+    ])
+
+  it('媒体槽 data: URL → 上传并填回 widget（且绝不把 data URL 拼到 comfy origin 后面）', async () => {
+    await executeApp(mediaApp(), { img: 'data:image/png;base64,AAAA' }, ORIGIN)
+    expect(submittedPrompt()['3']!.inputs.image).toBe('upload.png')
+    const calls = fetchMock.mock.calls.map(([u]) => String(u))
+    expect(calls.some((u) => u.includes(':8188data:'))).toBe(false)
+    expect(calls.filter((u) => u === 'data:image/png;base64,AAAA')).toHaveLength(1)
+  })
+
+  it('媒体槽：磁盘上存在的绝对路径 → 读盘上传（应用参数描述里就是「图片路径」）', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wb-exec-'))
+    const file = join(dir, 'local.png')
+    writeFileSync(file, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    try {
+      await executeApp(mediaApp(), { img: file }, ORIGIN)
+      expect(submittedPrompt()['3']!.inputs.image).toBe('upload.png')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('媒体槽：无法解析的值 → 明确报错（旧行为是静默忽略、照用模板默认素材）', async () => {
+    await expect(executeApp(mediaApp(), { img: 'D:\\nope\\missing.png' }, ORIGIN)).rejects.toThrow(
+      /媒体槽/
+    )
+  })
+
+  it('媒体槽：已上传的裸文件名原样透传', async () => {
+    await executeApp(mediaApp(), { img: 'already-there.png' }, ORIGIN)
+    expect(submittedPrompt()['3']!.inputs.image).toBe('already-there.png')
   })
   it('普通参数按 node id + widget 合并', async () => {
     const app = makeApp({ '2': { class_type: 'KSampler', inputs: { cfg: 4.0 } } }, [

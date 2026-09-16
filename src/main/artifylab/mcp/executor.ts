@@ -8,10 +8,12 @@
  * 依赖 Node 22 全局 fetch / FormData / Blob / structuredClone / AbortController。
  */
 import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
+import { basename, extname } from 'node:path'
 import type { App, ComfyPrompt, ParamNode } from '../appStore'
 import { logger } from '../utils/logger'
 import {
-  comfyFetch,
+  fetchAbsoluteMedia,
   freeMemory as comfyFreeMemory,
   getHistory as comfyGetHistory,
   interrupt as comfyInterrupt,
@@ -261,6 +263,37 @@ function mimeToExt(mime: string): string {
   return 'bin'
 }
 
+/** 扩展名 → MIME（本地路径上传时补类型；ComfyUI 主要按扩展名校验） */
+function extToMime(ext: string): string {
+  switch (ext) {
+    case 'png':
+      return 'image/png'
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg'
+    case 'webp':
+      return 'image/webp'
+    case 'gif':
+      return 'image/gif'
+    case 'bmp':
+      return 'image/bmp'
+    case 'mp4':
+      return 'video/mp4'
+    case 'webm':
+      return 'video/webm'
+    case 'mov':
+      return 'video/quicktime'
+    case 'mp3':
+      return 'audio/mpeg'
+    case 'wav':
+      return 'audio/wav'
+    case 'flac':
+      return 'audio/flac'
+    default:
+      return 'application/octet-stream'
+  }
+}
+
 /** POST /prompt → prompt_id（IO 已收口 comfyClient.queuePrompt，候选 ④） */
 export async function queuePrompt(
   comfyOrigin: string,
@@ -281,18 +314,60 @@ export async function getHistory(
   return comfyGetHistory(promptId, { origin: comfyOrigin })
 }
 
+/**
+ * 解析媒体槽取值 → ComfyUI 侧引用（`{ name(含 subfolder 前缀), subfolder, type }`）。
+ *
+ * 支持四种形态（**这是媒体槽唯一的事实源**，`uploadMedia` 与 `executeApp` 共用）：
+ *   1. `data:` URL            → 解码字节 → POST /upload/image
+ *   2. 本机 `http(s)` URL     → 取字节（SSRF 白名单校验）→ POST /upload/image
+ *   3. 磁盘上**真实存在**的绝对路径 → 读盘 → POST /upload/image
+ *   4. 已上传的裸文件名（无路径分隔符）→ 原样返回，交给 ComfyUI 按 input 目录解析
+ *
+ * 返回 null 表示「不是可用的媒体取值」，由调用方决定报错文案（不再静默忽略）。
+ *
+ * 修复背景（2026-09-16 真机验证）：旧实现把 `data:`/`http(s)` 交给
+ * `comfyFetch(url, {}, { origin: '' })` 取字节，而 comfyFetch 无条件拼
+ * `${origin}${path}` 且空 origin 回落 comfyHost → URL 变成
+ * `http://localhost:8188data:image/jpeg;base64,…`，媒体槽传 data:/http(s) 必 500。
+ */
+async function resolveMediaValue(
+  comfyOrigin: string,
+  value: string
+): Promise<{ name: string; subfolder: string; type: string } | null> {
+  const v = value.trim()
+  if (!v) return null
+
+  // 1/2：data: / 本机 http(s) —— 字节来自外部绝对地址，显式不拼 comfy origin
+  if (/^(data:|https?:)/i.test(v)) {
+    assertSafeMediaUrl(v)
+    const blob = await fetchAbsoluteMedia(v)
+    if (blob.size > MAX_MEDIA_BYTES)
+      throw new Error(`media too large: ${blob.size} bytes (max ${MAX_MEDIA_BYTES})`)
+    return uploadMediaBlob(comfyOrigin, blob, `upload.${mimeToExt(blob.type)}`)
+  }
+
+  // 3：磁盘上真实存在的绝对路径（应用参数描述里就是「图片路径」）
+  if (/^[a-zA-Z]:[\\/]/.test(v) || v.startsWith('\\\\') || v.startsWith('/')) {
+    if (!existsSync(v)) return null
+    const buf = readFileSync(v)
+    const ext = extname(v).replace(/^\./, '').toLowerCase()
+    return uploadMediaBuffer(comfyOrigin, buf, basename(v), extToMime(ext))
+  }
+
+  // 4：已上传的裸文件名
+  if (!/[\\/]/.test(v)) return v ? { name: v, subfolder: '', type: 'input' } : null
+
+  return null
+}
+
 /** POST /upload/image → { name(含 subfolder 前缀), subfolder, type }（M4：文件名扩展名 + subfolder） */
 export async function uploadMedia(
   comfyOrigin: string,
   dataUrl: string
 ): Promise<{ name: string; subfolder: string; type: string }> {
-  assertSafeMediaUrl(dataUrl)
-  const blobRes = await comfyFetch(dataUrl, {}, { origin: '' })
-  if (!blobRes.ok) throw new Error(`fetch media HTTP ${blobRes.status}`)
-  const blob = await blobRes.blob()
-  if (blob.size > MAX_MEDIA_BYTES)
-    throw new Error(`media too large: ${blob.size} bytes (max ${MAX_MEDIA_BYTES})`)
-  return uploadMediaBlob(comfyOrigin, blob, `upload.${mimeToExt(blob.type)}`)
+  const r = await resolveMediaValue(comfyOrigin, dataUrl)
+  if (!r) throw new Error(`无法解析媒体取值：${dataUrl.slice(0, 60)}`)
+  return r
 }
 
 /**
@@ -349,15 +424,24 @@ export async function executeApp(
   // 1. seed（M2：显式 seed 生效——传了 seed 且未强制 randomize 时用 seed；NaN 拒绝）
   applySeed(prompt, args)
 
-  // 2. media 参数：base64/URL → upload → 填回 widget（移植 useWorkflow.js:314-325）
+  // 2. media 参数：data:/http(s)/本地存在的绝对路径 → 上传后填回 widget；
+  //    已上传的裸文件名原样写入；**无法解析的值明确报错**（不再静默忽略）
   for (const n of inputs) {
     if (!isMediaRender(n.renderComponent)) continue
     const v = args[n.name]
-    if (typeof v !== 'string' || !/^(data:|https?:)/.test(v)) continue
+    if (v == null || typeof v !== 'string' || !v.trim()) continue
     const widget = n.selectedWidget?.name
     if (!widget || !prompt[n.id]?.inputs) continue
-    const uploaded = await uploadMedia(comfyOrigin, v)
-    prompt[n.id]!.inputs[widget] = uploaded.name
+    const resolved = await resolveMediaValue(comfyOrigin, v)
+    if (!resolved) {
+      // 旧行为是 continue（值被丢弃、节点沿用模板默认素材、UI 上却记着你传的值 ——
+      // 静默降级）。真机验证据此误判过一次「参数已生效」，故改为显式失败。
+      throw new Error(
+        `参数「${n.name}」是媒体槽（${n.renderComponent}），但取值无法解析：${v.slice(0, 80)}。` +
+          `可接受：data: URL、本机 http(s) URL、磁盘上存在的绝对路径，或已上传到 ComfyUI input 目录的文件名。`
+      )
+    }
+    prompt[n.id]!.inputs[widget] = resolved.name
   }
 
   // 3. 普通 input 参数：按 node id + widget name 合并（Object.assign 语义，移植 useWorkflow.js:221-225）

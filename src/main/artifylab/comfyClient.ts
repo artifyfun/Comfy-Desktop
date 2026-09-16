@@ -90,6 +90,33 @@ async function comfyJson<T>(
   return (await res.json()) as T
 }
 
+/**
+ * 取**绝对 URL** 的媒体字节（`data:` / 本机 `http(s)`）——刻意**不加** ComfyUI origin 前缀。
+ *
+ * 背景（2026-09-16 真机验证抓到的真实缺陷）：executor.uploadMedia 先前用
+ * `comfyFetch(dataUrl, {}, { origin: '' })` 取媒体字节，但 comfyFetch 无条件拼
+ * `${origin}${path}`，而 resolveComfyOrigin('') 因空值又回落到 comfyHost ——
+ * 请求 URL 变成 `http://localhost:8188data:image/jpeg;base64,…`，于是媒体槽一旦
+ * 传 `data:`/`http(s)` 就 500（`Failed to parse URL from http://localhost:8188data:…`）。
+ * 媒体字节是**外部绝对地址**，本就不该走 comfy 前缀，故单列一个动词。
+ */
+export async function fetchAbsoluteMedia(
+  url: string,
+  deps: ComfyClientDeps = {},
+  timeoutMs = 120_000
+): Promise<Blob> {
+  const doFetch = deps.fetch ?? fetch
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const res = await doFetch(url, { signal: ctrl.signal })
+    if (!res.ok) throw new Error(`fetch media HTTP ${res.status}`)
+    return await res.blob()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // ───────────────────────── 领域动词 ─────────────────────────
 
 /** GET /object_info（全量节点 schema）。历史超时 10s/15s，统一 15s。 */
