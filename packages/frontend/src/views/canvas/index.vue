@@ -1762,6 +1762,13 @@
         >
           <i class="fas fa-shapes text-4xl opacity-30"></i>
           <p class="text-sm opacity-50">{{ t('canvasEmptyHint') }}</p>
+          <button
+            class="pointer-events-auto mt-2 rounded-lg border border-[var(--wb-accent)]/60 px-3.5 py-1.5 text-xs text-[var(--wb-accent)] transition hover:bg-[var(--wb-accent)]/10"
+            data-testid="canvas-empty-guide-btn"
+            @click="guideOpen = true"
+          >
+            <i class="fas fa-compass mr-1"></i>{{ t('canvasEmptyGuideBtn') }}
+          </button>
         </div>
         <!-- 拖放提示 -->
         <div
@@ -4956,6 +4963,8 @@ function onKey(e) {
       ctxMenu.value = null
     } else if (shortcutsOpen.value) {
       shortcutsOpen.value = false
+    } else if (guideOpen.value) {
+      guideOpen.value = false
     } else if (tool.value) {
       tool.value = null
       syncDraggables()
