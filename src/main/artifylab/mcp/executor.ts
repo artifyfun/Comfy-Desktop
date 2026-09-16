@@ -550,15 +550,30 @@ export async function executePrompt(
 }
 
 /**
- * 从 ComfyUI history 的 status.messages 事件数组提取 execution_error 的可读摘要：
+ * 从 ComfyUI history 的 status.messages 事件数组提取可读错误摘要：
  * `[["execution_start",…],["execution_error",{"node_type":"KSampler","node_id":"16",
  * "exception_message":"…","exception_type":"…","traceback":"…"}],…]`。
  * 直接 JSON.stringify 整数组会把执行过程噪音全倒进错误文案（前端 500 字符截断后
- * 只剩残缺 JSON）；这里只取出错节点 + 异常消息。找不到 execution_error 返回 null。
+ * 只剩残缺 JSON）；这里只取出错节点 + 异常消息。
+ *
+ * 两类终态都要认（2026-09-16 真机验证补）：
+ * - `execution_error`：节点抛异常；
+ * - `execution_interrupted`：**取消/中断**，ComfyUI 只发这个事件、没有 execution_error。
+ *   旧实现只认前者，取不到就回落到整数组 JSON —— 用户点取消后看到的是一坨原始 JSON
+ *   而不是「已取消」。找不到任何可读事件才返回 null。
  */
 export function extractExecutionError(messages: unknown[]): string | null {
   for (const entry of messages) {
-    if (!Array.isArray(entry) || entry[0] !== 'execution_error') continue
+    if (!Array.isArray(entry)) continue
+    const kind = entry[0]
+    if (kind === 'execution_interrupted') {
+      const info = (entry[1] ?? {}) as { node_id?: string; node_type?: string }
+      const where = [info.node_type, info.node_id ? `#${info.node_id}` : '']
+        .filter(Boolean)
+        .join(' ')
+      return where ? `执行已中断（取消）：${where}` : '执行已中断（取消）'
+    }
+    if (kind !== 'execution_error') continue
     const d = entry[1]
     if (!d || typeof d !== 'object') continue
     const err = d as {
@@ -573,6 +588,17 @@ export function extractExecutionError(messages: unknown[]): string | null {
     return JSON.stringify(entry)
   }
   return null
+}
+
+/** 过程事件名清单（无可读错误事件时的兜底摘要，避免倒原始 JSON 数组）。
+ * 容错两种形状：事件元组 `[name, payload]` 与裸字符串（旧数据/自定义节点可能直传文本）。 */
+function messageKinds(messages: unknown[]): string {
+  const kinds: string[] = []
+  for (const entry of messages) {
+    if (Array.isArray(entry) && typeof entry[0] === 'string') kinds.push(entry[0])
+    else if (typeof entry === 'string' && entry.trim()) kinds.push(entry.trim().slice(0, 120))
+  }
+  return [...new Set(kinds)].join(' → ')
 }
 
 /**
@@ -598,12 +624,17 @@ export async function getExecutionStatus(
   const status = entry.status as { status_str?: string; messages?: unknown[] } | undefined
   if (status?.status_str === 'error') {
     const msgs = status.messages ?? []
-    // 优先提取 execution_error 事件的可读摘要（节点+异常消息），整数组兜底
+    // 优先提取 execution_error / execution_interrupted 的可读摘要；
+    // 都取不到时给「过程事件清单」兜底（不再把整个事件数组 stringify 倒给用户）
     const readable = extractExecutionError(msgs)
     return {
       prompt_id: promptId,
       status: 'error',
-      error: readable ?? (msgs.length ? JSON.stringify(msgs) : 'ComfyUI execution error')
+      error:
+        readable ??
+        (msgs.length
+          ? `ComfyUI 执行失败（未提供可解析的错误事件；过程事件：${messageKinds(msgs)}）`
+          : 'ComfyUI execution error')
     }
   }
   const rawOutputs = (entry.outputs as Record<string, unknown>) ?? {}

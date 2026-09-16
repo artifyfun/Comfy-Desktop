@@ -395,6 +395,66 @@ describe('getExecutionStatus', () => {
     expect(res.error).not.toContain('traceback')
   })
 
+  // 2026-09-16 真机验证补：取消/中断时 ComfyUI 只发 execution_interrupted（没有
+  // execution_error），旧实现取不到可读摘要 → 把整个事件数组 stringify 给用户，
+  // 点「取消」后看到的是一坨原始 JSON。
+  it('execution_interrupted（取消）→ 可读文案，不倒原始 JSON', async () => {
+    const app = makeApp({ '1': { class_type: 'KSampler', inputs: { seed: 123 } } })
+    await executeApp(app, {}, ORIGIN)
+    const promptId = 'p-test-1'
+    const messages = [
+      ['execution_start', { prompt_id: promptId, timestamp: 1 }],
+      ['execution_cached', { nodes: [], prompt_id: promptId, timestamp: 2 }],
+      ['execution_interrupted', { prompt_id: promptId, node_id: '9', node_type: 'KSampler' }]
+    ]
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes(`/history/${promptId}`)) {
+        return new Response(
+          JSON.stringify({
+            [promptId]: { status: { status_str: 'error', completed: false, messages } }
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+      throw new Error(`unexpected: ${url}`)
+    })
+    const res = await getExecutionStatus(ORIGIN, promptId)
+    expect(res.status).toBe('error')
+    expect(res.error).toContain('执行已中断（取消）')
+    expect(res.error).toContain('KSampler #9')
+    expect(res.error).not.toContain('execution_start')
+    expect(res.error).not.toContain('[[')
+  })
+
+  it('无任何可解析错误事件 → 摘要过程事件名（不倒原始 JSON）', async () => {
+    const app = makeApp({ '1': { class_type: 'KSampler', inputs: { seed: 123 } } })
+    await executeApp(app, {}, ORIGIN)
+    const promptId = 'p-test-1'
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes(`/history/${promptId}`)) {
+        return new Response(
+          JSON.stringify({
+            [promptId]: {
+              status: {
+                status_str: 'error',
+                messages: [
+                  ['execution_start', { prompt_id: promptId }],
+                  ['execution_cached', { nodes: [] }]
+                ]
+              }
+            }
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+      throw new Error(`unexpected: ${url}`)
+    })
+    const res = await getExecutionStatus(ORIGIN, promptId)
+    expect(res.status).toBe('error')
+    expect(res.error).toMatch(/过程事件：execution_start → execution_cached/)
+    expect(res.error).not.toContain('[[')
+  })
+
   it('execution_error 缺 exception_message → 回退保留事件摘要', async () => {
     const app = makeApp({ '1': { class_type: 'KSampler', inputs: { seed: 123 } } })
     await executeApp(app, {}, ORIGIN)
