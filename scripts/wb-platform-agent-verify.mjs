@@ -8,6 +8,8 @@
  *   --scenario s2   自然语言让 agent 跑既有 app（Anima），真出图
  *   --scenario s3   让 agent 用 wb_build_workflow **新建**文生图 app → 发布 → 再真跑一次
  *   --scenario s4   让 agent 新建 **H3 文生视频** app → 发布 → 再真跑一次（耗时长）
+ *   --scenario s5   让 agent 对既有 app **同名版本化迭代**（改尺寸）→ 再真跑一次
+ *                   （断言 app_versions 新快照 + 产物尺寸随新版本变化）
  *
  * 用法：
  *   node scripts/wb-platform-agent-verify.mjs --scenario s2
@@ -26,6 +28,8 @@ const APP = opt('--app', 'http://127.0.0.1:3008').replace(/\/$/, '')
 const COMFY = opt('--comfy', 'http://127.0.0.1:8188').replace(/\/$/, '')
 const SCENARIO = opt('--scenario', 's2')
 const TIMEOUT_MIN = Number(opt('--timeout-min', SCENARIO === 's4' ? '45' : '20'))
+const EXPECT_SIZE = opt('--expect-size', null)
+const VERSION_APP = opt('--version-app', 'Krea2文生图1024')
 const COMFY_ROOT = 'D:/Comfy-Desktop/ComfyUI-Shared'
 const EVID_DIR = 'D:/artifyfun/tmp/wb-gen-verify'
 const stamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -47,7 +51,35 @@ const INSTRUCTIONS = {
     'loras/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors 与 ' +
     'text_encoders/qwen3-vl-4b-heretic_fp8_e4m3fn.safetensors；' +
     '(3) 输出必须走**保存节点**（不要只接 Preview）；(4) 必需节点都要能在 object_info 里查到。' +
-    '建好后用 wb_publish_workflow 发布为模板，然后**用它真跑一次**：prompt 用 "a cat walking on a sunny beach"。'
+    '建好后用 wb_publish_workflow 发布为模板，然后**用它真跑一次**：prompt 用 "a cat walking on a sunny beach"。',
+  s5:
+    '请对模板「Krea2文生图1024」做一次**版本化迭代**：' +
+    '把默认出图尺寸从 1024x1024 改成 768x768（width/height 两个参数），其余结构与参数名保持不变；' +
+    '用 wb_publish_workflow **同名重新发布**（走版本化更新，**不要** force_new）。' +
+    '然后用**新版本**真跑一次：prompt 用 "a blue sphere on a black table"。'
+}
+
+// ───────── S5 前置：记录目标 app 的版本基线 ─────────
+// 口径（见项目记忆）：app_versions 存**被替换的旧态**，生效版本 = 最大快照号 + 1。
+let versionBefore = null
+let versionAppId = null
+if (SCENARIO === 's5') {
+  const { DatabaseSync } = await import('node:sqlite')
+  const tpls0 = (await (await fetch(`${APP}/api/workbench/templates`)).json()).data || []
+  const target = tpls0.find((t) => t.name === VERSION_APP)
+  if (!target) throw new Error(`模板库缺少「${VERSION_APP}」`)
+  versionAppId = target.appId || target.id.replace(/^app:/, '')
+  const db = new DatabaseSync(join(process.env.APPDATA, 'artify-desktop', 'gallery.db'))
+  const row = db
+    .prepare(
+      'select coalesce(max(version), 0) as v, count(*) as c from app_versions where app_id = ?'
+    )
+    .get(versionAppId)
+  versionBefore = { maxSnapshot: Number(row.v), snapshots: Number(row.c) }
+  db.close()
+  console.log(
+    `ℹ️  S5 基线：${VERSION_APP}(${versionAppId}) 快照数=${versionBefore.snapshots} 最大快照号=${versionBefore.maxSnapshot}（生效版本=${versionBefore.maxSnapshot + 1}）`
+  )
 }
 
 const results = []
@@ -302,6 +334,14 @@ if (!promptId) {
         dataUrl = `data:${mime};base64,${Buffer.from(await v.arrayBuffer()).toString('base64')}`
       }
       const probe = await probeImage(dataUrl)
+      if (EXPECT_SIZE) {
+        const [ew, eh] = EXPECT_SIZE.split('x').map(Number)
+        record(
+          `${SCENARIO} 产物尺寸 == 期望 ${EXPECT_SIZE}`,
+          probe.w === ew && probe.h === eh,
+          `实测 ${probe.w}x${probe.h}`
+        )
+      }
       record(
         `${SCENARIO} L3 图片可解码且非纯色`,
         probe.w >= 256 &&
@@ -325,7 +365,7 @@ if (!promptId) {
 }
 
 // 模板库侧：S3/S4 应产出新模板
-if (SCENARIO !== 's2') {
+if (SCENARIO === 's3' || SCENARIO === 's4') {
   const tpls = (await (await fetch(`${APP}/api/workbench/templates`)).json()).data || []
   const fresh = tpls.filter(
     (t) => !['app:71ee1cf3', 'app:5be61939', 'app:2515a251'].some((p) => t.id.startsWith(p))
@@ -341,6 +381,37 @@ if (SCENARIO !== 's2') {
     }`
   )
   if (builtTemplateId) info(`plan 目标模板：${builtTemplateId}`)
+}
+
+// ───────── S5 版本化断言 ─────────
+if (SCENARIO === 's5' && versionBefore) {
+  const { DatabaseSync } = await import('node:sqlite')
+  const db = new DatabaseSync(join(process.env.APPDATA, 'artify-desktop', 'gallery.db'))
+  const row = db
+    .prepare(
+      'select coalesce(max(version), 0) as v, count(*) as c from app_versions where app_id = ?'
+    )
+    .get(versionAppId)
+  const after = { maxSnapshot: Number(row.v), snapshots: Number(row.c) }
+  // 旧态被存进快照 → 最大快照号 +1，且生效版本随之 +1
+  db.close()
+  record(
+    `S5 版本化迭代：app_versions 新增快照且最大快照号 +1`,
+    after.maxSnapshot === versionBefore.maxSnapshot + 1 &&
+      after.snapshots === versionBefore.snapshots + 1,
+    `快照数 ${versionBefore.snapshots}→${after.snapshots}，最大号 ${versionBefore.maxSnapshot}→${after.maxSnapshot}（生效版本 ${versionBefore.maxSnapshot + 1}→${after.maxSnapshot + 1}）`
+  )
+  const tplNow = ((await (await fetch(`${APP}/api/workbench/templates`)).json()).data || []).find(
+    (t) => t.name === VERSION_APP
+  )
+  const latentOf = (t) =>
+    Object.values(t?.prompt || {}).find((n) => /Empty.*Latent/i.test(n.class_type || ''))?.inputs
+  const l = latentOf(tplNow)
+  record(
+    `S5 新版本已生效（尺寸默认值 768）`,
+    !!l && Number(l.width) === 768 && Number(l.height) === 768,
+    `模板 ${VERSION_APP} 的 latent 默认 = ${l ? `${l.width}x${l.height}` : '未找到'}`
+  )
 }
 
 const outTree = readdirSync('D:/Comfy-Desktop/ComfyUI-Shared/output').slice(0, 3)
