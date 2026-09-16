@@ -1814,6 +1814,24 @@ import AppPickerModal from './AppPickerModal.vue'
 import CanvasGuideModal from './CanvasGuideModal.vue'
 import { useLinkGestures } from './useLinkGestures'
 import {
+  makeViewCtx as cfgMakeViewCtx,
+  highlightStroke as cfgHighlightStroke,
+  handleConfig as cfgHandleConfig,
+  linkAnchorConfig as cfgLinkAnchorConfig,
+  resizeAnchorConfig as cfgResizeAnchorConfig,
+  mediaRectConfig as cfgMediaRectConfig,
+  noteRectConfig as cfgNoteRectConfig,
+  noteTextConfig as cfgNoteTextConfig,
+  frameConfig as cfgFrameConfig,
+  frameLabelConfig as cfgFrameLabelConfig,
+  shotRectConfig as cfgShotRectConfig,
+  shotSeqConfig as cfgShotSeqConfig,
+  shotTextConfig as cfgShotTextConfig,
+  NOTE_COLORS,
+  NOTE_DEFAULT_COLOR,
+  noteTextColor,
+} from './nodeConfigs'
+import {
   makeAppNode,
   collectUpstream,
   buildNodeOverrides,
@@ -2301,9 +2319,7 @@ function accentColor() {
   return accentColorCache
 }
 function highlightStroke(o, defStroke = 'rgba(160,160,160,0.45)') {
-  if (selection.value.includes(o.id)) return { stroke: accentColor(), strokeWidth: 2 }
-  if (isHighlightedOf(o)) return { stroke: accentColor(), strokeWidth: 2 }
-  return { stroke: defStroke, strokeWidth: 1 }
+  return cfgHighlightStroke(cfgCtx.value, o, defStroke)
 }
 /** 物件是否显示连接句柄：悬停/选中/连线拖拽中（起点与悬停目标，参考 isConnecting 全显） */
 function showHandles(o) {
@@ -2338,53 +2354,16 @@ watch(
  * hitFunc 仅在 showHandles 时提供热区，平时不拦截物件交互。
  */
 function handleConfig(o, side) {
-  const hovered = hoverNodeId.value === o.id
-  return {
-    x: side === 'target' ? 0 : o.width,
-    y: o.height / 2,
-    radius: (hovered ? 7.5 : 6) / viewport.value.scale,
-    fill: '#171718',
-    stroke: '#a0a0a0',
-    strokeWidth: 2 / viewport.value.scale,
-    opacity: showHandles(o) ? 1 : 0,
-    cursor: 'crosshair',
-    // hitFunc 读实时状态（不闭包 on）：hit graph 重绘时按当下显隐提供热区。
-    // fix(热区劫持拖动): 原 24px 半径热区在 64px 级小图上盖满大半节点,
-    // mousedown 全被句柄吃掉进连线模式——节点本体拖不动、桩看似"不跟随"。
-    // 热区收敛到圆点视觉半径 2 倍(≈12px 屏距):句柄好点、图拖得动。
-    hitFunc(ctx, shape) {
-      if (!showHandles(o)) return
-      const r = 12 / viewport.value.scale
-      ctx.beginPath()
-      ctx.arc(0, 0, r, 0, Math.PI * 2, false)
-      ctx.closePath()
-      ctx.fillStrokeShape(shape)
-    },
-  }
+  // hover 判定用画布悬停（hoverNodeId），与 showHandles 的多源判定解耦：
+  // 模块版 handleConfig 接收 isHovered + 显隐布尔（hitFunc 读实时状态）
+  return cfgHandleConfig(cfgCtx.value, o, side, showHandles(o))
 }
 /** 连线重连锚点配置（选中连线才显现）：from 端=源侧(右端 x1,y1)、to 端=目标侧(左端 x2,y2)。
  *  常驻渲染 + hitFunc 动态热区 —— 平时 opacity 0 且无热区，不拦截连线/物件交互；
  *  选中后热区开启，可拖到其它物件重连。颜色区分两端便于识别方向。 */
 function linkAnchorConfig(seg, side) {
   const active = selectedLinkId.value === seg.id && !reconnectDrag.active
-  return {
-    x: side === 'from' ? seg.x1 : seg.x2,
-    y: side === 'from' ? seg.y1 : seg.y2,
-    radius: 6.5 / viewport.value.scale,
-    fill: side === 'from' ? '#31b9f4' : '#a0a0a0', // 源端=accent-hover 目标端=中性灰
-    stroke: '#171718',
-    strokeWidth: 1.5 / viewport.value.scale,
-    opacity: active ? 1 : 0,
-    cursor: 'grab',
-    hitFunc(ctx, shape) {
-      if (!active) return
-      const r = 22 / viewport.value.scale
-      ctx.beginPath()
-      ctx.arc(0, 0, r, 0, Math.PI * 2, false)
-      ctx.closePath()
-      ctx.fillStrokeShape(shape)
-    },
-  }
+  return cfgLinkAnchorConfig(cfgCtx.value, seg, side, active)
 }
 
 // —— 选中对象四角缩放手柄（第 3 批 + 媒体扩展，参考 infinite-canvas resize handles）——
@@ -2423,25 +2402,7 @@ function resizeVisible(o) {
  *  圆心外偏 10px（屏幕恒定）：媒体节点 overlay 播放器占满矩形，角柄外置才可命中；
  *  普通节点上也让角柄悬于边框外，避免盖住节点像素。 */
 function resizeAnchorConfig(o, corner) {
-  const off = 10 / viewport.value.scale // 屏幕 10px → 世界（随缩放）
-  return {
-    x: corner.endsWith('e') ? o.width + off : -off,
-    y: corner.startsWith('s') ? o.height + off : -off,
-    radius: 6 / viewport.value.scale,
-    fill: '#ffffff',
-    stroke: '#171718',
-    strokeWidth: 1.5 / viewport.value.scale,
-    opacity: resizeVisible(o) ? 1 : 0,
-    cursor: corner === 'nw' || corner === 'se' ? 'nwse-resize' : 'nesw-resize',
-    hitFunc(ctx, shape) {
-      if (!resizeVisible(o)) return
-      const r = 20 / viewport.value.scale
-      ctx.beginPath()
-      ctx.arc(0, 0, r, 0, Math.PI * 2, false)
-      ctx.closePath()
-      ctx.fillStrokeShape(shape)
-    },
-  }
+  return cfgResizeAnchorConfig(cfgCtx.value, o, corner, resizeVisible(o))
 }
 
 // —— 撤销/重做（有界快照栈；快照 = objects+links+groups 序列化） ——
@@ -2574,76 +2535,16 @@ function imageConfig(o) {
 }
 /** 媒体节点占位框（overlay 播放器下的 Konva 热区/选中框） */
 function mediaRectConfig(o) {
-  const sel = selection.value.includes(o.id)
-  // fix(视频双影): rect 位于 group 内，坐标须相对 group(0,0)——此前误带 o.x/o.y
-  // 世界坐标，占位框被画到 2 倍偏移处（group.x + rect.x），与 HTML overlay
-  // 播放器(世界坐标定位)分离成"两个区块"，且 hit graph 落空导致拖拽失效。
-  return {
-    width: o.width,
-    height: o.height,
-    fill: o.type === 'video' ? 'rgba(11,140,233,0.10)' : 'rgba(11,140,233,0.07)',
-    stroke: sel
-      ? accentColor()
-      : isHighlightedOf(o)
-        ? accentColor()
-        : o.type === 'video'
-          ? 'rgba(11,140,233,0.55)'
-          : 'rgba(11,140,233,0.35)',
-    strokeWidth: sel || isHighlightedOf(o) ? 2 : 1.5,
-    cornerRadius: 10,
-  }
+  // fix(视频双影) 注释见 nodeConfigs.mediaRectConfig：rect 位于 group 内须用相对坐标
+  return cfgMediaRectConfig(cfgCtx.value, o)
 }
 
-// note 调色板：预设底色（前 7 个为亮色 → 深色文字；默认 slate 深色 → 浅色文字）
-const NOTE_COLORS = [
-  '#fef08a', // yellow
-  '#f9a8d4', // pink
-  '#86efac', // green
-  '#7dd3fc', // 便签亮色系（NOTE_COLORS 功能色板，保留）
-  '#fdba74', // orange
-  '#c4b5fd', // violet
-  '#fda4af', // rose
-  '#475569', // slate（默认）
-]
-const NOTE_DEFAULT_COLOR = '#475569'
-/** 按背景亮度选文字色：亮底深字 / 深底浅字（便签新配色可读性） */
-function noteTextColor(bg) {
-  const hex = String(bg || NOTE_DEFAULT_COLOR).replace('#', '')
-  if (hex.length !== 6) return '#e2e8f0'
-  const r = parseInt(hex.slice(0, 2), 16)
-  const g = parseInt(hex.slice(2, 4), 16)
-  const b = parseInt(hex.slice(4, 6), 16)
-  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-  return lum > 0.55 ? '#171718' : '#e2e8f0'
-}
-
+// note 调色板/文字色/矩形与文本配置：纯函数版见 nodeConfigs.js（A2 抽取）
 function noteRectConfig(o) {
-  // LOD 二轮：缩略级降级样式（opacity 1 / 去圆角 / 去默认描边——
-  // perfectDraw 离屏中转是千件全览 draw 大头，纯函数 lodNoteRectStyle 单测锁定）
-  const lowLod = lodNoteRectStyle(viewport.value.scale)
-  return {
-    width: o.width,
-    height: o.height,
-    fill: o.color || NOTE_DEFAULT_COLOR,
-    opacity: lowLod ? 1 : 0.9,
-    cornerRadius: lowLod ? 0 : 8,
-    ...(lowLod ? highlightStroke(o, '') : highlightStroke(o)),
-  }
+  return cfgNoteRectConfig(cfgCtx.value, o)
 }
 function noteTextConfig(o) {
-  // LOD：缩略级视口隐藏文本排版（全览 1000 物件 Text 布局是大头）
-  if (!lodTextVisible(viewport.value.scale)) return { visible: false, listening: false }
-  return {
-    // E3：显示态净化 @ 提及标记（@[名]{id} → @名）
-    text: stripMentionMarks(o.text || ''),
-    width: o.width,
-    height: o.height,
-    padding: 10,
-    fontSize: o.fontSize || 13,
-    lineHeight: 1.4,
-    fill: noteTextColor(o.color),
-    align: 'left',
-  }
+  return cfgNoteTextConfig(cfgCtx.value, o)
 }
 
 // —— note 文本就地编辑：双击便签 / 悬浮工具栏「编辑」/ 右键菜单 ——
@@ -2940,6 +2841,20 @@ function rubberConfig() {
 }
 // 连线几何（物件移动后端点跟随——由 computed 每帧重算）
 const linkSegs = computed(() => linkEndpoints(links.value, objects.value).filter(Boolean))
+
+// A2 config 层：纯函数 nodeConfigs 的视图上下文（选中/高亮/accent/缩放参数化）
+const cfgCtx = computed(() =>
+  cfgMakeViewCtx({
+    isSelected: (id) => selection.value.includes(id),
+    isHighlighted: (id) => {
+      const o = objects.value.find((x) => x.id === id)
+      return o ? isHighlightedOf(o) : false
+    },
+    isHovered: (id) => hoverNodeId.value === id,
+    accent: accentColor(),
+    scale: viewport.value.scale,
+  }),
+)
 
 // —— 连线手势（A2 抽取）：句柄建线 + 锚点重连，状态机见 useLinkGestures ——
 const {
@@ -4247,71 +4162,21 @@ function addFrameAt(wx, wy) {
   saveSoon()
 }
 const frameObjects = computed(() => withCull((o) => o.type === 'frame'))
+// Frame/Shot 配置：纯函数版见 nodeConfigs.js（fix 注释原样保留在那）
 function frameConfig(o) {
-  // fix: rect 在 group 内须用相对坐标（group 已定位 o.x/o.y）；id 由 group 承载
-  // （rect 再带同 id 会与 group 重复，findOne 命中 rect 而非 group）
-  // fix(选中无反馈): 同 shotRectConfig——补选中态分支（accent 实线盖虚线）
-  const sel = selection.value.includes(o.id)
-  return {
-    width: o.width,
-    height: o.height,
-    fill: 'rgba(11,140,233,0.04)',
-    stroke: sel ? accentColor() : 'rgba(73,74,80,0.9)',
-    strokeWidth: sel ? 2 : 1.5,
-    ...(sel ? {} : { dash: [8, 6] }),
-    cornerRadius: 10,
-  }
+  return cfgFrameConfig(cfgCtx.value, o)
 }
 function frameLabelConfig(o) {
-  if (!lodTextVisible(viewport.value.scale)) return { visible: false, listening: false }
-  return {
-    text: o.name || 'Frame',
-    // 局部坐标（group 已定位在 o.x/o.y；此前误用绝对坐标 o.x/o.y-20 导致标签双重偏移）
-    x: 10,
-    y: -22,
-    width: Math.max(40, o.width - 20),
-    fontSize: 13,
-    fill: '#a0a0a0',
-    align: 'left',
-    listening: false,
-  }
+  return cfgFrameLabelConfig(cfgCtx.value, o)
 }
 function shotRectConfig(o) {
-  // fix(选中无反馈): 此前无选中态分支——selection 已设置但卡片外观零变化,
-  // 用户感知"点不中/只能 hover"。沿用 highlightStroke 统一模式(选中=accent 2px)。
-  return {
-    width: o.width,
-    height: o.height,
-    fill: 'rgba(11,140,233,0.06)',
-    ...highlightStroke(o, 'rgba(73,74,80,0.9)'),
-    strokeWidth: selection.value.includes(o.id) ? 2 : 1.5,
-    cornerRadius: 8,
-  }
+  return cfgShotRectConfig(cfgCtx.value, o)
 }
 function shotSeqConfig(o) {
-  if (!lodTextVisible(viewport.value.scale)) return { visible: false, listening: false }
-  return {
-    text: `#${o.seq || 1}`,
-    x: 8,
-    y: 6,
-    fontSize: 12,
-    fontStyle: 'bold',
-    fill: '#a0a0a0',
-    listening: false,
-  }
+  return cfgShotSeqConfig(cfgCtx.value, o)
 }
 function shotTextConfig(o) {
-  if (!lodTextVisible(viewport.value.scale)) return { visible: false, listening: false }
-  return {
-    text: o.text || '',
-    x: 8,
-    y: 24,
-    width: o.width - 16,
-    height: o.height - 32,
-    fontSize: 11,
-    fill: '#a0a0a0',
-    listening: false,
-  }
+  return cfgShotTextConfig(cfgCtx.value, o)
 }
 
 // —— N5 分镜帧（storyboard shot 卡：镜号+画面+描述；A5 批量生成） ——
