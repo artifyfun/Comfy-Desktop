@@ -24,11 +24,8 @@ import path from 'node:path'
 import os from 'node:os'
 import electron from 'electron'
 import type { ComfyPrompt } from '../appStore'
-import {
-  queuePrompt as comfyQueuePrompt,
-  getHistory as comfyGetHistory,
-  randomizeSeedFields
-} from '../comfyClient'
+import { randomizeSeedFields } from '../comfyClient'
+import { runOnce as comfyRunOnce } from '../workbench/comfyExecutor'
 import {
   stopExecution,
   freeIfWorkflowChanged,
@@ -292,7 +289,8 @@ export function buildItemPrompt(
   return prompt
 }
 
-/** 提交单条并轮询至完成（1s 间隔；404/无 entry = 排队/运行中；超时判失败防死循环） */
+/** 提交单条并轮询至完成——执行语义收口 workbench/comfyExecutor（A3：
+ *  原 1s 轮询 + 超时 + 产物裸扫与工作台 extractFiles 同构，两份实现已合一） */
 async function runItem(
   comfyOrigin: string,
   prompt: ComfyPrompt
@@ -301,50 +299,15 @@ async function runItem(
   error?: string
   files?: Array<{ filename: string; subfolder?: string; type?: string }>
 }> {
-  const clientId = randomUUID()
-  let promptId: string
-  try {
-    promptId = await comfyQueuePrompt(prompt, clientId, { origin: comfyOrigin })
-  } catch (e) {
-    return { ok: false, error: (e as Error).message }
+  const outcome = await comfyRunOnce(prompt, comfyOrigin, {
+    timeoutMs: MAX_ITEM_POLL_MS,
+    shouldAbort: () => manualPaused || !executing,
+    abortReason: manualPaused ? 'paused' : 'stopped'
+  })
+  if (outcome.status === 'success') {
+    return { ok: true, files: outcome.files }
   }
-  const pollStart = Date.now()
-  for (;;) {
-    // 暂停与停止都通过 executing=false 中断；错误文案区分，便于用户理解
-    if (manualPaused || !executing) {
-      return { ok: false, error: manualPaused ? 'paused' : 'stopped' }
-    }
-    if (Date.now() - pollStart > MAX_ITEM_POLL_MS) {
-      return { ok: false, error: `timeout: no history entry within ${MAX_ITEM_POLL_MS / 60000}min` }
-    }
-    await new Promise((r) => setTimeout(r, 1000))
-    let entry: Record<string, unknown> | null
-    try {
-      entry = await comfyGetHistory(promptId, { origin: comfyOrigin })
-    } catch (e) {
-      return { ok: false, error: `history poll: ${(e as Error).message}` }
-    }
-    if (!entry) continue
-    const status = entry.status as { status_str?: string } | undefined
-    if (status?.status_str === 'error') {
-      return { ok: false, error: JSON.stringify(status).slice(0, 500) }
-    }
-    // 抽产物文件引用（与工作台 extractFiles 同构），供队列预览/收藏/另存为
-    const files: Array<{ filename: string; subfolder?: string; type?: string }> = []
-    const outputs = entry.outputs as Record<string, Record<string, unknown>> | undefined
-    for (const v of Object.values(outputs ?? {})) {
-      const o = v ?? {}
-      for (const key of ['images', 'gifs']) {
-        for (const it of (o[key] as
-          | Array<{ filename?: string; subfolder?: string; type?: string }>
-          | undefined) ?? []) {
-          if (it?.filename)
-            files.push({ filename: it.filename, subfolder: it.subfolder, type: it.type })
-        }
-      }
-    }
-    return { ok: true, files }
-  }
+  return { ok: false, error: outcome.status === 'error' ? outcome.error : outcome.reason }
 }
 
 /** 执行单个任务的全部 items；返回终态（stopped=用户中断，paused=用户暂停可继续） */
