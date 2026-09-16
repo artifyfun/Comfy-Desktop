@@ -43,6 +43,13 @@ interface CivitaiImage {
 /** LoRA Manager settings（civitai_api_key / civitai_host），60s 缓存 */
 let lmSettingsCache: { apiKey: string; host: string; at: number } | null = null
 
+/** Civitai HTTP seam（A6）：默认全局 fetch；测试注入 fake（不触网） */
+type CivitaiFetch = typeof fetch
+let civitaiFetch: CivitaiFetch = fetch
+export function __setCivitaiFetchForTest(f: CivitaiFetch | null): void {
+  civitaiFetch = f ?? fetch
+}
+
 function lmSettings(): { apiKey: string; host: string } {
   if (lmSettingsCache && Date.now() - lmSettingsCache.at < 60_000) {
     return { apiKey: lmSettingsCache.apiKey, host: lmSettingsCache.host }
@@ -149,7 +156,7 @@ async function fetchExamplePrompts(
   const url = `https://${host}/api/v1/images?modelVersionId=${modelVersionId}&limit=${limit * 3}`
   const headers: Record<string, string> = {}
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(10000) })
+  const res = await civitaiFetch(url, { headers, signal: AbortSignal.timeout(10000) })
   if (!res.ok) throw new Error(`civitai API ${res.status}`)
   const json = (await res.json()) as { items?: CivitaiImage[] }
   const out: Array<{ prompt: string; lora_weight?: number }> = []
@@ -303,7 +310,7 @@ export async function searchCivitaiModels(opts: {
     try {
       const headers: Record<string, string> = {}
       if (apiKey) headers.Authorization = `Bearer ${apiKey}`
-      const res = await fetch(url, { headers, signal: AbortSignal.timeout(12000) })
+      const res = await civitaiFetch(url, { headers, signal: AbortSignal.timeout(12000) })
       if (!res.ok) throw new Error(`civitai API ${res.status}`)
       const json = (await res.json()) as {
         items?: CivitaiModelResp[]

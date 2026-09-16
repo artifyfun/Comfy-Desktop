@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import path from 'node:path'
-import { restoreBundleFiles, restoreOne } from './importRestore'
+import { restoreBundleFiles, restoreOne, parseZipStore } from './importRestore'
 import type { WorkbenchSession } from './service'
 
 function sess(): WorkbenchSession {
@@ -139,5 +139,73 @@ describe('restoreBundleFiles', () => {
     )
     expect(rr.restored).toHaveLength(0)
     expect(rr.skipped).toBe(2)
+  })
+})
+
+// ---------- parseZipStore（A6：路由内联 ZIP 解析移入后的单测） ----------
+
+/** 手工拼最小合法 STORE ZIP：本地头+数据 + 中央目录 + EOCD */
+function buildStoreZip(entries: Array<[string, Buffer]>): Buffer {
+  const locals: Buffer[] = []
+  const centrals: Buffer[] = []
+  let offset = 0
+  for (const [name, data] of entries) {
+    const nameBuf = Buffer.from(name, 'utf8')
+    // 本地头（30B）：sig/version/flags/method/time/date/crc/csize/usize/namelen/extralen
+    const lh = Buffer.alloc(30)
+    lh.writeUInt32LE(0x04034b50, 0)
+    lh.writeUInt16LE(20, 4)
+    lh.writeUInt16LE(0, 6)
+    lh.writeUInt16LE(0, 8) // STORE
+    lh.writeUInt16LE(0, 10)
+    lh.writeUInt16LE(0, 12)
+    lh.writeUInt32LE(0, 14) // crc 略
+    lh.writeUInt32LE(data.length, 18)
+    lh.writeUInt32LE(data.length, 22)
+    lh.writeUInt16LE(nameBuf.length, 26)
+    lh.writeUInt16LE(0, 28)
+    locals.push(lh, nameBuf, data)
+    // 中央目录（46B）
+    const ch = Buffer.alloc(46)
+    ch.writeUInt32LE(0x02014b50, 0)
+    ch.writeUInt16LE(20, 4)
+    ch.writeUInt16LE(20, 6)
+    ch.writeUInt16LE(0, 8)
+    ch.writeUInt16LE(0, 10) // STORE
+    ch.writeUInt32LE(0, 16)
+    ch.writeUInt32LE(data.length, 20)
+    ch.writeUInt32LE(data.length, 24)
+    ch.writeUInt16LE(nameBuf.length, 28)
+    ch.writeUInt16LE(0, 30)
+    ch.writeUInt16LE(0, 32)
+    ch.writeUInt32LE(offset, 42)
+    centrals.push(ch, nameBuf)
+    offset += 30 + nameBuf.length + data.length
+  }
+  const cd = Buffer.concat(centrals)
+  const eocd = Buffer.alloc(22)
+  eocd.writeUInt32LE(0x06054b50, 0)
+  eocd.writeUInt16LE(entries.length, 8)
+  eocd.writeUInt16LE(entries.length, 10)
+  eocd.writeUInt32LE(cd.length, 12)
+  eocd.writeUInt32LE(offset, 16)
+  return Buffer.concat([...locals, cd, eocd])
+}
+
+describe('parseZipStore', () => {
+  it('合法 STORE zip：条目名→数据 完整解出', () => {
+    const zip = buildStoreZip([
+      ['session.json', Buffer.from('{"a":1}')],
+      ['outputs/1-1.png', Buffer.from([1, 2, 3, 4])]
+    ])
+    const m = parseZipStore(zip)
+    expect(m).not.toBeNull()
+    expect(m!.get('session.json')?.toString()).toBe('{"a":1}')
+    expect(Array.from(m!.get('outputs/1-1.png')!)).toEqual([1, 2, 3, 4])
+  })
+
+  it('非 zip / 过短输入 → null', () => {
+    expect(parseZipStore(Buffer.from('hello world not a zip'))).toBeNull()
+    expect(parseZipStore(Buffer.alloc(10))).toBeNull()
   })
 })

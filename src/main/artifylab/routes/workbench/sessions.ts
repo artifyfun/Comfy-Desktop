@@ -5,7 +5,7 @@ import { logger } from '../../utils/logger'
 import { createErrorResponse, createSuccessResponse } from '../../utils/errorHandler'
 import { workbenchService } from '../../workbench/service'
 import { buildSessionBundle } from '../../workbench/sessionBundle'
-import { restoreBundleFiles } from '../../workbench/importRestore'
+import { restoreBundleFiles, parseZipStore } from '../../workbench/importRestore'
 import { get as getSetting } from '../../../settings'
 import { readFileSync } from 'fs'
 import { resolve, sep } from 'path'
@@ -115,39 +115,11 @@ export function registerSessionsRoutes(router: express.Router): void {
         res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('zip file required'))
         return
       }
-      // EOCD 定位（末 22B，注释最长 64KB 往前扫）
-      let eocd = -1
-      const scanStart = Math.max(0, buf.length - 22 - 65535)
-      for (let i = buf.length - 22; i >= scanStart; i--) {
-        if (buf.readUInt32LE(i) === 0x06054b50) {
-          eocd = i
-          break
-        }
-      }
-      if (eocd < 0) {
+      // ZIP 解析收口 importRestore.parseZipStore（A6：二进制解析出路由门面）
+      const entries = parseZipStore(buf)
+      if (!entries) {
         res.status(HTTP_STATUS.BAD_REQUEST).json(createErrorResponse('invalid zip'))
         return
-      }
-      const count = buf.readUInt16LE(eocd + 10)
-      let ptr = buf.readUInt32LE(eocd + 16)
-      const entries = new Map<string, Buffer>()
-      for (let i = 0; i < count; i++) {
-        if (buf.readUInt32LE(ptr) !== 0x02014b50) break
-        const method = buf.readUInt16LE(ptr + 10)
-        const compSize = buf.readUInt32LE(ptr + 20)
-        const nameLen = buf.readUInt16LE(ptr + 28)
-        const extraLen = buf.readUInt16LE(ptr + 30)
-        const commentLen = buf.readUInt16LE(ptr + 32)
-        const localOff = buf.readUInt32LE(ptr + 42)
-        const name = buf.toString('utf8', ptr + 46, ptr + 46 + nameLen)
-        if (method === 0 && name) {
-          // 本地头：跳到 data（30 + nameLen + localExtra）
-          const lNameLen = buf.readUInt16LE(localOff + 26)
-          const lExtraLen = buf.readUInt16LE(localOff + 28)
-          const dataStart = localOff + 30 + lNameLen + lExtraLen
-          entries.set(name, buf.subarray(dataStart, dataStart + compSize))
-        }
-        ptr += 46 + nameLen + extraLen + commentLen
       }
       const manifestBuf = entries.get('session.json')
       if (!manifestBuf) {
