@@ -1348,6 +1348,7 @@ import {
   toolItemFailed as _toolItemFailed,
 } from './useTranscriptModel'
 import { useExecutionPolling, extractFiles } from './useExecutionPolling'
+import { useCanvasIntegration, isVideoFile } from './useCanvasIntegration'
 const { t, getCurrentLanguage } = useI18n()
 const { onResult, emitResult, onAttachments, onCanvasState, onPrompt, emitOps } = useCanvasMode()
 // 画布侧栏模式：store 模式由画布页设置；这里只需把产物经 emitResult 推给宿主
@@ -1491,6 +1492,54 @@ const pollTimers = new Map()
 // 位置约束：useExecutionPolling 依赖 isCanvasEmbedded，故这两行须在其之前。
 const props = defineProps({ canvasEmbedded: { type: Boolean, default: false } })
 const isCanvasEmbedded = computed(() => props.canvasEmbedded || route.query.canvas === '1')
+
+// —— A4：画布集成 seam 抽 useCanvasIntegration（产物落布三路分岔/状态感知/
+// 回填/ops 人审/模板同步执行）；isEmbed 判定随迁（原内联块首行） ——
+const isEmbed = computed(
+  () =>
+    route.query.embed === '1' ||
+    new URLSearchParams(window.location.search).get('embed') === '1' ||
+    // 兜底：宿主 iframe 内运行即视为 embed——URL 参被外部改写/重定向抹掉时，
+    // 窄栏不可塌回桌面布局
+    (typeof window !== 'undefined' && window.parent && window.parent !== window),
+)
+const isNarrow = computed(() => isEmbed.value || isCanvasEmbedded.value)
+
+const {
+  deliverArtifact: pushCardsToCanvas,
+  canvasState,
+  canvasAttachNotice,
+  attachFiles: pushCanvasAttachments,
+  pendingOps,
+  opsApplying,
+  opsResultMsg,
+  opsResultOk,
+  opsDiffLines,
+  proposeCanvasOps,
+  discardPendingOps,
+  confirmApplyOps,
+  syncWorkflowToCanvas,
+  runCanvasOnHost,
+  attachHostListeners,
+} = useCanvasIntegration({
+  isEmbed,
+  isCanvasEmbedded,
+  t,
+  draftAttachments,
+  input,
+  send,
+  uploadFiles,
+  pushFiles,
+  emitResult,
+  onCanvasState,
+  onAttachments,
+  onPrompt,
+  callBridge,
+  ARTIFY_MSG,
+})
+// 订阅装配（embed message / 侧栏总线 / 首屏状态拉取）；send/uploadFiles 均为
+// hoisted 函数声明，ctx 求值时已可引用。onBeforeUnmount 统一退订。
+let detachCanvasHost = attachHostListeners()
 const { applyExecutionSideEffect, startPoll, stopPoll, startBatchPoll, stopBatchPoll } =
   useExecutionPolling({
     messages,
@@ -1599,6 +1648,7 @@ onBeforeUnmount(() => {
   for (const timer of pollTimers.values()) clearInterval(timer)
   pollTimers.clear()
   document.removeEventListener('keydown', onGlobalKey)
+  detachCanvasHost?.()
 })
 
 function onGlobalKey(e) {
@@ -2283,212 +2333,6 @@ function viewUrl(f) {
 // 「卡片 → 工作台」回填接收。
 // 以响应式 route.query 为准（router.replace 改写 URL 后仍正确），
 // window.location 一次性快照兜底（初始导航前的极早调用）。
-const isEmbed = computed(
-  () =>
-    route.query.embed === '1' ||
-    new URLSearchParams(window.location.search).get('embed') === '1' ||
-    // 兜底：宿主 iframe 内运行即视为 embed——URL 参被外部改写/重定向抹掉时，
-    // 窄栏不可塌回桌面布局（502px 侧栏里渲染 AppHeader+会话侧栏 = 头部换行且不可用）
-    (typeof window !== 'undefined' && window.parent && window.parent !== window),
-)
-
-// props / isCanvasEmbedded 已上移至 useExecutionPolling 之前（下移会踩 TDZ）
-// 窄栏布局：C 宿主 iframe 与画布侧边栏共用（收会话侧栏/产物右栏、紧凑高度）
-const isNarrow = computed(() => isEmbed.value || isCanvasEmbedded.value)
-
-/** 把产物文件引用发给注入脚本（父窗口），由它铺成画布陈列卡片；
- *  画布侧栏模式直接经 canvasMode 推给宿主画布自动落布；
- *  独立页则入 canvasBridge 队列，画布页 mounted 时取走落布 */
-function pushCardsToCanvas(files) {
-  if (!files?.length) return
-  if (isCanvasEmbedded.value) {
-    emitResult(files)
-    return
-  }
-  if (!isEmbed.value) {
-    const n = pushFiles(files)
-    message.success(t('workbenchPinnedToCanvas').replace('{n}', String(n)))
-    return
-  }
-  try {
-    window.parent.postMessage(JSON.stringify({ type: ARTIFY_MSG.DISPLAY_CARD, files }), '*')
-  } catch (e) {
-    console.warn('[workbench] display-card push failed:', e)
-  }
-}
-
-// 回填：画布卡片右键/双击 → 注入脚本 postMessage 进来 → 作为参考图附件
-// （直接构造已就绪附件形态：文件已在 ComfyUI output 目录，/view 直出，
-// 无需再走 /api/workbench/upload）
-const canvasAttachNotice = ref('')
-// 画布感知（M1）：注入桥实时推送的宿主画布摘要
-const canvasState = ref(null)
-function applyCanvasState(data) {
-  if (!data || typeof data.seq !== 'number') return
-  // 防乱序：旧序号不覆盖新序号（iframe 重连时可能收到迟到的推送）
-  if (canvasState.value && data.seq <= canvasState.value.seq) return
-  canvasState.value = data
-}
-function onWindowMessage(event) {
-  let data = event.data
-  if (typeof data === 'string') {
-    try {
-      data = JSON.parse(data)
-    } catch {
-      return
-    }
-  }
-  if (data && data.type === ARTIFY_MSG.CANVAS_STATE) {
-    applyCanvasState(data.state)
-    return
-  }
-  if (!data || data.type !== ARTIFY_MSG.CARD_ATTACH) return
-  const files = Array.isArray(data.files) ? data.files : []
-  if (!files.length) return
-  canvasAttachNotice.value = t('workbenchCardAttached').replace('{n}', String(files.length))
-  setTimeout(() => (canvasAttachNotice.value = ''), 4000)
-  for (const f of files) {
-    draftAttachments.value.push({
-      kind: /\.(mp4|webm|mov|gif)$/i.test(f.filename || '')
-        ? 'video'
-        : /\.(mp3|wav|ogg|flac|m4a)$/i.test(f.filename || '')
-          ? 'audio'
-          : 'image',
-      name: f.subfolder ? `${f.subfolder}/${f.filename}` : f.filename,
-      filename: f.filename,
-      subfolder: f.subfolder ?? '',
-      type: f.type ?? 'output',
-      mime: '',
-      uploading: false,
-      fromCanvas: true,
-    })
-  }
-}
-if (isEmbed.value) window.addEventListener('message', onWindowMessage)
-// 画布页侧栏：宿主画布经 window 总线推送选区/物件摘要（与 embed postMessage 同构）
-if (isCanvasEmbedded.value) onCanvasState(applyCanvasState)
-// 画布 → 工作台 prompt 下发（A14 选区指令条 / N3 生成节点 / A5 分镜批量共用）：
-// 填输入框；autoSend=true 时下一 tick 自动发送；attachments 直接走画布附件通道
-if (isCanvasEmbedded.value) {
-  onPrompt(({ text, autoSend, attachments }) => {
-    if (Array.isArray(attachments) && attachments.length) pushCanvasAttachments(attachments)
-    if (typeof text === 'string' && text.trim()) input.value = text.trim()
-    if (autoSend) nextTick(() => send())
-  })
-}
-
-// 画布侧栏模式：接收宿主画布选区「发送到工作台」的活通道（侧栏常驻，mounted-drain 只覆盖跨路由场景）
-// 附件统一补 name = [subfolder/]filename——执行期 resolveAttachmentRef 只认 name，
-// 没有它画布回填附件发消息后媒体槽不会填（静默丢参考图）。
-function canvasRefName(f) {
-  return f.subfolder ? `${f.subfolder}/${f.filename}` : f.filename
-}
-function pushCanvasAttachments(files) {
-  if (!Array.isArray(files) || !files.length) return
-  canvasAttachNotice.value = t('workbenchCardAttached').replace('{n}', String(files.length))
-  setTimeout(() => (canvasAttachNotice.value = ''), 4000)
-  for (const f of files) {
-    // 裁剪图等内存文件：走现成上传通道落地成可执行附件（name 由上传回填）
-    if (f.file instanceof File) {
-      // 上传不可达（如纯前端 dev server，无 express 反代）时降级 dataURL chip：
-      // 至少在输入框可见；执行端对 data: 值另有 uploadMedia 上传兜底
-      uploadFiles([f.file], { silent: true }).catch(() => {})
-      const probe = new FileReader()
-      probe.onload = () => {
-        // 上传成功（chip 已有同名且 uploading:false 带 name）则不重复；
-        // 失败被 splice 后才落 dataUrl 兜底 chip
-        if (!draftAttachments.value.some((a) => a.filename === f.filename)) {
-          draftAttachments.value.push({
-            kind: 'image',
-            filename: f.filename,
-            mime: 'image/png',
-            uploading: false,
-            fromCanvas: true,
-            _preview: probe.result,
-          })
-        }
-      }
-      probe.readAsDataURL(f.file)
-      continue
-    }
-    draftAttachments.value.push({
-      kind: /\.(mp4|webm|mov|gif)$/i.test(f.filename || '') ? 'video' : 'image',
-      name: canvasRefName(f),
-      filename: f.filename,
-      subfolder: f.subfolder ?? '',
-      type: f.type ?? 'output',
-      mime: '',
-      uploading: false,
-      fromCanvas: true,
-      // A1:画布卡片身份(选区发送经 refOf 携带),send 注入引用清单用
-      cardId: f.cardId || '',
-      cardTitle: f.cardTitle || '',
-    })
-  }
-}
-if (isCanvasEmbedded.value) onAttachments(pushCanvasAttachments)
-// embed 首屏：主动要一份当前画布摘要（注入桥可能早于 iframe 就绪推过）
-if (isEmbed.value) {
-  setTimeout(() => {
-    try {
-      window.parent.postMessage(JSON.stringify({ type: ARTIFY_MSG.GET_CANVAS_STATE }), '*')
-    } catch {
-      return
-    }
-  }, 400)
-}
-
-// ---------- 写回 diff 确认（M2：LLM ops → 人审 → 注入桥执行） ----------
-const pendingOps = ref(null) // Array<op> | null
-const opsApplying = ref(false)
-const opsResultMsg = ref('')
-const opsResultOk = ref(false)
-
-/**
- * ops → 人类可读 diff 行（确认卡正文）。
- * 刻意不展示 JSON：用户审的是「改了什么」，不是协议。
- */
-const opsDiffLines = computed(() => {
-  const ops = pendingOps.value || []
-  return ops.map((op) => {
-    switch (op.type) {
-      case 'setWidget': {
-        const v = typeof op.value === 'object' ? JSON.stringify(op.value) : String(op.value)
-        return t('workbenchOpsSetWidget')
-          .replace('{node}', String(op.nodeId))
-          .replace('{widget}', String(op.widget))
-          .replace('{value}', v)
-      }
-      case 'addNode':
-        return t('workbenchOpsAddNode').replace('{type}', String(op.nodeType))
-      case 'removeNode':
-        return t('workbenchOpsRemoveNode').replace('{node}', String(op.nodeId))
-      case 'relink':
-        return t('workbenchOpsRelink')
-          .replace('{from}', String(op.fromNodeId))
-          .replace('{to}', String(op.toNodeId))
-      case 'loadWorkflow':
-        return t('workbenchOpsLoad')
-      case 'align':
-        return t('workbenchOpsAlign').replace('{mode}', String(op.mode || 'left'))
-      case 'autoLayout':
-        return t('workbenchOpsAutoLayout').replace(
-          '{dir}',
-          op.direction === 'reverse' ? t('workbenchOpsReverse') : t('workbenchOpsForward'),
-        )
-      default:
-        return `${op.type}`
-    }
-  })
-})
-
-/** 供对话流调用：AI 产出 ops 后进入人审（不直接执行） */
-function proposeCanvasOps(ops, _ctx) {
-  if (!isEmbed.value || !Array.isArray(ops) || !ops.length) return false
-  opsResultMsg.value = ''
-  pendingOps.value = ops
-  return true
-}
 
 // ---------------- M4 调试路由：失败自动分类 + 一键修复 ----------------
 // 纯函数层在 ./diagnosis.js（可单测）；副作用（fetch/proposeCanvasOps）留在本文件
@@ -2518,80 +2362,6 @@ function applyDiagnosisFix(artifact) {
   const d = diagnosisOf(artifact)
   if (!canApplyFix(d, isEmbed.value)) return
   proposeCanvasOps(d.suggestion.fixOps, { source: 'diagnosis', promptId: artifact.promptId })
-}
-
-function discardPendingOps() {
-  pendingOps.value = null
-  opsResultMsg.value = ''
-}
-
-async function confirmApplyOps() {
-  const ops = pendingOps.value
-  if (!ops?.length || opsApplying.value) return
-  opsApplying.value = true
-  opsResultMsg.value = ''
-  const reply = await callBridge(ARTIFY_MSG.CANVAS_OPS, { ops, reason: 'workbench-confirm' })
-  opsApplying.value = false
-  opsResultOk.value = !!reply.ok
-  const applied = Number(reply.applied) || 0
-  const failed = Array.isArray(reply.results)
-    ? reply.results.filter((r) => r && r.ok === false)
-    : []
-  opsResultMsg.value = reply.ok
-    ? t('workbenchOpsDone').replace('{n}', String(applied))
-    : t('workbenchOpsFailed') + (reply.error ? `: ${reply.error}` : '')
-  if (reply.ok && failed.length) {
-    opsResultMsg.value += ` (${failed.length} failed)`
-  }
-  // 应用成功 3s 后收卡（感知条会反映新状态）
-  if (reply.ok) {
-    setTimeout(() => {
-      if (opsResultOk.value) {
-        pendingOps.value = null
-        opsResultMsg.value = ''
-      }
-    }, 3000)
-  }
-}
-
-/**
- * 模板工作流 → 宿主画布：走注入桥 artify:canvas-ops loadWorkflow 整图替换
- * （与 diff 确认卡同通道）。返回 Promise，成功/失败由调用方提示。
- */
-function syncWorkflowToCanvas({ templateId, name, workflow, ensureTab }) {
-  // ensure-tab（执行前自动加载画布）在非 embed（A 工作台/画布侧栏，无画布宿主）
-  // 下静默跳过——模板执行照常进行；显式同步（非 ensureTab）仍报错提示。
-  if (!isEmbed.value) {
-    if (ensureTab) return Promise.resolve({ ok: true, mode: 'skipped' })
-    return Promise.reject(new Error(t('workbenchSyncNotEmbed')))
-  }
-  if (!workflow || !Array.isArray(workflow.nodes))
-    return Promise.reject(new Error(t('workbenchSyncNoWorkflow')))
-  // callBridge 永不 reject；此调用方对外维持 throw 语义
-  return callBridge(ARTIFY_MSG.CANVAS_OPS, {
-    // ensureTab：桥按「当前 tab 已是目标则复用、否则开新 tab」处理
-    ops: [{ type: 'loadWorkflow', workflow, newTab: ensureTab || undefined, name }],
-    reason: 'workbench-sync-template',
-  }).then((data) => (data.ok ? data : Promise.reject(new Error(data.error || 'unknown'))))
-}
-
-function isVideoFile(f) {
-  return /\.(mp4|webm|mov|gif)$/i.test(f?.filename ?? '')
-}
-
-/**
- * 执行画布当前工作流：通知注入桥 graphToPrompt → POST /api/canvas/execute
- * （或 /batch）→ ack 返回 promptId/jobId。与 sync 同通道但动作不同
- * （执行不改画布，只提交队列）。
- */
-function runCanvasOnHost({ requestId: _req, nodeOverrides, name, sessionId, batch }) {
-  if (!isEmbed.value) return Promise.reject(new Error(t('workbenchSyncNotEmbed')))
-  // callBridge 永不 reject；此调用方对外维持 throw 语义（原 10s 超时保留）
-  return callBridge(
-    ARTIFY_MSG.CANVAS_EXECUTE,
-    { nodeOverrides, name, sessionId, batch },
-    { timeout: 10000 },
-  ).then((data) => (data.ok ? data : Promise.reject(new Error(data.error || 'unknown'))))
 }
 
 // ---------- 固化 ----------
