@@ -1310,7 +1310,7 @@ class WorkbenchService {
         } catch {
           /* history 读取失败按无产物处理（不阻断轮询返回） */
         }
-        markSuccess(exec, files)
+        markSuccess(exec, files, result.warnings)
         this.appendMessage(sessionId, {
           role: 'agent',
           kind: 'artifact',
@@ -1319,6 +1319,16 @@ class WorkbenchService {
           outputFiles: files,
           promptId
         })
+        // 降级告警单独成条（kind=error 以在会话里显眼）：成功但被丢了分支/
+        // 只拿到 temp 产物时，用户必须看到，否则就是静默降级。
+        if (result.warnings?.length) {
+          this.appendMessage(sessionId, {
+            role: 'agent',
+            kind: 'error',
+            text: `⚠️ 执行完成但有降级：${result.warnings.join('；')}`,
+            promptId
+          })
+        }
         this.repo.flush()
       }
     }

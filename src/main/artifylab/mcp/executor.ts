@@ -13,21 +13,27 @@ import { basename, extname } from 'node:path'
 import type { App, ComfyPrompt, ParamNode } from '../appStore'
 import { logger } from '../utils/logger'
 import {
+  clearQueueDiagnostics,
   fetchAbsoluteMedia,
+  formatQueueNodeErrors,
   freeMemory as comfyFreeMemory,
   getHistory as comfyGetHistory,
+  getQueueDiagnostics,
   interrupt as comfyInterrupt,
   queuePrompt as comfyQueuePrompt,
   randomSeed,
   uploadImage
 } from '../comfyClient'
 import { previewHub, startPreviewFeed } from '../workbench/previewFeed'
+import { extractFiles } from '../workbench/executionLog'
 
 export interface ExecutionResult {
   prompt_id: string
   status: 'queued' | 'running' | 'success' | 'error'
   outputs?: unknown
   error?: string
+  /** 执行完成但被降级的告警（如部分输出分支被 ComfyUI 校验丢弃） */
+  warnings?: string[]
 }
 
 /** 提交后记录 prompt_id → app，供 getExecutionStatus 做输出过滤（M2） */
@@ -602,6 +608,35 @@ export async function getExecutionStatus(
   }
   const rawOutputs = (entry.outputs as Record<string, unknown>) ?? {}
   const outputs = extractOutputs(paramsNodes, rawOutputs)
+
+  // 提交时被 ComfyUI 丢弃的输出分支：到这里才谈得上「有没有影响」。
+  // - 一个产物都没有（history.outputs 全空）→ 这次执行实质上什么都没产出，报 error；
+  // - 有产物 → 保持 success，但把丢弃项作为 warnings 如实上报（旧行为是完全不提，
+  //   表现为「success 却拿不到正式产物」的静默降级）。
+  const diags = getQueueDiagnostics(promptId)
+  if (diags.length) {
+    clearQueueDiagnostics(promptId)
+    const detail = formatQueueNodeErrors(diags)
+    if (Object.keys(rawOutputs).length === 0) {
+      return {
+        prompt_id: promptId,
+        status: 'error',
+        error:
+          `执行结束但没有任何产物：${diags.length} 个节点未通过 ComfyUI 校验，其输出分支已被丢弃 → ` +
+          `${detail}。请检查这些节点的必填输入（模板可能缺少 widget 值或与当前节点版本不匹配）。`
+      }
+    }
+    const warnings = [
+      `${diags.length} 个节点未通过 ComfyUI 校验，其输出分支已被丢弃（本次执行已被降级）→ ${detail}`
+    ]
+    const files = extractFiles(paramsNodes, rawOutputs)
+    if (files.length && files.every((f) => f.type === 'temp')) {
+      warnings.push(
+        '产物全部是 ComfyUI 临时文件（type=temp，重启/清理即失效），没有任何正式保存产物（type=output）'
+      )
+    }
+    return { prompt_id: promptId, status: 'success', outputs, warnings }
+  }
   return { prompt_id: promptId, status: 'success', outputs }
 }
 

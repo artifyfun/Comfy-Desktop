@@ -14,6 +14,8 @@
  * - 非 2xx 响应统一 throw Error（消息含状态码与 body 摘要）；
  * - 返回已解析 JSON；不抛的业务态（如 history 缺失）返回 null。
  */
+import { logger } from './utils/logger'
+
 export interface ComfyClientDeps {
   /** 可注入的 fetch（测试 seam）；缺省用全局 fetch */
   fetch?: typeof fetch
@@ -90,6 +92,16 @@ async function comfyJson<T>(
   return (await res.json()) as T
 }
 
+/** JSON 文本 → 对象；空串/非法 JSON 一律 null（调用方据此给出更准确的报错） */
+function parseJsonOrNull<T>(text: string): T | null {
+  if (!text) return null
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    return null
+  }
+}
+
 /**
  * 取**绝对 URL** 的媒体字节（`data:` / 本机 `http(s)`）——刻意**不加** ComfyUI origin 前缀。
  *
@@ -159,13 +171,87 @@ export async function getHistory(
   return (json[promptId] as Record<string, unknown>) ?? null
 }
 
-/** POST /prompt → prompt_id。 */
+/** ComfyUI /prompt 的 node_errors 单节点摘要（该校验失败的节点的输出分支会被丢弃） */
+export interface QueueNodeError {
+  nodeId: string
+  classType: string
+  messages: string[]
+}
+
+/**
+ * /prompt 校验告警按 promptId 暂存，供轮询到终态时消费。
+ *
+ * 背景（2026-09-16 真机验证抓到的真实缺陷）：ComfyUI 的 /prompt **只要还有
+ * 一个**输出节点通过校验就返回 HTTP 200，其余校验失败的节点连其输出分支被
+ * **静默丢弃**。旧 queuePrompt 只读 prompt_id，于是这类工作流会以
+ * 「status=success + 零产物（或只剩 temp 预览帧）」收尾——既有 Anima 系模板的
+ * 4 个 `Save Images Mikey` 就是这么整条静默丢掉的，外层看不到任何线索。
+ * 与之同类：KA2 模板因同类原因直接 400/500，旧错误消息截断 200 字后也看不全。
+ */
+const queueDiagnostics = new Map<string, QueueNodeError[]>()
+const MAX_QUEUE_DIAGNOSTICS = 500
+
+/** 读取某次提交的 ComfyUI 校验告警（无则空数组） */
+export function getQueueDiagnostics(promptId: string): QueueNodeError[] {
+  return queueDiagnostics.get(promptId) ?? []
+}
+
+/** 终态消费后清理（与 executor.promptAppMap 同寿命语义，防内存滞留） */
+export function clearQueueDiagnostics(promptId: string): void {
+  queueDiagnostics.delete(promptId)
+}
+
+function describeNodeError(err: unknown): string {
+  if (!err || typeof err !== 'object') return String(err)
+  const e = err as {
+    type?: string
+    message?: string
+    details?: unknown
+    extra_info?: { input_name?: string } | null
+  }
+  const parts: string[] = []
+  if (e.type) parts.push(e.type)
+  if (e.extra_info?.input_name) parts.push(`缺少必填输入 ${e.extra_info.input_name}`)
+  else if (typeof e.details === 'string' && e.details) parts.push(e.details)
+  if (e.message) parts.push(e.message)
+  return parts.join(' / ') || '未知校验错误'
+}
+
+/** 把 /prompt 的 node_errors 压成可读结构（prompt 用于补 class_type） */
+export function summarizeNodeErrors(nodeErrors: unknown, prompt?: unknown): QueueNodeError[] {
+  if (!nodeErrors || typeof nodeErrors !== 'object') return []
+  const graph = (prompt ?? {}) as Record<string, { class_type?: string } | undefined>
+  const out: QueueNodeError[] = []
+  for (const [nodeId, info] of Object.entries(
+    nodeErrors as Record<string, { errors?: unknown; class_name?: string }>
+  )) {
+    const errors = Array.isArray(info?.errors) ? info.errors : []
+    out.push({
+      nodeId,
+      // ComfyUI 在 node_errors 里也带 class_name；prompt 图里取不到时用它兜底
+      classType: graph[nodeId]?.class_type ?? info?.class_name ?? '未知节点',
+      messages: errors.map(describeNodeError)
+    })
+  }
+  return out
+}
+
+/** 一行摘要（错误消息与告警文案共用） */
+export function formatQueueNodeErrors(list: QueueNodeError[], limit = 6): string {
+  const head = list
+    .slice(0, limit)
+    .map((d) => `${d.nodeId} ${d.classType}（${d.messages.join('；')}）`)
+    .join('、')
+  return list.length > limit ? `${head} 等 ${list.length} 个节点` : head
+}
+
+/** POST /prompt → prompt_id。校验失败的节点记入 getQueueDiagnostics（不阻断提交）。 */
 export async function queuePrompt(
   prompt: unknown,
   clientId: string,
   deps: ComfyClientDeps = {}
 ): Promise<string> {
-  const json = await comfyJson<{ prompt_id?: string; error?: unknown }>(
+  const res = await comfyFetch(
     '/prompt',
     {
       method: 'POST',
@@ -175,8 +261,33 @@ export async function queuePrompt(
     },
     deps
   )
-  if (json.error) throw new Error(`queuePrompt error: ${JSON.stringify(json.error)}`)
-  if (!json.prompt_id) throw new Error('queuePrompt: response missing prompt_id')
+  const raw = await res.text().catch(() => '')
+  type PromptResponse = { prompt_id?: string; error?: unknown; node_errors?: unknown }
+  const json = parseJsonOrNull<PromptResponse>(raw)
+
+  // 失败响应：把 node_errors 一并说清。旧实现走 comfyJson 并把 body 截到 200 字，
+  // 恰好把最有用的「哪个节点缺什么输入」截掉 —— KA2 的 500 就是这样变得不可诊断的。
+  if (!res.ok) {
+    const diags = summarizeNodeErrors(json?.node_errors, prompt)
+    const detail = diags.length ? `；节点校验失败 → ${formatQueueNodeErrors(diags)}` : ''
+    const head = json?.error ? JSON.stringify(json.error) : raw.slice(0, 400)
+    throw new Error(`ComfyUI /prompt HTTP ${res.status}: ${head}${detail}`)
+  }
+  if (json?.error) throw new Error(`queuePrompt error: ${JSON.stringify(json.error)}`)
+  if (!json?.prompt_id) throw new Error('queuePrompt: response missing prompt_id')
+
+  const diags = summarizeNodeErrors(json.node_errors, prompt)
+  if (diags.length) {
+    queueDiagnostics.set(json.prompt_id, diags)
+    if (queueDiagnostics.size > MAX_QUEUE_DIAGNOSTICS) {
+      const oldest = queueDiagnostics.keys().next().value
+      if (oldest != null) queueDiagnostics.delete(oldest)
+    }
+    logger.warn(
+      `ComfyUI 丢弃了 ${diags.length} 个校验失败的输出分支（prompt ${json.prompt_id}）：` +
+        formatQueueNodeErrors(diags)
+    )
+  }
   return json.prompt_id
 }
 

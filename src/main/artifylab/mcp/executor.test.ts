@@ -255,6 +255,89 @@ describe('getExecutionStatus', () => {
     expect(res.status).toBe('running')
   })
 
+  // 2026-09-16 真机验证抓到的缺陷回归：ComfyUI 返回 200 但 node_errors 非空时，
+  // 那些校验失败的节点连其输出分支被静默丢弃。旧实现照样报 success，
+  // 表现为「执行成功却拿不到正式产物」（既有 Anima 系模板即此）。
+  const diagPromptResponse = (promptId: string): Response =>
+    new Response(
+      JSON.stringify({
+        prompt_id: promptId,
+        node_errors: {
+          '138': {
+            class_name: 'Load Text File',
+            errors: [
+              {
+                type: 'required_input_missing',
+                message: 'Required input is missing',
+                extra_info: { input_name: 'file' }
+              }
+            ]
+          }
+        }
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+
+  it('有旁支产物但丢了输出分支 → success + warnings（不再静默）', async () => {
+    const app = makeApp({
+      '1': { class_type: 'KSampler', inputs: { seed: 1 } },
+      '138': { class_type: 'Load Text File', inputs: { dictionary_name: '[filename]' } }
+    })
+    const promptId = 'p-diag-1'
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('/free')) return new Response('{}', { status: 200 })
+      if (url.endsWith('/prompt')) return diagPromptResponse(promptId)
+      if (url.includes(`/history/${promptId}`)) {
+        return new Response(
+          JSON.stringify({
+            [promptId]: {
+              status: { status_str: 'success', messages: [] },
+              outputs: { '192': { images: [{ filename: 'preview_00001_.png', type: 'temp' }] } }
+            }
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+      throw new Error(`unexpected: ${url}`)
+    })
+    await executeApp(app, {}, ORIGIN)
+    const res = await getExecutionStatus(ORIGIN, promptId)
+    expect(res.status).toBe('success')
+    expect(res.warnings?.[0]).toContain('138 Load Text File')
+    expect(res.warnings?.[0]).toMatch(/缺少必填输入 file/)
+    // 产物全是 temp → 追加「没有正式产物」告警
+    expect(res.warnings?.[1]).toMatch(/type=temp/)
+    // 诊断随终态消费清空（防内存滞留）
+    const again = await getExecutionStatus(ORIGIN, promptId)
+    expect(again.warnings).toBeUndefined()
+  })
+
+  it('丢了输出分支且零产物 → error（不再假成功）', async () => {
+    const app = makeApp({
+      '1': { class_type: 'KSampler', inputs: { seed: 1 } },
+      '138': { class_type: 'Load Text File', inputs: { dictionary_name: '[filename]' } }
+    })
+    const promptId = 'p-diag-2'
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.includes('/free')) return new Response('{}', { status: 200 })
+      if (url.endsWith('/prompt')) return diagPromptResponse(promptId)
+      if (url.includes(`/history/${promptId}`)) {
+        return new Response(
+          JSON.stringify({
+            [promptId]: { status: { status_str: 'success', messages: [] }, outputs: {} }
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      }
+      throw new Error(`unexpected: ${url}`)
+    })
+    await executeApp(app, {}, ORIGIN)
+    const res = await getExecutionStatus(ORIGIN, promptId)
+    expect(res.status).toBe('error')
+    expect(res.error).toMatch(/没有任何产物/)
+    expect(res.error).toContain('138 Load Text File')
+  })
+
   it('ComfyUI 执行错误 → error 带消息', async () => {
     const app = makeApp({ '1': { class_type: 'KSampler', inputs: { seed: 123 } } })
     await executeApp(app, {}, ORIGIN)

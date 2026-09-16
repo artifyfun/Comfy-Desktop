@@ -34,6 +34,8 @@ export interface WorkbenchExecution {
   batchJobId?: string
   /** 失败原因（轮询回填；产物卡「复制错误全文」用） */
   error?: string
+  /** 降级告警（如部分输出分支被 ComfyUI 校验丢弃、产物全是 temp）——成功也可能带 */
+  warnings?: string[]
 }
 
 /** record() 入参：必填身份字段，batchJobId 可选 */
@@ -61,10 +63,15 @@ export function record(input: RecordExecutionInput): WorkbenchExecution {
 /** 落盘错误文案上限（防会话 JSON 膨胀；消息流另有 500 字符截断） */
 export const MAX_EXECUTION_ERROR_CHARS = 2000
 
-/** 轮询成功回填：status + 产物文件列表 */
-export function markSuccess(exec: WorkbenchExecution, files: WorkbenchOutputFile[]): void {
+/** 轮询成功回填：status + 产物文件列表（warnings 为降级告警，成功也可能带） */
+export function markSuccess(
+  exec: WorkbenchExecution,
+  files: WorkbenchOutputFile[],
+  warnings?: string[]
+): void {
   exec.status = 'success'
   exec.outputs = files
+  if (warnings?.length) exec.warnings = warnings
 }
 
 /** 轮询失败回填：status + 截断后的错误全文 */

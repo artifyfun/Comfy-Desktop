@@ -10,11 +10,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import {
   bindAppStore,
+  clearQueueDiagnostics,
   comfyFetch,
+  formatQueueNodeErrors,
   getObjectInfo,
   getNodeObjectInfo,
   getSystemStats,
   getHistory,
+  getQueueDiagnostics,
   queuePrompt,
   uploadImage,
   interrupt,
@@ -109,6 +112,71 @@ describe('领域动词', () => {
     const f = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse({}))
     await expect(queuePrompt({}, 'c', { fetch: f as unknown as typeof fetch })).rejects.toThrow(
       /missing prompt_id/
+    )
+  })
+
+  // 2026-09-16 真机验证抓到的缺陷回归：ComfyUI 只要还有一个输出节点可用就返回
+  // 200，其余校验失败的节点连其输出分支**静默丢弃**。旧实现只看 prompt_id，
+  // 于是这类工作流以「success + 零正式产物」收尾（既有 Anima 系模板的 4 个
+  // Save Images Mikey 整体被丢，外层零线索）。
+  it('queuePrompt：200 但带 node_errors → 仍返回 promptId，并把丢弃项记入诊断', async () => {
+    const prompt = {
+      '178': { class_type: 'Save Images Mikey', inputs: {} },
+      '138': { class_type: 'Load Text File', inputs: { dictionary_name: '[filename]' } }
+    }
+    const f = vi.fn(async (_url: string, _init?: RequestInit) =>
+      jsonResponse({
+        prompt_id: 'pid-diag',
+        node_errors: {
+          '138': {
+            class_name: 'Load Text File',
+            errors: [
+              {
+                type: 'required_input_missing',
+                message: 'Required input is missing',
+                extra_info: { input_name: 'file' }
+              }
+            ]
+          }
+        }
+      })
+    )
+    const id = await queuePrompt(prompt, 'c', { fetch: f as unknown as typeof fetch })
+    expect(id).toBe('pid-diag')
+    const diags = getQueueDiagnostics(id)
+    expect(diags).toHaveLength(1)
+    expect(diags[0]!.nodeId).toBe('138')
+    expect(diags[0]!.classType).toBe('Load Text File')
+    expect(diags[0]!.messages.join()).toMatch(/required_input_missing/)
+    expect(diags[0]!.messages.join()).toMatch(/缺少必填输入 file/)
+    expect(formatQueueNodeErrors(diags)).toContain('138 Load Text File')
+    clearQueueDiagnostics(id)
+    expect(getQueueDiagnostics(id)).toEqual([])
+  })
+
+  it('queuePrompt：HTTP 400 → 错误消息带上「哪个节点缺什么输入」（不再只截 200 字）', async () => {
+    const prompt = { '36': { class_type: 'Load Text File', inputs: {} } }
+    const f = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            error: { type: 'prompt_outputs_failed_validation', message: 'Prompt outputs failed' },
+            node_errors: {
+              '36': {
+                errors: [
+                  {
+                    type: 'required_input_missing',
+                    extra_info: { input_name: 'file' }
+                  }
+                ]
+              }
+            }
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        )
+    )
+    await expect(queuePrompt(prompt, 'c', { fetch: f as unknown as typeof fetch })).rejects.toThrow(
+      /36 Load Text File.*缺少必填输入 file/s
     )
   })
 
