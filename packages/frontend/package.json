@@ -73,12 +73,12 @@
     "@tanstack/vue-virtual": "^3.13.0",
     "@vueuse/core": "^13.3.0",
     "ant-design-vue": "^4.2.6",
-    "axios": "^1.9.0",
+    "axios": "^1.20.0",
     "body-parser": "^2.2.0",
     "concurrently": "^9.2.0",
     "cookie-parser": "^1.4.7",
     "dayjs": "^1.11.13",
-    "dompurify": "^3.4.14",
+    "dompurify": "^3.4.15",
     "dotenv": "^16.6.0",
     "express": "^4.21.2",
     "jszip": "^3.10.1",
@@ -96,7 +96,7 @@
     "vue-json-pretty": "^2.6.0",
     "vue-konva": "^3.4.0",
     "vue-router": "^4.5.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",
