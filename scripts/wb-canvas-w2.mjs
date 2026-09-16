@@ -1,10 +1,16 @@
 /**
  * 无限画布交互回归 · 第二波：平移/拖节点/框选/右键菜单/删除/新建画布。
  * 状态断言全部以 projects store + DOM 为准；每步 ✅/❌。
+ *
+ * 用法：node scripts/wb-canvas-w2.mjs [port|origin]     （默认 3008）
+ * 前置：node acceptance/canvas/serve.mjs 3008
  */
+import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
-const BASE = 'http://127.0.0.1:3008'
+const arg = process.argv[2] || '3008'
+const BASE = /^https?:\/\//.test(arg) ? arg.replace(/\/$/, '') : `http://127.0.0.1:${arg}`
+const SHOT_DIR = fileURLToPath(new URL('../acceptance/canvas/screenshots/', import.meta.url))
 const results = []
 function record(name, pass, evidence) {
   results.push({ name, pass, evidence })
@@ -47,21 +53,30 @@ await page.goto(`${BASE}/canvas?w2=${Date.now()}`, { waitUntil: 'networkidle', t
 await page.waitForTimeout(3000)
 await closeModals()
 
-// 预置 3 个对象: 页面先完整加载(此时 store 已初始化) → 写 store → 强制重载
-// (此前的写法在页面加载前写 store,被初始化逻辑覆盖 → 画布空白,3 个断言全误判)
-await page.waitForTimeout(1500)
-await page.evaluate(() => {
-  const proj = JSON.parse(localStorage.getItem('artify.canvas.projects.v1'))
-  proj.projects[0].doc.objects = [
-    { id: 'a1', type: 'note', x: 200, y: 200, width: 140, height: 90, text: '测试便签一' },
-    { id: 'a2', type: 'note', x: 500, y: 200, width: 140, height: 90, text: '测试便签二' },
-    { id: 'a3', type: 'note', x: 800, y: 450, width: 140, height: 90, text: '测试便签三' }
-  ]
-  localStorage.setItem('artify.canvas.projects.v1', JSON.stringify(proj))
+// 预置 3 个便签：**必须让 seed 活过 stub 的重写** —— acceptance/canvas/stub.js 每次 boot 都
+// 无条件 setItem（activeId 恒回 p-main），页内 evaluate 改 store 会被它覆盖（本脚本上一版就是
+// 这样误判成「未找到 a1」）。故改走 stub 响应体改写：在末尾追加 seed。
+const NOTES = [
+  { id: 'a1', type: 'note', x: 200, y: 200, width: 140, height: 90, text: '测试便签一' },
+  { id: 'a2', type: 'note', x: 500, y: 200, width: 140, height: 90, text: '测试便签二' },
+  { id: 'a3', type: 'note', x: 800, y: 450, width: 140, height: 90, text: '测试便签三' }
+]
+const SEED_SRC =
+  `(function(){try{const K='artify.canvas.projects.v1';` +
+  `const s=JSON.parse(localStorage.getItem(K));s.activeId='p-main';` +
+  `s.projects[0].doc.objects=${JSON.stringify(NOTES)};` +
+  `localStorage.setItem(K,JSON.stringify(s))}catch(e){console.warn('[w2] seed failed',e)}})()`
+await context.route('**/__canvas_stub.js', async (route) => {
+  const res = await route.fetch()
+  const body = await res.text()
+  await route.fulfill({ response: res, body: `${body}\n;${SEED_SRC}\n` })
 })
+await page.waitForTimeout(1500)
 await page.reload({ waitUntil: 'networkidle' })
 await page.waitForTimeout(3500)
 await closeModals()
+/** 分段基线：boot 阶段（stub 未 mock 端点的 SPA fallback 噪音）不计入断言 */
+const bootErrors = jsErrors.length
 // 断言画布真的渲染了对象(Konva canvas 像素非空 or 侧栏节点计数)——用页面内的节点计数文本
 const nodeCountText = await page.evaluate(() => {
   const m = document.body.textContent.match(/节点\s*(\d+)/)
@@ -214,9 +229,12 @@ const projCount = await page.evaluate(
 record('新建画布项目', projCount > projBefore && newClicked.clicked, `${projBefore} → ${projCount}`)
 
 // ── 6. 全程 JS 健康 ──
-record('全程无 JS 异常', jsErrors.length === 0, jsErrors.length ? jsErrors[0] : '')
+// 分段记账：stub 未 mock 的 /api 端点每次 boot 都会因 SPA fallback 返回 HTML 而抛
+// `Unexpected token '<'`（既有噪音），故只断言「交互阶段不新增」。
+const newErrors = jsErrors.length - bootErrors
+record('交互阶段无新增 JS 异常', newErrors === 0, newErrors ? jsErrors.slice(bootErrors)[0] : '无')
 
-await page.screenshot({ path: '/tmp/wb-canvas-w2.png' })
+await page.screenshot({ path: `${SHOT_DIR}canvas-w2-final.png` })
 await browser.close()
 
 const pass = results.filter((r) => r.pass).length

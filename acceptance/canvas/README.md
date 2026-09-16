@@ -98,3 +98,37 @@ agent-browser eval "(() => { const b=[...document.querySelectorAll('button')].fi
 # 重置
 agent-browser eval "window.__canvasCtl.reset()"
 ```
+
+---
+
+## C-H8 交互回归（playwright 无头，可复跑）
+
+两条脚本都走**真鼠标/真键盘**，断言以 `artify.canvas.projects.v1`（落盘态）与 Konva stage（实时态）
+双源互证。本机 `agent-browser` 不可用，改走仓库自带 playwright 无头实例。
+
+```bash
+cd /d/artifyfun/Comfy-Desktop && pnpm run build:frontend
+cd acceptance/canvas && node serve.mjs 3008 &
+cd /d/artifyfun/Comfy-Desktop
+node scripts/wb-canvas-interaction-verify.mjs 3008   # 15 断言
+node scripts/wb-canvas-w2.mjs 3008                   # 6 断言
+```
+
+| 脚本 | 覆盖 | 截图 |
+|---|---|---|
+| `wb-canvas-interaction-verify.mjs` | seed 双源互证 → 拖拽节点（+落盘）→ 单点选中/删除/撤销 → **Shift+拖框选**（选择栏 ≥2 + 一次删除全部 + 撤销全恢复）→ 滚轮缩放（+落盘）→ 空格+拖平移（+落盘）→ 交互段无新增 JS 异常 | ch8-drag-node / ch8-box-select / ch8-zoom-pan |
+| `wb-canvas-w2.mjs` | 空格+拖平移 → 拖节点 → 选中+删除 → 撤销 → 新建画布项目 → 交互段无新增 JS 异常 | canvas-w2-final |
+
+### 六个坑（照抄别踩）
+
+1. **seed 必须活过 stub 的重写**：`stub.js` 每次 boot 都无条件 `setItem`，页内 `evaluate` 改 store 再
+   `reload` 会被覆盖（旧版脚本据此误判成「未找到 a1」）。解法：`context.route('**/__canvas_stub.js')`
+   取原始响应体，**在末尾追加** seed 脚本再 fulfill —— 不改 `stub.js`。
+2. **普通拖 = 平移画布，框选要按住 Shift / Ctrl / 中键**（`onMouseDown` 里 `drag.mode='rubber'` 的条件）。
+3. **框选起止点都要留在画布容器内**：起手判定是 `if (e.target !== st) return`，点在节点上或画布顶部
+   DOM 工具条上都不会进框选分支；终点跑出容器则 rubber 不结算，**还会把随后的「空格+拖 平移」一起吞掉**
+   （表现为 stage 位移 0，极易误读成平移坏了）。
+4. **选择栏只在多选（≥2）时出现**（`selBar` computed：`ids.length < 2 → null`）——单选断言要用
+   「删掉一个 + 撤销回来」的功能证据，不能看选择栏。
+5. **拖拽类断言必须排在做缩放/平移之前**：脚本会真的把画布平移到负坐标，之后按屏幕坐标点节点全落空。
+6. **视口有实时/落盘两份**，落盘走 `saveSoon` 500ms 防抖 → 断言前等 ≥1.2s。
