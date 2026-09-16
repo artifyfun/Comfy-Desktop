@@ -9,7 +9,6 @@
  */
 import { join } from 'node:path'
 import { app } from 'electron'
-import { randomUUID } from 'node:crypto'
 import { existsSync, readdirSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import appStoreManager, { type App, type ComfyPrompt, type ParamNode } from '../appStore'
@@ -45,6 +44,7 @@ export type {
   SessionStore
 } from './sessionTypes'
 import { templateLibrary } from './templates'
+import { PresetManager } from './presetManager'
 import { toPseudoApp, type WorkflowTemplate } from './templateCore'
 import {
   checkVram,
@@ -59,9 +59,7 @@ import {
 import {
   assignAttachmentsToSlots,
   attachmentSummary,
-  clonePreset,
   presetConstraintText,
-  BUILTIN_PRESETS,
   type AttachmentKind,
   type AttachmentMeta,
   type WorkbenchPreset
@@ -224,6 +222,8 @@ const MAX_SESSION_TOKENS = 2_000_000
 class WorkbenchService {
   /** 持久层（候选①）：sessions/presets/favorites/memories 的 home */
   private repo: SessionStoreRepo
+  /** 清单类职责（A1刀2）：presets/favorites/memories 的 CRUD 深 module */
+  private presets: PresetManager
   /** /mcp 端点可用性（agent session 创建时探测，决定 spec 是否注入 wb_* 编排段） */
   private mcpAvailable = false
   /** 编排去重标记：decide 轮内 wb_execute_template 真实执行过 → 最终 PLAN 不再重复执行 */
@@ -254,6 +254,11 @@ class WorkbenchService {
       storePath: sessionsPath,
       presetExists: (id) => !!this.getPreset(id),
       onDelete: (id) => this.agents.dispose(id)
+    })
+    this.presets = new PresetManager({
+      repo: this.repo,
+      templateLibrary,
+      skillLibrary: defaultSkillLibrary()
     })
     templateLibrary.on('change', () => this.pokeTemplates())
   }
@@ -361,21 +366,19 @@ class WorkbenchService {
     this.repo.flush()
   }
 
-  // ---------------- 跨会话长期记忆（dsh memory 语义） ----------------
+  // ---------------- 跨会话长期记忆（dsh memory 语义）→ PresetManager 转发 ----------------
 
   listMemories(): Record<string, { value: string; updatedAt: number }> {
-    return this.repo.listMemories()
+    return this.presets.listMemories()
   }
 
   /** 写入/更新(幂等,同 key 覆盖);工作台自我更新与用户指令共用此口 */
   rememberMemory(key: string, value: string): void {
-    const k = key.trim().slice(0, 64)
-    if (!k) throw new Error('memory key 不能为空')
-    this.repo.upsertMemory(k, value.trim().slice(0, 500))
+    this.presets.rememberMemory(key, value)
   }
 
   forgetMemory(key: string): boolean {
-    return this.repo.removeMemory(key)
+    return this.presets.forgetMemory(key)
   }
 
   // ---------------- 编排去重（wb_* 工具真实执行过 → 最终 PLAN 跳过执行） ----------------
@@ -394,13 +397,7 @@ class WorkbenchService {
 
   /** decide spec 的「用户长期记忆」注入段(空记忆返回空串) */
   renderMemoryContext(): string {
-    const entries = Object.entries(this.repo.listMemories())
-    if (entries.length === 0) return ''
-    const lines = entries
-      .sort((a, b) => b[1].updatedAt - a[1].updatedAt)
-      .slice(0, 20)
-      .map(([k, v]) => `- ${k}: ${v.value}`)
-    return `\n## 用户长期记忆（跨会话持久,可直接引用;需更新时用 intent=memory）\n${lines.join('\n')}`
+    return this.presets.renderMemoryContext()
   }
 
   /** 会话级 token 用量追加(turn.completed) */
@@ -1494,11 +1491,10 @@ class WorkbenchService {
     this.repo.flush()
   }
 
-  // ---------------- 收藏（产物收藏夹，跨会话） ----------------
+  // ---------------- 收藏（产物收藏夹，跨会话）→ PresetManager 转发 ----------------
 
   listFavorites(sessionId?: string): WorkbenchFavorite[] {
-    const all = this.repo.listFavorites()
-    return sessionId ? all.filter((f) => f.sessionId === sessionId) : all
+    return this.presets.listFavorites(sessionId)
   }
 
   addFavorite(input: {
@@ -1507,27 +1503,16 @@ class WorkbenchService {
     file: WorkbenchOutputFile
     note?: string
   }): WorkbenchFavorite {
-    const fav: WorkbenchFavorite = {
-      id: randomUUID(),
-      sessionId: input.sessionId,
-      promptId: input.executionPromptId,
-      templateId:
-        this.getSession(input.sessionId)?.executions?.find(
-          (e) => e.promptId === input.executionPromptId
-        )?.templateId ?? '',
-      file: input.file,
-      note: input.note,
-      createdAt: Date.now()
-    }
-    // 去重:同会话同文件重复收藏视为幂等
-    const dup = this.repo.findFavorite(fav.sessionId, fav.file)
-    if (dup) return dup
-    this.repo.addFavorite(fav)
-    return fav
+    // templateId 从会话执行记录回查（service 侧语境；PresetManager 不感知会话）
+    const templateId =
+      this.getSession(input.sessionId)?.executions?.find(
+        (e) => e.promptId === input.executionPromptId
+      )?.templateId ?? ''
+    return this.presets.addFavorite({ ...input, templateId })
   }
 
   removeFavorite(id: string): boolean {
-    return this.repo.removeFavorite(id)
+    return this.presets.removeFavorite(id)
   }
 
   publishToApp(
@@ -1554,62 +1539,37 @@ class WorkbenchService {
     return newApp.id
   }
 
-  // ---------------- 预设 CRUD（copy-dialog 语义） ----------------
+  // ---------------- 预设 CRUD（copy-dialog 语义）→ PresetManager 转发 ----------------
 
   listPresets(): WorkbenchPreset[] {
-    // dsh preset.yml order 语义：按 order 升序，缺省排 100
-    return [...BUILTIN_PRESETS, ...this.repo.listUserPresets()].sort(
-      (a, b) => (a.order ?? 100) - (b.order ?? 100)
-    )
+    return this.presets.listPresets()
   }
 
   getPreset(id: string): WorkbenchPreset | null {
-    return this.listPresets().find((p) => p.id === id) ?? null
+    return this.presets.getPreset(id)
   }
 
   createPreset(opts: { from?: string; id: string; name?: string }): WorkbenchPreset {
-    const existing = new Set(this.listPresets().map((p) => p.id))
-    const preset = clonePreset(opts.from ?? 'standard', opts.id, opts.name ?? '', existing)
-    if (!preset) throw new Error('预设 id 非法或已存在')
-    this.repo.addUserPreset(preset)
-    return preset
+    return this.presets.createPreset(opts)
   }
 
   /**
    * 预设捆绑模板（可执行推荐池）。内置预设不可改，返回更新后预设。
    */
   updatePresetTemplates(id: string, templateIds: string[]): WorkbenchPreset {
-    if (BUILTIN_PRESETS.some((p) => p.id === id)) throw new Error('builtin preset is readonly')
-    // 只保留真实存在的模板 id
-    const valid = new Set(templateLibrary.list().map((t) => t.id))
-    const next = [...new Set(templateIds)].filter((s) => valid.has(s))
-    const updated = this.repo.updateUserPreset(id, { templateIds: next })
-    if (!updated) throw new Error(`preset not found: ${id}`)
-    return updated
+    return this.presets.updatePresetTemplates(id, templateIds)
   }
 
   /**
    * 预设捆绑技能（SKILL.md 知识技能 name 清单）。内置预设不可改。
    */
   updatePresetSkills(id: string, skillIds: string[]): WorkbenchPreset {
-    if (BUILTIN_PRESETS.some((p) => p.id === id)) throw new Error('builtin preset is readonly')
-    const valid = new Set(
-      defaultSkillLibrary()
-        .list()
-        .map((s) => s.name)
-    )
-    const next = [...new Set(skillIds)].filter((s) => valid.has(s))
-    const updated = this.repo.updateUserPreset(id, { skillIds: next })
-    if (!updated) throw new Error(`preset not found: ${id}`)
-    return updated
+    return this.presets.updatePresetSkills(id, skillIds)
   }
 
   /** 技能改名后修正所有预设的捆绑引用（改名不失效）；供路由层在 update 改名后调用 */
   fixPresetSkillRefs(oldName: string, newName: string): number {
-    return this.repo.mapUserPresets((p) => {
-      if (!p.skillIds?.includes(oldName)) return p
-      return { ...p, skillIds: p.skillIds.map((s) => (s === oldName ? newName : s)) }
-    })
+    return this.presets.fixPresetSkillRefs(oldName, newName)
   }
 
   // ---------------- 技能库（Agent Skills 开放标准，SKILL.md 知识文档） ----------------
@@ -1619,19 +1579,15 @@ class WorkbenchService {
   }
 
   deletePreset(id: string): boolean {
-    // 内置不可删（dsh 同款：shipped preset 不归用户管理）
-    if (BUILTIN_PRESETS.some((p) => p.id === id)) return false
-    return this.repo.deleteUserPreset(id)
+    return this.presets.deletePreset(id)
   }
 
   setDefaultPreset(id: string): boolean {
-    if (!this.listPresets().some((p) => p.id === id)) return false
-    this.repo.setDefaultPreset(id)
-    return true
+    return this.presets.setDefaultPreset(id)
   }
 
   getDefaultPresetId(): string {
-    return this.repo.getDefaultPresetId(BUILTIN_PRESETS[0]!.id)
+    return this.presets.getDefaultPresetId()
   }
 
   // ---------------- 环境快照（前端「能力说明」可视化用，与决策注入同源） ----------------
