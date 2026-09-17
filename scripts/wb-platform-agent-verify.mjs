@@ -28,6 +28,8 @@ const opt = (n, d) => {
 const APP = opt('--app', 'http://127.0.0.1:3008').replace(/\/$/, '')
 const COMFY = opt('--comfy', 'http://127.0.0.1:8188').replace(/\/$/, '')
 const SCENARIO = opt('--scenario', 's2')
+/** s2 的目标 app：默认 Anima（带模板漂移的历史样本）；runner 传健康 app 做门禁 */
+const S2_APP = opt('--app-name', 'Anima')
 const TIMEOUT_MIN = Number(opt('--timeout-min', SCENARIO === 's4' ? '45' : '20'))
 const EXPECT_SIZE = opt('--expect-size', null)
 const VERSION_APP = opt('--version-app', 'Krea2文生图1024')
@@ -37,7 +39,7 @@ const stamp = new Date().toISOString().replace(/[:.]/g, '-')
 mkdirSync(EVID_DIR, { recursive: true })
 
 const INSTRUCTIONS = {
-  s2: '请调用模板 Anima 生成一张图片，使用默认输入图。',
+  s2: `请调用模板 ${S2_APP} 生成一张图片${S2_APP === 'Anima' ? '，使用默认输入图' : ''}。`,
   s3:
     '请用 wb_build_workflow 新建一个**文生图** app：' +
     '要求 (1) 暴露一个名为 prompt 的**文本**参数（不要图片上传槽）；' +
@@ -50,7 +52,8 @@ const INSTRUCTIONS = {
     'diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors、' +
     'vae/minimax_h3_video_vae_int8_convrot.safetensors、vae/minimax_h3_audio_vae_fp32.safetensors、' +
     'loras/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors 与 ' +
-    'text_encoders/qwen3-vl-4b-heretic_fp8_e4m3fn.safetensors；' +
+    'text_encoders/qwen3vl_32b_minimax_h3_int8_convrot_uncensored-by-linjian257.safetensors（⚠️ 必须用它：H3 的 fl2va 模型配的是这个 32B convrot 编码器；' +
+    'qwen3-vl-4b-heretic_fp8_e4m3fn 与之维度不配对，KSampler 会报 19x2560 vs 5120x5376）；' +
     '(3) 输出必须走**保存节点**（不要只接 Preview）；(4) 必需节点都要能在 object_info 里查到。' +
     '建好后用 wb_publish_workflow 发布为模板，然后**用它真跑一次**：prompt 用 "a cat walking on a sunny beach"。',
   s5:
@@ -67,11 +70,24 @@ const INSTRUCTIONS = {
     '(2) 用本地已有模型：diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors、' +
     'vae/minimax_h3_video_vae_int8_convrot.safetensors、vae/minimax_h3_audio_vae_fp32.safetensors、' +
     'loras/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors、' +
-    'text_encoders/qwen3-vl-4b-heretic_fp8_e4m3fn.safetensors；' +
+    'text_encoders/qwen3vl_32b_minimax_h3_int8_convrot_uncensored-by-linjian257.safetensors（⚠️ 必须用它：H3 的 fl2va 模型配的是这个 32B convrot 编码器；' +
+    'qwen3-vl-4b-heretic_fp8_e4m3fn 与之维度不配对，KSampler 会报 19x2560 vs 5120x5376）；' +
     '(3) 输出走 SaveVideo + SaveAudio。' +
     '**硬性约束：wb_validate_workflow 最多 3 次、wb_publish_workflow 最多 1 次**（同名即版本化更新）。' +
     '发布后立刻用 wb_execute_template 真跑一次：prompt="a cat walking on a sunny beach", width=1344, height=768；' +
-    '再用 wb_get_outputs 取产物，最后简要报告产物文件名与规格。**不要反复重建或微调工作流**。'
+    '再用 wb_get_outputs 取产物，最后简要报告产物文件名与规格。**不要反复重建或微调工作流**。',
+  // S7「自愈/修复」：app 的模板被写坏了（接线错误），让 agent 自己定位、修复、重新发布并验证。
+  // 与 S3/S4b 的区别：目标不是从零创建，而是**修一个已存在但不能用的 app**。
+  s7:
+    '模板「MiniMax H3 文生视频」现在跑不起来：执行会在 KSampler 报 ' +
+    '"mat1 and mat2 shapes cannot be multiplied (19x2560 and 5120x5376)"。' +
+    '已知根因是它的 CLIPLoader 用了 qwen3-vl-4b-heretic_fp8_e4m3fn.safetensors，' +
+    '与 diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors 不配对。' +
+    '请把该 CLIPLoader 的 clip_name 改为 ' +
+    'qwen3vl_32b_minimax_h3_int8_convrot_uncensored-by-linjian257.safetensors（type 保持 minimax），' +
+    '**其余一律不动**，用 wb_publish_workflow 同名重新发布（版本化更新），' +
+    '然后用 wb_execute_template 真跑一次（prompt="a cat walking on a sunny beach", width=1344, height=768），' +
+    '确认能出片后用 wb_get_outputs 取产物并报告文件名与规格。'
 }
 
 // ───────── S5 前置：记录目标 app 的版本基线 ─────────
@@ -416,6 +432,19 @@ if (!promptId) {
 }
 
 // 模板库侧：S3/S4 应产出新模板
+// S7 专项：修复后的模板必须已把编码器纠正过来（否则修了等于没修）
+if (SCENARIO === 's7') {
+  const tpls2 = (await (await fetch(`${APP}/api/workbench/templates`)).json()).data || []
+  const t2 = tpls2.find((x) => x.name === 'MiniMax H3 文生视频')
+  const clip = Object.values(t2?.prompt || {}).find((v) => v.class_type === 'CLIPLoader')?.inputs
+    ?.clip_name
+  record(
+    'S7 修复后编码器已纠正并入库',
+    clip === 'qwen3vl_32b_minimax_h3_int8_convrot_uncensored-by-linjian257.safetensors',
+    `clip_name=${clip}`
+  )
+}
+
 if (SCENARIO === 's3' || SCENARIO === 's4') {
   const tpls = (await (await fetch(`${APP}/api/workbench/templates`)).json()).data || []
   const fresh = tpls.filter(

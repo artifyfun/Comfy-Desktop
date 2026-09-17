@@ -169,22 +169,37 @@ if (!tmpl) {
 } else {
   const param = (tmpl.paramsNodes || [])[0]
   const nodeId = param?.id
-  const widget = param?.name
+  // widget 名取 selectedWidget.name（参数名≠widget 名很常见：如参数叫 prompt、widget 叫 text）。
+  // 用参数名去读 history 会读空 → L1 恒假（2026-09-17 H3 场景实测）。
+  const widget = param?.selectedWidget?.name || param?.name
   const defVal = String(tmpl.prompt?.[nodeId]?.inputs?.[widget] ?? '').replace(/^"|"$/g, '')
   const isMediaSlot = /image|video|audio|-uploader$/i.test(param?.renderComponent ?? '')
   info(`参数：node ${nodeId} (${param?.type}) widget=${widget} render=${param?.renderComponent}`)
   info(`模板默认值：${defVal}`)
 
-  let paramValue = defVal
-  if (existsSync(defVal)) {
-    const ext = (defVal.split('.').pop() || 'jpg').toLowerCase()
-    const buf = readFileSync(defVal)
-    paramValue = `data:image/${ext === 'jpg' ? 'jpeg' : ext};base64,${buf.toString('base64')}`
-    info(
-      `构造新入参：源图 ${(buf.length / 1024).toFixed(0)}KB → data URL（${paramValue.length} 字符）`
-    )
+  // L1 要有意义，就必须传一个**非空且唯一**的值：文本类参数一律用探针串。
+  // 曾经的做法是「非媒体槽就沿用模板默认值」，而很多模板的 prompt 默认值是空串
+  // → `history === '' === paramValue` 恒真，断言全绿但其实什么都没验（2026-09-17 发现）。
+  // 若调用方用 `--params` 显式覆盖了该 widget，则以调用方给的值为准（那才是 L1 该断言的东西）。
+  const PROBE = `wb-l1-probe-${Date.now().toString(36)}`
+  const override = EXTRA_PARAMS[widget]
+  let paramValue = override !== undefined ? String(override) : defVal
+  if (override !== undefined) {
+    info(`该 widget 被 --params 覆盖 → L1 以覆盖值为准：${String(override).slice(0, 60)}`)
+  } else if (isMediaSlot) {
+    if (existsSync(defVal)) {
+      const ext = (defVal.split('.').pop() || 'jpg').toLowerCase()
+      const buf = readFileSync(defVal)
+      paramValue = `data:image/${ext === 'jpg' ? 'jpeg' : ext};base64,${buf.toString('base64')}`
+      info(
+        `构造新入参：源图 ${(buf.length / 1024).toFixed(0)}KB → data URL（${paramValue.length} 字符）`
+      )
+    } else {
+      info(`媒体参数默认值不是本机文件（${defVal || '空'}）→ 该场景 L1 不再成立`)
+    }
   } else {
-    info('源图不存在，回退模板默认值（L1 透传断言将不成立）')
+    paramValue = PROBE
+    info(`构造文本探针值：${PROBE}（L1 将断言 history 精确命中它）`)
   }
 
   const outBefore = new Set(readdirSync(OUTPUT_DIR))
@@ -241,9 +256,11 @@ if (!tmpl) {
 
     const inAfter = readdirSync(INPUT_DIR).filter((f) => !inBefore.has(f))
     record(
-      'S1.3 L1 入参真透传（history 值 ≠ 模板默认值）',
-      isMediaSlot ? !!histVal && histVal !== defVal : histVal === paramValue,
-      `history=${histVal.slice(0, 70)} | input 新增=${inAfter.join(', ') || '无'}`
+      'S1.3 L1 入参真透传（history 精确命中我们传的值）',
+      isMediaSlot ? !!histVal && histVal !== defVal : !!paramValue && histVal === paramValue,
+      `传=${paramValue.slice(0, 44)} | history=${histVal.slice(0, 70)} | input 新增=${
+        inAfter.join(', ') || '无'
+      }`
     )
 
     const outputs = hist?.outputs || {}

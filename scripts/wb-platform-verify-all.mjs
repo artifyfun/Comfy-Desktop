@@ -64,7 +64,7 @@ const SCENARIOS = {
   },
   s2: {
     group: 'agent',
-    title: 'S2 自然语言 → agent 跑既有 app',
+    title: 'S2 自然语言 → agent 跑既有 app（健康 app 做门禁）',
     args: [
       'scripts/wb-platform-agent-verify.mjs',
       '--app',
@@ -73,6 +73,8 @@ const SCENARIOS = {
       COMFY,
       '--scenario',
       's2',
+      '--app-name',
+      IMG_APP,
       '--timeout-min',
       '12'
     ]
@@ -144,14 +146,31 @@ const SCENARIOS = {
       '--expect-size',
       '1344x768'
     ]
+  },
+  s7: {
+    group: 'video',
+    title: 'S7 自愈/修复：agent 修好接线错误的视频 app 并真跑',
+    args: [
+      'scripts/wb-platform-agent-verify.mjs',
+      '--app',
+      APP,
+      '--comfy',
+      COMFY,
+      '--scenario',
+      's7',
+      '--timeout-min',
+      '18',
+      '--expect-size',
+      '1344x768'
+    ]
   }
 }
 
-const ORDER = ['s1', 's6', 's2', 's3', 's5', 's1v', 's4b']
+const ORDER = ['s1', 's6', 's2', 's3', 's5', 's1v', 's4b', 's7']
 const GROUPS = {
   core: ['s1', 's6'],
   agent: ['s2', 's3', 's5'],
-  video: ['s1v', 's4b'],
+  video: ['s1v', 's4b', 's7'],
   all: ORDER
 }
 const picked = ONLY
