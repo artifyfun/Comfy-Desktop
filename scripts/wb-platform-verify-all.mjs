@@ -5,6 +5,7 @@
  *   core  （默认）S1 直连生图（含 S0 前置自检）+ S6 异常路径 + S8 真实上传路径
  *   agent         S2 自然语言→agent 跑既有 app、S3 新建生图 app、S5 版本化迭代
  *   batch         S9 批量队列真跑（排队/暂停/恢复/rerun/取消）
+ *   canvas-e2e    S11 画布 AI 真实生成（前置：画布 harness 5174）
  *   video         S1v 直连生视频 768p、S4b 新建视频 app（有界迭代）、S10 新建图生视频 app（I2V）
  *   all           以上全部
  *
@@ -80,6 +81,12 @@ const SCENARIOS = {
     group: 'batch',
     title: 'S9 批量队列真跑（排队/暂停/恢复/rerun/取消；⚠️ 绝不触发关机/通知）',
     args: ['scripts/wb-platform-batch-verify.mjs', '--app', APP, '--comfy', COMFY]
+  },
+  s11: {
+    // 特殊前置：画布 harness（node acceptance/canvas/serve.mjs 5174）
+    group: 'canvas-e2e',
+    title: 'S11 画布 AI 真实生成→产物回画布（同源 SSE + 双人审）',
+    args: ['scripts/wb-platform-canvas-e2e-verify.mjs', '--app', APP, '--comfy', COMFY]
   },
   s10: {
     group: 'video',
@@ -206,11 +213,12 @@ const SCENARIOS = {
 
 // s7（自愈/修复演练）不进默认编排：它假设「app 当前是坏的」，对健康 app 是 8 分钟的空转；
 // app 真坏的时候用 --only s7 单独拉起来。
-const ORDER = ['s1', 's6', 's8', 's2', 's3', 's5', 's9', 's1v', 's4b', 's10']
+const ORDER = ['s1', 's6', 's8', 's2', 's3', 's5', 's9', 's1v', 's4b', 's10', 's11']
 const GROUPS = {
   core: ['s1', 's6', 's8'],
   agent: ['s2', 's3', 's5'],
   batch: ['s9'],
+  'canvas-e2e': ['s11'],
   video: ['s1v', 's4b', 's10'],
   all: ORDER
 }
