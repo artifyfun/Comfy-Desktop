@@ -17,6 +17,7 @@
  */
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 
@@ -89,7 +90,27 @@ const INSTRUCTIONS = {
     'qwen3vl_32b_minimax_h3_int8_convrot_uncensored-by-linjian257.safetensors（type 保持 minimax），' +
     '**其余一律不动**，用 wb_publish_workflow 同名重新发布（版本化更新），' +
     '然后用 wb_execute_template 真跑一次（prompt="a cat walking on a sunny beach", width=1344, height=768），' +
-    '确认能出片后用 wb_get_outputs 取产物并报告文件名与规格。'
+    '确认能出片后用 wb_get_outputs 取产物并报告文件名与规格。',
+  // S10「I2V 图生视频」：库里只有 T2V，让 agent 基于它**新建**图生视频 app（用户原话：
+  // 「现成的 app 不适合，就让工作台生成合适的」）。__S10_IMAGE__ 由脚本预上传后替换。
+  s10:
+    '模板库里的「MiniMax H3 文生视频」只能文生视频。请做一个**图生视频** app（名字' +
+    '「MiniMax H3 图生视频」）：若库里已有同名 app 就 wb_publish_workflow **同名版本化更新**，' +
+    '没有才 force_new 新建。基于「MiniMax H3 文生视频」的 workflow 改：' +
+    '① 节点 7（CLIPTextEncode）、8（EmptyMiniMaxH3LatentAV）、9（KSampler）**全部保留**；' +
+    '② 新增节点 15 = `LoadImage`，inputs = { image: "__S10_IMAGE__" }；' +
+    '③ 新增节点 16 = `MiniMaxH3AddGuide`，inputs = { positive: ["7",0], latent: ["8",0], ' +
+    'frame_idx: 0, vae: ["5",0], image: ["15",0] }（**不要用 MiniMaxH3ImageToVideo**——' +
+    '它走文本编码器视觉塔，本机 int8_convrot 编码器在该路径抛 dequantize_int8_embedding ' +
+    'NoCapableBackendError，实测验证过）；' +
+    '④ 节点 9（KSampler）的 positive 改接 ["16",0]（negative 保持 ["7",0]），其余不动；' +
+    '⑤ SaveVideo / SaveAudio 的 filename_prefix 改为 minimax_h3_i2v；' +
+    '⑥ 参数声明（paramsNodes）：节点 7 的 text（textarea，参数名 prompt）、节点 8 的 width 和 height' +
+    '（number）、**节点 15 的 image（renderComponent 必须是 image-uploader，selectedWidget.name = "image"）**；' +
+    '⑦ wb_validate_workflow（**≤3 次**）→ wb_publish_workflow（**≤1 次**）→ ' +
+    'wb_execute_template 真跑：params = { prompt: "the scene comes alive with gentle motion", ' +
+    'image: "__S10_IMAGE__", width: 1344, height: 768 } → wb_get_outputs 取产物并报告文件名。' +
+    '**不要反复重建或微调工作流**。'
 }
 
 // ───────── S5 前置：记录目标 app 的版本基线 ─────────
@@ -168,6 +189,48 @@ async function probeImage(dataUrl) {
   }
 }
 
+// ───────── S10 前置：走真实上传端点预上传首帧图（链路已在 S8 验证）─────────
+let S10_IMAGE = ''
+let S10_SRC = ''
+if (SCENARIO === 's10') {
+  const srcImg = join(tmpdir(), `wb-s10-src-${stamp}.jpg`)
+  const ff = spawnSync('ffmpeg', [
+    '-v',
+    'error',
+    '-y',
+    '-f',
+    'lavfi',
+    '-i',
+    'testsrc2=size=1024x680:rate=1',
+    '-frames:v',
+    '1',
+    srcImg
+  ])
+  if (ff.status !== 0) throw new Error('ffmpeg 生成测试图失败: ' + ff.stderr)
+  const boundary = `----wbs10${Date.now().toString(36)}`
+  const body = Buffer.concat([
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="wb-s10-first-frame.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`
+    ),
+    readFileSync(srcImg),
+    Buffer.from(`\r\n--${boundary}--\r\n`)
+  ])
+  const up = await fetch(`${APP}/api/workbench/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+    body
+  })
+  const upJson = await up.json().catch(() => ({}))
+  S10_IMAGE = upJson?.data?.name || ''
+  S10_SRC = srcImg
+  record(
+    'S10 前置 首帧图已上传（走真实 /api/workbench/upload）',
+    up.status === 201 && !!S10_IMAGE,
+    `HTTP ${up.status} name=${S10_IMAGE}`
+  )
+  if (!S10_IMAGE) throw new Error('预上传失败，s10 无从继续')
+}
+
 // ───────── 跑一轮 agent ─────────
 const session = (
   await jpost('/api/workbench/sessions/create', {
@@ -179,7 +242,10 @@ const threadId = session.id
 record(`${SCENARIO} 会话创建`, !!threadId, `threadId=${threadId}`)
 
 const runId = `${SCENARIO}-${Date.now()}`
-const instruction = INSTRUCTIONS[SCENARIO]
+const instruction =
+  SCENARIO === 's10'
+    ? INSTRUCTIONS[SCENARIO].replaceAll('__S10_IMAGE__', S10_IMAGE)
+    : INSTRUCTIONS[SCENARIO]
 info(`指令：${instruction.slice(0, 120)}…`)
 
 const res = await fetch(`${APP}/api/workbench/agent/run`, {
@@ -382,6 +448,81 @@ if (!promptId) {
               `实测 ${st.width}x${st.height}`
             )
           }
+          // S10 专项：**首帧相关性**——抽第 0 帧与上传源图对比（灰度下采样 + Pearson r），
+          // 证明视频真的由该图驱动（I2V 的本质断言，光有 L1 接线不够）。
+          if (SCENARIO === 's10' && S10_SRC && existsSync(S10_SRC)) {
+            const GRID = 24
+            const grab = (path, seek) => {
+              const r = spawnSync(
+                'ffmpeg',
+                [
+                  '-v',
+                  'error',
+                  seek ? '-ss' : '-i',
+                  seek ? String(seek) : path,
+                  ...(seek ? ['-i', path] : []),
+                  '-frames:v',
+                  '1',
+                  '-vf',
+                  `scale=${GRID * 4}:${GRID * 3}`,
+                  '-pix_fmt',
+                  'gray',
+                  '-f',
+                  'rawvideo',
+                  '-'
+                ],
+                { encoding: null, maxBuffer: 8 * 1024 * 1024 }
+              )
+              return r.status === 0 ? r.stdout : null
+            }
+            const vRaw = grab(local, 0)
+            const sRaw = grab(S10_SRC, 0)
+            if (
+              vRaw &&
+              sRaw &&
+              vRaw.length >= GRID * 4 * GRID * 3 &&
+              sRaw.length >= GRID * 4 * GRID * 3
+            ) {
+              const pool = (raw) => {
+                const W = GRID * 4
+                const GH = (GRID * 3) / 4 // 96x72 按 4x4 池化是 24x18 格（GRID×24 行会越界）
+                const out = []
+                for (let gy = 0; gy < GH; gy++) {
+                  for (let gx = 0; gx < GRID; gx++) {
+                    let sum = 0,
+                      n = 0
+                    for (let y = gy * 4; y < gy * 4 + 4; y++)
+                      for (let x = gx * 4; x < gx * 4 + 4; x++) {
+                        sum += raw[y * W + x]
+                        n++
+                      }
+                    out.push(sum / n)
+                  }
+                }
+                return out
+              }
+              const a = pool(vRaw),
+                b = pool(sRaw)
+              const ma = a.reduce((x, y) => x + y, 0) / a.length
+              const mb = b.reduce((x, y) => x + y, 0) / b.length
+              let num = 0,
+                da = 0,
+                db = 0
+              for (let i = 0; i < a.length; i++) {
+                num += (a[i] - ma) * (b[i] - mb)
+                da += (a[i] - ma) ** 2
+                db += (b[i] - mb) ** 2
+              }
+              const r = da && db ? num / Math.sqrt(da * db) : 0
+              record(
+                'S10 首帧与上传源图相关（视频真由该图驱动）',
+                r >= 0.4,
+                `Pearson r=${r.toFixed(3)}（阈值 0.4；抽帧 96x72 灰度下采样对比）`
+              )
+            } else {
+              record('S10 首帧与上传源图相关（视频真由该图驱动）', false, 'ffmpeg 抽帧失败')
+            }
+          }
         }
       }
     } else {
@@ -445,6 +586,37 @@ if (SCENARIO === 's7') {
     clip === 'qwen3vl_32b_minimax_h3_int8_convrot_uncensored-by-linjian257.safetensors',
     `clip_name=${clip}`
   )
+}
+
+// S10 专项：I2V app 入库形态 + 首帧真的被工作流引用（L1）+ 首帧相关性（L3）
+if (SCENARIO === 's10') {
+  const tpls2 = (await (await fetch(`${APP}/api/workbench/templates`)).json()).data || []
+  const i2v = tpls2.find((x) => x.name === 'MiniMax H3 图生视频')
+  const t2v = tpls2.find((x) => x.name === 'MiniMax H3 文生视频')
+  const mediaParam = (i2v?.paramsNodes || []).find((p) =>
+    String(p.renderComponent || '').startsWith('image')
+  )
+  record(
+    'S10 I2V app 已入库且带 image-uploader 参数（T2V 未被覆盖）',
+    !!i2v && !!mediaParam && !!t2v,
+    `i2v=${i2v?.id} 媒体参数=${mediaParam ? `${mediaParam.id}.${mediaParam.selectedWidget?.name}` : '无'} t2v 仍在=${!!t2v}`
+  )
+  // L1：history 里 LoadImage 的 widget == 上传件名，且 AddGuide 的 image 接到 LoadImage
+  if (i2v && promptId) {
+    const h2 = (await (await fetch(`${COMFY}/history/${promptId}`)).json())[promptId]
+    const graph = h2?.prompt?.[2] || {}
+    const loadNode = Object.entries(graph).find(([, v]) => v.class_type === 'LoadImage')
+    const guideNode = Object.entries(graph).find(([, v]) => v.class_type === 'MiniMaxH3AddGuide')
+    const imgWidget = loadNode?.[1]?.inputs?.image
+    const guideLink = guideNode?.[1]?.inputs?.image
+    record(
+      'S10 L1 首帧真被引用（LoadImage widget + AddGuide.image 接线）',
+      String(imgWidget || '').endsWith('wb-s10-first-frame.jpg') &&
+        Array.isArray(guideLink) &&
+        String(guideLink[0]) === String(loadNode?.[0]),
+      `LoadImage#${loadNode?.[0]}.image=${String(imgWidget).slice(0, 50)} AddGuide.image→${guideLink ? guideLink.join('.') : '未接'}`
+    )
+  }
 }
 
 if (SCENARIO === 's3' || SCENARIO === 's4') {

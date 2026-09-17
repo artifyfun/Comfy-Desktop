@@ -328,6 +328,7 @@ env -u ELECTRON_RUN_AS_NODE pnpm dev     # dev 与打包版抢 3008，先停另�
 | **S6** 异常路径 | `wb-platform-negative-verify.mjs` | 不存在的 id/模型、越界尺寸、空输入、**取消链路**；每步查「无脏 job / 无产物误登记」 | ✅ 14/14 |
 | **S8** 真实上传路径 | `wb-platform-upload-verify.mjs` | multipart 上传 → 201+meta → 落 ComfyUI input → 会话登记附件 → **裸文件名透传执行**（L1 history 命中）→ L2 → L3 产物 ≠ 上传源 | ✅ 9/9 |
 | **S9** 批量队列真跑 | `wb-platform-batch-verify.mjs` | start→running→**pause**（在跑条计 failed）→**job-resume** 续跑→completed→产物落盘解码→rerun→**cancel 排队任务=移出队列**→清理无脏 job；**全程不设 autoShutdown/notifyUrl** | ✅ 11/11 |
+| **S10** 工作台新建图生视频 app（I2V） | `wb-platform-agent-verify.mjs --scenario s10` | 预上传首帧图（真实 upload 端点）→ agent 基于 T2V 建 I2V app（**必须走 `MiniMaxH3AddGuide` VAE 引导帧**，`MiniMaxH3ImageToVideo` 会走文本编码器视觉塔、在 int8_convrot 编码器上抛 `dequantize_int8_embedding` NoCapableBackendError）→ 真跑 → ffprobe + **首帧 Pearson r≥0.4 对上传源图** | ✅ 15/15（r=0.971） |
 
 **辅助脚本**：`wb-template-health.mjs`（只读）用本机 `/object_info` 静态对照每个 app 模板的 prompt，
 找两类**节点版本漂移** —— `required_missing`（必填输入没给）与 `input_not_in_node`（连了本机不存在的输入口）。
