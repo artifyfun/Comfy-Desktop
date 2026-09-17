@@ -2,8 +2,9 @@
  * 平台生成能力验证 —— **总入口**（S0–S6 一次跑完，逐场景汇总）。
  *
  * 把散在各处的验证脚本按场景编排起来，跑完给一张总表 + 汇总 JSON：
- *   core  （默认）S1 直连生图（含 S0 前置自检）+ S6 异常路径
+ *   core  （默认）S1 直连生图（含 S0 前置自检）+ S6 异常路径 + S8 真实上传路径
  *   agent         S2 自然语言→agent 跑既有 app、S3 新建生图 app、S5 版本化迭代
+ *   batch         S9 批量队列真跑（排队/暂停/恢复/rerun/取消）
  *   video         S1v 直连生视频 768p、S4b 新建视频 app（有界迭代）
  *   all           以上全部
  *
@@ -61,6 +62,24 @@ const SCENARIOS = {
     group: 'core',
     title: 'S6 异常路径（失败要失败得清楚 + 取消链路）',
     args: ['scripts/wb-platform-negative-verify.mjs', '--app', APP, '--comfy', COMFY]
+  },
+  s8: {
+    group: 'core',
+    title: 'S8 真实上传路径（multipart → input → 裸文件名透传执行）',
+    args: [
+      'scripts/wb-platform-upload-verify.mjs',
+      '--app',
+      APP,
+      '--comfy',
+      COMFY,
+      '--app-name',
+      opt('--upload-app', 'Anima')
+    ]
+  },
+  s9: {
+    group: 'batch',
+    title: 'S9 批量队列真跑（排队/暂停/恢复/rerun/取消；⚠️ 绝不触发关机/通知）',
+    args: ['scripts/wb-platform-batch-verify.mjs', '--app', APP, '--comfy', COMFY]
   },
   s2: {
     group: 'agent',
@@ -170,10 +189,11 @@ const SCENARIOS = {
 
 // s7（自愈/修复演练）不进默认编排：它假设「app 当前是坏的」，对健康 app 是 8 分钟的空转；
 // app 真坏的时候用 --only s7 单独拉起来。
-const ORDER = ['s1', 's6', 's2', 's3', 's5', 's1v', 's4b']
+const ORDER = ['s1', 's6', 's8', 's2', 's3', 's5', 's9', 's1v', 's4b']
 const GROUPS = {
-  core: ['s1', 's6'],
+  core: ['s1', 's6', 's8'],
   agent: ['s2', 's3', 's5'],
+  batch: ['s9'],
   video: ['s1v', 's4b'],
   all: ORDER
 }

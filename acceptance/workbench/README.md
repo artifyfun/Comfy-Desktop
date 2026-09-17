@@ -304,6 +304,7 @@ cd /d/artifyfun/Comfy-Desktop
 node scripts/wb-platform-verify-all.mjs                 # core：S1 + S6
 node scripts/wb-platform-verify-all.mjs --group agent   # S2 / S3 / S5
 node scripts/wb-platform-verify-all.mjs --group video   # S1v / S4b（耗时，走 H3）
+node scripts/wb-platform-verify-all.mjs --group batch   # S9 批量队列真跑
 node scripts/wb-platform-verify-all.mjs --group all     # 全部
 node scripts/wb-platform-verify-all.mjs --only s1,s6    # 指定场景
 ```
@@ -325,6 +326,8 @@ env -u ELECTRON_RUN_AS_NODE pnpm dev     # dev 与打包版抢 3008，先停另�
 | **S4b** 新建视频 app（有界迭代） | 同上 `--scenario s4b` | 同上 + 视频规格；指令写死 `validate ≤3 / publish ≤1` | ✅ 11/11 |
 | **S5** 版本化迭代 | 同上 `--scenario s5` | `app_versions` 新增快照且最大快照号 +1（生效版本 = 最大 +1）、新尺寸真出图 | ✅ 12/12 |
 | **S6** 异常路径 | `wb-platform-negative-verify.mjs` | 不存在的 id/模型、越界尺寸、空输入、**取消链路**；每步查「无脏 job / 无产物误登记」 | ✅ 14/14 |
+| **S8** 真实上传路径 | `wb-platform-upload-verify.mjs` | multipart 上传 → 201+meta → 落 ComfyUI input → 会话登记附件 → **裸文件名透传执行**（L1 history 命中）→ L2 → L3 产物 ≠ 上传源 | ✅ 9/9 |
+| **S9** 批量队列真跑 | `wb-platform-batch-verify.mjs` | start→running→**pause**（在跑条计 failed）→**job-resume** 续跑→completed→产物落盘解码→rerun→**cancel 排队任务=移出队列**→清理无脏 job；**全程不设 autoShutdown/notifyUrl** | ✅ 11/11 |
 
 **辅助脚本**：`wb-template-health.mjs`（只读）用本机 `/object_info` 静态对照每个 app 模板的 prompt，
 找两类**节点版本漂移** —— `required_missing`（必填输入没给）与 `input_not_in_node`（连了本机不存在的输入口）。
