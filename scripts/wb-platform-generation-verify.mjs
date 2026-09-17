@@ -171,7 +171,8 @@ if (!tmpl) {
   const nodeId = param?.id
   // widget 名取 selectedWidget.name（参数名≠widget 名很常见：如参数叫 prompt、widget 叫 text）。
   // 用参数名去读 history 会读空 → L1 恒假（2026-09-17 H3 场景实测）。
-  const widget = param?.selectedWidget?.name || param?.name
+  const paramName = param?.name // execute 的 params 键 = 参数名（executor 按 args[param.name] 取）
+  const widget = param?.selectedWidget?.name || paramName // history 里读的是 widget 名（两者可以不同）
   const defVal = String(tmpl.prompt?.[nodeId]?.inputs?.[widget] ?? '').replace(/^"|"$/g, '')
   const isMediaSlot = /image|video|audio|-uploader$/i.test(param?.renderComponent ?? '')
   info(`参数：node ${nodeId} (${param?.type}) widget=${widget} render=${param?.renderComponent}`)
@@ -182,7 +183,7 @@ if (!tmpl) {
   // → `history === '' === paramValue` 恒真，断言全绿但其实什么都没验（2026-09-17 发现）。
   // 若调用方用 `--params` 显式覆盖了该 widget，则以调用方给的值为准（那才是 L1 该断言的东西）。
   const PROBE = `wb-l1-probe-${Date.now().toString(36)}`
-  const override = EXTRA_PARAMS[widget]
+  const override = EXTRA_PARAMS[paramName]
   let paramValue = override !== undefined ? String(override) : defVal
   if (override !== undefined) {
     info(`该 widget 被 --params 覆盖 → L1 以覆盖值为准：${String(override).slice(0, 60)}`)
@@ -220,7 +221,7 @@ if (!tmpl) {
     body: JSON.stringify({
       sessionId,
       templateId: tmpl.id,
-      params: { [widget]: paramValue, ...EXTRA_PARAMS }
+      params: { [paramName]: paramValue, ...EXTRA_PARAMS }
     })
   })
   const promptId = unwrap(eRes)?.promptId
