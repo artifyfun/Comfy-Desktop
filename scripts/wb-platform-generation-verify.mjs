@@ -15,6 +15,7 @@
  *
  * 前置：应用运行版已启动（:3008）+ ComfyUI 就绪（:8188）。S1 不走 agent，与 LLM 余额无关。
  */
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -28,6 +29,18 @@ const APP = opt('--app', 'http://127.0.0.1:3008').replace(/\/$/, '')
 const COMFY = opt('--comfy', 'http://127.0.0.1:8188').replace(/\/$/, '')
 const TEMPLATE = opt('--template', 'Anima')
 const TIMEOUT_MIN = Number(opt('--timeout-min', '30'))
+/** 额外入参（JSON）：用于按需覆盖模板未暴露但模板 prompt 里存在的 widget，或显式指定尺寸等 */
+const EXTRA_PARAMS = (() => {
+  const raw = opt('--params', '')
+  if (!raw) return {}
+  try {
+    return JSON.parse(raw)
+  } catch (e) {
+    throw new Error(`--params 不是合法 JSON：${e.message}`)
+  }
+})()
+/** 视频产物期望分辨率（如 1344x768）；给了就断言，且要求 ffprobe 可读 */
+const EXPECT_VIDEO_SIZE = opt('--expect-video-size', '')
 const APPDATA = process.env.APPDATA || ''
 const COMFY_ROOT = 'D:/Comfy-Desktop/ComfyUI-Shared'
 const OUTPUT_DIR = `${COMFY_ROOT}/output`
@@ -189,7 +202,11 @@ if (!tmpl) {
   const t0 = Date.now()
   const eRes = await req(`${APP}/api/workbench/execute`, {
     method: 'POST',
-    body: JSON.stringify({ sessionId, templateId: tmpl.id, params: { [widget]: paramValue } })
+    body: JSON.stringify({
+      sessionId,
+      templateId: tmpl.id,
+      params: { [widget]: paramValue, ...EXTRA_PARAMS }
+    })
   })
   const promptId = unwrap(eRes)?.promptId
   record('S1.2 提交执行拿到 promptId（L1）', !!promptId, `HTTP ${eRes.http} promptId=${promptId}`)
@@ -267,7 +284,117 @@ if (!tmpl) {
     info(`输出目录新增 ${added.length} 项：${added.slice(0, 5).join(', ') || '无'}`)
 
     const target = saved[0] || media[0]
-    if (target) {
+    const isVideoTarget = !!target && /\.(mp4|webm|mov)$/i.test(target.filename)
+    if (target && isVideoTarget) {
+      // ── 视频产物：用 ffprobe 读规格 + 抽帧量化「画面真的在动」（不是静态图拼的）──
+      const local = join(
+        COMFY_ROOT,
+        target.type === 'output' ? 'output' : 'temp',
+        target.subfolder,
+        target.filename
+      ).replace(/\//g, '\\')
+      record('S1.6 L3 视频产物落盘', existsSync(local), `${local}`)
+      if (existsSync(local)) {
+        info(`大小 ${(statSync(local).size / 1024 / 1024).toFixed(2)}MB`)
+        const pr = spawnSync(
+          'ffprobe',
+          [
+            '-v',
+            'error',
+            '-select_streams',
+            'v:0',
+            '-show_entries',
+            'stream=codec_name,width,height,r_frame_rate,nb_frames,duration',
+            '-show_entries',
+            'format=duration,size,format_name',
+            '-of',
+            'json',
+            local
+          ],
+          { encoding: 'utf8' }
+        )
+        if (pr.status !== 0) {
+          record('S1.7 L3 ffprobe 可解析视频', false, String(pr.stderr || '').slice(0, 160))
+        } else {
+          const j = JSON.parse(pr.stdout)
+          const st = (j.streams || [])[0] || {}
+          const [num, den] = String(st.r_frame_rate || '0/1')
+            .split('/')
+            .map(Number)
+          const fps = den ? num / den : 0
+          const dur = Number(j.format?.duration ?? st.duration ?? 0)
+          const frames = Number(st.nb_frames) || Math.round(dur * fps)
+          record(
+            'S1.7 L3 ffprobe 可解析视频（编码/分辨率/时长/帧数）',
+            !!st.codec_name && Number(st.width) > 0 && dur > 0.3,
+            `${st.codec_name} ${st.width}x${st.height} ${fps.toFixed(2)}fps ${frames}帧 ${dur.toFixed(2)}s`
+          )
+          if (EXPECT_VIDEO_SIZE) {
+            const [ew, eh] = EXPECT_VIDEO_SIZE.split('x').map(Number)
+            record(
+              `S1.8 L3 视频分辨率 == 期望 ${EXPECT_VIDEO_SIZE}`,
+              Number(st.width) === ew && Number(st.height) === eh,
+              `实测 ${st.width}x${st.height}`
+            )
+          }
+          // 抽帧 → 灰度 → 相邻帧平均像素差（纯色/静止视频差值≈0）
+          const raw = join(EVID_DIR, `motion-${stamp}.raw`)
+          const ff = spawnSync(
+            'ffmpeg',
+            [
+              '-v',
+              'error',
+              '-y',
+              '-i',
+              local,
+              '-vf',
+              'fps=6,scale=160:-2',
+              '-pix_fmt',
+              'gray',
+              '-f',
+              'rawvideo',
+              raw
+            ],
+            { encoding: 'utf8' }
+          )
+          if (ff.status !== 0 || !existsSync(raw)) {
+            record(
+              'S1.9 L3 抽帧量化画面运动',
+              false,
+              String(ff.stderr || 'ffmpeg 失败').slice(0, 160)
+            )
+          } else {
+            const bytes = readFileSync(raw)
+            const W = 160
+            const frameH = Math.max(
+              2,
+              Math.round(((Number(st.height) / Number(st.width)) * W) / 2) * 2
+            )
+            const fs = W * frameH
+            const n = Math.floor(bytes.length / fs)
+            let sum = 0
+            let pairs = 0
+            let maxDiff = 0
+            for (let i = 1; i < n; i++) {
+              let d = 0
+              for (let k = 0; k < fs; k += 7) {
+                d += Math.abs(bytes[i * fs + k] - bytes[(i - 1) * fs + k])
+              }
+              const mean = d / Math.ceil(fs / 7)
+              sum += mean
+              maxDiff = Math.max(maxDiff, mean)
+              pairs++
+            }
+            const avg = pairs ? sum / pairs : 0
+            record(
+              'S1.9 L3 抽帧量化画面运动（非静止/非纯色）',
+              pairs >= 2 && avg > 1,
+              `${n} 帧采样，相邻帧平均像素差=${avg.toFixed(2)}（最大 ${maxDiff.toFixed(2)}，阈值 >1）`
+            )
+          }
+        }
+      }
+    } else if (target) {
       const local = join(
         COMFY_ROOT,
         target.type === 'output' ? 'output' : 'temp',

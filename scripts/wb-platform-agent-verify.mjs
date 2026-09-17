@@ -15,6 +15,7 @@
  *   node scripts/wb-platform-agent-verify.mjs --scenario s2
  *   node scripts/wb-platform-agent-verify.mjs --scenario s3 --timeout-min 20
  */
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -56,7 +57,21 @@ const INSTRUCTIONS = {
     '请对模板「Krea2文生图1024」做一次**版本化迭代**：' +
     '把默认出图尺寸从 1024x1024 改成 768x768（width/height 两个参数），其余结构与参数名保持不变；' +
     '用 wb_publish_workflow **同名重新发布**（走版本化更新，**不要** force_new）。' +
-    '然后用**新版本**真跑一次：prompt 用 "a blue sphere on a black table"。'
+    '然后用**新版本**真跑一次：prompt 用 "a blue sphere on a black table"。',
+  // S4 的「有界迭代」变体：S4 唯一失败项是单轮 15min 决策超时，根因是 agent 一轮里
+  // 反复 wb_publish_workflow 23 次（并触发 64 次人审回执）。这里把迭代次数写死，
+  // 用来判定「是能力不够，还是 agent 迭代失控」。
+  s4b:
+    '请用 wb_build_workflow 新建（或同名版本化更新）一个 **MiniMax H3 文生视频** app，要求：' +
+    '(1) 暴露 prompt(textarea) 与 width/height(int，默认 1344/768)；' +
+    '(2) 用本地已有模型：diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors、' +
+    'vae/minimax_h3_video_vae_int8_convrot.safetensors、vae/minimax_h3_audio_vae_fp32.safetensors、' +
+    'loras/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors、' +
+    'text_encoders/qwen3-vl-4b-heretic_fp8_e4m3fn.safetensors；' +
+    '(3) 输出走 SaveVideo + SaveAudio。' +
+    '**硬性约束：wb_validate_workflow 最多 3 次、wb_publish_workflow 最多 1 次**（同名即版本化更新）。' +
+    '发布后立刻用 wb_execute_template 真跑一次：prompt="a cat walking on a sunny beach", width=1344, height=768；' +
+    '再用 wb_get_outputs 取产物，最后简要报告产物文件名与规格。**不要反复重建或微调工作流**。'
 }
 
 // ───────── S5 前置：记录目标 app 的版本基线 ─────────
@@ -313,7 +328,43 @@ if (!promptId) {
         `${local} (${existsSync(local) ? (statSync(local).size / 1024 / 1024).toFixed(1) + 'MB' : '不存在'})`
       )
       if (existsSync(local)) {
-        info(`ffprobe 待跑：${local}`)
+        // ffprobe 读规格（分辨率/帧率/帧数/时长）；EXPECT_SIZE 给了就断言分辨率
+        const pr = spawnSync(
+          'ffprobe',
+          [
+            '-v',
+            'error',
+            '-select_streams',
+            'v:0',
+            '-show_entries',
+            'stream=codec_name,width,height,r_frame_rate,nb_frames,duration',
+            '-of',
+            'json',
+            local
+          ],
+          { encoding: 'utf8' }
+        )
+        if (pr.status !== 0) {
+          record(`${SCENARIO} L3 ffprobe 可解析视频`, false, String(pr.stderr || '').slice(0, 140))
+        } else {
+          const st = (JSON.parse(pr.stdout).streams || [])[0] || {}
+          const [n, d] = String(st.r_frame_rate || '0/1')
+            .split('/')
+            .map(Number)
+          record(
+            `${SCENARIO} L3 ffprobe 可解析视频`,
+            !!st.codec_name && Number(st.width) > 0,
+            `${st.codec_name} ${st.width}x${st.height} ${(d ? n / d : 0).toFixed(2)}fps ${st.nb_frames}帧 ${Number(st.duration).toFixed(2)}s`
+          )
+          if (EXPECT_SIZE) {
+            const [ew, eh] = EXPECT_SIZE.split('x').map(Number)
+            record(
+              `${SCENARIO} 视频分辨率 == 期望 ${EXPECT_SIZE}`,
+              Number(st.width) === ew && Number(st.height) === eh,
+              `实测 ${st.width}x${st.height}`
+            )
+          }
+        }
       }
     } else {
       const local = join(
