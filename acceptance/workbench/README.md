@@ -290,3 +290,49 @@ agent-browser eval 'window.__stubLogs.find(l=>/run request/.test(l))'
 # 收尾
 agent-browser close
 ```
+---
+
+## 平台生成能力验证（S 矩阵）—— 真应用 + 真 ComfyUI，不走 stub
+
+与上面 W/C 编号的**浏览器验收**是两套东西：S 矩阵打的是**真应用（:3008）+ 真 ComfyUI（:8188）**，
+断言落在「ComfyUI history 入参 / 落盘产物 / ffprobe 规格」上，因此**没有截图**，证据是 JSON 与产物文件本身。
+
+**总入口（推荐）**：
+
+```bash
+cd /d/artifyfun/Comfy-Desktop
+node scripts/wb-platform-verify-all.mjs                 # core：S1 + S6
+node scripts/wb-platform-verify-all.mjs --group agent   # S2 / S3 / S5
+node scripts/wb-platform-verify-all.mjs --group video   # S1v / S4b（耗时，走 H3）
+node scripts/wb-platform-verify-all.mjs --group all     # 全部
+node scripts/wb-platform-verify-all.mjs --only s1,s6    # 指定场景
+```
+
+**前置**：应用在跑 + ComfyUI 就绪。本机 shell 带 `ELECTRON_RUN_AS_NODE=1`，必须去掉它再启动，
+否则 Electron 会被当纯 Node 跑（表现为「启动即退出、无进程、不写 app.log」）：
+
+```bash
+env -u ELECTRON_RUN_AS_NODE pnpm dev     # dev 与打包版抢 3008，先停另一个
+```
+
+| 场景 | 脚本 | 断言 | 状态 |
+|---|---|---|---|
+| **S0** 前置自检 | `wb-platform-generation-verify.mjs`（随 S1 一起跑） | 应用/ComfyUI/GPU/模板 id 口径/LLM 供应商 | ✅ 5/5 |
+| **S1** 直连生图 | 同上（`--template <app>`） | L1 入参真透传 → L2 执行成功 → L3 **正式保存产物**（只有 temp 预览=不通过）+ 解码取样防纯色 | ✅ |
+| **S1v** 直连生视频 768p | 同上（`--params` + `--expect-video-size`） | L1/L2/L3 + **ffprobe 规格** + **抽帧算相邻帧像素差**（判画面真在动） | ✅ 14/14 |
+| **S2** 自然语言 → agent 跑既有 app | `wb-platform-agent-verify.mjs --scenario s2` | 抓 agent 真实工具调用 + plan 分派，回会话/history/磁盘三层核对 | ✅ |
+| **S3** 工作台新建生图 app | 同上 `--scenario s3` | agent `validate → publish → execute → get_outputs` 全链，产物落 `output/` | ✅ 10/10 |
+| **S4b** 新建视频 app（有界迭代） | 同上 `--scenario s4b` | 同上 + 视频规格；指令写死 `validate ≤3 / publish ≤1` | ✅ 11/11 |
+| **S5** 版本化迭代 | 同上 `--scenario s5` | `app_versions` 新增快照且最大快照号 +1（生效版本 = 最大 +1）、新尺寸真出图 | ✅ 12/12 |
+| **S6** 异常路径 | `wb-platform-negative-verify.mjs` | 不存在的 id/模型、越界尺寸、空输入、**取消链路**；每步查「无脏 job / 无产物误登记」 | ✅ 14/14 |
+
+**辅助脚本**：`wb-template-health.mjs`（只读）用本机 `/object_info` 静态对照每个 app 模板的 prompt，
+找两类**节点版本漂移** —— `required_missing`（必填输入没给）与 `input_not_in_node`（连了本机不存在的输入口）。
+⚠️ `input_not_in_node` 只是**静态标红、不等于坏**：是否影响执行取决于该节点是否在输出路径上，需实测。
+
+**结论与遗留**：见 `docs/workbench-generation-verify-report.md`（S0–S6 全部场景已封闭）。
+
+**已知失效脚本（别照着跑）**：`scripts/wb-headless-verify.mjs` 等的是 `[data-testid="plan-option"]`，
+而 `acceptance/workbench/stub.js` **没有 plan 场景**（正确的帧名是 `CUSTOM plan_proposed`，见 `aguiBridge.js`），
+所以它必然 200s 超时失败。**plan 分派这条路径现在由 S2 / S3 / S4b 用真应用覆盖**（那三条都会走 plan 或工具链），
+所以此脚本建议按「退役」处理；若仍要保留，需要先给 stub 补 plan 场景。
