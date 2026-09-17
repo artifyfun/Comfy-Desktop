@@ -30,6 +30,8 @@ const COMFY = opt('--comfy', 'http://127.0.0.1:8188').replace(/\/$/, '')
 const SCENARIO = opt('--scenario', 's2')
 /** s2 的目标 app：默认 Anima（带模板漂移的历史样本）；runner 传健康 app 做门禁 */
 const S2_APP = opt('--app-name', 'Anima')
+/** s2 的画面内容：不给就会触发 agent 按设计先反问澄清（intent=chat），场景就断了 */
+const S2_PROMPT = opt('--s2-prompt', '')
 const TIMEOUT_MIN = Number(opt('--timeout-min', SCENARIO === 's4' ? '45' : '20'))
 const EXPECT_SIZE = opt('--expect-size', null)
 const VERSION_APP = opt('--version-app', 'Krea2文生图1024')
@@ -39,7 +41,7 @@ const stamp = new Date().toISOString().replace(/[:.]/g, '-')
 mkdirSync(EVID_DIR, { recursive: true })
 
 const INSTRUCTIONS = {
-  s2: `请调用模板 ${S2_APP} 生成一张图片${S2_APP === 'Anima' ? '，使用默认输入图' : ''}。`,
+  s2: `请调用模板 ${S2_APP} 生成一张图片${S2_PROMPT ? `：${S2_PROMPT}` : S2_APP === 'Anima' ? '，使用默认输入图' : ''}。`,
   s3:
     '请用 wb_build_workflow 新建一个**文生图** app：' +
     '要求 (1) 暴露一个名为 prompt 的**文本**参数（不要图片上传槽）；' +
@@ -506,7 +508,10 @@ writeFileSync(
       runId,
       instruction,
       toolCalls,
-      customs: customs.map((c) => c.name),
+      customs: customs.map((c) => ({
+        name: c.name,
+        value: JSON.stringify(c.value ?? null).slice(0, 400)
+      })),
       runError,
       approved,
       eventCount: events.length

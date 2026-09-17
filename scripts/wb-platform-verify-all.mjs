@@ -75,6 +75,8 @@ const SCENARIOS = {
       's2',
       '--app-name',
       IMG_APP,
+      '--s2-prompt',
+      'a red cube on a white table',
       '--timeout-min',
       '12'
     ]
@@ -166,11 +168,13 @@ const SCENARIOS = {
   }
 }
 
-const ORDER = ['s1', 's6', 's2', 's3', 's5', 's1v', 's4b', 's7']
+// s7（自愈/修复演练）不进默认编排：它假设「app 当前是坏的」，对健康 app 是 8 分钟的空转；
+// app 真坏的时候用 --only s7 单独拉起来。
+const ORDER = ['s1', 's6', 's2', 's3', 's5', 's1v', 's4b']
 const GROUPS = {
   core: ['s1', 's6'],
   agent: ['s2', 's3', 's5'],
-  video: ['s1v', 's4b', 's7'],
+  video: ['s1v', 's4b'],
   all: ORDER
 }
 const picked = ONLY
