@@ -79,7 +79,10 @@ AGENT_BROWSER_SESSION=canvas-verify agent-browser open http://127.0.0.1:5174/can
   **过程里量出一处遮挡缺陷**（软渲染提示横幅压住右上工具条，已修，见 C-H10 章）。
   ⚠️ 现状记录：**未组合的多选拖动只移动被拖的那一个**（要整体移动需先「组合」）；
   组合成员拖角柄不缩放（`onResizeStart` 里 `groupOf(id) → return`，设计如此）；二者已写成断言固化。
-- ⬜ **画布项目切换 / 重命名 / 删除**（w2 只验了「新建画布项目」）
+- ✅ **画布项目切换 / 重命名 / 删除** —— 已由 **C-H14**（`scripts/wb-canvas-projects-verify.mjs`，11/11）覆盖：
+  标题双击重命名、卡片切换（**画布真的重装载**）、刷新持久化、卡片内联重命名、单卡删除（取消/确认两路）、
+  批量管理、删唯一项目自动补空并清空画布。数据层语义早已由 `projectStore.test.js`(20+ 条) 覆盖，本脚本只验 UI 路径。
+  过程里修掉**同一横幅的第二处遮挡**（压住项目下拉表头）→ 提示层改为 `pointer-events-none`。
 - ✅ **图片落点语义** —— 已修（见 C-H9 章末）：落点改取拖放事件坐标，三条路统一为「落点 = 节点中心」，
   单测 `dropPlacement.test.js` + C-H9.8b/9b/10b 双保险。
   ⚠️ 仍**未实证**：真实原生拖放（从 Explorer 拖文件进来）的端到端效果 —— 无头里构造不了浏览器级拖放
@@ -334,3 +337,50 @@ cd packages/frontend && npx vitest run src/views/canvas/aiSnapshots.test.js
 
 验收脚本用自己的序列（C-H8 / C-H9 / C-H10 / C-H12 …），**与代码注释里的功能实现编号
 （C-H11 步级重跑、C-H13 多选浮动操作栏、C-H15~C-H19 …）不是一套**；两者同号时以文件名区分。
+
+---
+
+## C-H14 画布项目 切换 / 重命名 / 删除（playwright 无头，11/11）
+
+```bash
+# 前置：应用在跑（env -u ELECTRON_RUN_AS_NODE pnpm dev）
+cd /d/artifyfun/Comfy-Desktop && node scripts/wb-canvas-projects-verify.mjs
+```
+
+| 断言 | 覆盖 |
+|---|---|
+| C-H14.0 | 项目栏就位（3 个项目 / 激活项 / 标题） |
+| C-H14.1 | 双击标题内联重命名 → store 的 `title` 与 `doc.name` 同步、`activeId` 不变 |
+| C-H14.2 | 点卡片切换 → `activeId` 变 **且画布重装载**（Konva 上只剩新项目的物件 id，旧物件消失） |
+| C-H14.3 | 刷新后仍是切换后的项目（持久化 + 重装载） |
+| C-H14.4 | 卡片 hover 操作区「笔」→ 内联重命名生效（E4） |
+| C-H14.5 | 单卡删除走 `Modal.confirm`：**点取消不删** |
+| C-H14.6 | 确认删除 → 项目数 −1 且列表不再有它 |
+| C-H14.7 | 软渲染提示横幅不拦截指针（`pointer-events:none`，不挡下拉菜单表头） |
+| C-H14.8 | 批量管理：勾选计入按钮文案（`删除所选（n）`）→ 确认 → 批量删除（删到空自动补 1 个） |
+| C-H14.9 | 删唯一项目 → 自动补「未命名画布」且**画布清空**（旧节点不残留） |
+| C-H14.10 | 全程无新增页面错误 |
+
+截图：`ch14-projects.png`。
+
+### 分层：数据层早已验过，浏览器只验 UI
+
+`projectStore.js` 是纯函数（`addProject/renameProject/deleteProject/switchProject/normalizeStore/
+projectCardStats/bootProjectStore`），`projectStore.test.js` 20+ 条 + `composables.test.js`
+的 `useCanvasProjects` 段已覆盖容量/边界/迁移/I-O 适配。所以本脚本**不重复**那些断言，
+只验浏览器才能证明的：**切换是否真的把画布内容整批换掉**、删除确认的两条路径、批量选择计数。
+
+### 又一处遮挡（同一横幅，已修根因）
+
+`C-H14.8` 第一次跑就撞上「软渲染降级提示」横幅拦截项目下拉菜单表头的按钮（playwright 报
+`... intercepts pointer events`）。它与 C-H10.0b 那次（压住右上工具条）是**同一个横幅的两种遮挡**。
+上一轮只是把它从 `top-3` 挪到 `top-16`，仍会盖住新出现的浮层 —— 这次改**根因**：
+提示横幅整体 `pointer-events-none`，只给关闭按钮 `pointer-events-auto`。
+**提示层不是交互层，不该拦截指针**；C-H14.7 把它写成几何+计算样式双断言，避免回归。
+
+### 坑：hover 操作区的按文本定位会"自杀"
+
+卡片内联重命名的输入框是 `v-if="prjRenameId === pr.id"`，进入重命名态后**标题文本进了
+`<input value>`**（`innerText` 看不到）→ 用 `hasText: '丙画布'` 过滤出来的 locator **当场失配**，
+表现为"点了笔却没出现输入框"（实际是选择器找不到那张卡了）。
+正解：**进入重命名态前先记下卡片索引，之后用 `nth(idx)` 按位置定位**。

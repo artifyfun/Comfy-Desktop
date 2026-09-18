@@ -1342,15 +1342,20 @@
         </div>
 
         <!-- 软件渲染降级提示（Win11 GPU黑名单机）：一次性告知。
-             ⚠️ 必须避开右上角悬浮工具条（`top-3 right-3` 的 flex 行，约 700px 宽、20 个按钮）——
-             原先两处都在 top-3：居中横幅与工具条在 1600px 视口下重叠 2 万 px²，
-             实测 **14/20 个工具条按钮被横幅拦截**（C-H10.0b）。下移到底部对齐工具条之下。 -->
+             ⚠️ 两条布局约束（C-H10.0b / C-H14 实测）：
+             ① 必须避开右上角悬浮工具条（`top-3 right-3` 的 flex 行，约 700px 宽、20 个按钮）——
+                原先两处都在 top-3：居中横幅与工具条在 1600px 视口下重叠 2 万 px²，14/20 个按钮被拦截；
+             ② 横幅是**提示**不是交互层，本体一律 `pointer-events-none`（只留关闭按钮可点）——
+                否则任何落在它下面的控件（工具条、项目下拉的「批量管理」等）都点不到。 -->
         <div
           v-if="softRenderTip"
-          class="absolute z-20 left-1/2 top-16 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs text-amber-300"
+          class="pointer-events-none absolute z-20 left-1/2 top-16 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs text-amber-300"
         >
           <i class="fas fa-triangle-exclamation"></i>{{ t('canvasSoftRenderTip') }}
-          <button class="ml-1 text-amber-300/70 hover:text-amber-300" @click="dismissSoftRenderTip">
+          <button
+            class="pointer-events-auto ml-1 text-amber-300/70 hover:text-amber-300"
+            @click="dismissSoftRenderTip"
+          >
             <i class="fas fa-xmark"></i>
           </button>
         </div>
