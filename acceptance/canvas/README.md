@@ -76,6 +76,8 @@ AGENT_BROWSER_SESSION=canvas-verify agent-browser open http://127.0.0.1:5174/can
 - ✅ **图片入画布路径** —— 已由 **C-H9** 覆盖三条路（文件拖入 / 剪贴板粘贴 / 素材库拖出），且校验按真实比例缩放
 - ⬜ **多选拖动 / 分组（groups） / 对齐与自动布局**（文档里有 groups 字段，未验）
 - ⬜ **画布项目切换 / 重命名 / 删除**（w2 只验了「新建画布项目」）
+- ⬜ **图片落点语义**：`onDrop`/`onPaste` 忽略拖放事件坐标、只用 Konva 指针位置（见 C-H9 章末，已实测 A/B/C）；
+  真实原生拖拽是否受影响未实证；另素材库路径"居中"与文件路径"落点为左上角"两种语义不一致
 - ⬜ **快照 / 历史回滚**：先确认该功能是否存在于 UI（旧 C-H8 脚本曾断言一个并不存在的"快照面板入口"，已删）
 
 **更早遗留**
@@ -168,6 +170,32 @@ cd /d/artifyfun/Comfy-Desktop && node scripts/wb-canvas-gaps-verify.mjs
 | C-H9.11 | 全程无新增页面错误 |
 
 截图：`ch9-link-created` / `ch9-link-reconnect` / `ch9-sel-prompt` / `ch9-sel-prompt-sent` / `ch9-image-drop` / `ch9-resize`。
+
+> ⚠️ **看图别误判**：C-H9 ③ 段的粘贴测试用例是**纯色 `#1c8` 绿**的合成 SVG（纯色便于断言），
+> 所以 `ch9-image-drop` / `ch9-resize` 截图里那块**纯绿矩形 = 粘贴进来的测试图，不是坏节点**
+> （它没有虚线框/破损图标）；同时文件拖入的渐变图与它**落在同一坐标**且尺寸更小，被它整块盖住看不见。
+> 右下角那个深色带蓝框的小面板是 **minimap（全景小窗）**，也不是坏节点。对照见 `ch9-green-probe.png`
+> （空画布只跑三条图片路径：模糊大图=素材库拖出，绿块=粘贴）。
+
+### 顺带量出的真问题：图片落点不看拖放事件坐标（未修，待排）
+
+`onDrop` / `onPaste` 三处都用 `st.getPointerPosition()` 定位，**完全忽略拖放事件自带的 `clientX/clientY`**；
+模板里的 `@dragover.prevent="dragOver = true"` 也只置高亮、丢弃坐标。而 Konva 的 `pointerPos` **只由
+pointermove/pointerdown 更新**，拖放事件不参与。实测（合成 drop，走应用真实 handler）：
+
+| 组 | 真指针在世界坐标 | drop 事件里的坐标 | 实际落点 |
+|---|---|---|---|
+| A | 200,200 | 900,600 | **200,199.6**（= 真指针，事件坐标被忽略） |
+| B | 900,600 | 900,600 | 900,599.6 |
+| C | 从不移动 | 900,600 | 757,73.6（**上一次真实点击遗留的陈旧指针**） |
+
+用户可见后果取决于「原生拖拽期间浏览器是否仍派发 pointermove」：若不派发（原生拖拽的常见行为），
+**从系统/资产库拖入的图片会落在"拖动开始前指针所在的位置"**，而不是落点。
+（无头里无法构造浏览器级拖放：CDP `Input.dispatchDragEvent` 投递的载荷进不了 `dataTransfer.files`／自定义 mime，
+D/E 两组均零对象，故此条**未实证**，标注待排。）
+
+顺带一处不一致：素材库路径用 `insertAsset(..., w.x - 130, w.y - 90)` **居中**于落点，
+文件/粘贴路径 `filesToObjects(files, w)` 把落点当**左上角** —— 同一操作两种落点语义。
 
 ### 根因：`stopKonvaEvent` 的短路写法让「阻断冒泡」从未生效（已修）
 
