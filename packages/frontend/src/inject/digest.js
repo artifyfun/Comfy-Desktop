@@ -1,4 +1,4 @@
-import { CANVAS_BRIDGE } from './card_bridge.js'
+import { CANVAS_BRIDGE, getEmbedWindow } from './card_bridge.js'
 import { ARTIFY_MSG } from './protocol.js'
 import { getComfyUIApp } from './canvas_patches.js'
 // 从 comfy_inject.js 单体机械切分（技术债重构），逻辑零改动。
@@ -560,9 +560,15 @@ export async function pushCanvasDigest(force) {
     if (!force && json === CANVAS_BRIDGE.lastDigestJson) return
     CANVAS_BRIDGE.lastDigestJson = json
     // 1) 工作台 iframe（存在才发；embed 未打开时不白算）
-    if (artifyEmbedWindow) {
+    //    ⚠️ 必须走 getEmbedWindow()：`artifyEmbedWindow` 是 card_bridge 的模块私有变量，
+    //    此处曾裸引用它 —— 靠 esbuild 打包时的作用域合并「碰巧」同名才没报错，但
+    //    card_bridge 侧实际被重命名成 `artifyEmbedWindow2`，裸引用退化为未声明全局
+    //    （IIFE 非严格模式 → undefined，恒 falsy）→ 摘要在 embed 形态下从未推给工作台。
+    //    原生 ESM（vitest）下更直接 ReferenceError，连 express 快照那路一起丢。
+    const embedWin = getEmbedWindow()
+    if (embedWin) {
       try {
-        artifyEmbedWindow.postMessage(
+        embedWin.postMessage(
           JSON.stringify({ type: ARTIFY_MSG.CANVAS_STATE, state: digest }),
           '*',
         )

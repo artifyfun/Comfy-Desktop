@@ -1495,9 +1495,10 @@
       CANVAS_BRIDGE.lastDigestQueueActive = digest.queue.running + digest.queue.pending > 0;
       if (!force && json === CANVAS_BRIDGE.lastDigestJson) return;
       CANVAS_BRIDGE.lastDigestJson = json;
-      if (artifyEmbedWindow) {
+      const embedWin = getEmbedWindow();
+      if (embedWin) {
         try {
-          artifyEmbedWindow.postMessage(
+          embedWin.postMessage(
             JSON.stringify({ type: ARTIFY_MSG.CANVAS_STATE, state: digest }),
             "*"
           );
@@ -1524,15 +1525,15 @@
   }
 
   // src/inject/card_bridge.js
-  var artifyEmbedWindow2 = null;
+  var artifyEmbedWindow = null;
   function getEmbedWindow() {
-    return artifyEmbedWindow2;
+    return artifyEmbedWindow;
   }
   function setEmbedWindow(w) {
-    artifyEmbedWindow2 = w;
+    artifyEmbedWindow = w;
   }
   function sendCardsToEmbed(nodes) {
-    if (!artifyEmbedWindow2) {
+    if (!artifyEmbedWindow) {
       console.warn("[ArtifyInject] no embed window; card attach skipped");
       return;
     }
@@ -1541,7 +1542,7 @@
       for (const f of n.properties?.files || []) files.push(f);
     }
     if (!files.length) return;
-    artifyEmbedWindow2.postMessage(JSON.stringify({ type: ARTIFY_MSG.CARD_ATTACH, files }), "*");
+    artifyEmbedWindow.postMessage(JSON.stringify({ type: ARTIFY_MSG.CARD_ATTACH, files }), "*");
   }
   function spawnDisplayCards(files) {
     const app = getCardApp();
@@ -1696,9 +1697,9 @@
     }
   }
   function postToEmbed(msg) {
-    if (!artifyEmbedWindow2) return;
+    if (!artifyEmbedWindow) return;
     try {
-      artifyEmbedWindow2.postMessage(JSON.stringify(msg), "*");
+      artifyEmbedWindow.postMessage(JSON.stringify(msg), "*");
     } catch (_e) {
     }
   }

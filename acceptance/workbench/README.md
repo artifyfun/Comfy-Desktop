@@ -211,8 +211,9 @@ agent-browser eval 'window.__stubLogs.find(l=>/interaction-response/.test(l))'
 - **附件流程**：composer 的 draftAttachments 流程未触发（stub 不模拟附件 → 后端 decide 路径）。
 - ✅ **wb_canvas_ops** 已由 **W10** 覆盖；**wb_sync / wb_canvas_exec** 的非嵌入降级语义由 **W15**（5/5）、
   **C 模式（iframe `?embed=1` + 注入桥）的成功路径**由 **W16**（`scripts/wb-cmode-bridge-verify.mjs`，9/9）覆盖。
-  ⬜ 仍未覆盖：真 **注入桥**（`inject/card_bridge.js` 在真 ComfyUI 页面里跑 `applyCanvasOps` / `graphToPrompt`
-  → 真服务端提交）—— W16 用假宿主帧验的是**工作台这一侧**的协议形状与错误透传；桥那一侧的落布/执行需真宿主页面。
+  ⬜ **真注入桥的端到端**（在真 ComfyUI 页面里挂桥 → 真 `graphToPrompt` → 真服务端提交）：W16 用假宿主帧验的是
+  **工作台这一侧**的协议形状与错误透传；桥那一侧的**实现语义**已由 **W17 的单测层**覆盖（见文末），
+  但「真页面 + 真桥 + 真队列」这一条仍需要真宿主环境。
   另注：`/canvas` 侧栏那种**同窗口**内嵌**不算** `isEmbed`（判定见 `workbench/index.vue:1498`），
   那条路由 `wb_canvas_ops` + 页内总线走（W10/S11 已覆盖）。
 - **approval 超时倒计时**：InteractionApprovalCard 倒计时 UI 已渲染但 stub 不模拟超时分支（需后端 emit 倒计时归零 reject 兜底才能验证）。
@@ -362,3 +363,49 @@ env -u ELECTRON_RUN_AS_NODE pnpm dev     # dev 与打包版抢 3008，先停另�
 而 `acceptance/workbench/stub.js` **没有 plan 场景**（正确的帧名是 `CUSTOM plan_proposed`，见 `aguiBridge.js`），
 所以它必然 200s 超时失败。**plan 分派这条路径现在由 S2 / S3 / S4b 用真应用覆盖**（那三条都会走 plan 或工具链），
 所以此脚本建议按「退役」处理；若仍要保留，需要先给 stub 补 plan 场景。
+
+---
+
+## W17 注入桥实现层补测（vitest 单测 43 条，无浏览器）
+
+`packages/frontend/src/inject/` 14 个模块此前**零测试**，而这里是「工作台 → 宿主画布」唯一写通道的实现。
+W16 只验了 A 面协议形状（假宿主），桥**自己**的路由/落布/执行语义一直没人守。两个纯单测文件补上（不需要真 ComfyUI）：
+
+```bash
+cd packages/frontend && npx vitest run src/inject/
+```
+
+| 文件 | 条数 | 覆盖 |
+|---|---|---|
+| `card_bridge.test.js` | 17 | `handleArtifyMessage` 四条路由 + ack 形状：`CANVAS_OPS`（结构级落 checkpoint / 纯 `setWidget` 不落 / 异常截断 120 字符）、`CANVAS_EXECUTE`（无 app → 报 `graphToPrompt unavailable` 且**不 fetch**；`prompt` 取 `graphToPrompt().output` 或裸返回；服务端 `success:false` 透传 message；HTTP 500 且 body 非 JSON → 报 HTTP 码）、**批量行键**「节点id.widget名」→ `inputsMapping`（`{id,key,valueMap}`）+ `items`（`sharedParams` 合并进每行）、行键非法/不足 2 行各自报错、`GET_CANVAS_STATE` → 推摘要、`postToEmbed` 无 iframe 静默丢弃 |
+| `digest_ops.test.js` | 26 | `applyOneOp` / `applyCanvasOps` 的真实 op 语义：`setWidget`（命中/before-after 回执/触发 callback/callback 抛错容忍/字符串 id）、`addNode`（`createNode`+`widgetsValues`+默认 pos 区间/未注册类型）、`removeNode`、`relink`（`from.connect` 参数/slot 越界）、非法入参、`align`（left/right/hcenter 用**异宽**节点、`hdist` 等距且首尾不动、未知 mode）、`autoLayout`（链路分列 x 递增）、批量（单条失败不中断、全失败 `ok:false`、**`loadWorkflow` 是终态替换**：前面已有成功 op 时后续直接丢弃、结构级才 `captureCanvasState`、capture 抛错不影响执行）、`pushCanvasDigest`（就绪才推、未就绪仍落 express 快照、去重现状） |
+
+### 挖出并修掉的真缺陷：跨模块裸引用 + 打包器重命名 → 摘要从未推给工作台
+
+`digest.js` 的 `pushCanvasDigest` 里写着 `if (artifyEmbedWindow)` —— 但**这个变量是 `card_bridge.js` 的模块私有 `let`**，
+`digest.js` 既没 import 也没有任何赋值点。它能「不报错」是因为 **esbuild 打包时的作用域合并**：产物里
+card_bridge 侧被重命名为 `artifyEmbedWindow2`，而 digest 段保留裸名 → **退化成未声明全局**。
+
+| 运行形态 | 表现 |
+|---|---|
+| 打包产物（IIFE，非严格模式） | 裸名解析为 `undefined` → `if` 恒 falsy → **摘要在 embed 形态下从未 postMessage 给工作台**（express 快照那路还在，所以没人察觉） |
+| 原生 ESM（vitest） | 直接 `ReferenceError` → 被自身 `catch` 吞成 warn → **连 express 快照那路也一起丢** |
+
+修法：`import { getEmbedWindow }`（card_bridge 早就导出了访问器，只是没人用）。修后产物里该处为 `getEmbedWindow()`，
+且 card_bridge 的变量不再被重命名（名字冲突消失）—— 这两点都可 `grep packages/frontend/public/comfy_inject.js` 复核。
+
+**变异验证**：把修复还原成裸引用 → 3 条测试变红；还原回去 → 全绿。
+
+> 教训：**跨模块共享可变状态必须走导出的访问器**。打包器的作用域合并会让「漏了 import 的裸引用」
+> 在产物里**看起来能用**（甚至在非严格模式下静默变 `undefined`），而在单测环境直接炸 ——
+> 两种表现同一个根因，也是「为什么这个 bug 能活这么久」的答案。
+> 顺带：`packages/frontend/public/comfy_inject.js` 是**入库产物**，改 `src/inject/**` 后必须跑
+> `pnpm --filter artifylab-frontend run build:inject`（`build:frontend` 只建 app，**不会**重建 inject）。
+
+### 待排（本轮只记录、未改语义）：摘要「去重」是死逻辑
+
+`buildCanvasDigest` 每次都 `++CANVAS_BRIDGE.digestSeq` 并打 `ts` → `if (!force && json === lastDigestJson) return`
+**永不命中**，实际每 2s 轮询都推一次（embed 场景 = 每 2s 一次 postMessage + 一次 express POST）。
+不是缺陷但也不省：改它要先剥离 `seq/ts` 再比，且 `GET_CANVAS_STATE` 得改 `force=true`
+（`applyCanvasState` 靠 `seq` 严格递增防乱序，工作台重连时画布未变也得能拿到摘要）—— 属行为变更 + 需真环境端到端验证，另起一轮。
+现状已写成断言（`digest_ops.test.js` 第三条），改动会变红。
