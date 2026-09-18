@@ -74,6 +74,8 @@ CUSTOM `wb_canvas_ops`，整条 embed 链路（桥 → poller → canvasMode 总
 | W13 | **header 弹窗层级（stacking context）**（`scripts/wb-modal-zindex-verify.mjs`，打开 `/canvas`）— ① 画布内开 z-30 浮层（提示词库面板）→ 点 header「关于」→ 断言弹窗遮罩的 **SC 祖先链里没有 header** + 重叠点 `elementsFromPoint` 最上层属于弹窗子树；② 「设置」弹窗同断言 | w13-about-above-canvas.png / w13-config-above-canvas.png |
 
 | W14 | **画布指南弹窗（`scripts/wb-canvas-guide-verify.mjs`，打开 `/canvas`）** — ① 点缩放条罗盘 `[data-testid="canvas-guide-btn"]` → 弹窗 `[data-testid="canvas-guide-modal"]` 出现：侧栏 **2 组 / 12 篇**、正文标题 + 内嵌 SVG 示意图（元素数 > 5）；② 侧栏点「文生图」→ 正文标题随之切换、步骤列表非空、`active` 跟随；③④⑤ **三种关闭口径**各断言残留 = 0：Esc 一次 / `.guide-close` 按钮 / 点遮罩空白区；⑥ 空画布 `[data-testid="canvas-empty-guide-btn"]` → 打开 → Esc 关闭；⑦ 两段加载各自「无新增页面错误」（分段基线对比） | w14-guide-open.png / w14-guide-page-switch.png / w14-guide-closed.png / w14-empty-cta.png / w14-empty-cta-closed.png |
+| W16 | **C 模式桥的成功路径（`scripts/wb-cmode-bridge-verify.mjs`，假宿主帧 + iframe `?embed=1`，9/9）** — W15 只验了非嵌入态的降级；`isEmbed` 判定是 `embed=1 \|\| window.parent !== window`（`workbench/index.vue:1498`），**同窗口不算嵌入**，所以真嵌入态只能用 iframe 建。父页当假注入桥（`callBridge` 只按 `type+requestId` 关联 ack，不校验 origin）→ 断言：① `wb_sync{ensureTab:true}` → 宿主收到 `artify:canvas-ops`，`ops[0]={type:'loadWorkflow',newTab:true,name,workflow:{nodes:2,links}}`、`reason:'workbench-sync-template'`，ack ok 后**零错误气泡**；② 无 `ensureTab` → `newTab` 缺省；③ 宿主回 `{ok:false,error}` → 两条事件分别弹「同步到画布失败: 宿主拒绝（测试）」/「执行画布工作流失败: 宿主拒绝（测试）」（**透传宿主错误原文**）；④ 宿主 ack `{ok:true,promptId}` → 推「提交执行…」+「画布工作流已提交执行」 | w16-sync-success.png / w16-bridge-reject.png / w16-canvas-exec-success.png |
+
 | W15 | **执行副作用 CUSTOM 的降级语义（`scripts/wb-custom-sideeffects-verify.mjs`，打开 `/workbench`）** — `wb_sync` / `wb_canvas_exec` 此前零覆盖。三条独立触发词各自隔离：①「同步画布兜底」→ `wb_sync{ensureTab:true}` 在非嵌入态应**静默 skipped**（零错误气泡、本轮正常收尾 —— "执行前自动加载画布"失败不许打断生成流程）；②「同步画布显式」→ 无 `ensureTab` 应 reject → 错误气泡「同步到画布失败」；③「跑一下画布」→ `wb_canvas_exec` 应 reject → 错误气泡「执行画布工作流失败」；④ 三段无新增页面错误 | w15-sync-fallback.png / w15-sync-explicit.png / w15-canvas-exec.png |
 
 > **W14 的两个坑**：① **stub 每次加载都会重写 localStorage**（`stub.js` 在 boot 时无条件 `setItem`，`activeId` 恒回 `p-main`）——想把 activeId 切到 `p-empty`（空画布）不能靠 `page.evaluate` 改 key 再 `reload`，会被 stub 覆盖。解法：`context.route('**/__canvas_stub.js')` 取原始响应体后**在末尾追加**一段切项目的脚本再 fulfill，**不改动 acceptance/canvas/stub.js**（其他用例仍要默认 seed）。② 页面错误要**分段记账**：stub 未 mock 的 8 个 `/api` 端点（`POST /api/config`、`GET /api/batch/queue`、`GET /api/workbench/{sessions,presets,templates,runtime}`、`POST /api/workbench/sessions/create`、`POST /api/canvas/snapshot`）每次 boot 都会因 SPA fallback 返回 HTML 而抛 `Unexpected token '<'`，属既有噪音 → 每段 `reload` 后重置基线，只断言「指南交互本身不新增错误」。
@@ -82,6 +84,13 @@ CUSTOM `wb_canvas_ops`，整条 embed 链路（桥 → poller → canvasMode 总
 > 我先写成「执行画布工作流：…」→ 命中审批 → 审批分支 `return` 停在人审卡，6e 帧永远发不出来；
 > 第二次改成「跑一下画布上的工作流（不要走审批）」**仍然命中**（「审批」两字在消息里）。
 > 另注：`node serve.mjs <port> &` 这种后台起法会被回收，起 harness 要用后台任务方式（或复用已在跑的端口）。
+
+> **W16 的坑（写用例时最花时间的两条）**：① **顺序即正确性** —— canvas-exec 成功会进「执行中」轮询态，
+> 之后发送控件被 `!sessionId || busy` 挡住 → 后面的消息**根本发不出去**（首轮把它误判成"桥没回 ack"）。
+> 修法：把负路径排在成功执行之前，**不要**靠重新 `setContent` 拿干净 iframe —— stub 会把会话历史还原回来，状态更脏。
+> ② **假宿主脚本必须包 IIFE** —— `setContent` 会被调用多次，顶层 `const ACK` 第二次执行直接
+> `SyntaxError: Identifier 'ACK' has already been declared` → 宿主监听没装上 → 症状是 `bridge timeout`
+> （而不是"脚本报错"，page error 里才有真相）。
 
 > 另注：罗盘按钮在**底部缩放条**（不是被 z-20 提示条压住的顶部工具栏），所以这里 `locator.click()` 可用，不必像 W11 那样强制 `evaluate(el => el.click())`。
 
@@ -200,8 +209,12 @@ agent-browser eval 'window.__stubLogs.find(l=>/interaction-response/.test(l))'
 ## 已知遗留 / 未覆盖
 
 - **附件流程**：composer 的 draftAttachments 流程未触发（stub 不模拟附件 → 后端 decide 路径）。
-- ✅ **wb_canvas_ops** 已由 **W10** 覆盖；**wb_sync / wb_canvas_exec** 已由 **W15**（`scripts/wb-custom-sideeffects-verify.mjs`，5/5）覆盖其**降级语义**（静默 skipped / 显式报错 / 画布执行报错）。
-  ⬜ 仍未覆盖：这两条事件在**嵌入态（/canvas 侧栏）的成功路径** —— 需真宿主画布 + 真 ComfyUI 执行，留给 canvas-embedded 场景（`wb_canvas_ops` 的成功路径已由 W10 在画布页覆盖）。
+- ✅ **wb_canvas_ops** 已由 **W10** 覆盖；**wb_sync / wb_canvas_exec** 的非嵌入降级语义由 **W15**（5/5）、
+  **C 模式（iframe `?embed=1` + 注入桥）的成功路径**由 **W16**（`scripts/wb-cmode-bridge-verify.mjs`，9/9）覆盖。
+  ⬜ 仍未覆盖：真 **注入桥**（`inject/card_bridge.js` 在真 ComfyUI 页面里跑 `applyCanvasOps` / `graphToPrompt`
+  → 真服务端提交）—— W16 用假宿主帧验的是**工作台这一侧**的协议形状与错误透传；桥那一侧的落布/执行需真宿主页面。
+  另注：`/canvas` 侧栏那种**同窗口**内嵌**不算** `isEmbed`（判定见 `workbench/index.vue:1498`），
+  那条路由 `wb_canvas_ops` + 页内总线走（W10/S11 已覆盖）。
 - **approval 超时倒计时**：InteractionApprovalCard 倒计时 UI 已渲染但 stub 不模拟超时分支（需后端 emit 倒计时归零 reject 兜底才能验证）。
 - **多窗口审批 race**：同 threadId 两窗口同时打开、互相 approve 的 race 未验（需要 stub 支持并发流）。
 
