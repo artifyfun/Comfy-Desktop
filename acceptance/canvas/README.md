@@ -74,14 +74,19 @@ AGENT_BROWSER_SESSION=canvas-verify agent-browser open http://127.0.0.1:5174/can
 - ✅ **手动连线手势** —— 已由 **C-H9**（`scripts/wb-canvas-gaps-verify.mjs`，12/12）覆盖：真鼠标拖句柄建线 / 点线删除 / 拖锚点重连。**过程里挖出真 bug**（见 C-H9 章「根因」）
 - ✅ **选区快捷指令条（A14）** —— 已由 **C-H9** 覆盖：框选浮出 `#canvas-sel-prompt` → 回车真送达 agent → agent 只聊天不出图
 - ✅ **图片入画布路径** —— 已由 **C-H9** 覆盖三条路（文件拖入 / 剪贴板粘贴 / 素材库拖出），且校验按真实比例缩放
-- ⬜ **多选拖动 / 分组（groups） / 对齐与自动布局**（文档里有 groups 字段，未验）
+- ⬜ **多选拖动 / 分组（groups） / 对齐与自动布局** —— 已核实**三者都有 UI 与实现**，只是零验收：
+  选择栏 `groupSelected`/`ungroupSelection`（`index.vue:3948/3960`）、`alignSel(...)`（左/水平居中…）、
+  `engine.js` 的 `distributeObjects`。它们全都走「选中集合 + 全局 Konva 绑定」——
+  正是 C-H9 挖出病灶（`stopKonvaEvent` 失效 → `onItemDown(-1)`）的高发区，优先级最高。
 - ⬜ **画布项目切换 / 重命名 / 删除**（w2 只验了「新建画布项目」）
 - ✅ **图片落点语义** —— 已修（见 C-H9 章末）：落点改取拖放事件坐标，三条路统一为「落点 = 节点中心」，
   单测 `dropPlacement.test.js` + C-H9.8b/9b/10b 双保险。
   ⚠️ 仍**未实证**：真实原生拖放（从 Explorer 拖文件进来）的端到端效果 —— 无头里构造不了浏览器级拖放
   （CDP `Input.dispatchDragEvent` 的载荷进不了 `dataTransfer.files`／自定义 mime，两组零对象），
   理论依据是"原生拖拽期间不派发 pointermove"（这也是修它的理由），需要人手拖一次确认。
-- ⬜ **快照 / 历史回滚**：先确认该功能是否存在于 UI（旧 C-H8 脚本曾断言一个并不存在的"快照面板入口"，已删）
+- ⬜ **快照 / 历史回滚** —— 已核实**功能存在**（旧笔记"可能不存在"是误判）：`index.vue:1302`
+  「C-H3 AI 快照面板（AI 改画布前自动打的检查点，一键回滚）」+ undo/redo 快照栈（快照 = objects+links+groups）。
+  属数据安全类，值得优先验。
 
 **更早遗留**
 
