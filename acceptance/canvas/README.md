@@ -85,9 +85,9 @@ AGENT_BROWSER_SESSION=canvas-verify agent-browser open http://127.0.0.1:5174/can
   ⚠️ 仍**未实证**：真实原生拖放（从 Explorer 拖文件进来）的端到端效果 —— 无头里构造不了浏览器级拖放
   （CDP `Input.dispatchDragEvent` 的载荷进不了 `dataTransfer.files`／自定义 mime，两组零对象），
   理论依据是"原生拖拽期间不派发 pointermove"（这也是修它的理由），需要人手拖一次确认。
-- ⬜ **快照 / 历史回滚** —— 已核实**功能存在**（旧笔记"可能不存在"是误判）：`index.vue:1302`
-  「C-H3 AI 快照面板（AI 改画布前自动打的检查点，一键回滚）」+ undo/redo 快照栈（快照 = objects+links+groups）。
-  属数据安全类，值得优先验。
+- ✅ **快照 / 历史回滚** —— 已由 **C-H12**（`scripts/wb-canvas-snapshot-verify.mjs`，11/11）覆盖 + 存储层单测（`aiSnapshots.test.js`，9 条）。
+  撤销/重做（含 redo 截断、栈底栈顶边界）与 AI 快照面板（渲染 / 一键恢复 / 回滚可撤销 / 删除）双路验完。
+  ⚠️ 埋了一个坑：快照按**真实 `activeAppId`** 分组，不是 `'default'`（脚本从应用配置读 pid）。
 
 **更早遗留**
 
@@ -241,7 +241,8 @@ if (kev) kev.cancelBubble = true
    直出源码。手势复现脚本按步骤 wrap（每步前后比 `pageErrors.length`），一眼看出是哪一步抛。
 8. **别用 heredoc + Python 字符串做补丁**：往 `python - <<'PY'` 里写含 `\n` 的替换串时，是 **Python 在解析
    自己的字符串字面量**时把 `\n` 变成真换行（bash 的 quoted heredoc 本身不转义），落盘后 JS 语法就错了——
-   连踩两次。凡是要落含转义序列的代码，**一律用 Write/Edit 工具直接改文件**。
+   连踩两次。**而且 `str.replace` 不命中时是静默的**（C-H12 里 3 处替换只中 2 处，白跑一轮才知道），
+   每一处替换都必须 `assert old in s`。凡是要落含转义序列的代码，**一律用 Write/Edit 工具直接改文件**。
 9. **框选 ≠ 单选**：`openSelPrompt` 只在 `rubber`（框选）分支调用 —— C-H9 初版断言「单选点击浮出指令条」是**断言写错**，
    不是产品 bug；写断言前先读触发条件。
 10. **重复函数声明 `typecheck:web` 不报，只有 `vite build` 报**：往 `.vue` 的 `<script setup>` 里
@@ -293,3 +294,43 @@ cd /d/artifyfun/Comfy-Desktop && node scripts/wb-canvas-selection-verify.mjs
   「组合 → 拖成员」（`onNodeDragEnd` 里只按 `groups` 成员联动）。要做 Figma 式"多选拖动整体走"，
   需在 `onNodeDrag` 里对 `selection` 做同样处理。
 - **组合成员不可单独缩放**：`onResizeStart` 对 `groupOf(id)` 直接 return。
+
+---
+
+## C-H12 撤销/重做 + AI 快照回滚（playwright 无头 11/11 + 单测 9 条）
+
+数据安全网两条腿：**撤销栈**（会话内、上限 60、混合所有操作）与 **AI 快照**（`aiSnapshots.js`，
+按项目分组、单项目上限 10、AI 批量改画布前自动打的命名检查点，`docs/research-canvas-agent-benchmark.md` 建议 #6）。
+
+```bash
+# 前置：应用在跑（env -u ELECTRON_RUN_AS_NODE pnpm dev）
+cd /d/artifyfun/Comfy-Desktop && node scripts/wb-canvas-snapshot-verify.mjs
+cd packages/frontend && npx vitest run src/views/canvas/aiSnapshots.test.js
+```
+
+| 断言 | 覆盖 |
+|---|---|
+| C-H12.0 | 画布就位 + AI 快照预置 1 条（种在**真实 pid** 下） |
+| C-H12.1 / 2 | 对齐 → Ctrl+Z 回到对齐前（落盘）→ Ctrl+Shift+Z 重做回对齐后（落盘） |
+| C-H12.3 | **撤销后做新动作 → redo 栈被截断**（`pushHistory` 清 future；新动作不被"重做"吃掉） |
+| C-H12.4 / 5 | 连按 Ctrl+Z ×14 / Ctrl+Shift+Z ×20 到底到顶 → 不崩、文档仍合法 |
+| C-H12.6 | AI 快照面板渲染（1 条 = 1 行） |
+| C-H12.7 | 点「恢复此快照」→ 文档回到快照态（4 → 2 物件，id 级断言） |
+| C-H12.8 | **回滚本身可撤销**（`restoreAiSnapshot` 内有 `beforeChange()`） |
+| C-H12.9 | 删除快照 → 存储该项目清空 + 面板消失 |
+| C-H12.10 | 全程无新增页面错误 |
+
+单测（`aiSnapshots.test.js`，纯函数 + 注入 storage）钉住容量语义：单项目 FIFO 上限 10、
+全局上限 40（整段淘汰最旧项目）、label 兜底与截断 80、坏 JSON 静默归零、删除命中/未命中。
+
+### 坑：快照按**真实 `activeAppId`** 分组，不是 `'default'`
+
+`useAppNodes` 用 `appStore.config.activeAppId || 'default'` 当分组键。真机上它是真实 app uuid
+（本机 `73cf9668-…`），所以种快照必须种到那个键下 —— 首轮种 `'default'` 面板死活不渲染，
+诊断打印 `projects` 键才发现。脚本改为从 `<APPDATA>/artify-desktop/artify-apps.json` 的
+`config.activeAppId` 读 pid（可用 `--pid` 覆盖）。
+
+### 编号说明
+
+验收脚本用自己的序列（C-H8 / C-H9 / C-H10 / C-H12 …），**与代码注释里的功能实现编号
+（C-H11 步级重跑、C-H13 多选浮动操作栏、C-H15~C-H19 …）不是一套**；两者同号时以文件名区分。
