@@ -1,5 +1,16 @@
 import { colorizeLinks, colorizeCanvas } from './uuid_color.js'
 import { getComfyUIApp } from './canvas_patches.js'
+// ⚠️ 曾经裸引用 artify_inject / isIframe / artify_playground / isElectron / isArtifyLoading
+// 而不 import（拆单体时的漏改）→ esbuild 打包后这些名字被重命名，裸引用退化为
+// 未声明全局 → 调用 loadWorkflow() 时直接 `ReferenceError: artify_inject is not defined`。
+import {
+  artify_inject,
+  artify_playground,
+  isElectron,
+  isIframe,
+  getIsArtifyLoading,
+  setIsArtifyLoading,
+} from './context.js'
 // 从 comfy_inject.js 单体机械切分（技术债重构），逻辑零改动。
 export function getQueryParam(key) {
   const params = new URLSearchParams(window.location.search)
@@ -74,7 +85,7 @@ export async function loadWorkflow() {
   }
   // 主进程 A→C 切换会重放 __artifyReloadWorkflow，页面自身也可能在
   // 首屏加载时执行过——同一时间只允许一个加载流程，避免并发重入。
-  if (isArtifyLoading) {
+  if (getIsArtifyLoading()) {
     console.log('[ArtifyInject] loadWorkflow skipped: already loading')
     return
   }
@@ -101,7 +112,7 @@ export async function loadWorkflow() {
   const { workflow } = currentApp.template
   console.log(`[ArtifyInject] Standalone mode: Loading workflow "${workflowName}"`)
 
-  isArtifyLoading = true
+  setIsArtifyLoading(true)
   try {
     // Inject name into graph data
     if (workflow && typeof workflow === 'object') {
@@ -191,7 +202,7 @@ export async function loadWorkflow() {
     // getConfig/getAppById/apiRequest/loadGraphData 任一失败原本会变成 unhandled rejection。
     console.error('[ArtifyInject] loadWorkflow failed:', e)
   } finally {
-    isArtifyLoading = false
+    setIsArtifyLoading(false)
   }
 }
 

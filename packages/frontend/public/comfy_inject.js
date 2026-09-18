@@ -542,7 +542,7 @@
         if (eventType === "loadGraphData") {
           const workflowName = msgData.name || "ArtifyLab Workflow";
           console.log("[ArtifyInject] Processing loadGraphData, target name:", workflowName);
-          isArtifyLoading = true;
+          setIsArtifyLoading(true);
           try {
             if (data && typeof data === "object") {
               data.name = workflowName;
@@ -585,7 +585,7 @@
                 app.ui.workflowManager.refresh();
             }
           } finally {
-            isArtifyLoading = false;
+            setIsArtifyLoading(false);
           }
           let namingAttempts = 0;
           const namingInterval = setInterval(() => {
@@ -735,7 +735,7 @@
       console.log("[ArtifyInject] loadWorkflow aborted: in playground/readonly mode");
       return;
     }
-    if (isArtifyLoading) {
+    if (getIsArtifyLoading()) {
       console.log("[ArtifyInject] loadWorkflow skipped: already loading");
       return;
     }
@@ -757,7 +757,7 @@
     const workflowName = currentApp.name || "ArtifyLab Workflow";
     const { workflow } = currentApp.template;
     console.log(`[ArtifyInject] Standalone mode: Loading workflow "${workflowName}"`);
-    isArtifyLoading = true;
+    setIsArtifyLoading(true);
     try {
       if (workflow && typeof workflow === "object") {
         workflow.name = workflowName;
@@ -831,22 +831,29 @@
     } catch (e) {
       console.error("[ArtifyInject] loadWorkflow failed:", e);
     } finally {
-      isArtifyLoading = false;
+      setIsArtifyLoading(false);
     }
   }
 
   // src/inject/context.js
-  var artify_inject2 = getQueryParam("artify_inject");
-  var isElectron2 = !!window.electronAPI;
-  var isIframe2 = (function() {
+  var artify_inject = getQueryParam("artify_inject");
+  var isElectron = !!window.electronAPI;
+  var isIframe = (function() {
     try {
       return window.self !== window.top;
     } catch (e) {
       return true;
     }
   })();
-  var artify_playground2 = getQueryParam("artify_playground") === "true";
-  if (artify_inject2 === "readonly" || window.self !== window.top || artify_playground2) {
+  var artify_playground = getQueryParam("artify_playground") === "true";
+  var isArtifyLoading = false;
+  function getIsArtifyLoading() {
+    return isArtifyLoading;
+  }
+  function setIsArtifyLoading(v) {
+    isArtifyLoading = v;
+  }
+  if (artify_inject === "readonly" || window.self !== window.top || artify_playground) {
     try {
       if (window.indexedDB) {
         window.indexedDB.deleteDatabase("comfyui");
@@ -1979,14 +1986,14 @@
     }
   }
   function startArtifySidebarTab() {
-    if (!isIframe2) ensureArtifySidebarTab();
+    if (!isIframe) ensureArtifySidebarTab();
   }
 
   // src/inject/bootstrap.js
   function installBootstrap() {
     window.addEventListener("load", function() {
       let timer = null;
-      if (artify_inject2 === "readonly") {
+      if (artify_inject === "readonly") {
         let hideReadonlyUI = function() {
           const selectors = [
             ".comfyui-body-top",
@@ -2074,7 +2081,7 @@
         }
         const isFullyReady = hasVersion && hasLiteGraph && stableNodeTypesCount >= 5;
         if (isFullyReady && window.app && window.app.graph) {
-          if (artify_inject2 === "readonly" || isIframe2 || artify_playground2) {
+          if (artify_inject === "readonly" || isIframe || artify_playground) {
             console.log(
               `[ArtifyInject] Playground mode detected (Node types: ${nodeTypesCount}), waiting for stability...`
             );

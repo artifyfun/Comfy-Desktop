@@ -1,4 +1,13 @@
 import { colorizeLinks, colorizeCanvas, getRandomColor } from './uuid_color.js'
+// ⚠️ 曾经裸引用 artify_inject / isIframe / artify_playground / isArtifyLoading
+// 而不 import（拆单体时的漏改）→ 打包后名字被重命名 → 调用 doHandleComfyuiContext() /
+// colorizeCanvas() 等时抛 `ReferenceError: artify_inject is not defined`（静默失效）。
+import {
+  artify_inject,
+  artify_playground,
+  isIframe,
+  setIsArtifyLoading,
+} from './context.js'
 // 从 comfy_inject.js 单体机械切分（技术债重构），逻辑零改动。
 function serializer(replacer, cycleReplacer) {
   var stack = [],
@@ -559,7 +568,7 @@ function doHandleComfyuiContext(app, LiteGraph, onReady) {
       if (eventType === 'loadGraphData') {
         const workflowName = msgData.name || 'ArtifyLab Workflow'
         console.log('[ArtifyInject] Processing loadGraphData, target name:', workflowName)
-        isArtifyLoading = true
+        setIsArtifyLoading(true)
         try {
           if (data && typeof data === 'object') {
             data.name = workflowName
@@ -617,7 +626,7 @@ function doHandleComfyuiContext(app, LiteGraph, onReady) {
               app.ui.workflowManager.refresh()
           }
         } finally {
-          isArtifyLoading = false
+          setIsArtifyLoading(false)
         }
 
         // Stronger persistence: try to set the name multiple times as UI components might overwrite it during init

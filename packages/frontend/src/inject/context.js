@@ -12,6 +12,18 @@ export const isIframe = (function () {
 })()
 export const artify_playground = getQueryParam('artify_playground') === 'true'
 export let isArtifyLoading = false
+/**
+ * `isArtifyLoading` 的跨模块读写口。
+ * ⚠️ ESM 的 import 绑定是**只读**的 —— 其它模块不能 `import { isArtifyLoading }` 后赋值，
+ * 必须走 setter；否则只能像 2026-09 前那样裸引用（不 import），被打包器重命名后
+ * 在运行时抛 `ReferenceError: isArtifyLoading is not defined`。
+ */
+export function getIsArtifyLoading() {
+  return isArtifyLoading
+}
+export function setIsArtifyLoading(v) {
+  isArtifyLoading = v
+}
 
 // Prevent ComfyUI from restoring previous session tabs or graphs in playground/readonly mode
 if (artify_inject === 'readonly' || window.self !== window.top || artify_playground) {

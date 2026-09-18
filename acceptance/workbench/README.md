@@ -388,8 +388,12 @@ card_bridge 侧被重命名为 `artifyEmbedWindow2`，而 digest 段保留裸名
 
 | 运行形态 | 表现 |
 |---|---|
-| 打包产物（IIFE，非严格模式） | 裸名解析为 `undefined` → `if` 恒 falsy → **摘要在 embed 形态下从未 postMessage 给工作台**（express 快照那路还在，所以没人察觉） |
-| 原生 ESM（vitest） | 直接 `ReferenceError` → 被自身 `catch` 吞成 warn → **连 express 快照那路也一起丢** |
+| 打包产物（IIFE） | `ReferenceError: artifyEmbedWindow is not defined` → 被 `pushCanvasDigest` 自身的 catch 吞成 `console.warn` → **摘要既不推 iframe 也不落 express** |
+| 原生 ESM（vitest） | 同上（读取未声明的裸标识符在**任何**严格/非严格模式下都抛 ReferenceError） |
+
+> ⚠️ 本条最初记成"产物里非严格模式读作 `undefined` → `if` 恒假"——**那是错的**：
+> 非严格模式只对**赋值**宽容，读取未声明变量一律抛。W18 用真产物跑出 `ReferenceError`
+> 后已按实测更正（教训：这类判断别推理，跑一次真产物就有答案）。
 
 修法：`import { getEmbedWindow }`（card_bridge 早就导出了访问器，只是没人用）。修后产物里该处为 `getEmbedWindow()`，
 且 card_bridge 的变量不再被重命名（名字冲突消失）—— 这两点都可 `grep packages/frontend/public/comfy_inject.js` 复核。
@@ -409,3 +413,90 @@ card_bridge 侧被重命名为 `artifyEmbedWindow2`，而 digest 段保留裸名
 不是缺陷但也不省：改它要先剥离 `seq/ts` 再比，且 `GET_CANVAS_STATE` 得改 `force=true`
 （`applyCanvasState` 靠 `seq` 严格递增防乱序，工作台重连时画布未变也得能拿到摘要）—— 属行为变更 + 需真环境端到端验证，另起一轮。
 现状已写成断言（`digest_ops.test.js` 第三条），改动会变红。
+
+---
+
+## W18 真注入桥端到端（playwright + **真构建产物**，12/12）
+
+W15 验非嵌入态降级语义、W16 用**假宿主帧**验工作台这一侧、W17 用单测验桥的实现语义 ——
+「**真桥产物在浏览器里跑**」这条一直空着。W18 补上：把 W16 的假宿主换成**真 inject**。
+
+```bash
+cd /d/artifyfun/Comfy-Desktop && pnpm run build:frontend   # 前置：产物要最新
+node scripts/wb-inject-bridge-verify.mjs                    # 自带服务器（默认 5180），无需 harness
+```
+
+搭法（**全部同源**，避免跨源与代理坑）：脚本自带一台静态服务器，同时负责
+
+| 路径 | 作用 |
+|---|---|
+| `/__host` | 假 ComfyUI 宿主页（桩 `window.app` / `LiteGraph` / `electronAPI` + **真 inject 产物**） |
+| `/__inject.js` | `src/main/artifylab/public/frontend/comfy_inject.min.js`（**真 terser 产物**，不是源码） |
+| `/api/canvas/*`、`/queue`、`/api/config` | express stub —— **记录桥发出的请求体**（断言对象） |
+| 其余 | app 构建产物 + `stub.js` 注入（与 harness 同法） |
+
+宿主页桩必须满足桥的启动判定：`#vue-app` + `__COMFYUI_FRONTEND_VERSION__` + `LiteGraph.registered_node_types`
+（数量稳定 5 tick）+ `window.app.graph`，且顶层**非 iframe** → standalone 分支；
+并且 `extensionManager.registerSidebarTab` 得是函数 —— 桥才会注册 tab、建工作台 iframe。
+
+| 断言 | 覆盖 |
+|---|---|
+| W18.0 | **静态守卫**：`npx eslint src/inject` 的 no-undef 必须为 0（见下） |
+| W18.1 | 真产物加载：`__artifyInjectLoaded` + `registry` 36 项装配完整 |
+| W18.2 / 3 | 桥注册 `artify-workbench` tab → 建出 iframe → `setEmbedWindow` 与 iframe 的 `contentWindow` 是**同一个** |
+| W18.4 | 工作台 iframe 在 embed 形态 boot 完成 |
+| W18.5 | **画布摘要真的推给工作台**（iframe 内收到 `artify:canvas-state`，含 workflowName/nodeCount/models） |
+| W18.6 | 摘要同时落 express（`POST /api/canvas/snapshot`，body 是真 digest：`seq≥1`） |
+| W18.7 | `wb_sync` → 桥**真执行** `applyCanvasOps` → 桩画布被重建（`graph.clear=1`、`createNode=2`） |
+| W18.8 | 结构级 ops 先落 express checkpoint（`body.reason="workbench-sync-template"`） |
+| W18.9 | `wb_canvas_exec` → 桥真 `graphToPrompt` → `POST /api/canvas/execute` 的 `prompt` 是宿主图 |
+| W18.10 | ack 真回流 → 工作台侧出现「画布工作流已提交执行」 |
+| W18.11 | 宿主页 + iframe **全程零未捕获异常** |
+
+### 抓出并修掉的第二簇真缺陷：拆单体漏 import（16 处 no-undef，2 个文件）
+
+W18 第一次跑就报 `ReferenceError: artify_inject is not defined`（此前 W17 修的是同类病灶的另一处）。
+根因：`api_workflow.js` / `canvas_patches.js` **无条件使用** `context.js` 的导出
+（`artify_inject` / `isIframe` / `artify_playground` / `isElectron` / `isArtifyLoading`）却**没有 import** ——
+esbuild 打包时这些名字被 mangle 成短名（产物里 `artify_inject` → `y`），裸引用退化为未声明全局。
+
+实测影响（都是真功能）：
+
+| 位置 | 后果 |
+|---|---|
+| `api_workflow.js:71` `loadWorkflow()` | 一进来就抛 → **standalone「自动加载 activeApp 工作流」从未生效** |
+| `canvas_patches.js:93/139/150` `doHandleComfyuiContext()` | 抛 → readonly/playground 的画布约束、多 tab 抑制全不执行 |
+| `canvas_patches.js:562/620` | 抛 → `isArtifyLoading` 守卫失效（可能与主进程重放并发重入） |
+
+修法两条：① 两个文件补 `import ... from './context.js'`；
+② `isArtifyLoading` 是 `export let`（**)要赋值**），而 **ESM 的 import 绑定只读** ——
+所以 context 补了 `getIsArtifyLoading()` / `setIsArtifyLoading(v)` 访问器，调用点改为读写访问器。
+
+**变异验证**：去掉 `api_workflow.js` 的 context import → 重建 → W18.11 变红（`ReferenceError: artify_inject is not defined`）；还原 → 12/12。
+
+### 为什么 16 处能潜伏这么久：前端包的 lint 从不在 pre-commit 跑
+
+- 根 `.husky/pre-commit` = `npm run typecheck && npm run lint && npm run format:check`，而根 eslint **忽略 `packages/frontend/**`**
+- 前端包自己的 `npx eslint src` 能报（本次就是它给出 16 处全量清单），但**没人跑它**
+- 前端全量现状 131 error（96 个 `no-unused-vars` + 21 个 `vue/multi-word-component-names`…），**所以暂时不能直接并入 pre-commit**；
+  但 `src/inject` 已单独扫干净，并把「no-undef 必须为 0」挂成 **W18.0**（每次跑 W18 都守一遍）
+- 其余 3 处 no-undef 是**误报**：Vite define 的 `__APP_VERSION__`、测试文件里的 `require`
+
+### 两个夹具坑
+
+1. **假宿主必须给 `electronAPI`**：真机 ComfyUI 页由 `src/preload/comfyPreload.ts:142`
+   `contextBridge.exposeInMainWorld('electronAPI', ...)` 注入，inject 的 `isElectron` 与 `apiRequest` 的
+   baseUrl 都依赖它；缺了会回落到 **硬编码 `http://localhost:3000`**（`api_workflow.js:38`）→
+   `TypeError: Failed to fetch`。（顺带说明：真机上 `loadWorkflow` 是走 `electronAPI.ArtifyLab.getConfig()`
+   拿 `server_origin` 的正常路径，不是那个 3000 兜底。）
+2. **模板字符串里不能出现反引号**：在 `HOST_HTML = \`...\`` 的注释里写 `` `isElectron` `` 会**终结模板字符串**
+   → `SyntaxError: Unexpected identifier`。写宿主页 HTML 时用「」代替。
+
+### 构建链（改 `src/inject/**` 后必做）
+
+```bash
+pnpm --filter artifylab-frontend run build:inject   # 源 → packages/frontend/public/comfy_inject.js
+pnpm run build:frontend                             # vite 拷贝 + terser → src/main/artifylab/public/frontend/comfy_inject.min.js
+```
+两步都跑才算改完：**dev 读 public 版、打包版读 app 目录的 min 版**（`src/main/host/comfyInject.ts` 的两条分支）。
+只跑 `build:frontend` 会用旧源码压 min（W17 就漏过一次，靠 grep 产物才发现）。
