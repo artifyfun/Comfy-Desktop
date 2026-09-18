@@ -71,9 +71,9 @@ AGENT_BROWSER_SESSION=canvas-verify agent-browser open http://127.0.0.1:5174/can
 **2026-09-18 复核新增（S11 已闭环一条，其余待排）**
 
 - ✅ **D2 digest → wb_canvas_ops 链路**（原写"需 agent 后端"）—— 已由 **S11**（`scripts/wb-platform-canvas-e2e-verify.mjs`，8/8）用真 LLM + 真 ComfyUI 覆盖：真会话发指令 → 批准 → 真出图 → canvas ops 确认卡 → 落布 app 节点。
-- ⬜ **手动连线手势**：从节点端口拖出建连线 / 删除连线 / 重连（C-H8 只覆盖了 ops 落布产生的连线，未覆盖手画）
-- ⬜ **选区快捷指令条（A14）**：多选浮出的快捷指令条点击行为（`openSelPrompt` 修复后未专项验收）
-- ⬜ **图片入画布路径**：资产库拖入 / 粘贴图（A4）/ 上传到画布（W11 只验了资产库弹窗可弹可关 + App 拾取器落节点）
+- ✅ **手动连线手势** —— 已由 **C-H9**（`scripts/wb-canvas-gaps-verify.mjs`，12/12）覆盖：真鼠标拖句柄建线 / 点线删除 / 拖锚点重连。**过程里挖出真 bug**（见 C-H9 章「根因」）
+- ✅ **选区快捷指令条（A14）** —— 已由 **C-H9** 覆盖：框选浮出 `#canvas-sel-prompt` → 回车真送达 agent → agent 只聊天不出图
+- ✅ **图片入画布路径** —— 已由 **C-H9** 覆盖三条路（文件拖入 / 剪贴板粘贴 / 素材库拖出），且校验按真实比例缩放
 - ⬜ **多选拖动 / 分组（groups） / 对齐与自动布局**（文档里有 groups 字段，未验）
 - ⬜ **画布项目切换 / 重命名 / 删除**（w2 只验了「新建画布项目」）
 - ⬜ **快照 / 历史回滚**：先确认该功能是否存在于 UI（旧 C-H8 脚本曾断言一个并不存在的"快照面板入口"，已删）
@@ -143,3 +143,53 @@ node scripts/wb-canvas-w2.mjs 3008                   # 6 断言
    「删掉一个 + 撤销回来」的功能证据，不能看选择栏。
 5. **拖拽类断言必须排在做缩放/平移之前**：脚本会真的把画布平移到负坐标，之后按屏幕坐标点节点全落空。
 6. **视口有实时/落盘两份**，落盘走 `saveSoon` 500ms 防抖 → 断言前等 ≥1.2s。
+
+---
+
+## C-H9 画布盲区补测（playwright 无头 + 真 agent，12/12）
+
+补掉上面「已知遗留」里的三条：手动连线手势 / 选区快捷指令条 / 图片入画布。
+搭法同 S11：**直接从应用自身打开 `/canvas`**（`:3008` 同源伺服 SPA，SSE 才原生流式），
+`electronAPI` shim + 画布种子走 `addInitScript` 注入。
+
+```bash
+# 前置：应用在跑（env -u ELECTRON_RUN_AS_NODE pnpm dev）
+cd /d/artifyfun/Comfy-Desktop && node scripts/wb-canvas-gaps-verify.mjs
+```
+
+| 断言 | 覆盖 |
+|---|---|
+| C-H9.0 | 画布页 + 内嵌工作台就位（真会话） |
+| C-H9.1–3 | ① 拖右句柄建线 → 点线选中 + Delete 删除 → 拖 `to` 端锚点重连到另一节点（links 落盘态互证） |
+| C-H9.4–7 | ② 框选浮出 `#canvas-sel-prompt` → 再框选输入重置 → 回车真发送 → **agent 回复（chat 类，不触发生图）** |
+| C-H9.8–10 | ③ 文件拖入（DataTransfer+File）/ 剪贴板粘贴（ClipboardEvent）/ 素材库拖出（`application/x-artify-asset-url`）+ 按真实比例缩放 |
+| C-H9.11 | 全程无新增页面错误 |
+
+截图：`ch9-link-created` / `ch9-link-reconnect` / `ch9-sel-prompt` / `ch9-sel-prompt-sent` / `ch9-image-drop`。
+
+### 根因：`stopKonvaEvent` 的短路写法让「阻断冒泡」从未生效（已修）
+
+```js
+// ✗ 原写法：cancelBubble 初始化就是 false → 条件为假 → 永远置不上 true
+kev?.cancelBubble && (kev.cancelBubble = true)
+// ✓ 修后
+if (kev) kev.cancelBubble = true
+```
+
+`index.vue` 里对所有 Group 做了全局绑定 `st.find('Group').forEach(g => g.on('mousedown.wb', e => onItemDown(idx(), e)))`，
+而 `idx()` 用 `g.id()` 反查物件索引。冒泡没被阻断 → **句柄组/锚点组（无 id）传 idx=-1 进来 → `objects.value[-1].id` 抛 TypeError**；
+更隐蔽的是**有 id 的 Group** 会误把缩放/建线手势当成「按在物件上」（`drag.mode='item'`、改 selection），与手势抢状态。
+这 5 个调用点（句柄建线、锚点重连、角柄缩放、app 节点两处）**全都**受影响。
+
+加固两处：① `stopKonvaEvent` 无条件置 `cancelBubble = true`；② `onItemDown` 取物件前兜空（`if (!obj) return`），
+任何新增 Group 都不再能用同类方式崩掉画布。回归单测：`useLinkGestures.test.js` 新增 3 条（cancelBubble 初始 false 也要置真 / 锚点重连路径 / 缺 `evt` 不抛）。
+
+### 三个坑（新增）
+
+7. **源码级栈要用 dev（:5100）跑**：打包产物栈只有混淆后的行号，定位 `onItemDown` 这种函数还得靠 `pnpm dev`
+   直出源码。手势复现脚本按步骤 wrap（每步前后比 `pageErrors.length`），一眼看出是哪一步抛。
+8. **别用 heredoc + Python 字符串做补丁**：往 `python - <<'PY'` 里写含 `\n` 的替换串时，是 **Python 在解析
+   自己的字符串字面量**时把 `\n` 变成真换行（bash 的 quoted heredoc 本身不转义），落盘后 JS 语法就错了——
+   连踩两次。凡是要落含转义序列的代码，**一律用 Write/Edit 工具直接改文件**。
+9. **框选 ≠ 单选**：`openSelPrompt` 只在 `rubber`（框选）分支调用 —— C-H9 初版断言「单选点击浮出指令条」是**断言写错**，
+   不是产品 bug；写断言前先读触发条件。

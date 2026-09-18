@@ -47,9 +47,15 @@ export function useLinkGestures(canvasCtx) {
   })
 
   /** Konva 事件对象无 preventDefault/stopPropagation，Vue .prevent/.stop 修饰符会抛错；
-   *  统一在此代理到原生 evt（kev.evt 为浏览器原生事件） */
+   *  统一在此代理到原生 evt（kev.evt 为浏览器原生事件）。
+   *  ⚠️ 2026-09-18 修复：原写法 `kev?.cancelBubble && (kev.cancelBubble = true)` 是**短路无效**——
+   *  Konva 事件初始化时 cancelBubble 就是 false，条件为假 → 永远置不上 true，冒泡根本没被阻断。
+   *  后果：句柄/锚点/角柄按下会一路冒泡到 `st.find('Group').on('mousedown.wb')` 的全局绑定，
+   *  以 `g.id()` 反查物件的 `onItemDown(idx())`：无 id 的 Group（句柄组/锚点组）idx=-1 →
+   *  `objects.value[-1].id` 抛 TypeError（C-H9 实测，拖句柄建线每次都抛）；有 id 的 Group 则
+   *  **误把该手势当成“按在物件上”**（drag.mode='item'、改 selection），与缩放/建线抢状态。 */
   function stopKonvaEvent(kev) {
-    kev?.cancelBubble && (kev.cancelBubble = true) // Konva 冒泡阻断
+    if (kev) kev.cancelBubble = true // Konva 冒泡阻断（必须无条件置真）
     kev?.evt?.preventDefault?.()
     kev?.evt?.stopPropagation?.()
   }

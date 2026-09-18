@@ -2939,7 +2939,12 @@ function onWheel(e) {
 
 function onItemDown(i, e) {
   // 物件按下：记录待拖，交给 Konva 的节点拖拽；框选模式空地按下走 onMouseDown
-  hoverNodeId.value = objects.value[i].id
+  // 防御：全局 `st.find('Group').on('mousedown.wb')` 对**每个** Group 都绑了本函数，
+  // 用 `g.id()` 反查索引；无 id 的 Group（句柄组/连线锚点组等）会传 -1 进来。
+  // 修 stopKonvaEvent 后这些手势已在源头阻断冒泡，此处再兜一层，避免任何新 Group 复现同类崩溃。
+  const obj = objects.value[i]
+  if (!obj) return
+  hoverNodeId.value = obj.id
   // 右键菜单/连线创建菜单：点任何物件即收起（此前只有点空地才关，点物件关不掉）
   if (ctxMenu.value) ctxMenu.value = null
   if (connectCreate.open) closeConnectCreate()

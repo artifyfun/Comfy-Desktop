@@ -134,3 +134,34 @@ describe('useLinkGestures — 锚点重连', () => {
     expect(g.reconnectDrag.active).toBe(false)
   })
 })
+
+describe('stopKonvaEvent — 冒泡阻断必须真的生效（2026-09-18 修）', () => {
+  // 回归背景：原写法 `kev?.cancelBubble && (kev.cancelBubble = true)` 短路无效——
+  // Konva 事件初始化时 cancelBubble 就是 false，条件为假 → 永远置不上 true。
+  // 后果：句柄/锚点/角柄按下会冒泡到 `st.find('Group').on('mousedown.wb')` 的全局绑定，
+  // 以 g.id() 反查物件 → 无 id 的 Group 传 -1 → `objects.value[-1].id` 抛 TypeError；
+  // 有 id 的 Group 则误把该手势当成“按在物件上”（drag.mode='item'、改 selection）。
+  it('cancelBubble 初始为 false 时也要被置为 true', () => {
+    const { ctx } = mkCtx([objA], [])
+    const g = useLinkGestures(ctx)
+    const kev = { cancelBubble: false, evt: { preventDefault() {}, stopPropagation() {} } }
+    g.onConnectStart('a', 'source', kev)
+    expect(kev.cancelBubble).toBe(true)
+  })
+
+  it('锚点按下同样阻断（重连路径）', () => {
+    const { ctx } = mkCtx([objA, objB], [{ id: 'l1', from: 'a', to: 'b' }])
+    const g = useLinkGestures(ctx)
+    const kev = { cancelBubble: false, evt: {} }
+    g.onAnchorDown('l1', 'to', kev)
+    expect(kev.cancelBubble).toBe(true)
+  })
+
+  it('缺 evt 也不抛（Konva 事件可能没有 evt 字段）', () => {
+    const { ctx } = mkCtx([objA], [])
+    const g = useLinkGestures(ctx)
+    const kev = { cancelBubble: false }
+    expect(() => g.onConnectStart('a', 'target', kev)).not.toThrow()
+    expect(kev.cancelBubble).toBe(true)
+  })
+})
