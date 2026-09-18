@@ -4928,8 +4928,33 @@ function persistImage(o) {
   }
   probe.src = o.src
 }
+/**
+ * 拖放/粘贴落点 → 世界坐标（坐标来源优先级：拖放事件坐标 → Konva 指针 → 画布中心）
+ *
+ * ⚠️ 必须优先用拖放事件自带的 `clientX/clientY`：原生/H5 拖拽期间浏览器**不派发 pointermove**，
+ * 而 Konva 的 `pointerPos` 只由 pointermove/pointerdown 更新 —— 只读 `getPointerPosition()`
+ * 会把图放到**拖动开始前指针所在的位置**（实测：真指针@200,200 + drop 坐标@900,600 →
+ * 落在 200,199.6；连指针都没动过时落在上一次点击遗留的陈旧位置）。
+ *
+ * `clientX/clientY` 双双为 0 视为"事件没带坐标"（合成事件、ClipboardEvent 无此字段），
+ * 此时回落到 Konva 指针 → 画布中心。画布区域不贴窗口左上角（左侧栏 + 顶部工具条），
+ * 所以真实落在画布上的拖放不会是 (0,0)。
+ */
+function dropWorld(e) {
+  const st = stageEl.value?.getStage?.()
+  const cx = Number(e?.clientX)
+  const cy = Number(e?.clientY)
+  const hasPoint = cx > 0 || cy > 0
+  if (hasPoint) {
+    const rect = st?.container()?.getBoundingClientRect?.()
+    if (rect) return screenToWorld(viewport.value, cx - rect.left, cy - rect.top)
+  }
+  const p = st?.getPointerPosition() || { x: size.w / 2, y: size.h / 2 }
+  return screenToWorld(viewport.value, p.x, p.y)
+}
 function filesToObjects(files, world) {
   const made = []
+  // world = 首个节点的**中心**；多文件竖直递推（每个 cursorY 都是该节点的中心）
   let cursorY = world.y
   for (const f of files) {
     if (f.type.startsWith('video/') || f.type.startsWith('audio/')) {
@@ -4947,8 +4972,8 @@ function filesToObjects(files, world) {
       const o = {
         id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
         type: 'image',
-        x: world.x,
-        y: cursorY,
+        x: Math.round(world.x - w / 2),
+        y: Math.round(cursorY - h / 2),
         width: w,
         height: h,
         src: url,
@@ -4971,28 +4996,21 @@ function onDrop(e) {
   if (assetId) {
     const a = assets.value.find((x) => x.id === assetId)
     if (a) {
-      const st = stageEl.value?.getStage?.()
-      const p = st.getPointerPosition() || { x: size.w / 2, y: size.h / 2 }
-      const w = screenToWorld(viewport.value, p.x, p.y)
-      insertAsset(a, w.x - 130, w.y - 90)
+      const w = dropWorld(e)
+      insertAsset(a, w.x, w.y)
     }
     return
   }
   // 资产库拖出：携带完整图 URL，直接按 URL 建节点（insertAsset 内部 probe 探尺寸）
   const assetUrl = e.dataTransfer?.getData('application/x-artify-asset-url')
   if (assetUrl) {
-    const st = stageEl.value?.getStage?.()
-    const p = st.getPointerPosition() || { x: size.w / 2, y: size.h / 2 }
-    const w = screenToWorld(viewport.value, p.x, p.y)
-    insertAsset({ persist: assetUrl }, w.x - 130, w.y - 90)
+    const w = dropWorld(e)
+    insertAsset({ persist: assetUrl }, w.x, w.y)
     return
   }
   const files = [...(e.dataTransfer?.files || [])]
   if (!files.length) return
-  const st = stageEl.value?.getStage?.()
-  const p = st.getPointerPosition() || { x: size.w / 2, y: size.h / 2 }
-  const w = screenToWorld(viewport.value, p.x, p.y)
-  filesToObjects(files, w)
+  filesToObjects(files, dropWorld(e))
 }
 function onPaste(e) {
   const items = [...(e.clipboardData?.items || [])]
@@ -5001,10 +5019,8 @@ function onPaste(e) {
     .map((it) => it.getAsFile())
     .filter(Boolean)
   if (!files.length) return
-  const st = stageEl.value?.getStage?.()
-  const p = st?.getPointerPosition() || { x: size.w / 2, y: size.h / 2 }
-  const w = screenToWorld(viewport.value, p.x, p.y)
-  filesToObjects(files, w)
+  // ClipboardEvent 无 clientX/clientY → dropWorld 自动回落到 Konva 指针（贴着鼠标粘贴）
+  filesToObjects(files, dropWorld(e))
 }
 
 // —— 工作台产物落画布（公共通道）——

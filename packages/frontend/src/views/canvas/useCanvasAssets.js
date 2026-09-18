@@ -56,18 +56,23 @@ export function useCanvasAssets(deps) {
     return screenToWorld(viewport.value, size.w / 2, size.h / 2)
   }
 
-  /** 素材入画布：persist dataURL 直接建 image 节点（等比 ≤260px） */
-  function insertAsset(a, wx, wy) {
+  /** 素材入画布：persist dataURL 直接建 image 节点（等比 ≤260px）。
+   *  ⚠️ `cx/cy` 是**图片中心**的目标世界坐标（不是左上角）——尺寸要 probe 完才知道，
+   *  所以居中只能在 onload 里算。此前调用方各自写 `x-130, y-90` 硬编码偏移，
+   *  非 260x180 的素材（如方形 260x260）中心会偏 40px。 */
+  function insertAsset(a, cx, cy) {
     const probe = new Image()
     probe.onload = () => {
       const scale = Math.min(1, 260 / probe.naturalWidth)
+      const width = Math.round(probe.naturalWidth * scale)
+      const height = Math.round(probe.naturalHeight * scale)
       const o = {
         id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
         type: 'image',
-        x: Math.round(wx),
-        y: Math.round(wy),
-        width: Math.round(probe.naturalWidth * scale),
-        height: Math.round(probe.naturalHeight * scale),
+        x: Math.round(cx - width / 2),
+        y: Math.round(cy - height / 2),
+        width,
+        height,
         src: probe.src,
         persist: probe.src,
       }

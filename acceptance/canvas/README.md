@@ -76,8 +76,11 @@ AGENT_BROWSER_SESSION=canvas-verify agent-browser open http://127.0.0.1:5174/can
 - ✅ **图片入画布路径** —— 已由 **C-H9** 覆盖三条路（文件拖入 / 剪贴板粘贴 / 素材库拖出），且校验按真实比例缩放
 - ⬜ **多选拖动 / 分组（groups） / 对齐与自动布局**（文档里有 groups 字段，未验）
 - ⬜ **画布项目切换 / 重命名 / 删除**（w2 只验了「新建画布项目」）
-- ⬜ **图片落点语义**：`onDrop`/`onPaste` 忽略拖放事件坐标、只用 Konva 指针位置（见 C-H9 章末，已实测 A/B/C）；
-  真实原生拖拽是否受影响未实证；另素材库路径"居中"与文件路径"落点为左上角"两种语义不一致
+- ✅ **图片落点语义** —— 已修（见 C-H9 章末）：落点改取拖放事件坐标，三条路统一为「落点 = 节点中心」，
+  单测 `dropPlacement.test.js` + C-H9.8b/9b/10b 双保险。
+  ⚠️ 仍**未实证**：真实原生拖放（从 Explorer 拖文件进来）的端到端效果 —— 无头里构造不了浏览器级拖放
+  （CDP `Input.dispatchDragEvent` 的载荷进不了 `dataTransfer.files`／自定义 mime，两组零对象），
+  理论依据是"原生拖拽期间不派发 pointermove"（这也是修它的理由），需要人手拖一次确认。
 - ⬜ **快照 / 历史回滚**：先确认该功能是否存在于 UI（旧 C-H8 脚本曾断言一个并不存在的"快照面板入口"，已删）
 
 **更早遗留**
@@ -148,10 +151,11 @@ node scripts/wb-canvas-w2.mjs 3008                   # 6 断言
 
 ---
 
-## C-H9 画布盲区补测（playwright 无头 + 真 agent，14/14）
+## C-H9 画布盲区补测（playwright 无头 + 真 agent，17/17）
 
 补掉上面「已知遗留」里的三条：手动连线手势 / 选区快捷指令条 / 图片入画布；
-另加 ④ 段反向确认**修复没有连坏邻近手势**（角柄缩放，同属"无 id 的 v-group"病灶）。
+另加 ④ 段反向确认**修复没有连坏邻近手势**（角柄缩放，同属"无 id 的 v-group"病灶）；
+③ 段补三条**落点语义**断言（见下方「落点」小节）。
 搭法同 S11：**直接从应用自身打开 `/canvas`**（`:3008` 同源伺服 SPA，SSE 才原生流式），
 `electronAPI` shim + 画布种子走 `addInitScript` 注入。
 
@@ -166,6 +170,7 @@ cd /d/artifyfun/Comfy-Desktop && node scripts/wb-canvas-gaps-verify.mjs
 | C-H9.1–3 | ① 拖右句柄建线 → 点线选中 + Delete 删除 → 拖 `to` 端锚点重连到另一节点（links 落盘态互证） |
 | C-H9.4–7 | ② 框选浮出 `#canvas-sel-prompt` → 再框选输入重置 → 回车真发送 → **agent 回复（chat 类，不触发生图）** |
 | C-H9.8–10 | ③ 文件拖入（DataTransfer+File）/ 剪贴板粘贴（ClipboardEvent）/ 素材库拖出（`application/x-artify-asset-url`）+ 按真实比例缩放 |
+| C-H9.8b / 9b / 10b | ③ **落点语义**：文件拖入与素材库拖出的落点 = 拖放事件坐标（节点中心）；粘贴无坐标 → 落点贴真实指针 |
 | C-H9.12–13 | ④ **角柄缩放**：拖 `se` 角柄真改尺寸（160x100 → 290x190 落盘）+ **x/y 不动**（状态归属正确——修复前该手势会被全局绑定误判成"按在物件上"而整体拖动） |
 | C-H9.11 | 全程无新增页面错误 |
 
@@ -177,25 +182,30 @@ cd /d/artifyfun/Comfy-Desktop && node scripts/wb-canvas-gaps-verify.mjs
 > 右下角那个深色带蓝框的小面板是 **minimap（全景小窗）**，也不是坏节点。对照见 `ch9-green-probe.png`
 > （空画布只跑三条图片路径：模糊大图=素材库拖出，绿块=粘贴）。
 
-### 顺带量出的真问题：图片落点不看拖放事件坐标（未修，待排）
+### 落点：不看拖放事件坐标（已修）+ 统一为「落点 = 节点中心」
 
-`onDrop` / `onPaste` 三处都用 `st.getPointerPosition()` 定位，**完全忽略拖放事件自带的 `clientX/clientY`**；
-模板里的 `@dragover.prevent="dragOver = true"` 也只置高亮、丢弃坐标。而 Konva 的 `pointerPos` **只由
-pointermove/pointerdown 更新**，拖放事件不参与。实测（合成 drop，走应用真实 handler）：
+**病灶**（2026-09-18 修）：`onDrop` / `onPaste` 三处都用 `st.getPointerPosition()` 定位，
+**完全忽略拖放事件自带的 `clientX/clientY`**；模板里的 `@dragover.prevent="dragOver = true"`
+也只置高亮、丢弃坐标。而 Konva 的 `pointerPos` **只由 pointermove/pointerdown 更新**，
+拖放事件不参与。实测（合成 drop，走应用真实 handler）：
 
-| 组 | 真指针在世界坐标 | drop 事件里的坐标 | 实际落点 |
+| 组 | 真指针在世界坐标 | drop 事件里的坐标 | 修复前落点 |
 |---|---|---|---|
 | A | 200,200 | 900,600 | **200,199.6**（= 真指针，事件坐标被忽略） |
 | B | 900,600 | 900,600 | 900,599.6 |
 | C | 从不移动 | 900,600 | 757,73.6（**上一次真实点击遗留的陈旧指针**） |
 
-用户可见后果取决于「原生拖拽期间浏览器是否仍派发 pointermove」：若不派发（原生拖拽的常见行为），
-**从系统/资产库拖入的图片会落在"拖动开始前指针所在的位置"**，而不是落点。
-（无头里无法构造浏览器级拖放：CDP `Input.dispatchDragEvent` 投递的载荷进不了 `dataTransfer.files`／自定义 mime，
-D/E 两组均零对象，故此条**未实证**，标注待排。）
+原生拖拽期间浏览器不派发 pointermove，所以只读指针位置会把图放到**"拖动开始前指针所在的位置"**。
 
-顺带一处不一致：素材库路径用 `insertAsset(..., w.x - 130, w.y - 90)` **居中**于落点，
-文件/粘贴路径 `filesToObjects(files, w)` 把落点当**左上角** —— 同一操作两种落点语义。
+**修法**：新增 `dropWorld(e)`，坐标优先级 = **拖放事件坐标 → Konva 指针 → 画布中心**，
+`onDrop` 三个分支与 `onPaste` 统一走它（`clientX/clientY` 双 0 视为事件没带坐标 → 回落指针，
+这样 `ClipboardEvent` 与无参合成事件天然走指针分支）。同时把三条路的锚点统一为
+**「落点 = 节点中心」**：居中在 probe 拿到真实尺寸后才算（`insertAsset` / `filesToObjects` /
+`addMediaFromFile` 内部完成），此前素材库路径靠调用方硬编码 `x-130, y-90`（非 260x180 的
+素材会偏，方形素材偏 40px），文件路径则把落点当左上角。
+
+回归：单测 `src/views/canvas/dropPlacement.test.js`（5 条，含方形/横图/音频/视频回正）+
+C-H9.8b / 9b / 10b 三条浏览器断言（实测 `中心 (1100, 319.5) vs 拖放点 (1100, 320)`）。
 
 ### 根因：`stopKonvaEvent` 的短路写法让「阻断冒泡」从未生效（已修）
 
@@ -219,7 +229,7 @@ if (kev) kev.cancelBubble = true
 角柄的 `v-group` 同样**没有 id**，修复前它按下的 mousedown 一样会冒泡到 `onItemDown(-1)`（同一崩溃路径）；
 修复后必须既"不崩"又"照常能缩放"，且**不能把节点整体拖走**。
 
-### 三个坑（新增）
+### 四个坑（新增）
 
 7. **源码级栈要用 dev（:5100）跑**：打包产物栈只有混淆后的行号，定位 `onItemDown` 这种函数还得靠 `pnpm dev`
    直出源码。手势复现脚本按步骤 wrap（每步前后比 `pageErrors.length`），一眼看出是哪一步抛。
@@ -228,3 +238,6 @@ if (kev) kev.cancelBubble = true
    连踩两次。凡是要落含转义序列的代码，**一律用 Write/Edit 工具直接改文件**。
 9. **框选 ≠ 单选**：`openSelPrompt` 只在 `rubber`（框选）分支调用 —— C-H9 初版断言「单选点击浮出指令条」是**断言写错**，
    不是产品 bug；写断言前先读触发条件。
+10. **重复函数声明 `typecheck:web` 不报，只有 `vite build` 报**：往 `.vue` 的 `<script setup>` 里
+    插函数时插重了，`vue-tsc --noEmit` 静默通过、单测也全绿，`pnpm run build:frontend` 才以
+    `Identifier 'x' has already been declared` 失败。**改完脚本段必须跑一次真实构建**，别只信 typecheck。

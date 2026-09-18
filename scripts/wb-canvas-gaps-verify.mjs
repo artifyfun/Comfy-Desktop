@@ -414,27 +414,36 @@ async function main() {
   errSeg('② 选区指令条段')
 
   // ═══════════ ③ 图片入画布（三条路）═══════════
+  // 落点语义（2026-09-18 修后）：**落点 = 节点中心**，且坐标优先取拖放事件的 clientX/clientY
+  // （原生拖拽期间浏览器不派发 pointermove，只读 Konva getPointerPosition 会落到拖动开始前的位置）。
+  // 因此这里三次投放都**显式带坐标**，并把「落点 ≈ 坐标」作为断言；粘贴无坐标 → 断言贴指针。
+  const DROP1 = { x: 1100, y: 320 } // 文件拖入的落点（避开 A/B/C 与 g-img，免得挡住了 ④ 段要点的 A 角柄）
+  const DROP2 = { x: 860, y: 640 } // 素材库拖出的落点
+  const PASTE_AT = { x: 860, y: 300 } // 粘贴时的真实指针位置
+  const near = (o, p, tol = 3) =>
+    Math.abs(o.x + o.w / 2 - p.x) <= tol && Math.abs(o.y + o.h / 2 - p.y) <= tol
   {
-    // I1 文件拖入：合成 DataTransfer + File（走 onDrop 的 files 分支）
+    // I1 文件拖入：合成 DataTransfer + File（走 onDrop 的 files 分支）+ 真实落点坐标
     const before = await readDoc()
-    await page.evaluate(async () => {
-      const svg =
-        '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="680"><defs><linearGradient id="g"><stop offset="0" stop-color="#c33"/><stop offset="1" stop-color="#36c"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><circle cx="500" cy="340" r="200" fill="#ffd"/></svg>'
-      const blob = new Blob([svg], { type: 'image/svg+xml' })
-      const file = new File([blob], 'ch9-drop.svg', { type: 'image/svg+xml' })
-      const dt = new DataTransfer()
-      dt.items.add(file)
-      const target =
-        document.querySelector('[data-testid="canvas-drop-zone"]') ||
-        document.querySelector('canvas')?.parentElement?.parentElement ||
-        document.body
-      target.dispatchEvent(
-        new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt })
-      )
-      target.dispatchEvent(
-        new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt })
-      )
-    })
+    const s1 = await toScreen(DROP1.x, DROP1.y)
+    await page.evaluate(
+      async ({ sx, sy }) => {
+        const svg =
+          '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="680"><defs><linearGradient id="g"><stop offset="0" stop-color="#c33"/><stop offset="1" stop-color="#36c"/></linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/><circle cx="500" cy="340" r="200" fill="#ffd"/></svg>'
+        const blob = new Blob([svg], { type: 'image/svg+xml' })
+        const file = new File([blob], 'ch9-drop.svg', { type: 'image/svg+xml' })
+        const dt = new DataTransfer()
+        dt.items.add(file)
+        const target =
+          document.querySelector('[data-testid="canvas-drop-zone"]') ||
+          document.querySelector('canvas')?.parentElement?.parentElement ||
+          document.body
+        const ev = { bubbles: true, cancelable: true, dataTransfer: dt, clientX: sx, clientY: sy }
+        target.dispatchEvent(new DragEvent('dragover', ev))
+        target.dispatchEvent(new DragEvent('drop', ev))
+      },
+      { sx: s1.x, sy: s1.y }
+    )
     await page.waitForTimeout(1200)
     let after = await readDoc()
     const dropped = after.objects.filter((o) => !before.objects.some((b) => b.id === o.id))
@@ -448,9 +457,19 @@ async function main() {
         ? `${dropped[0].id} ${dropped[0].w}x${dropped[0].h} src=${dropped[0].src}`
         : '未新增对象'
     )
+    record(
+      'C-H9.8b 文件拖入落点 = 拖放事件坐标（节点中心）',
+      dropped.length === 1 && near(dropped[0], DROP1),
+      dropped.length
+        ? `中心 (${dropped[0].x + dropped[0].w / 2}, ${dropped[0].y + dropped[0].h / 2}) vs 拖放点 (${DROP1.x}, ${DROP1.y})`
+        : '未新增对象'
+    )
 
-    // I2 剪贴板粘贴：合成 ClipboardEvent（走 onPaste）
+    // I2 剪贴板粘贴：合成 ClipboardEvent（走 onPaste）；无拖放坐标 → 落点应贴着真实指针
     const before2 = await readDoc()
+    const sp = await toScreen(PASTE_AT.x, PASTE_AT.y)
+    await page.mouse.move(sp.x, sp.y)
+    await page.waitForTimeout(250)
     await page.evaluate(() => {
       const svg =
         '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><rect width="100%" height="100%" fill="#1c8"/></svg>'
@@ -471,23 +490,31 @@ async function main() {
       pasted.length === 1 && pasted[0].type === 'image' && pasted[0].w === 260,
       pasted.length ? `${pasted[0].id} ${pasted[0].w}x${pasted[0].h}` : '未新增对象'
     )
+    record(
+      'C-H9.9b 粘贴无拖放坐标 → 落点贴真实指针（回落到 Konva 指针）',
+      pasted.length === 1 && near(pasted[0], PASTE_AT, 4),
+      pasted.length
+        ? `中心 (${pasted[0].x + pasted[0].w / 2}, ${pasted[0].y + pasted[0].h / 2}) vs 指针 (${PASTE_AT.x}, ${PASTE_AT.y})`
+        : '未新增对象'
+    )
 
-    // I3 素材库拖出载荷（application/x-artify-asset-url，真 ComfyUI /view URL）
+    // I3 素材库拖出载荷（application/x-artify-asset-url，真 ComfyUI /view URL）+ 指定落点
     const before3 = await readDoc()
-    await page.evaluate((url) => {
-      const dt = new DataTransfer()
-      dt.setData('application/x-artify-asset-url', url)
-      const target =
-        document.querySelector('[data-testid="canvas-drop-zone"]') ||
-        document.querySelector('canvas')?.parentElement?.parentElement ||
-        document.body
-      target.dispatchEvent(
-        new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt })
-      )
-      target.dispatchEvent(
-        new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt })
-      )
-    }, COMFY_VIEW_SRC)
+    const s2 = await toScreen(DROP2.x, DROP2.y)
+    await page.evaluate(
+      ({ url, sx, sy }) => {
+        const dt = new DataTransfer()
+        dt.setData('application/x-artify-asset-url', url)
+        const target =
+          document.querySelector('[data-testid="canvas-drop-zone"]') ||
+          document.querySelector('canvas')?.parentElement?.parentElement ||
+          document.body
+        const ev = { bubbles: true, cancelable: true, dataTransfer: dt, clientX: sx, clientY: sy }
+        target.dispatchEvent(new DragEvent('dragover', ev))
+        target.dispatchEvent(new DragEvent('drop', ev))
+      },
+      { url: COMFY_VIEW_SRC, sx: s2.x, sy: s2.y }
+    )
     await page.waitForTimeout(1600)
     after = await readDoc()
     const fromAsset = after.objects.filter((o) => !before3.objects.some((b) => b.id === o.id))
@@ -497,6 +524,13 @@ async function main() {
       fromAsset.length
         ? `${fromAsset[0].id} ${fromAsset[0].w}x${fromAsset[0].h} src=${fromAsset[0].src}`
         : '未新增对象（URL 可能不可达）'
+    )
+    record(
+      'C-H9.10b 素材库落点 = 拖放事件坐标（节点中心）',
+      fromAsset.length === 1 && near(fromAsset[0], DROP2),
+      fromAsset.length
+        ? `中心 (${fromAsset[0].x + fromAsset[0].w / 2}, ${fromAsset[0].y + fromAsset[0].h / 2}) vs 拖放点 (${DROP2.x}, ${DROP2.y})`
+        : '未新增对象'
     )
     await page.screenshot({ path: `${SHOT_DIR}ch9-image-drop.png` })
   }
@@ -537,11 +571,7 @@ async function main() {
     const doc1 = await readDoc()
     const B = nodeOf(doc1, 'g-a')
     const grew = B.w > A.w + 80 && B.h > A.h + 50
-    record(
-      'C-H9.12 拖 se 角柄真缩放（尺寸变化落盘）',
-      grew,
-      `${A.w}x${A.h} → ${B.w}x${B.h}`
-    )
+    record('C-H9.12 拖 se 角柄真缩放（尺寸变化落盘）', grew, `${A.w}x${A.h} → ${B.w}x${B.h}`)
     record(
       'C-H9.13 缩放不误触整体拖动（x/y 不动 = 状态归属正确）',
       B.x === A.x && B.y === A.y,

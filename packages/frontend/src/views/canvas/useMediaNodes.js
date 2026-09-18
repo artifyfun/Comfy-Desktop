@@ -5,7 +5,18 @@
 import { reactive, ref, computed, watch } from 'vue'
 
 export function useMediaNodes(deps) {
-  const { objects, viewport, size, worldToScreen, saveSoon, beforeChange, message, t, persistImage, withCull } = deps
+  const {
+    objects,
+    viewport,
+    size,
+    worldToScreen,
+    saveSoon,
+    beforeChange,
+    message,
+    t,
+    persistImage,
+    withCull,
+  } = deps
 
   // —— 媒体节点（S4b video/audio）：拖入/上传 + overlay 播放器 + 存档 ——
   const mediaObjects = computed(() => withCull((o) => o.type === 'video' || o.type === 'audio'))
@@ -19,15 +30,16 @@ export function useMediaNodes(deps) {
       h: o.height * viewport.value.scale,
     }
   }
-  /** 从文件建媒体节点；视频取首帧定尺寸，音频固定 280x96 */
-  function addMediaFromFile(f, wx, wy, onSized) {
+  /** 从文件建媒体节点；视频取首帧定尺寸，音频固定 280x96。
+   *  ⚠️ `cx/cy` 是**节点中心**的目标世界坐标（与 insertAsset / filesToObjects 统一） */
+  function addMediaFromFile(f, cx, cy, onSized) {
     const isVideo = f.type.startsWith('video/')
     const url = URL.createObjectURL(f)
     const o = {
       id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
       type: isVideo ? 'video' : 'audio',
-      x: wx,
-      y: wy,
+      x: Math.round(cx - (isVideo ? 320 : 280) / 2),
+      y: Math.round(cy - (isVideo ? 180 : 96) / 2),
       width: isVideo ? 320 : 280,
       height: isVideo ? 180 : 96,
       src: url,
@@ -37,21 +49,22 @@ export function useMediaNodes(deps) {
     objects.value.push(o)
     saveSoon()
     if (isVideo) {
-      // 视频元信息定尺寸（最大 320 宽，16:9 兜底）
+      // 视频元信息定尺寸（最大 320 宽，16:9 兜底）；尺寸变了要按原中心回正
       const probe = document.createElement('video')
       probe.preload = 'metadata'
       probe.onloadedmetadata = () => {
         const ratio = probe.videoHeight / probe.videoWidth || 0.5625
         o.width = Math.min(320, Math.max(160, probe.videoWidth))
         o.height = Math.round(o.width * ratio)
+        o.x = Math.round(cx - o.width / 2)
+        o.y = Math.round(cy - o.height / 2)
         onSized?.(o.height)
         saveSoon()
       }
       probe.src = url
     } else {
       onSized?.(o.height)
-    }
-    // 存档：小文件 dataURL 内嵌；大文件只留会话（toast 告知刷新丢失）
+    } // 存档：小文件 dataURL 内嵌；大文件只留会话（toast 告知刷新丢失）
     if (f.size <= 4 * 1024 * 1024) {
       const rd = new FileReader()
       rd.onload = () => {
