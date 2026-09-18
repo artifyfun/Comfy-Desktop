@@ -503,6 +503,55 @@ async function main() {
 
   errSeg('③ 图片入画布段')
 
+  // ═══════════ ④ 角柄缩放（同属"无 id 的 v-group"病灶，修冒泡后必须仍可用）═══════════
+  // 角柄组是 `<v-group v-for="o in resizeTargets">` —— **没有 id**，修 stopKonvaEvent 之前
+  // 它的 mousedown 会冒泡到全局 onItemDown(idx())，idx 用 g.id() 反查 → -1 → 抛 TypeError；
+  // 修好后要在源头被阻断，同时缩放本身必须照常工作、且**不能把节点整体拖走**（状态归属正确）。
+  {
+    const doc0 = await readDoc()
+    const A = nodeOf(doc0, 'g-a')
+    const c = await page.evaluate(() => {
+      const st = window.Konva.stages[0]
+      const r = st.container().getBoundingClientRect()
+      return { left: r.left, top: r.top, x: st.x(), y: st.y(), scale: st.scaleX() }
+    })
+    const S = (wx, wy) => ({
+      x: c.left + wx * c.scale + c.x,
+      y: c.top + wy * c.scale + c.y
+    })
+    // 先选中（角柄是选中态才可见）
+    const ctr = S(A.x + A.w / 2, A.y + A.h / 2)
+    await page.mouse.click(ctr.x, ctr.y)
+    await page.waitForTimeout(600)
+    // se 角柄：圆心在 (x+w+off, y+h+off)，off = 10/scale
+    const off = 10 / c.scale
+    const h0 = S(A.x + A.w + off, A.y + A.h + off)
+    const h1 = S(A.x + A.w + off + 120, A.y + A.h + off + 80)
+    await page.mouse.move(h0.x, h0.y)
+    await page.waitForTimeout(200)
+    await page.mouse.down()
+    await page.mouse.move(h1.x, h1.y, { steps: 16 })
+    await page.waitForTimeout(200)
+    await page.mouse.up()
+    await page.waitForTimeout(1400) // 等 saveSoon 500ms 防抖落盘
+    const doc1 = await readDoc()
+    const B = nodeOf(doc1, 'g-a')
+    const grew = B.w > A.w + 80 && B.h > A.h + 50
+    record(
+      'C-H9.12 拖 se 角柄真缩放（尺寸变化落盘）',
+      grew,
+      `${A.w}x${A.h} → ${B.w}x${B.h}`
+    )
+    record(
+      'C-H9.13 缩放不误触整体拖动（x/y 不动 = 状态归属正确）',
+      B.x === A.x && B.y === A.y,
+      `x/y ${A.x},${A.y} → ${B.x},${B.y}`
+    )
+    await page.screenshot({ path: `${SHOT_DIR}ch9-resize.png` })
+  }
+
+  errSeg('④ 角柄缩放段')
+
   // 交互段无新增页面错误
   const newErrors = pageErrors.slice(errorsAtBoot)
   record(

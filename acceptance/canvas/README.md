@@ -146,9 +146,10 @@ node scripts/wb-canvas-w2.mjs 3008                   # 6 断言
 
 ---
 
-## C-H9 画布盲区补测（playwright 无头 + 真 agent，12/12）
+## C-H9 画布盲区补测（playwright 无头 + 真 agent，14/14）
 
-补掉上面「已知遗留」里的三条：手动连线手势 / 选区快捷指令条 / 图片入画布。
+补掉上面「已知遗留」里的三条：手动连线手势 / 选区快捷指令条 / 图片入画布；
+另加 ④ 段反向确认**修复没有连坏邻近手势**（角柄缩放，同属"无 id 的 v-group"病灶）。
 搭法同 S11：**直接从应用自身打开 `/canvas`**（`:3008` 同源伺服 SPA，SSE 才原生流式），
 `electronAPI` shim + 画布种子走 `addInitScript` 注入。
 
@@ -163,9 +164,10 @@ cd /d/artifyfun/Comfy-Desktop && node scripts/wb-canvas-gaps-verify.mjs
 | C-H9.1–3 | ① 拖右句柄建线 → 点线选中 + Delete 删除 → 拖 `to` 端锚点重连到另一节点（links 落盘态互证） |
 | C-H9.4–7 | ② 框选浮出 `#canvas-sel-prompt` → 再框选输入重置 → 回车真发送 → **agent 回复（chat 类，不触发生图）** |
 | C-H9.8–10 | ③ 文件拖入（DataTransfer+File）/ 剪贴板粘贴（ClipboardEvent）/ 素材库拖出（`application/x-artify-asset-url`）+ 按真实比例缩放 |
+| C-H9.12–13 | ④ **角柄缩放**：拖 `se` 角柄真改尺寸（160x100 → 290x190 落盘）+ **x/y 不动**（状态归属正确——修复前该手势会被全局绑定误判成"按在物件上"而整体拖动） |
 | C-H9.11 | 全程无新增页面错误 |
 
-截图：`ch9-link-created` / `ch9-link-reconnect` / `ch9-sel-prompt` / `ch9-sel-prompt-sent` / `ch9-image-drop`。
+截图：`ch9-link-created` / `ch9-link-reconnect` / `ch9-sel-prompt` / `ch9-sel-prompt-sent` / `ch9-image-drop` / `ch9-resize`。
 
 ### 根因：`stopKonvaEvent` 的短路写法让「阻断冒泡」从未生效（已修）
 
@@ -183,6 +185,11 @@ if (kev) kev.cancelBubble = true
 
 加固两处：① `stopKonvaEvent` 无条件置 `cancelBubble = true`；② `onItemDown` 取物件前兜空（`if (!obj) return`），
 任何新增 Group 都不再能用同类方式崩掉画布。回归单测：`useLinkGestures.test.js` 新增 3 条（cancelBubble 初始 false 也要置真 / 锚点重连路径 / 缺 `evt` 不抛）。
+
+**改完必须反向确认邻近手势没被连坏**：`stopKonvaEvent` 有 5 个调用点（句柄建线 ✓ / 锚点重连 ✓ /
+**角柄缩放** / app 节点 ⚙ 面板 / app 节点 ▶ 运行），①②③ 段只覆盖了前两个 —— 于是补 ④ 段。
+角柄的 `v-group` 同样**没有 id**，修复前它按下的 mousedown 一样会冒泡到 `onItemDown(-1)`（同一崩溃路径）；
+修复后必须既"不崩"又"照常能缩放"，且**不能把节点整体拖走**。
 
 ### 三个坑（新增）
 
