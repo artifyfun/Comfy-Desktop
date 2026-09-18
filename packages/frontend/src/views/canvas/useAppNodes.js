@@ -610,15 +610,10 @@ export function useAppNodes(deps) {
     // （此前 connect_nodes 直接用 AI 侧 id 去 find(o.id === op.from)，永远匹配不到 →
     //   连线被静默丢弃：节点建出来了、线是断的。）
     agentRefMap = new Map()
-    // C-H3 AI 快照：批量改画布前自动打持久命名快照（安全网，失败不阻塞）
-    try {
-      const doc = serializeDoc(objects.value, viewport.value, 'canvas', links.value, groups.value)
-      const pid = appStore.config?.activeAppId || 'default'
-      saveAiSnapshot(aiSnapshotStorage, pid, `AI 操作前（${ops.length} 条指令）`, doc)
-      aiSnapshotVersion.value++
-    } catch (e) {
-      console.warn('[aiSnapshot] 快照失败:', e?.message || e)
-    }
+    // C-H3 AI 快照：批量改画布前自动打持久命名快照（安全网，失败不阻塞）。
+    // 走 takeAiSnapshot —— 此前这里是它的**内联副本**（函数本体反而没人调用，
+    // 同一段逻辑两份实现，改一处忘一处；统一为单一入口）。
+    takeAiSnapshot(`AI 操作前（${ops.length} 条指令）`)
     // C-H7 落布整理：本批 add_app_node 的节点做水平居中 + 垂直等距分布
     // （复用画布既有 align/distribute 引擎，链式工作流视觉整齐）
     const opAppIds = new Set(ops.filter((op) => op.type === 'add_app_node').map((op) => op.appId))

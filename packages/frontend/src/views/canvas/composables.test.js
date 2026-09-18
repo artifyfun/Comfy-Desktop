@@ -36,11 +36,13 @@ function makePageDeps(overrides = {}) {
   const objects = ref([])
   const selection = ref([])
   const links = ref([])
+  const groups = ref([])
   const viewport = ref({ x: 0, y: 0, scale: 1 })
   return {
     objects,
     selection,
     links,
+    groups, // ⚠️ useAppNodes 解构了 groups（serializeDoc 用）——工厂漏给会让快照静默失败
     viewport,
     size: { w: 800, h: 600 },
     saveSoon: vi.fn(),
@@ -158,6 +160,32 @@ describe('useAppNodes.applyOneAgentOp', () => {
     // app 节点 + params：合并（run 是 void 异步，不在此断言其结果）
     c.applyOneAgentOp({ type: 'run_node', nodeId: 'n2', params: { steps: 30 } })
     expect(deps.objects.value[1].params).toEqual({ steps: 30 })
+  })
+
+  it('applyCanvasAgentOps：批量改画布前自动打一条 AI 快照（标签含指令条数、doc 为可解析文档串）', async () => {
+    // 回归背景：这条安全网此前是 `applyCanvasAgentOps` 里的**内联副本**，而 `takeAiSnapshot`
+    // 本体无人调用（死代码）—— 两份实现，改一处忘一处。现在统一走 takeAiSnapshot，用本测锁住。
+    const store = new Map()
+    vi.stubGlobal('localStorage', {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, v),
+    })
+    try {
+      const { c, deps } = await setup([
+        { id: 'n1', type: 'note', x: 10, y: 20, width: 100, height: 60 },
+      ])
+      await c.applyCanvasAgentOps([{ type: 'select_nodes', ids: ['n1'] }])
+      const raw = store.get('artify.canvas.aiSnapshots.v1')
+      expect(raw).toBeTruthy()
+      const list = JSON.parse(raw).projects['app-1'] // pid = appStore.config.activeAppId
+      expect(list).toHaveLength(1)
+      expect(list[0].label).toBe('AI 操作前（1 条指令）')
+      expect(typeof list[0].doc).toBe('string')
+      expect(JSON.parse(list[0].doc).objects.map((o) => o.id)).toEqual(['n1'])
+      expect(deps.objects.value).toHaveLength(1) // 快照不影响本批 op 执行
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
 
