@@ -74,8 +74,15 @@ CUSTOM `wb_canvas_ops`，整条 embed 链路（桥 → poller → canvasMode 总
 | W13 | **header 弹窗层级（stacking context）**（`scripts/wb-modal-zindex-verify.mjs`，打开 `/canvas`）— ① 画布内开 z-30 浮层（提示词库面板）→ 点 header「关于」→ 断言弹窗遮罩的 **SC 祖先链里没有 header** + 重叠点 `elementsFromPoint` 最上层属于弹窗子树；② 「设置」弹窗同断言 | w13-about-above-canvas.png / w13-config-above-canvas.png |
 
 | W14 | **画布指南弹窗（`scripts/wb-canvas-guide-verify.mjs`，打开 `/canvas`）** — ① 点缩放条罗盘 `[data-testid="canvas-guide-btn"]` → 弹窗 `[data-testid="canvas-guide-modal"]` 出现：侧栏 **2 组 / 12 篇**、正文标题 + 内嵌 SVG 示意图（元素数 > 5）；② 侧栏点「文生图」→ 正文标题随之切换、步骤列表非空、`active` 跟随；③④⑤ **三种关闭口径**各断言残留 = 0：Esc 一次 / `.guide-close` 按钮 / 点遮罩空白区；⑥ 空画布 `[data-testid="canvas-empty-guide-btn"]` → 打开 → Esc 关闭；⑦ 两段加载各自「无新增页面错误」（分段基线对比） | w14-guide-open.png / w14-guide-page-switch.png / w14-guide-closed.png / w14-empty-cta.png / w14-empty-cta-closed.png |
+| W15 | **执行副作用 CUSTOM 的降级语义（`scripts/wb-custom-sideeffects-verify.mjs`，打开 `/workbench`）** — `wb_sync` / `wb_canvas_exec` 此前零覆盖。三条独立触发词各自隔离：①「同步画布兜底」→ `wb_sync{ensureTab:true}` 在非嵌入态应**静默 skipped**（零错误气泡、本轮正常收尾 —— "执行前自动加载画布"失败不许打断生成流程）；②「同步画布显式」→ 无 `ensureTab` 应 reject → 错误气泡「同步到画布失败」；③「跑一下画布」→ `wb_canvas_exec` 应 reject → 错误气泡「执行画布工作流失败」；④ 三段无新增页面错误 | w15-sync-fallback.png / w15-sync-explicit.png / w15-canvas-exec.png |
 
 > **W14 的两个坑**：① **stub 每次加载都会重写 localStorage**（`stub.js` 在 boot 时无条件 `setItem`，`activeId` 恒回 `p-main`）——想把 activeId 切到 `p-empty`（空画布）不能靠 `page.evaluate` 改 key 再 `reload`，会被 stub 覆盖。解法：`context.route('**/__canvas_stub.js')` 取原始响应体后**在末尾追加**一段切项目的脚本再 fulfill，**不改动 acceptance/canvas/stub.js**（其他用例仍要默认 seed）。② 页面错误要**分段记账**：stub 未 mock 的 8 个 `/api` 端点（`POST /api/config`、`GET /api/batch/queue`、`GET /api/workbench/{sessions,presets,templates,runtime}`、`POST /api/workbench/sessions/create`、`POST /api/canvas/snapshot`）每次 boot 都会因 SPA fallback 返回 HTML 而抛 `Unexpected token '<'`，属既有噪音 → 每段 `reload` 后重置基线，只断言「指南交互本身不新增错误」。
+> **W15 的坑**：stub 场景的**触发词不能撞已有正则**。`withApproval` 用 `/审批|执行/` 匹配，
+> 所以那条用于触发画布执行的测试消息里**连「审批」「执行」这两个词都不能出现** ——
+> 我先写成「执行画布工作流：…」→ 命中审批 → 审批分支 `return` 停在人审卡，6e 帧永远发不出来；
+> 第二次改成「跑一下画布上的工作流（不要走审批）」**仍然命中**（「审批」两字在消息里）。
+> 另注：`node serve.mjs <port> &` 这种后台起法会被回收，起 harness 要用后台任务方式（或复用已在跑的端口）。
+
 > 另注：罗盘按钮在**底部缩放条**（不是被 z-20 提示条压住的顶部工具栏），所以这里 `locator.click()` 可用，不必像 W11 那样强制 `evaluate(el => el.click())`。
 
 > **W14 可跑两条链路**（同一套断言，验证产物与 dev 两条渲染路径）：
@@ -193,7 +200,8 @@ agent-browser eval 'window.__stubLogs.find(l=>/interaction-response/.test(l))'
 ## 已知遗留 / 未覆盖
 
 - **附件流程**：composer 的 draftAttachments 流程未触发（stub 不模拟附件 → 后端 decide 路径）。
-- **wb_sync / wb_canvas_exec / wb_canvas_ops** 等执行副作用 CUSTOM 未覆盖（`preview_frame` 已在 W9 覆盖）。
+- ✅ **wb_canvas_ops** 已由 **W10** 覆盖；**wb_sync / wb_canvas_exec** 已由 **W15**（`scripts/wb-custom-sideeffects-verify.mjs`，5/5）覆盖其**降级语义**（静默 skipped / 显式报错 / 画布执行报错）。
+  ⬜ 仍未覆盖：这两条事件在**嵌入态（/canvas 侧栏）的成功路径** —— 需真宿主画布 + 真 ComfyUI 执行，留给 canvas-embedded 场景（`wb_canvas_ops` 的成功路径已由 W10 在画布页覆盖）。
 - **approval 超时倒计时**：InteractionApprovalCard 倒计时 UI 已渲染但 stub 不模拟超时分支（需后端 emit 倒计时归零 reject 兜底才能验证）。
 - **多窗口审批 race**：同 threadId 两窗口同时打开、互相 approve 的 race 未验（需要 stub 支持并发流）。
 

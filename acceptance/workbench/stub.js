@@ -44,11 +44,11 @@
         api_key: '',
         base_url: '',
         model: '',
-        provider: '',
+        provider: ''
       }),
       getAppInfo: async () => ({ name: 'Artify Lab', version: 'verify' }),
-      loadComfyUI: async () => ({ url: ORIGIN }),
-    },
+      loadComfyUI: async () => ({ url: ORIGIN })
+    }
   }
 
   // ============ 内存 sessions store ============
@@ -63,7 +63,9 @@
       const st = JSON.parse(raw)
       if (!st || st.v !== 2) return null
       return st
-    } catch { return null }
+    } catch {
+      return null
+    }
   }
   function persist() {
     try {
@@ -73,10 +75,12 @@
           v: 2,
           sessions,
           nextId,
-          history: [...eventsHistory.entries()],
-        }),
+          history: [...eventsHistory.entries()]
+        })
       )
-    } catch { /* storage 满/禁用时降级为纯内存,验收不影响 */ }
+    } catch {
+      /* storage 满/禁用时降级为纯内存,验收不影响 */
+    }
   }
   const restored = loadPersisted()
   let sessions = restored
@@ -94,10 +98,10 @@
               role: 'user',
               kind: 'chat',
               text: '回放测试：规划任务并生成产物',
-              createdAt: Date.now() - 30e3,
-            },
-          ],
-        },
+              createdAt: Date.now() - 30e3
+            }
+          ]
+        }
       ]
   let nextId = restored ? restored.nextId : 2
 
@@ -113,12 +117,15 @@
 
   function recordEvent(threadId, seq, ev, runId) {
     let arr = eventsHistory.get(threadId)
-    if (!arr) { arr = []; eventsHistory.set(threadId, arr) }
+    if (!arr) {
+      arr = []
+      eventsHistory.set(threadId, arr)
+    }
     arr.push({
       seq,
       runId: runId || '',
       eventType: ev.type,
-      content: JSON.stringify(ev),
+      content: JSON.stringify(ev)
     })
     persist()
   }
@@ -141,25 +148,36 @@
   function flushThread(threadId) {
     const t = threads.get(threadId)
     if (!t || t.flushing || t.closed) return
-if (t.queue.length === 0) {
-        t.flushing = false
-        // doneEnqueued(RUN_FINISHED 收到) 或 truncateAfterFlush(W7 断流场景) 才关
-        if (t.doneEnqueued || t.truncateAfterFlush) {
-          try { t.controller.close() } catch { /* ignore */ }
-          t.closed = true
-          threads.delete(threadId)
+    if (t.queue.length === 0) {
+      t.flushing = false
+      // doneEnqueued(RUN_FINISHED 收到) 或 truncateAfterFlush(W7 断流场景) 才关
+      if (t.doneEnqueued || t.truncateAfterFlush) {
+        try {
+          t.controller.close()
+        } catch {
+          /* ignore */
         }
-        return
+        t.closed = true
+        threads.delete(threadId)
       }
+      return
+    }
     t.flushing = true
     const tick = () => {
-      if (t.closed) { t.flushing = false; return }
+      if (t.closed) {
+        t.flushing = false
+        return
+      }
       if (t.queue.length === 0) {
         t.flushing = false
         // W7:truncateAfterFlush(断流场景无 RUN_FINISHED)同样要在队列空后关流——
         // 否则前端 readAguiStream 永远等 EOF,workbenchStreamInterrupted 永不触发
         if (t.doneEnqueued || t.truncateAfterFlush) {
-          try { t.controller.close() } catch { /* ignore */ }
+          try {
+            t.controller.close()
+          } catch {
+            /* ignore */
+          }
           t.closed = true
           threads.delete(threadId)
         }
@@ -195,15 +213,18 @@ if (t.queue.length === 0) {
           truncateAfterFlush: false,
           runId: null,
           seq: 0,
-          intervalMs: intervalMs || INTERVAL_MS,
+          intervalMs: intervalMs || INTERVAL_MS
         })
         // 启动 flush 循环（无帧时 flush 立刻返回）
         flushThread(threadId)
       },
       cancel() {
         const t = threads.get(threadId)
-        if (t) { t.closed = true; threads.delete(threadId) }
-      },
+        if (t) {
+          t.closed = true
+          threads.delete(threadId)
+        }
+      }
     })
   }
 
@@ -214,7 +235,9 @@ if (t.queue.length === 0) {
     'iVBORw0KGgoAAAANSUhEUgAAAIAAAABQCAIAAABeYuqzAAAEBElEQVR42u1dS5LTMBR8r6oPwzFYDVvYQxWHoIoNWzYMsIED8DkBR+ACcyYWwbEtW7Ys21J3oixSqWSikXr66dmvW2/82cNnMzMz9+uTufnSO27dVy4f9u9F3xkMdR3P+88H78wN1b2ITCw21MLE4msMR0teY4DP4sT6wdHw2oTX4WSFN7yqBjcSptXwOiG4uyc0vGbXeAVuOo1jyQoqvLol8OJ1OFnh3vAqG9zjL+Ke8RqscNsFxYFkxQDThleF4EbDq1hwh180Nzf4XeDVr38nXoeTFafiFaYmfbwOJyvU8fr15aWZvX33h3ozjA+F1bHI+TVe7+l4HU7WQQ4oHo/z1aHNeJkpb4aYH/1EvI7mV/cbSJPH3FDDaYAqHjPwSroXGRSFduJ1OFlRBK/BF5P5lYjXuABQdzPMIWtXCyqF1wn8CrIAS7JNrA6BKh7z8Lq8KoPX4WRFbKIZeGVXh/bg1f2l6m+GeWQFVTxm4DWeD0ey3VLK7PUAhnjMkfosMlUOXXqVrCiN1wn86nNA1c0wj6yQ9j2E9wHVk+12XRpU8ZiBV3+5pGlqCvWAWvG4By+j2QwzyIq8O1sifo1rQXImMDSTYd3gRrCUdLxIdPxpNVrLBAZ1fiXpAcSmObiIyTCqS8/VgoRMTbgBk+F1jorJA+omw6keoGVqgkqyXdCIpE1NczlAzWQY3gpLmeawMjq/ac7CW5BaJsM8skLdZDhYlaRpDuomQzNtBzFc35QZqpKVTIaZZH14/WMTXr+/vrL2WHw8fn9KJys2x2N7rD1Sd2k3N/MXb35KmFhjE3v88NzM3n/8u2czrKjjdzmgWrLdrePHVEkRUxOYfQ/pDnV3bgdxvDoEFRNrDK/RfYCaqWlRDxBxqI8rETKmphk9QNRXM6oF8TvUN9eC+E1zI1G+pskwj6wgMhlm4ZVUCyIO7jU9gN73MKmGsjrUI7p0WAuiNbGuONS9hC59hkkHbCdGNuM1EuX1TE24hWZUZromMGQfcSbhl5XF63Cy4gy8Sur4JR3qZwR3747WNWXO5ACdTnNIOeJMza9eDpPsnAZf20bJTXMJl2TUwQ0+38M2vMIcQNmZb4Gs15Pywp35pnqAUOc06HfmS9MDWIMb4/Oder6aWC2IqjPfAlmhYmJdmJi0qQkehoBaZz5bQ5A7uKHfyfD/DzN35lsgKyZHnNkd6kF1KMwBUqamQS2IvTPfSi1o/jpdIbiRdMSZm19WfTPcoeODKh4z8Pr07ckvJktBU9OwWwp1Zz4Jk2EeWZF4ldnwOknHx+wR54ZXseCGRGe+G94METvi3PAqo+ODHC+VzmnZZJ3kgDtoFkQV3PCGV1VTEyYtTxteRYMb9/UfHPlMc/8AE9g8v5I1oPYAAAAASUVORK5CYII='
 
   // ============ 场景帧构造 ============
-  function nowMs() { return Date.now() }
+  function nowMs() {
+    return Date.now()
+  }
 
   function frameRunStarted(threadId, runId) {
     return { type: 'RUN_STARTED', timestamp: nowMs(), threadId, runId }
@@ -276,6 +299,15 @@ if (t.queue.length === 0) {
     // W10 画布 AI 节点指令（输入含铺画布/画布指令）—— canvas-embedded 模式：
     // CUSTOM wb_canvas_ops 经 canvasMode 总线到宿主画布页 → 人审确认卡 → 执行
     const withCanvasOps = /铺画布|画布指令|canvas.?ops|build_workflow/i.test(s)
+    // W15 执行副作用三态（三条独立触发词，便于各自隔离断言）：
+    //   ① 含「同步画布兜底」→ wb_sync{ensureTab:true}：非嵌入态应**静默 skipped**（不打断生成流程）
+    //   ② 含「同步画布显式」→ wb_sync（无 ensureTab）：非嵌入态应 reject → 错误气泡「同步到画布失败」
+    //   ③ 含「跑一下画布」  → wb_canvas_exec：非嵌入态应 reject → 错误气泡「执行画布工作流失败」
+    // ⚠️ ③ 的触发词**不能含「执行」**：那会命中上面的 withApproval（/审批|执行/），
+    //    审批场景在推进到本段之前就 `return` 停在人审卡，导致 6e 帧永远发不出来。
+    const withSyncFallback = /同步画布兜底/i.test(s)
+    const withSyncExplicit = /同步画布显式/i.test(s)
+    const withCanvasExec = /跑一下画布|canvas.?exec/i.test(s)
 
     const mid = 'm-' + Math.random().toString(36).slice(2, 8)
     const rid = 'r-' + Math.random().toString(36).slice(2, 8)
@@ -308,7 +340,7 @@ if (t.queue.length === 0) {
         { text: '解析画布项目数据', completed: false },
         { text: '生成工作流参数', completed: false },
         { text: '提交执行并等待结果', completed: false },
-        { text: '回填产物到画布', completed: false },
+        { text: '回填产物到画布', completed: false }
       ]
       const itemsDone = itemsInitial.map((it) => ({ ...it, completed: true }))
       pushFrame(threadId, frameCustom('todos', { runId, items: itemsInitial }))
@@ -325,7 +357,7 @@ if (t.queue.length === 0) {
         threadId,
         runId,
         toolName: 'wb_execute_template',
-        args,
+        args
       })
       pushFrame(
         threadId,
@@ -335,8 +367,8 @@ if (t.queue.length === 0) {
           toolName: 'wb_execute_template',
           toolTier: 'execution',
           risk: 'write+side-effect',
-          args, // C15 契约:卡片读 value.args(后端 toolApprovalRequiredValue 同形)
-        }),
+          args // C15 契约:卡片读 value.args(后端 toolApprovalRequiredValue 同形)
+        })
       )
       // 不在此处推 RUN_FINISHED；interaction-response 触发 resolved 后再推收尾
       return
@@ -346,7 +378,7 @@ if (t.queue.length === 0) {
     if (withArtifacts) {
       const files = [
         { filename: 'w4-result-1.png', subfolder: 'w4', type: 'output' },
-        { filename: 'w4-result-2.png', subfolder: 'w4', type: 'output' },
+        { filename: 'w4-result-2.png', subfolder: 'w4', type: 'output' }
       ]
       pushFrame(
         threadId,
@@ -354,8 +386,8 @@ if (t.queue.length === 0) {
           promptId: 'p-' + Math.random().toString(36).slice(2, 8),
           name: 'portrait_lora',
           outputs: files.map((f) => f.filename),
-          outputFiles: files,
-        }),
+          outputFiles: files
+        })
       )
     }
 
@@ -365,8 +397,8 @@ if (t.queue.length === 0) {
         threadId,
         frameCustom('wb_error', {
           itemId: 'e-' + Math.random().toString(36).slice(2, 8),
-          message: '执行失败：模型推理超时（stub 演示）',
-        }),
+          message: '执行失败：模型推理超时（stub 演示）'
+        })
       )
     }
 
@@ -379,7 +411,7 @@ if (t.queue.length === 0) {
       pushFrame(threadId, frameToolStart(toolCallId, 'wb_execute_template'))
       pushFrame(
         threadId,
-        frameToolArgs(toolCallId, JSON.stringify({ templateId: 'portrait_lora', wait: true })),
+        frameToolArgs(toolCallId, JSON.stringify({ templateId: 'portrait_lora', wait: true }))
       )
       pushFrame(threadId, frameToolEnd(toolCallId))
 
@@ -391,8 +423,8 @@ if (t.queue.length === 0) {
           frameCustom('preview_frame', {
             promptId,
             dataUrl: 'data:image/png;base64,' + PREVIEW_PLACEHOLDER_B64,
-            at: nowMs(),
-          }),
+            at: nowMs()
+          })
         )
       }
       pushFrame(threadId, {
@@ -400,7 +432,7 @@ if (t.queue.length === 0) {
         timestamp: nowMs(),
         toolCallId,
         content: JSON.stringify({ ok: true, prompt_id: promptId, status: 'success' }),
-        role: 'tool',
+        role: 'tool'
       })
     }
 
@@ -412,10 +444,7 @@ if (t.queue.length === 0) {
       pushFrame(threadId, frameToolStart(toolCallId, 'wb_build_workflow'))
       pushFrame(
         threadId,
-        frameToolArgs(
-          toolCallId,
-          JSON.stringify({ template_ids: ['app:e2e-aaa', 'app:e2e-bbb'] }),
-        ),
+        frameToolArgs(toolCallId, JSON.stringify({ template_ids: ['app:e2e-aaa', 'app:e2e-bbb'] }))
       )
       pushFrame(threadId, frameToolEnd(toolCallId))
       const ops = [
@@ -425,7 +454,7 @@ if (t.queue.length === 0) {
           name: 'E2E 文生图',
           nodeId: 'wf-e2e-0-a1',
           x: 80,
-          y: 80,
+          y: 80
         },
         {
           type: 'add_app_node',
@@ -433,16 +462,16 @@ if (t.queue.length === 0) {
           name: 'E2E 图生视频',
           nodeId: 'wf-e2e-1-b2',
           x: 440,
-          y: 80,
+          y: 80
         },
         {
           type: 'connect_nodes',
           from: 'wf-e2e-0-a1',
           to: 'wf-e2e-1-b2',
           fromName: 'E2E 文生图',
-          toName: 'E2E 图生视频',
+          toName: 'E2E 图生视频'
         },
-        { type: 'select_nodes', ids: ['wf-e2e-0-a1', 'wf-e2e-1-b2'] },
+        { type: 'select_nodes', ids: ['wf-e2e-0-a1', 'wf-e2e-1-b2'] }
       ]
       pushFrame(threadId, frameCustom('wb_canvas_ops', { ops, source: 'wb_build_workflow' }))
       pushFrame(threadId, {
@@ -450,7 +479,54 @@ if (t.queue.length === 0) {
         timestamp: nowMs(),
         toolCallId,
         content: JSON.stringify({ ok: true, dispatched: true, nodes: ops.length }),
-        role: 'tool',
+        role: 'tool'
+      })
+    }
+
+    // 6e) W15 执行副作用（wb_sync / wb_canvas_exec）：载荷形状照真实发点
+    //     （dispatchPlan.ts `emitCustom('wb_sync', {templateId,name,workflow,ensureTab:true})`）。
+    if (withSyncFallback || withSyncExplicit || withCanvasExec) {
+      const toolName = withCanvasExec ? 'wb_canvas_execute' : 'wb_sync_workflow'
+      const toolCallId = 'tc-' + Math.random().toString(36).slice(2, 8)
+      pushFrame(threadId, frameToolStart(toolCallId, toolName))
+      pushFrame(threadId, frameToolArgs(toolCallId, JSON.stringify({ name: 'W15 样例工作流' })))
+      pushFrame(threadId, frameToolEnd(toolCallId))
+      const workflow = {
+        nodes: [
+          { id: 1, type: 'CheckpointLoaderSimple', widgets_values: ['w15-a.safetensors'] },
+          { id: 2, type: 'KSampler', widgets_values: [1, 'euler', 'normal', 20, 7.5, 1] }
+        ],
+        links: [[1, 0, 2, 0, 'MODEL']]
+      }
+      if (withSyncExplicit) {
+        // 无 ensureTab → 非嵌入宿主应 reject（验证「显式同步失败要报错」这一半语义）
+        pushFrame(
+          threadId,
+          frameCustom('wb_sync', {
+            templateId: 'app:w15-sync-explicit',
+            name: 'W15 显式同步',
+            workflow
+          })
+        )
+      } else if (withSyncFallback) {
+        pushFrame(
+          threadId,
+          frameCustom('wb_sync', {
+            templateId: 'app:w15-sync-fallback',
+            name: 'W15 兜底同步',
+            workflow,
+            ensureTab: true
+          })
+        )
+      } else {
+        pushFrame(threadId, frameCustom('wb_canvas_exec', { name: 'W15 画布当前工作流' }))
+      }
+      pushFrame(threadId, {
+        type: 'TOOL_CALL_RESULT',
+        timestamp: nowMs(),
+        toolCallId,
+        content: JSON.stringify({ ok: true }),
+        role: 'tool'
       })
     }
 
@@ -469,7 +545,7 @@ if (t.queue.length === 0) {
   function jsonResp(body, status) {
     return new Response(JSON.stringify(body), {
       status: status || 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' }
     })
   }
 
@@ -485,7 +561,9 @@ if (t.queue.length === 0) {
 
     // 列表类端点统一包 {data:[...]}（index.vue:1363/1376/1384/3088/3344 均
     // 用 `json?.data ?? []` 反序列化,与后端 OkEnvelope 同构）。
-    function listResp(arr) { return jsonResp({ data: arr }) }
+    function listResp(arr) {
+      return jsonResp({ data: arr })
+    }
 
     if (route === 'GET /api/workbench/sessions') {
       const archived = u.searchParams.get('archived') === 'true'
@@ -494,13 +572,13 @@ if (t.queue.length === 0) {
     if (route === 'POST /api/workbench/sessions/create') {
       const body = init?.body ? JSON.parse(init.body) : {}
       const s = {
-        id: 's-' + (nextId++),
+        id: 's-' + nextId++,
         title: body.title || '新会话',
         archived: false,
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        threadId: body.threadId || ('t-' + Date.now()),
-        messages: [],
+        threadId: body.threadId || 't-' + Date.now(),
+        messages: []
       }
       sessions.unshift(s)
       persist()
@@ -538,7 +616,7 @@ if (t.queue.length === 0) {
         threadId,
         approvalMode: body.approvalMode,
         reasoningEffort: body.reasoningEffort,
-        inputPreview: String(body.input || '').slice(0, 60),
+        inputPreview: String(body.input || '').slice(0, 60)
       })
       // W6:用户消息落 legacy session.messages(真实后端 decide() 同语义)——
       // loadHistoryIntoPage 靠它把用户气泡按 createdAt 归并回放
@@ -549,7 +627,7 @@ if (t.queue.length === 0) {
           role: 'user',
           kind: 'chat',
           text: String(body.input || ''),
-          createdAt: Date.now(),
+          createdAt: Date.now()
         })
         persist()
       }
@@ -561,8 +639,8 @@ if (t.queue.length === 0) {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
           Connection: 'keep-alive',
-          'X-Accel-Buffering': 'no',
-        },
+          'X-Accel-Buffering': 'no'
+        }
       })
     }
 
@@ -574,7 +652,7 @@ if (t.queue.length === 0) {
         requestId: body.requestId,
         action: body.action,
         echoArgs: body.args || null,
-        originalArgs: pending ? pending.args : null,
+        originalArgs: pending ? pending.args : null
       })
       if (pending) {
         pendingApprovals.delete(body.requestId)
@@ -588,8 +666,8 @@ if (t.queue.length === 0) {
             toolName: pending.toolName,
             approved,
             finalAction: body.action,
-            finalArgs: body.action === 'edit' ? body.args || null : null,
-          }),
+            finalArgs: body.action === 'edit' ? body.args || null : null
+          })
         )
         // 审批解决后追加一段简短结果文本 + RUN_FINISHED 收尾
         const mid = 'm-resp-' + Math.random().toString(36).slice(2, 8)
@@ -602,8 +680,8 @@ if (t.queue.length === 0) {
               ? body.action === 'edit'
                 ? '参数已编辑，按新参数放行。'
                 : '已审批通过,继续执行。'
-              : '已拒绝,本轮终止。',
-          ),
+              : '已拒绝,本轮终止。'
+          )
         )
         pushFrame(pending.threadId, frameTextEnd(mid))
         pushFrame(pending.threadId, frameRunFinished(pending.threadId, pending.runId))
@@ -622,10 +700,15 @@ if (t.queue.length === 0) {
     // /view?filename=...&subfolder=...&type=... —— W4 产物缩略图占位图（1x1 PNG）
     // 真实后端经 routes/proxy.ts 转发到 ComfyUI /view;stub 返一张最小 PNG 防 404 噪声
     if (route === 'GET /view') {
-      const png = Uint8Array.from(atob(
-        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
-      ), (c) => c.charCodeAt(0))
-      return new Response(png, { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=300' } })
+      const png = Uint8Array.from(
+        atob(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+        ),
+        (c) => c.charCodeAt(0)
+      )
+      return new Response(png, {
+        headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=300' }
+      })
     }
 
     // —— 引导期必需端点 ——
@@ -646,7 +729,7 @@ if (t.queue.length === 0) {
         serverHost: ORIGIN,
         theme: 'dark',
         lang: 'zh',
-        activeAppId: '',
+        activeAppId: ''
       })
     }
     // batchTaskStore.fetchQueue 读 json.data.{jobs,paused}
@@ -672,7 +755,7 @@ if (t.queue.length === 0) {
         description: '',
         workflow: {},
         prompt: {},
-        params: [],
+        params: []
       })
     }
 
@@ -686,14 +769,14 @@ if (t.queue.length === 0) {
           id: 'app:e2e-aaa',
           name: 'E2E 文生图',
           description: '画布拾取用',
-          template: { prompt: { 1: { class_type: 'KSampler' } }, paramsNodes: [] },
+          template: { prompt: { 1: { class_type: 'KSampler' } }, paramsNodes: [] }
         },
         {
           id: 'app:e2e-bbb',
           name: 'E2E 无工作流',
           description: '应被拾取器过滤掉',
-          template: {},
-        },
+          template: {}
+        }
       ])
     }
     // GET /api/workbench/assets：创作资产库内容（AssetLibrary.api() 读 json.data → .assets）
@@ -701,14 +784,14 @@ if (t.queue.length === 0) {
       return okResp({
         total: 1,
         assets: [
-          { id: 'asset:e2e-1', kind: 'character', name: 'E2E 角色', refs_count: 2, seed: 12345 },
-        ],
+          { id: 'asset:e2e-1', kind: 'character', name: 'E2E 角色', refs_count: 2, seed: 12345 }
+        ]
       })
     }
     // GET /api/workbench/skills：技能库内容（SkillManager 读 json.data）
     if (route === 'GET /api/workbench/skills') {
       return okResp([
-        { name: 'e2e-skill', description: '验收用技能', enabled: true, builtin: false, size: 1 },
+        { name: 'e2e-skill', description: '验收用技能', enabled: true, builtin: false, size: 1 }
       ])
     }
 
@@ -717,29 +800,46 @@ if (t.queue.length === 0) {
   }
 
   window.__wbCtl = {
-    reset() { location.reload() },
-    get sessions() { return sessions },
-    get pendingApprovals() { return pendingApprovals },
-    get threads() { return threads },
-    get eventsHistory() { return eventsHistory },
+    reset() {
+      location.reload()
+    },
+    get sessions() {
+      return sessions
+    },
+    get pendingApprovals() {
+      return pendingApprovals
+    },
+    get threads() {
+      return threads
+    },
+    get eventsHistory() {
+      return eventsHistory
+    },
     // 验收用：捕获 stub 内 console.log + warn 文本,前端 eval 可读
-    get logs() { return window.__stubLogs || (window.__stubLogs = []) },
-    clearLogs() { if (window.__stubLogs) window.__stubLogs.splice(0) },
+    get logs() {
+      return window.__stubLogs || (window.__stubLogs = [])
+    },
+    clearLogs() {
+      if (window.__stubLogs) window.__stubLogs.splice(0)
+    }
   }
   // 同步 console.log/warn 到 window.__stubLogs（验收回归与 agent-browser eval 抓取）
   ;(function patchLogs() {
     const buf = (window.__stubLogs = window.__stubLogs || [])
-    const wrap = (orig) => function (...args) {
-      try {
-        buf.push(
-          args
-            .map((a) => (typeof a === 'object' && a !== null ? JSON.stringify(a) : String(a)))
-            .join(' '),
-        )
-        if (buf.length > 200) buf.shift()
-      } catch { /* ignore */ }
-      return orig.apply(console, args)
-    }
+    const wrap = (orig) =>
+      function (...args) {
+        try {
+          buf.push(
+            args
+              .map((a) => (typeof a === 'object' && a !== null ? JSON.stringify(a) : String(a)))
+              .join(' ')
+          )
+          if (buf.length > 200) buf.shift()
+        } catch {
+          /* ignore */
+        }
+        return orig.apply(console, args)
+      }
     console.log = wrap(console.log)
     console.warn = wrap(console.warn)
   })()
