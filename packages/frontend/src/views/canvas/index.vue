@@ -3230,6 +3230,10 @@ function onMouseUp() {
 
 let dragRecorded = false // 本次拖拽是否已压历史栈
 let dragStartPos = null // 起拖快照（dragend 组联动增量基准；数据已实时写回，不能用拖后值）
+/** 多选拖动联动表：dragstart 时若被拖节点在多选里，记录 selection 全员起拖位置。
+ *  dragmove 每帧按「锚点相对起拖的增量」同步其它成员（Figma 式整体走）；
+ *  有它时 dragend 的组联动跳过（多选优先于组合——用户显式选了谁就动谁）。 */
+let multiDragStart = null
 /** Ctrl/⌘/Alt+拖拽克隆手势：dragstart 时置位。记录被拖原件的 id、起拖坐标与克隆 id。
  *  视觉策略：克隆体先以同坐标落布（留在原地=原版），原 Konva 节点继续被拖走
  *  （=克隆体），dragend 时把数据身份与位置对齐（原版留起点、克隆归终点）。 */
@@ -3238,6 +3242,16 @@ const dragClone = reactive({ armed: false, origId: null, cloneId: null, start: {
  *  组联动增量必须以 dragstart 位置为基准） */
 function onNodeDragStartSnap(e) {
   dragStartPos = { id: e.target.id(), x: e.target.x(), y: e.target.y() }
+  multiDragStart = null
+  // 多选拖动整体走：记录 selection 全员起拖位置（Ctrl+拖拽克隆手势除外）
+  const sel = selection.value
+  if (!dragClone.armed && sel.length > 1 && sel.includes(e.target.id())) {
+    multiDragStart = new Map()
+    for (const id of sel) {
+      const mo = objects.value.find((x) => x.id === id)
+      if (mo) multiDragStart.set(id, { x: mo.x, y: mo.y })
+    }
+  }
 }
 
 function onNodeDrag(e) {
@@ -3279,18 +3293,45 @@ function onNodeDrag(e) {
     o.x = node.x()
     o.y = node.y()
   }
+  // 多选拖动整体走：其它成员按锚点相对起拖的增量实时跟随（吸附调整之后的最终位置）。
+  // 数据与 Konva 同帧写回，dragend 无需再补（组联动只在非多选时生效）。
+  // 克隆手势（armed）不做联动 —— armed 在 dragstart 的 clone 钩子里才置位，这里必须再判。
+  if (multiDragStart && multiDragStart.has(o.id) && !dragClone.armed) {
+    const ddx = node.x() - dragStartPos.x
+    const ddy = node.y() - dragStartPos.y
+    if (ddx || ddy) {
+      for (const [id, s] of multiDragStart) {
+        if (id === o.id) continue
+        const mo = objects.value.find((x) => x.id === id)
+        if (!mo) continue
+        mo.x = s.x + ddx
+        mo.y = s.y + ddy
+        const kn = stageEl.value?.getStage?.()?.findOne('#' + CSS.escape(id))
+        if (kn) {
+          kn.x(mo.x)
+          kn.y(mo.y)
+        }
+      }
+    }
+  }
 }
 
 function onNodeDragEnd(e) {
   dragRecorded = false
   const startPos = dragStartPos
   dragStartPos = null
+  multiDragStart = null
   guides.v = []
   guides.h = []
   const o = objects.value.find((x) => x.id === e.target.id())
   if (o) {
-    // 组联动：数据已实时写回，以起拖快照为基准算增量（否则恒 0，组联动失效）
-    const g = groups.value.find((gr) => gr.members.includes(o.id))
+    // 组联动：数据已实时写回，以起拖快照为基准算增量（否则恒 0，组联动失效）。
+    // 多选拖动时跳过 —— 多选优先于组合（成员已在 dragmove 按 selection 实时联动），
+    // 否则拖多选会意外带走组内未选中成员。
+    const g =
+      multiDragStart && multiDragStart.has(o.id)
+        ? null
+        : groups.value.find((gr) => gr.members.includes(o.id))
     const oldX = startPos?.id === o.id ? startPos.x : o.x
     const oldY = startPos?.id === o.id ? startPos.y : o.y
     o.x = e.target.x()
@@ -3332,6 +3373,7 @@ function onNodeCloneStart(e) {
   dragClone.origId = o.id
   dragClone.cloneId = nid
   dragClone.start = { x: o.x, y: o.y }
+  multiDragStart = null // 克隆手势不做多选联动（onNodeDragStartSnap 先于本函数跑，armed 还没置位）
 }
 function commitCloneDrag(e) {
   if (!dragClone.armed) return

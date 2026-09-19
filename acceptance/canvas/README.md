@@ -77,7 +77,7 @@ AGENT_BROWSER_SESSION=canvas-verify agent-browser open http://127.0.0.1:5174/can
 - ✅ **多选拖动 / 分组（groups） / 对齐与自动布局** —— 已由 **C-H10**（`scripts/wb-canvas-selection-verify.mjs`，14/14）覆盖：
   框选/Shift+点选多选、选择栏与右键菜单两组对齐入口、等距分布、组合/解组、组内拖动联动；
   **过程里量出一处遮挡缺陷**（软渲染提示横幅压住右上工具条，已修，见 C-H10 章）。
-  ⚠️ 现状记录：**未组合的多选拖动只移动被拖的那一个**（要整体移动需先「组合」）；
+  ⚠️ **未组合的多选拖动已特性化（2026-09-19）：多选拖动整体走（Figma 式）**，见 C-H10.10；
   组合成员拖角柄不缩放（`onResizeStart` 里 `groupOf(id) → return`，设计如此）；二者已写成断言固化。
 - ✅ **画布项目切换 / 重命名 / 删除** —— 已由 **C-H14**（`scripts/wb-canvas-projects-verify.mjs`，11/11）覆盖：
   标题双击重命名、卡片切换（**画布真的重装载**）、刷新持久化、卡片内联重命名、单卡删除（取消/确认两路）、
@@ -291,11 +291,13 @@ cd /d/artifyfun/Comfy-Desktop && node scripts/wb-canvas-selection-verify.mjs
 `elementFromPoint` 到它们的坐标会返回**容器**（不是按钮），于是"禁用"被误报成"被遮挡"
 （本轮就误报了 6 个：撤销/重做/运行选中/组合/解组/送参考图 —— 全是当下本就该禁用的）。
 
-### 现状记录（不是缺陷，但已固化成断言，改动时会变红）
+### 行为约定（已固化成断言，改动时会变红）
 
-- **未组合的多选拖动只移动被拖的那一个**：多选 + 拖动 ≠ 整体移动；整体移动的唯一路径是
-  「组合 → 拖成员」（`onNodeDragEnd` 里只按 `groups` 成员联动）。要做 Figma 式"多选拖动整体走"，
-  需在 `onNodeDrag` 里对 `selection` 做同样处理。
+- **未组合的多选拖动：整体移动（Figma 式，2026-09-19 特性化）**：`onNodeDragStartSnap`
+  在被拖节点属于多选（`selection.length > 1`）时记录全员起拖位置，`onNodeDrag` 每帧按
+  「锚点相对起拖的增量」实时联动其它成员（数据 + Konva 同帧写回）；**多选优先于组合**
+  —— dragend 的组联动在多选拖动时跳过，避免意外带走组内未选中成员。克隆手势
+  （Ctrl/⌘/Alt+拖拽）不做联动（armed 在 snap 之后才置位，dragmove 里必须再判）。
 - **组合成员不可单独缩放**：`onResizeStart` 对 `groupOf(id)` 直接 return。
 
 ---

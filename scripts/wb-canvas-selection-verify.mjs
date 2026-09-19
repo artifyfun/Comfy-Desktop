@@ -459,7 +459,7 @@ async function main() {
     )
   }
 
-  // ═══════════ ⑨ 未组合的多选拖动：只移动被拖的那一个（现状记录）═══════════
+  // ═══════════ ⑨ 未组合的多选拖动：整体移动（Figma 式，2026-09-19 特性化）═══════════
   {
     // 用「点空地清空 → 单选 A → Shift+点 B」构造 2 选（比框选稳：框选起点若落在物件上
     // 会走 onItemDown 而不是 rubber，选区直接为空 —— 首轮就在这儿踩过）
@@ -483,12 +483,13 @@ async function main() {
     const after = await readDoc()
     const na = nodeOf(after, 'g-a')
     const nb = nodeOf(after, 'g-b')
-    const aMoved = na.x - a2.x > 30
-    const bHeld = nb.x === b2.x && nb.y === b2.y
+    const dxA = na.x - a2.x
+    const dxB = nb.x - b2.x
+    const bothMoved = dxA > 30 && Math.abs(dxA - dxB) <= 0.6 && nb.y === b2.y
     record(
-      `C-H10.10 未组合的多选拖动：仅被拖者移动（现状；清空=${cleared} 计数=${selN}）`,
-      cleared && selN === 2 && aMoved && bHeld,
-      `A Δx=${(na.x - a2.x).toFixed(1)}；B 未动=${bHeld} → 要整体移动需先「组合」`
+      `C-H10.10 未组合的多选拖动：整体移动（Δ 一致；清空=${cleared} 计数=${selN}）`,
+      cleared && selN === 2 && bothMoved,
+      `A Δx=${dxA.toFixed(1)}；B Δx=${dxB.toFixed(1)}（差 ${(dxA - dxB).toFixed(2)}）→ 整体走，不必先「组合」`
     )
     await page.screenshot({ path: `${SHOT_DIR}ch10-multiselect.png` })
   }
