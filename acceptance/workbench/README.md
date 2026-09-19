@@ -216,7 +216,8 @@ agent-browser eval 'window.__stubLogs.find(l=>/interaction-response/.test(l))'
   **C 模式（iframe `?embed=1` + 注入桥）的成功路径**由 **W16**（`scripts/wb-cmode-bridge-verify.mjs`，9/9）覆盖。
   ⬜ **真注入桥的端到端**（在真 ComfyUI 页面里挂桥 → 真 `graphToPrompt` → 真服务端提交）：W16 用假宿主帧验的是
   **工作台这一侧**的协议形状与错误透传；桥那一侧的**实现语义**已由 **W17 的单测层**覆盖（见文末），
-  但「真页面 + 真桥 + 真队列」这一条仍需要真宿主环境。
+  但「真页面 + 真桥 + 真队列」这一条已由 **W22** 覆盖（`scripts/wb-real-queue-verify.mjs`，
+  真 promptId + 真出图落盘）。
   另注：`/canvas` 侧栏那种**同窗口**内嵌**不算** `isEmbed`（判定见 `workbench/index.vue:1498`），
   那条路由 `wb_canvas_ops` + 页内总线走（W10/S11 已覆盖）。
 - **approval 超时倒计时**：InteractionApprovalCard 倒计时 UI 已渲染但 stub 不模拟超时分支（需后端 emit 倒计时归零 reject 兜底才能验证）。
@@ -611,3 +612,52 @@ node scripts/wb-digest-dedupe-verify.mjs
 `Execution context was destroyed`，先等 ~3s 再发；② 应用 launch 时才把
 `comfy_inject.min.js` 同步到 extensions 目录，改 inject 源码后做真机回归要先手动同步
 （`cp <app产物>/comfy_inject.min.js <site-packages>/comfyui_frontend_package/static/extensions/artify_inject.js`）。
+
+---
+
+## W22 C 侧栏链路 → 真队列 → 真出图（CDP 附着应用实例，6/7→7/7）
+
+最后一块端到端：W19/W20 的 execute 提交打到的是 stub；W22 补「真队列跑完一次生成」。
+
+```bash
+# 前置：应用 dev 在跑 + 实例已启动（W20 环境）
+node scripts/wb-real-queue-verify.mjs              # 种 7 节点最小 txt2img 后执行
+W22_SEED=0 node scripts/wb-real-queue-verify.mjs   # 直接执行用户当前画布工作流（真语义）
+```
+
+链路：桥 `handleArtifyMessage({type:'artify:canvas-execute'})` → 真 `graphToPrompt` →
+`POST :3008/api/canvas/execute`（真 `executePrompt` → 真 `/prompt`）→ 轮询
+`GET /api/canvas/execute-status`（工作台同款路由 → 真 `/history`）→ **真图片落盘**
+（`ComfyUI_00015_.png`，2878 KB，Shared output 目录）。
+
+| 断言 | 实证 |
+|---|---|
+| W22.0 | 桥注入 + 真 `graphToPrompt` + 真 checkpoint 就绪 |
+| W22.1/7 | 用户当前图快照（13 节点）→ 执行后恢复（保护现场） |
+| W22.2 | `W22_SEED=0` 跳过种图，直接执行用户当前画布（img2img + AILab_ImageCompare） |
+| W22.3 | fetch 截获桥的提交响应 → **真 promptId**（真队列已接收） |
+| W22.4 | execute-status 轮询至 `success`（真 `/history`） |
+| W22.5 | **SaveImage 产物真实落盘**（文件存在且 >10KB） |
+| W22.6 | 无致命异常（见下） |
+
+### 过程中的三个发现
+
+1. **模型层不兼容（非产品缺陷）**：首遍种标准 KSampler txt2img，真队列报
+   `SAM3Model.forward() takes 2 positional arguments but 3 were given` —— 实例唯一的
+   checkpoint `sam3.1_multiplex_fp16` 是自定义模型，配标准 KSampler 不能跑（用户日常图走
+   自定义节点）。**错误经 execute-status 以可读文案浮出**（`extractExecutionError` 按设计工作）。
+   改为执行用户当前真工作流（`W22_SEED=0`）后 success。
+2. **execute-status 的响应形状**：成功时 `outputs = { files: [{filename,subfolder,type}] }`
+   （全扫 images/gifs **扁平化**，见 canvas.ts 的「产物全扫」注释），不是按节点分组的 dict ——
+   脚本按 dict 解析会假红。
+3. **偶发「Uncaught (in promise)」（非确定性，非产品缺陷）**：5 次执行 3 次出现，无描述无栈。
+   两轮探针归因：① 页面主 frame `unhandledrejection` 监听静置与执行全程均 0；
+   ② CDP `Log.domain` + **全部 9 个执行上下文**（含 Electron Isolated World）逐个装监听，
+   干净复现中全 0。无法归因到任何产品代码 → W22.6 对「空描述空栈」的该类条目降级为告警，
+   有真实堆栈的仍判失败。
+
+### 至此注入桥六层闭环
+
+W17 单测(47) → W16 假宿主(9) → W18 真产物+桩 app(12) → W19 真产物+手工 ComfyUI(10) →
+W20 应用自管实例(5) → W21 摘要去重真机(3) → **W22 真队列出图(7)**。
+侧栏聊天的真 LLM 决策链路由 S11（真 LLM + 真 ComfyUI）覆盖 —— C 侧栏的执行链路已全部真实闭环。
