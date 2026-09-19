@@ -500,3 +500,46 @@ pnpm run build:frontend                             # vite 拷贝 + terser → s
 ```
 两步都跑才算改完：**dev 读 public 版、打包版读 app 目录的 min 版**（`src/main/host/comfyInject.ts` 的两条分支）。
 只跑 `build:frontend` 会用旧源码压 min（W17 就漏过一次，靠 grep 产物才发现）。
+
+---
+
+## W19 真 ComfyUI 页面里的注入桥（playwright + 真后端，10/10）
+
+W18 的宿主是**桩 `window.app`**；真 ComfyUI 才有的东西由 W19 覆盖。**前置**：真 ComfyUI 后端
+（本机 `ComfyUI-Installs/ComfyUI/ComfyUI/.venv/Scripts/python.exe main.py --port 8188 …`，
+⚠️ `standalone-env/` 里那个 python **没有 torch**，别用）。
+
+```bash
+node scripts/wb-real-comfy-bridge-verify.mjs   # [--comfy http://127.0.0.1:8188] [--port 5181]
+```
+
+搭法：`page.addInitScript` 在真页面脚本前落地 ①主进程注入的两个全局（`__ARTIFY_LAB_URL__` /
+`__ARTIFY_LAB_API__`）+ ②preload 等价的 `electronAPI` 桩 + ③**真桥产物**（`new Function(src)()`，
+等价主进程 `executeJavaScript` 的时机）；之后真 ComfyUI 自己 boot，桥用**真
+`extensionManager.registerSidebarTab`** 注册。桥的行为通过 registry 暴露的
+`handleArtifyMessage` / `buildCanvasDigest` 直接驱动（真 app 当宿主）。
+
+| 断言 | 真环境实证 |
+|---|---|
+| W19.1 | 真就绪判据：等 `LiteGraph.registered_node_types` 填满（本机 4090）——**只等 `app.graph` 会在注册表还是 0 时开跑**，`createNode` 全返 null，看起来像"桥坏了"（第一轮就误判过） |
+| W19.1b | 真前端 `loadGraphData` 载图（也是桥 `loadWorkflowGraph` 走的 API）；真页面会恢复上次会话的工作流（本机 10 节点 AuraFlow 图） |
+| W19.2 | 真 `buildCanvasDigest`：真 `/queue` + 真节点计数 |
+| W19.3 | 真 `LiteGraph.createNode('KSampler')` + 真 `graph.add` → 节点 10 → 11 |
+| W19.4 | 真 `setWidget`：真节点的真 widget `seed: 42 → 424242` |
+| W19.5 | 真 `app.graphToPrompt()` → `POST /api/canvas/execute` 收到 **11 个真 API 格式节点**（`class_type`+`inputs`） |
+| W19.6 | 真 checkpoint：`body` 同时带 **workflow（10 节点）+ prompt（10 节点）双格式** |
+| W19.7 | 桥注册进**真侧栏**（真 `getSidebarTabs()` 里出现 `artify-workbench`，共 7 个 tab） |
+| W19.8 | 真 `align`：真节点 pos `[0,137,274] → [0,0,0]`（真几何变化） |
+| W19.9 | 真页面全程零新增未捕获异常 |
+
+**至此注入桥的四层全部闭环**：单测（W17，46 条）→ 假宿主协议（W16，9/9）→ **真产物 + 桩 app**（W18，12/12）
+→ **真产物 + 真 ComfyUI**（W19，10/10）。仍留白的只有"真队列跑完一次生成"（S 矩阵 S1/S11 已在真应用+真 ComfyUI 上覆盖执行链路）。
+
+### 三个坑
+
+1. **就绪判据**：真前端 `app.graph` 出现 ≠ 节点注册完成 —— 注册表（4000+）是异步填的。
+   判据要等"数量 ≥100 且连续两次采样相同"（桥自己的 bootstrap 也是这么等的）。
+2. **跨源 CORS**：真 ComfyUI 在 8188、express stub 在 5181 → 桥的 POST 会先发 OPTIONS 预检；
+   服务器必须回 CORS 头 + OPTIONS 204，且**预检不能记进请求记账**（否则断言取到空 body）。
+3. **python 环境**：`ComfyUI-Installs/ComfyUI/standalone-env/python.exe` **没有 torch**；
+   真正的运行环境是 `ComfyUI-Installs/ComfyUI/ComfyUI/.venv/Scripts/python.exe`（torch 2.12.1+cu130）。
