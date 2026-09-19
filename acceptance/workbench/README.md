@@ -35,7 +35,7 @@ WB_MSG="规划一个验收任务，包含 todo 步骤" WB_EXPECT=0 \
 ```
 
 脚本可参数化：`WB_MSG` 换触发消息、`WB_EXPECT=0` 只观测不断言、`WB_SHOT` 换截图基名。
-它同时会打印「被 SPA fallback 兜成 HTML 的 /api/* 请求」——stub 缺端点时会立刻显形。
+它同时会打印「被 SPA fallback 兜成 HTML 的 /api/\* 请求」——stub 缺端点时会立刻显形。
 
 **W10 画布 ops 的 DOM 级验收（打开的是 `/canvas`，不是 `/workbench`）**：
 
@@ -55,21 +55,21 @@ CUSTOM `wb_canvas_ops`，整条 embed 链路（桥 → poller → canvasMode 总
 
 ## 验收矩阵（8 场景全绿）
 
-| # | 验收点 | 截图 |
-|---|---|---|
-| W1 | **P1-B3 todo_list 进度卡** — 发"规划一个验收任务，包含 todo 步骤"→ 4 行 todo 全显示文本、计数 4/4、对勾终态、流干净收尾（无"对话流中断"红字） | w1-todo-done.png |
-| W2 | **B1 工具审批 HITL 卡** — 发"请审批执行这个任务"→ tool_approval_required CUSTOM → 等待审批卡 + 倒计时 + 批准/拒绝/修改参数按钮；点击"批准"→ interaction-response → tool_approval_resolved CUSTOM → 卡翻"已批准 执行模板" + 收尾文本 | w2-approval-pending.png / w2-approval-resolved.png |
-| W3 | **E1 推理强度透传 + reasoning 行渲染** — 发"请用推理分析这个任务"→ REASONING_MESSAGE_* 三帧 → 🧠 行展示脑图 + reasoning 文本 | w3-reasoning.png |
-| B1+E1 | **approvalMode=conservative / reasoningEffort=high 透传** — localStorage 设 `wb.approvalMode=conservative` + `wb.reasoningEffort=high` → reload 后 footer 显示「保守 / 高」→ 发"请审批推理这个任务"→ stub 控制台打出 `run request {approvalMode:"conservative", reasoningEffort:"high", ...}` 完整透传 | w3-b1-e1-conservative-high.png |
-| W4 | **wb_artifact 产物卡** — 发"生成产物图"→ CUSTOM wb_artifact{outputFiles} → applyExecutionSideEffect 'artifact' → 主区右侧栏渲染 2 张缩略图（`/view?filename=&type=output` 占位 PNG） | w4-artifacts.png |
-| W5 | **wb_error 错误气泡** — 发"故意出错测试"→ CUSTOM wb_error{message} → applyCustom 'wb_error' → 主区红色错误气泡"执行失败：模型推理超时（stub 演示）" | w5-error.png |
-| W6 | **历史回放** — 发"历史回放：规划任务清单"（触发 todos）→ reload → 自动恢复 `s-seed-1` → selectSession → loadHistoryIntoPage 拉 records → 用户气泡按 createdAt 归并 + agent 文本 + todo 卡 4/4 重建 | w6-history-replay.png |
-| W7 | **流截断兜底** — 发"测试断流"→ stub truncateAfterFlush=true（不发 RUN_FINISHED）→ flushThread 队列空后 close → 前端 readAguiStream EOF → `!sawRunFinish` 触发 `workbenchStreamInterrupted` 红色错误气泡"对话流中断，本轮未收到完成信号" | w7-stream-interrupted.png |
-| W8 | **审批 edit-args** — 发"修改参数执行这个任务"→ tool_approval_required 带 args `{templateId,count,seed,customParam}` → 点击「修改参数」→ textarea 预填美化 JSON → 改 count 4→6 → 保存 → interaction-response action='edit' echoArgs.count=6 / originalArgs.count=4 → tool_approval_resolved 带 finalAction='edit' + finalArgs → 收尾文本"参数已编辑，按新参数放行。" | w8-approval-edit.png |
-| W9 | **生成过程直通预览（编排路径）** — 发"我要看实时预览"→ TOOL_CALL_START/ARGS/END 占出工具卡 → 3 帧 CUSTOM `preview_frame{dataUrl}` → 工具卡内渲染 `<img data-testid="exec-preview">`。断言：图在、**真的解码成功**（naturalWidth 128 / naturalHeight 80）、src 是 `data:image/*`、无页面级报错 | w9-preview.png |
-| W10 | **画布 ops 全链 + DOM 级确认卡** — 在 **`/canvas`** 发"帮我把模板铺画布搭成工作流"→ stub 推 CUSTOM `wb_canvas_ops{ops,source}`（ops 为 canvasTools 真实形状：`appId` 是模板 id、节点引用走本批 `nodeId`）→ 画布页 `.agent-ops-card` 渲染出「新建应用节点：E2E 文生图 / 图生视频 · 连线 E2E 文生图 → E2E 图生视频 · 选中 2 个物件」。断言：卡文案含节点名且**不暴露内部 nodeId**、确认前节点未落布（人审门有效）→ 点「执行」→ `artify.canvas.projects.v1` 出现 **2 个节点（id 恰为 AI 侧 nodeId）+ 1 条连线** | w10-canvas-ops-card.png / w10-canvas-ops-applied.png |
-| W11 | **两个用户报障的回归 + 视图按钮口径**（`scripts/wb-ui-regress-verify.mjs`）— ① 点侧栏「创作资产库」→ 弹窗**当次**可见、点关闭**能关**、点「技能库」**不再连带**弹出资产库；② `/canvas` 点「添加 App 节点」→ 拾取器弹出且**只列带工作流的应用**（空 `template` 被过滤）→ 点一项 → `artify.canvas.projects.v1` 的 `project.doc.objects` 出现 1 个 `type:'app'`、`appId` 正确的节点；③ 枚举四个视图入口断言 **icon↔行为口径一致**（准星=全部适配视图 / expand=重置视图，两栏都是），随后累计平移 4 次把内容推到远处负坐标、新建节点 → 缩放滑杆降到 40% → 点「重置视图」→ 断言 100%、**视口中心世界坐标不变**、正在看的节点仍在画面内 | w11-assetlib-open.png / w11-apppicker.png / w11-canvas-node-added.png / w11-reset-before.png / w11-reset-after.png |
-| W12 | **提示词库重写后的渲染与回填**（`scripts/wb-promptlib-ui-verify.mjs`，打开 `/canvas`）— ① 点工具栏「提示词库」→ 面板按**工作流分类**渲染：断言分类数 ≥14、含「模型分档 / 文生图 / 文生视频 / 图生视频 / 图生图 / 图像编辑」、条目 ≥100、**每条都有 hint**；② 搜索「Krea2」→ 条目数从 136 降到 10（验证搜索能命中 hint 里的模型名）；③ 添加便签（自动选中）→ 点「先锁不变项」那条词条 → `project.doc.objects` 里 note.text 追加成功、面板自动关闭 | w12-promptlib-open.png / w12-promptlib-applied.png |
+| #     | 验收点                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 截图                                                                                                               |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| W1    | **P1-B3 todo_list 进度卡** — 发"规划一个验收任务，包含 todo 步骤"→ 4 行 todo 全显示文本、计数 4/4、对勾终态、流干净收尾（无"对话流中断"红字）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | w1-todo-done.png                                                                                                   |
+| W2    | **B1 工具审批 HITL 卡** — 发"请审批执行这个任务"→ tool_approval_required CUSTOM → 等待审批卡 + 倒计时 + 批准/拒绝/修改参数按钮；点击"批准"→ interaction-response → tool_approval_resolved CUSTOM → 卡翻"已批准 执行模板" + 收尾文本                                                                                                                                                                                                                                                                                                                                                                                               | w2-approval-pending.png / w2-approval-resolved.png                                                                 |
+| W3    | **E1 推理强度透传 + reasoning 行渲染** — 发"请用推理分析这个任务"→ REASONING*MESSAGE*\* 三帧 → 🧠 行展示脑图 + reasoning 文本                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | w3-reasoning.png                                                                                                   |
+| B1+E1 | **approvalMode=conservative / reasoningEffort=high 透传** — localStorage 设 `wb.approvalMode=conservative` + `wb.reasoningEffort=high` → reload 后 footer 显示「保守 / 高」→ 发"请审批推理这个任务"→ stub 控制台打出 `run request {approvalMode:"conservative", reasoningEffort:"high", ...}` 完整透传                                                                                                                                                                                                                                                                                                                            | w3-b1-e1-conservative-high.png                                                                                     |
+| W4    | **wb_artifact 产物卡** — 发"生成产物图"→ CUSTOM wb_artifact{outputFiles} → applyExecutionSideEffect 'artifact' → 主区右侧栏渲染 2 张缩略图（`/view?filename=&type=output` 占位 PNG）                                                                                                                                                                                                                                                                                                                                                                                                                                              | w4-artifacts.png                                                                                                   |
+| W5    | **wb_error 错误气泡** — 发"故意出错测试"→ CUSTOM wb_error{message} → applyCustom 'wb_error' → 主区红色错误气泡"执行失败：模型推理超时（stub 演示）"                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | w5-error.png                                                                                                       |
+| W6    | **历史回放** — 发"历史回放：规划任务清单"（触发 todos）→ reload → 自动恢复 `s-seed-1` → selectSession → loadHistoryIntoPage 拉 records → 用户气泡按 createdAt 归并 + agent 文本 + todo 卡 4/4 重建                                                                                                                                                                                                                                                                                                                                                                                                                                | w6-history-replay.png                                                                                              |
+| W7    | **流截断兜底** — 发"测试断流"→ stub truncateAfterFlush=true（不发 RUN_FINISHED）→ flushThread 队列空后 close → 前端 readAguiStream EOF → `!sawRunFinish` 触发 `workbenchStreamInterrupted` 红色错误气泡"对话流中断，本轮未收到完成信号"                                                                                                                                                                                                                                                                                                                                                                                           | w7-stream-interrupted.png                                                                                          |
+| W8    | **审批 edit-args** — 发"修改参数执行这个任务"→ tool_approval_required 带 args `{templateId,count,seed,customParam}` → 点击「修改参数」→ textarea 预填美化 JSON → 改 count 4→6 → 保存 → interaction-response action='edit' echoArgs.count=6 / originalArgs.count=4 → tool_approval_resolved 带 finalAction='edit' + finalArgs → 收尾文本"参数已编辑，按新参数放行。"                                                                                                                                                                                                                                                               | w8-approval-edit.png                                                                                               |
+| W9    | **生成过程直通预览（编排路径）** — 发"我要看实时预览"→ TOOL_CALL_START/ARGS/END 占出工具卡 → 3 帧 CUSTOM `preview_frame{dataUrl}` → 工具卡内渲染 `<img data-testid="exec-preview">`。断言：图在、**真的解码成功**（naturalWidth 128 / naturalHeight 80）、src 是 `data:image/*`、无页面级报错                                                                                                                                                                                                                                                                                                                                     | w9-preview.png                                                                                                     |
+| W10   | **画布 ops 全链 + DOM 级确认卡** — 在 **`/canvas`** 发"帮我把模板铺画布搭成工作流"→ stub 推 CUSTOM `wb_canvas_ops{ops,source}`（ops 为 canvasTools 真实形状：`appId` 是模板 id、节点引用走本批 `nodeId`）→ 画布页 `.agent-ops-card` 渲染出「新建应用节点：E2E 文生图 / 图生视频 · 连线 E2E 文生图 → E2E 图生视频 · 选中 2 个物件」。断言：卡文案含节点名且**不暴露内部 nodeId**、确认前节点未落布（人审门有效）→ 点「执行」→ `artify.canvas.projects.v1` 出现 **2 个节点（id 恰为 AI 侧 nodeId）+ 1 条连线**                                                                                                                      | w10-canvas-ops-card.png / w10-canvas-ops-applied.png                                                               |
+| W11   | **两个用户报障的回归 + 视图按钮口径**（`scripts/wb-ui-regress-verify.mjs`）— ① 点侧栏「创作资产库」→ 弹窗**当次**可见、点关闭**能关**、点「技能库」**不再连带**弹出资产库；② `/canvas` 点「添加 App 节点」→ 拾取器弹出且**只列带工作流的应用**（空 `template` 被过滤）→ 点一项 → `artify.canvas.projects.v1` 的 `project.doc.objects` 出现 1 个 `type:'app'`、`appId` 正确的节点；③ 枚举四个视图入口断言 **icon↔行为口径一致**（准星=全部适配视图 / expand=重置视图，两栏都是），随后累计平移 4 次把内容推到远处负坐标、新建节点 → 缩放滑杆降到 40% → 点「重置视图」→ 断言 100%、**视口中心世界坐标不变**、正在看的节点仍在画面内 | w11-assetlib-open.png / w11-apppicker.png / w11-canvas-node-added.png / w11-reset-before.png / w11-reset-after.png |
+| W12   | **提示词库重写后的渲染与回填**（`scripts/wb-promptlib-ui-verify.mjs`，打开 `/canvas`）— ① 点工具栏「提示词库」→ 面板按**工作流分类**渲染：断言分类数 ≥14、含「模型分档 / 文生图 / 文生视频 / 图生视频 / 图生图 / 图像编辑」、条目 ≥100、**每条都有 hint**；② 搜索「Krea2」→ 条目数从 136 降到 10（验证搜索能命中 hint 里的模型名）；③ 添加便签（自动选中）→ 点「先锁不变项」那条词条 → `project.doc.objects` 里 note.text 追加成功、面板自动关闭                                                                                                                                                                                  | w12-promptlib-open.png / w12-promptlib-applied.png                                                                 |
 
 | W13 | **header 弹窗层级（stacking context）**（`scripts/wb-modal-zindex-verify.mjs`，打开 `/canvas`）— ① 画布内开 z-30 浮层（提示词库面板）→ 点 header「关于」→ 断言弹窗遮罩的 **SC 祖先链里没有 header** + 重叠点 `elementsFromPoint` 最上层属于弹窗子树；② 「设置」弹窗同断言 | w13-about-above-canvas.png / w13-config-above-canvas.png |
 
@@ -95,6 +95,7 @@ CUSTOM `wb_canvas_ops`，整条 embed 链路（桥 → poller → canvasMode 总
 > 另注：罗盘按钮在**底部缩放条**（不是被 z-20 提示条压住的顶部工具栏），所以这里 `locator.click()` 可用，不必像 W11 那样强制 `evaluate(el => el.click())`。
 
 > **W14 可跑两条链路**（同一套断言，验证产物与 dev 两条渲染路径）：
+>
 > - 产物（默认）：`pnpm run build:frontend` → `node acceptance/canvas/serve.mjs 5174` → `node scripts/wb-canvas-guide-verify.mjs 5174`
 > - dev server：`pnpm dev`（面板 vite 在 **5100**）→ `node scripts/wb-canvas-guide-verify.mjs --base http://127.0.0.1:5100 --inject-stub`（截图前缀变 `w14-dev-`）
 >
@@ -109,10 +110,11 @@ CUSTOM `wb_canvas_ops`，整条 embed 链路（桥 → poller → canvasMode 总
 > **W11 的两个坑（照抄别踩）**：① 首屏会自动弹「使用指南」（`GUIDE_SEEN_KEY` localStorage 标记），遮罩会拦住所有点击 → 每次 `goto` 后先点掉 `.ant-modal-close`；② 画布顶部提示条（z-20，如"检测到软件渲染已降级"）会压住工具栏 → 工具栏按钮用 `evaluate(el => el.click())` 直接分发，别用 `locator.click()`（会一直等 actionability 超时）。③ 读画布状态必须走 **`project.doc.objects`**（不是 `project.objects`）——形状按 `projectStore.js` 来，猜形状会读出一片空、把产品 bug 误判成"没落节点"（本轮就自摆了一次）。
 > 变异验证：删掉 `assetLibOpen` 声明（还原原始缺陷）→ 脚本立刻报「点『创作资产库』当次没弹出」。
 > **W11 ③ 的测量要点**：视图状态有「实时（响应式 `viewport`）」与「落盘（`project.doc.viewport`）」两份，读错那一份会得出相反结论——
+>
 > - 状态栏的 `NN%` 读数是**实时**缩放的可靠探针（`readZoomPct`）；落盘值只在 `saveSoon`（500ms 防抖）之后才更新
 > - 平移/缩放不落盘、而 `resetView`/`fitAll` 现在会调 `saveSoon` → 断言「重置后落盘视口 = 新值」本身就是**持久化生效**的验证
 > - 造「内容远离原点」必须**累计平移**（单次拖拽受窗口边界限制，最多几百像素）；判据用「视口中心世界坐标不变 + 正在看的节点仍在画面内」，不要用「内容包围盒中心可见」——内容散布很开时包围盒中心恰是空白区，那条判据会放过一个看起来仍然是空画布的坏实现
-> 变异验证：把 `resetView` 还原成 `makeViewport()`（`{1,0,0}`）→ 脚本报「重置视图移动了视口中心」，节点屏幕位置 (-2691,-1756) 在画面外。
+>   变异验证：把 `resetView` 还原成 `makeViewport()`（`{1,0,0}`）→ 脚本报「重置视图移动了视口中心」，节点屏幕位置 (-2691,-1756) 在画面外。
 
 > W9 与 `scripts/wb-preview-verify.mjs` 互补：后者验**真机 ComfyUI**的协议与帧解码（能力协商 / 8 字节头剥离），W9 验**前端渲染链路**（AG-UI → aguiBridge → 消息 → 工具卡 `<img>`）。两段合起来才是 #5 的完整证据。
 
@@ -163,6 +165,7 @@ agent-browser eval 'window.__stubLogs.find(l=>/interaction-response/.test(l))'
 **`POST /api/apps/detail` 必须 mock**（W10 需要）：画布 App 节点挂载时拉详情，id 是**模板 id**（`app:<uuid>`）。真实路由在应用中心查不到时会**回退模板库**（`routes/apps.ts:56-70`，注释写明专为 `wb_build_workflow` 铺出的节点而加）——stub 不 mock 的话这条路会落到 SPA fallback 拿到 HTML，前端弹**两条红色「获取应用失败」**，验收截图看起来像产品故障（其实是 harness 缺口）。
 
 **W11 新增的三个端点**（形状照真实路由，别自造）：
+
 - `POST /api/apps` → `okResp([...])`：应用列表，`appStore.loadApps` 读 `json.data`。画布拾取器**只列带工作流的应用**（`template.prompt` 非空）——stub 里故意放一个空 `template` 的项，用来断言过滤生效。
 - `GET /api/workbench/assets` → `okResp({ total, assets })`：创作资产库内容（`AssetLibrary` 读 `json.data` → `.assets`）。
 - `GET /api/workbench/skills` → `okResp([...])`：技能库内容（`SkillManager` 读 `json.data`）。
@@ -190,12 +193,12 @@ agent-browser eval 'window.__stubLogs.find(l=>/interaction-response/.test(l))'
 
 ## 与 canvas/batch 验收方法学的差异
 
-| 维度 | batch-queue | canvas | workbench |
-|---|---|---|---|
-| 后端契约 | batchRunner 队列状态机 | 无（纯前端 localStorage） | AG-UI SSE 21 种事件类型 + REST `{data:[]}` + OkEnvelope + localStorage 持久化 |
-| stub 复杂度 | 高（14 路由 + 状态机） | 低（seed 一次性） | 中（常驻 SSE + 同流 late-enqueue + 持久化 + 占位 /view 路由） |
-| 关键修复 | 路径前缀 `/batch` 漏配 | electronAPI mock 缺失 | type 命名小写 vs registry 大写 + todos item 字段错 + list 端点包 `{data}` + session GET 信封 + approval value.字段名（args vs arguments）+ flushThread 截断 close 分支遗漏 + 引导期端点未 mock（SPA fallback 返 HTML → JSON.parse 炸）+ TOOL_CALL 三帧缺失致 preview_frame 无落点 |
-| 验收矩阵 | T1–T7 队列 | C0–C6 画布 | W1–W8 + B1 + E1 |
+| 维度        | batch-queue            | canvas                    | workbench                                                                                                                                                                                                                                                                         |
+| ----------- | ---------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 后端契约    | batchRunner 队列状态机 | 无（纯前端 localStorage） | AG-UI SSE 21 种事件类型 + REST `{data:[]}` + OkEnvelope + localStorage 持久化                                                                                                                                                                                                     |
+| stub 复杂度 | 高（14 路由 + 状态机） | 低（seed 一次性）         | 中（常驻 SSE + 同流 late-enqueue + 持久化 + 占位 /view 路由）                                                                                                                                                                                                                     |
+| 关键修复    | 路径前缀 `/batch` 漏配 | electronAPI mock 缺失     | type 命名小写 vs registry 大写 + todos item 字段错 + list 端点包 `{data}` + session GET 信封 + approval value.字段名（args vs arguments）+ flushThread 截断 close 分支遗漏 + 引导期端点未 mock（SPA fallback 返 HTML → JSON.parse 炸）+ TOOL_CALL 三帧缺失致 preview_frame 无落点 |
+| 验收矩阵    | T1–T7 队列             | C0–C6 画布                | W1–W8 + B1 + E1                                                                                                                                                                                                                                                                   |
 
 ## agent-browser Windows 经验（workbench 专属）
 
@@ -312,6 +315,7 @@ agent-browser eval 'window.__stubLogs.find(l=>/run request/.test(l))'
 # 收尾
 agent-browser close
 ```
+
 ---
 
 ## 平台生成能力验证（S 矩阵）—— 真应用 + 真 ComfyUI，不走 stub
@@ -338,20 +342,20 @@ node scripts/wb-platform-verify-all.mjs --only s1,s6    # 指定场景
 env -u ELECTRON_RUN_AS_NODE pnpm dev     # dev 与打包版抢 3008，先停另一个
 ```
 
-| 场景 | 脚本 | 断言 | 状态 |
-|---|---|---|---|
-| **S0** 前置自检 | `wb-platform-generation-verify.mjs`（随 S1 一起跑） | 应用/ComfyUI/GPU/模板 id 口径/LLM 供应商 | ✅ 5/5 |
-| **S1** 直连生图 | 同上（`--template <app>`） | L1 入参真透传 → L2 执行成功 → L3 **正式保存产物**（只有 temp 预览=不通过）+ 解码取样防纯色 | ✅ |
-| **S1v** 直连生视频 768p | 同上（`--params` + `--expect-video-size`） | L1/L2/L3 + **ffprobe 规格** + **抽帧算相邻帧像素差**（判画面真在动） | ✅ 14/14 |
-| **S2** 自然语言 → agent 跑既有 app | `wb-platform-agent-verify.mjs --scenario s2` | 抓 agent 真实工具调用 + plan 分派，回会话/history/磁盘三层核对 | ✅ |
-| **S3** 工作台新建生图 app | 同上 `--scenario s3` | agent `validate → publish → execute → get_outputs` 全链，产物落 `output/` | ✅ 10/10 |
-| **S4b** 新建视频 app（有界迭代） | 同上 `--scenario s4b` | 同上 + 视频规格；指令写死 `validate ≤3 / publish ≤1` | ✅ 11/11 |
-| **S5** 版本化迭代 | 同上 `--scenario s5` | `app_versions` 新增快照且最大快照号 +1（生效版本 = 最大 +1）、新尺寸真出图 | ✅ 12/12 |
-| **S6** 异常路径 | `wb-platform-negative-verify.mjs` | 不存在的 id/模型、越界尺寸、空输入、**取消链路**；每步查「无脏 job / 无产物误登记」 | ✅ 14/14 |
-| **S8** 真实上传路径 | `wb-platform-upload-verify.mjs` | multipart 上传 → 201+meta → 落 ComfyUI input → 会话登记附件 → **裸文件名透传执行**（L1 history 命中）→ L2 → L3 产物 ≠ 上传源 | ✅ 9/9 |
-| **S9** 批量队列真跑 | `wb-platform-batch-verify.mjs` | start→running→**pause**（在跑条计 failed）→**job-resume** 续跑→completed→产物落盘解码→rerun→**cancel 排队任务=移出队列**→清理无脏 job；**全程不设 autoShutdown/notifyUrl** | ✅ 11/11 |
-| **S10** 工作台新建图生视频 app（I2V） | `wb-platform-agent-verify.mjs --scenario s10` | 预上传首帧图（真实 upload 端点）→ agent 基于 T2V 建 I2V app（**必须走 `MiniMaxH3AddGuide` VAE 引导帧**，`MiniMaxH3ImageToVideo` 会走文本编码器视觉塔、在 int8_convrot 编码器上抛 `dequantize_int8_embedding` NoCapableBackendError）→ 真跑 → ffprobe + **首帧 Pearson r≥0.4 对上传源图** | ✅ 15/15（r=0.971） |
-| **S11** 画布 AI 真实生成→产物回画布 | `wb-platform-canvas-e2e-verify.mjs`（**前置：画布 harness 5174**） | **从应用自身打开 `/canvas`**（同源真 SSE；⚠️ 别用 playwright route 代理 /api——route.fulfill 缓冲 SSE，客户端断开后端即取消整轮）→ 真会话 + 真指令 → **自动批准工具人审卡**（`approval-approve`；wb_execute_template 默认要人审）→ `.agent-ops-card` → 点执行 → doc 落 app 节点 + 会话 success + 产物落盘 | ✅ 8/8 |
+| 场景                                  | 脚本                                                               | 断言                                                                                                                                                                                                                                                                                                     | 状态                |
+| ------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| **S0** 前置自检                       | `wb-platform-generation-verify.mjs`（随 S1 一起跑）                | 应用/ComfyUI/GPU/模板 id 口径/LLM 供应商                                                                                                                                                                                                                                                                 | ✅ 5/5              |
+| **S1** 直连生图                       | 同上（`--template <app>`）                                         | L1 入参真透传 → L2 执行成功 → L3 **正式保存产物**（只有 temp 预览=不通过）+ 解码取样防纯色                                                                                                                                                                                                               | ✅                  |
+| **S1v** 直连生视频 768p               | 同上（`--params` + `--expect-video-size`）                         | L1/L2/L3 + **ffprobe 规格** + **抽帧算相邻帧像素差**（判画面真在动）                                                                                                                                                                                                                                     | ✅ 14/14            |
+| **S2** 自然语言 → agent 跑既有 app    | `wb-platform-agent-verify.mjs --scenario s2`                       | 抓 agent 真实工具调用 + plan 分派，回会话/history/磁盘三层核对                                                                                                                                                                                                                                           | ✅                  |
+| **S3** 工作台新建生图 app             | 同上 `--scenario s3`                                               | agent `validate → publish → execute → get_outputs` 全链，产物落 `output/`                                                                                                                                                                                                                                | ✅ 10/10            |
+| **S4b** 新建视频 app（有界迭代）      | 同上 `--scenario s4b`                                              | 同上 + 视频规格；指令写死 `validate ≤3 / publish ≤1`                                                                                                                                                                                                                                                     | ✅ 11/11            |
+| **S5** 版本化迭代                     | 同上 `--scenario s5`                                               | `app_versions` 新增快照且最大快照号 +1（生效版本 = 最大 +1）、新尺寸真出图                                                                                                                                                                                                                               | ✅ 12/12            |
+| **S6** 异常路径                       | `wb-platform-negative-verify.mjs`                                  | 不存在的 id/模型、越界尺寸、空输入、**取消链路**；每步查「无脏 job / 无产物误登记」                                                                                                                                                                                                                      | ✅ 14/14            |
+| **S8** 真实上传路径                   | `wb-platform-upload-verify.mjs`                                    | multipart 上传 → 201+meta → 落 ComfyUI input → 会话登记附件 → **裸文件名透传执行**（L1 history 命中）→ L2 → L3 产物 ≠ 上传源                                                                                                                                                                             | ✅ 9/9              |
+| **S9** 批量队列真跑                   | `wb-platform-batch-verify.mjs`                                     | start→running→**pause**（在跑条计 failed）→**job-resume** 续跑→completed→产物落盘解码→rerun→**cancel 排队任务=移出队列**→清理无脏 job；**全程不设 autoShutdown/notifyUrl**                                                                                                                               | ✅ 11/11            |
+| **S10** 工作台新建图生视频 app（I2V） | `wb-platform-agent-verify.mjs --scenario s10`                      | 预上传首帧图（真实 upload 端点）→ agent 基于 T2V 建 I2V app（**必须走 `MiniMaxH3AddGuide` VAE 引导帧**，`MiniMaxH3ImageToVideo` 会走文本编码器视觉塔、在 int8_convrot 编码器上抛 `dequantize_int8_embedding` NoCapableBackendError）→ 真跑 → ffprobe + **首帧 Pearson r≥0.4 对上传源图**                 | ✅ 15/15（r=0.971） |
+| **S11** 画布 AI 真实生成→产物回画布   | `wb-platform-canvas-e2e-verify.mjs`（**前置：画布 harness 5174**） | **从应用自身打开 `/canvas`**（同源真 SSE；⚠️ 别用 playwright route 代理 /api——route.fulfill 缓冲 SSE，客户端断开后端即取消整轮）→ 真会话 + 真指令 → **自动批准工具人审卡**（`approval-approve`；wb_execute_template 默认要人审）→ `.agent-ops-card` → 点执行 → doc 落 app 节点 + 会话 success + 产物落盘 | ✅ 8/8              |
 
 **辅助脚本**：`wb-template-health.mjs`（只读）用本机 `/object_info` 静态对照每个 app 模板的 prompt，
 找两类**节点版本漂移** —— `required_missing`（必填输入没给）与 `input_not_in_node`（连了本机不存在的输入口）。
@@ -375,10 +379,10 @@ W16 只验了 A 面协议形状（假宿主），桥**自己**的路由/落布/�
 cd packages/frontend && npx vitest run src/inject/
 ```
 
-| 文件 | 条数 | 覆盖 |
-|---|---|---|
-| `card_bridge.test.js` | 17 | `handleArtifyMessage` 四条路由 + ack 形状：`CANVAS_OPS`（结构级落 checkpoint / 纯 `setWidget` 不落 / 异常截断 120 字符）、`CANVAS_EXECUTE`（无 app → 报 `graphToPrompt unavailable` 且**不 fetch**；`prompt` 取 `graphToPrompt().output` 或裸返回；服务端 `success:false` 透传 message；HTTP 500 且 body 非 JSON → 报 HTTP 码）、**批量行键**「节点id.widget名」→ `inputsMapping`（`{id,key,valueMap}`）+ `items`（`sharedParams` 合并进每行）、行键非法/不足 2 行各自报错、`GET_CANVAS_STATE` → 推摘要、`postToEmbed` 无 iframe 静默丢弃 |
-| `digest_ops.test.js` | 26 | `applyOneOp` / `applyCanvasOps` 的真实 op 语义：`setWidget`（命中/before-after 回执/触发 callback/callback 抛错容忍/字符串 id）、`addNode`（`createNode`+`widgetsValues`+默认 pos 区间/未注册类型）、`removeNode`、`relink`（`from.connect` 参数/slot 越界）、非法入参、`align`（left/right/hcenter 用**异宽**节点、`hdist` 等距且首尾不动、未知 mode）、`autoLayout`（链路分列 x 递增）、批量（单条失败不中断、全失败 `ok:false`、**`loadWorkflow` 是终态替换**：前面已有成功 op 时后续直接丢弃、结构级才 `captureCanvasState`、capture 抛错不影响执行）、`pushCanvasDigest`（就绪才推、未就绪仍落 express 快照、去重现状） |
+| 文件                  | 条数 | 覆盖                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `card_bridge.test.js` | 17   | `handleArtifyMessage` 四条路由 + ack 形状：`CANVAS_OPS`（结构级落 checkpoint / 纯 `setWidget` 不落 / 异常截断 120 字符）、`CANVAS_EXECUTE`（无 app → 报 `graphToPrompt unavailable` 且**不 fetch**；`prompt` 取 `graphToPrompt().output` 或裸返回；服务端 `success:false` 透传 message；HTTP 500 且 body 非 JSON → 报 HTTP 码）、**批量行键**「节点id.widget名」→ `inputsMapping`（`{id,key,valueMap}`）+ `items`（`sharedParams` 合并进每行）、行键非法/不足 2 行各自报错、`GET_CANVAS_STATE` → 推摘要、`postToEmbed` 无 iframe 静默丢弃                                                                                    |
+| `digest_ops.test.js`  | 26   | `applyOneOp` / `applyCanvasOps` 的真实 op 语义：`setWidget`（命中/before-after 回执/触发 callback/callback 抛错容忍/字符串 id）、`addNode`（`createNode`+`widgetsValues`+默认 pos 区间/未注册类型）、`removeNode`、`relink`（`from.connect` 参数/slot 越界）、非法入参、`align`（left/right/hcenter 用**异宽**节点、`hdist` 等距且首尾不动、未知 mode）、`autoLayout`（链路分列 x 递增）、批量（单条失败不中断、全失败 `ok:false`、**`loadWorkflow` 是终态替换**：前面已有成功 op 时后续直接丢弃、结构级才 `captureCanvasState`、capture 抛错不影响执行）、`pushCanvasDigest`（就绪才推、未就绪仍落 express 快照、去重现状） |
 
 ### 挖出并修掉的真缺陷：跨模块裸引用 + 打包器重命名 → 摘要从未推给工作台
 
@@ -386,10 +390,10 @@ cd packages/frontend && npx vitest run src/inject/
 `digest.js` 既没 import 也没有任何赋值点。它能「不报错」是因为 **esbuild 打包时的作用域合并**：产物里
 card_bridge 侧被重命名为 `artifyEmbedWindow2`，而 digest 段保留裸名 → **退化成未声明全局**。
 
-| 运行形态 | 表现 |
-|---|---|
-| 打包产物（IIFE） | `ReferenceError: artifyEmbedWindow is not defined` → 被 `pushCanvasDigest` 自身的 catch 吞成 `console.warn` → **摘要既不推 iframe 也不落 express** |
-| 原生 ESM（vitest） | 同上（读取未声明的裸标识符在**任何**严格/非严格模式下都抛 ReferenceError） |
+| 运行形态           | 表现                                                                                                                                               |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 打包产物（IIFE）   | `ReferenceError: artifyEmbedWindow is not defined` → 被 `pushCanvasDigest` 自身的 catch 吞成 `console.warn` → **摘要既不推 iframe 也不落 express** |
+| 原生 ESM（vitest） | 同上（读取未声明的裸标识符在**任何**严格/非严格模式下都抛 ReferenceError）                                                                         |
 
 > ⚠️ 本条最初记成"产物里非严格模式读作 `undefined` → `if` 恒假"——**那是错的**：
 > 非严格模式只对**赋值**宽容，读取未声明变量一律抛。W18 用真产物跑出 `ReferenceError`
@@ -428,30 +432,30 @@ node scripts/wb-inject-bridge-verify.mjs                    # 自带服务器（
 
 搭法（**全部同源**，避免跨源与代理坑）：脚本自带一台静态服务器，同时负责
 
-| 路径 | 作用 |
-|---|---|
-| `/__host` | 假 ComfyUI 宿主页（桩 `window.app` / `LiteGraph` / `electronAPI` + **真 inject 产物**） |
-| `/__inject.js` | `src/main/artifylab/public/frontend/comfy_inject.min.js`（**真 terser 产物**，不是源码） |
-| `/api/canvas/*`、`/queue`、`/api/config` | express stub —— **记录桥发出的请求体**（断言对象） |
-| 其余 | app 构建产物 + `stub.js` 注入（与 harness 同法） |
+| 路径                                     | 作用                                                                                     |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `/__host`                                | 假 ComfyUI 宿主页（桩 `window.app` / `LiteGraph` / `electronAPI` + **真 inject 产物**）  |
+| `/__inject.js`                           | `src/main/artifylab/public/frontend/comfy_inject.min.js`（**真 terser 产物**，不是源码） |
+| `/api/canvas/*`、`/queue`、`/api/config` | express stub —— **记录桥发出的请求体**（断言对象）                                       |
+| 其余                                     | app 构建产物 + `stub.js` 注入（与 harness 同法）                                         |
 
 宿主页桩必须满足桥的启动判定：`#vue-app` + `__COMFYUI_FRONTEND_VERSION__` + `LiteGraph.registered_node_types`
 （数量稳定 5 tick）+ `window.app.graph`，且顶层**非 iframe** → standalone 分支；
 并且 `extensionManager.registerSidebarTab` 得是函数 —— 桥才会注册 tab、建工作台 iframe。
 
-| 断言 | 覆盖 |
-|---|---|
-| W18.0 | **静态守卫**：`npx eslint src/inject` 的 no-undef 必须为 0（见下） |
-| W18.1 | 真产物加载：`__artifyInjectLoaded` + `registry` 36 项装配完整 |
+| 断言      | 覆盖                                                                                                     |
+| --------- | -------------------------------------------------------------------------------------------------------- |
+| W18.0     | **静态守卫**：`npx eslint src/inject` 的 no-undef 必须为 0（见下）                                       |
+| W18.1     | 真产物加载：`__artifyInjectLoaded` + `registry` 36 项装配完整                                            |
 | W18.2 / 3 | 桥注册 `artify-workbench` tab → 建出 iframe → `setEmbedWindow` 与 iframe 的 `contentWindow` 是**同一个** |
-| W18.4 | 工作台 iframe 在 embed 形态 boot 完成 |
-| W18.5 | **画布摘要真的推给工作台**（iframe 内收到 `artify:canvas-state`，含 workflowName/nodeCount/models） |
-| W18.6 | 摘要同时落 express（`POST /api/canvas/snapshot`，body 是真 digest：`seq≥1`） |
-| W18.7 | `wb_sync` → 桥**真执行** `applyCanvasOps` → 桩画布被重建（`graph.clear=1`、`createNode=2`） |
-| W18.8 | 结构级 ops 先落 express checkpoint（`body.reason="workbench-sync-template"`） |
-| W18.9 | `wb_canvas_exec` → 桥真 `graphToPrompt` → `POST /api/canvas/execute` 的 `prompt` 是宿主图 |
-| W18.10 | ack 真回流 → 工作台侧出现「画布工作流已提交执行」 |
-| W18.11 | 宿主页 + iframe **全程零未捕获异常** |
+| W18.4     | 工作台 iframe 在 embed 形态 boot 完成                                                                    |
+| W18.5     | **画布摘要真的推给工作台**（iframe 内收到 `artify:canvas-state`，含 workflowName/nodeCount/models）      |
+| W18.6     | 摘要同时落 express（`POST /api/canvas/snapshot`，body 是真 digest：`seq≥1`）                             |
+| W18.7     | `wb_sync` → 桥**真执行** `applyCanvasOps` → 桩画布被重建（`graph.clear=1`、`createNode=2`）              |
+| W18.8     | 结构级 ops 先落 express checkpoint（`body.reason="workbench-sync-template"`）                            |
+| W18.9     | `wb_canvas_exec` → 桥真 `graphToPrompt` → `POST /api/canvas/execute` 的 `prompt` 是宿主图                |
+| W18.10    | ack 真回流 → 工作台侧出现「画布工作流已提交执行」                                                        |
+| W18.11    | 宿主页 + iframe **全程零未捕获异常**                                                                     |
 
 ### 抓出并修掉的第二簇真缺陷：拆单体漏 import（16 处 no-undef，2 个文件）
 
@@ -462,11 +466,11 @@ esbuild 打包时这些名字被 mangle 成短名（产物里 `artify_inject` �
 
 实测影响（都是真功能）：
 
-| 位置 | 后果 |
-|---|---|
-| `api_workflow.js:71` `loadWorkflow()` | 一进来就抛 → **standalone「自动加载 activeApp 工作流」从未生效** |
-| `canvas_patches.js:93/139/150` `doHandleComfyuiContext()` | 抛 → readonly/playground 的画布约束、多 tab 抑制全不执行 |
-| `canvas_patches.js:562/620` | 抛 → `isArtifyLoading` 守卫失效（可能与主进程重放并发重入） |
+| 位置                                                      | 后果                                                             |
+| --------------------------------------------------------- | ---------------------------------------------------------------- |
+| `api_workflow.js:71` `loadWorkflow()`                     | 一进来就抛 → **standalone「自动加载 activeApp 工作流」从未生效** |
+| `canvas_patches.js:93/139/150` `doHandleComfyuiContext()` | 抛 → readonly/playground 的画布约束、多 tab 抑制全不执行         |
+| `canvas_patches.js:562/620`                               | 抛 → `isArtifyLoading` 守卫失效（可能与主进程重放并发重入）      |
 
 修法两条：① 两个文件补 `import ... from './context.js'`；
 ② `isArtifyLoading` 是 `export let`（**)要赋值**），而 **ESM 的 import 绑定只读** ——
@@ -476,7 +480,7 @@ esbuild 打包时这些名字被 mangle 成短名（产物里 `artify_inject` �
 
 ### 为什么 16 处能潜伏这么久：前端包的 lint 从不在 pre-commit 跑
 
-- 根 `.husky/pre-commit` = `npm run typecheck && npm run lint && npm run format:check`，而根 eslint **忽略 `packages/frontend/**`**
+- 根 `.husky/pre-commit` = `npm run typecheck && npm run lint && npm run format:check`，而根 eslint **忽略 `packages/frontend/**`\*\*
 - 前端包自己的 `npx eslint src` 能报（本次就是它给出 16 处全量清单），但**没人跑它**
 - 前端全量现状 131 error（96 个 `no-unused-vars` + 21 个 `vue/multi-word-component-names`…），**所以暂时不能直接并入 pre-commit**；
   但 `src/inject` 已单独扫干净，并把「no-undef 必须为 0」挂成 **W18.0**（每次跑 W18 都守一遍）
@@ -490,7 +494,7 @@ esbuild 打包时这些名字被 mangle 成短名（产物里 `artify_inject` �
    `TypeError: Failed to fetch`。（顺带说明：真机上 `loadWorkflow` 是走 `electronAPI.ArtifyLab.getConfig()`
    拿 `server_origin` 的正常路径，不是那个 3000 兜底。）
 2. **模板字符串里不能出现反引号**：在 `HOST_HTML = \`...\`` 的注释里写 `` `isElectron` `` 会**终结模板字符串**
-   → `SyntaxError: Unexpected identifier`。写宿主页 HTML 时用「」代替。
+→ `SyntaxError: Unexpected identifier`。写宿主页 HTML 时用「」代替。
 
 ### 构建链（改 `src/inject/**` 后必做）
 
@@ -498,6 +502,7 @@ esbuild 打包时这些名字被 mangle 成短名（产物里 `artify_inject` �
 pnpm --filter artifylab-frontend run build:inject   # 源 → packages/frontend/public/comfy_inject.js
 pnpm run build:frontend                             # vite 拷贝 + terser → src/main/artifylab/public/frontend/comfy_inject.min.js
 ```
+
 两步都跑才算改完：**dev 读 public 版、打包版读 app 目录的 min 版**（`src/main/host/comfyInject.ts` 的两条分支）。
 只跑 `build:frontend` 会用旧源码压 min（W17 就漏过一次，靠 grep 产物才发现）。
 
@@ -519,18 +524,18 @@ node scripts/wb-real-comfy-bridge-verify.mjs   # [--comfy http://127.0.0.1:8188]
 `extensionManager.registerSidebarTab`** 注册。桥的行为通过 registry 暴露的
 `handleArtifyMessage` / `buildCanvasDigest` 直接驱动（真 app 当宿主）。
 
-| 断言 | 真环境实证 |
-|---|---|
-| W19.1 | 真就绪判据：等 `LiteGraph.registered_node_types` 填满（本机 4090）——**只等 `app.graph` 会在注册表还是 0 时开跑**，`createNode` 全返 null，看起来像"桥坏了"（第一轮就误判过） |
-| W19.1b | 真前端 `loadGraphData` 载图（也是桥 `loadWorkflowGraph` 走的 API）；真页面会恢复上次会话的工作流（本机 10 节点 AuraFlow 图） |
-| W19.2 | 真 `buildCanvasDigest`：真 `/queue` + 真节点计数 |
-| W19.3 | 真 `LiteGraph.createNode('KSampler')` + 真 `graph.add` → 节点 10 → 11 |
-| W19.4 | 真 `setWidget`：真节点的真 widget `seed: 42 → 424242` |
-| W19.5 | 真 `app.graphToPrompt()` → `POST /api/canvas/execute` 收到 **11 个真 API 格式节点**（`class_type`+`inputs`） |
-| W19.6 | 真 checkpoint：`body` 同时带 **workflow（10 节点）+ prompt（10 节点）双格式** |
-| W19.7 | 桥注册进**真侧栏**（真 `getSidebarTabs()` 里出现 `artify-workbench`，共 7 个 tab） |
-| W19.8 | 真 `align`：真节点 pos `[0,137,274] → [0,0,0]`（真几何变化） |
-| W19.9 | 真页面全程零新增未捕获异常 |
+| 断言   | 真环境实证                                                                                                                                                                   |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W19.1  | 真就绪判据：等 `LiteGraph.registered_node_types` 填满（本机 4090）——**只等 `app.graph` 会在注册表还是 0 时开跑**，`createNode` 全返 null，看起来像"桥坏了"（第一轮就误判过） |
+| W19.1b | 真前端 `loadGraphData` 载图（也是桥 `loadWorkflowGraph` 走的 API）；真页面会恢复上次会话的工作流（本机 10 节点 AuraFlow 图）                                                 |
+| W19.2  | 真 `buildCanvasDigest`：真 `/queue` + 真节点计数                                                                                                                             |
+| W19.3  | 真 `LiteGraph.createNode('KSampler')` + 真 `graph.add` → 节点 10 → 11                                                                                                        |
+| W19.4  | 真 `setWidget`：真节点的真 widget `seed: 42 → 424242`                                                                                                                        |
+| W19.5  | 真 `app.graphToPrompt()` → `POST /api/canvas/execute` 收到 **11 个真 API 格式节点**（`class_type`+`inputs`）                                                                 |
+| W19.6  | 真 checkpoint：`body` 同时带 **workflow（10 节点）+ prompt（10 节点）双格式**                                                                                                |
+| W19.7  | 桥注册进**真侧栏**（真 `getSidebarTabs()` 里出现 `artify-workbench`，共 7 个 tab）                                                                                           |
+| W19.8  | 真 `align`：真节点 pos `[0,137,274] → [0,0,0]`（真几何变化）                                                                                                                 |
+| W19.9  | 真页面全程零新增未捕获异常                                                                                                                                                   |
 
 **至此注入桥的四层全部闭环**：单测（W17，46 条）→ 假宿主协议（W16，9/9）→ **真产物 + 桩 app**（W18，12/12）
 → **真产物 + 真 ComfyUI**（W19，10/10）。仍留白的只有"真队列跑完一次生成"（S 矩阵 S1/S11 已在真应用+真 ComfyUI 上覆盖执行链路）。
@@ -550,7 +555,8 @@ node scripts/wb-real-comfy-bridge-verify.mjs   # [--comfy http://127.0.0.1:8188]
 
 W16-W19 的宿主都是测试自己搭的（假宿主帧 / 桩 app / 手工起的 ComfyUI）；**应用真实链路**——
 用户在应用里点「运行实例」→ 应用启动 ComfyUI、主进程 `executeJavaScript` 注入桥（`withArtifyLabBootstrap`）
-+ preload 注入 `electronAPI` —— 由 W20 覆盖。
+
+- preload 注入 `electronAPI` —— 由 W20 覆盖。
 
 ```bash
 # ① 起应用（ARTIFY_DEV_DEBUG_PORT 是主进程内建的验收钩子，只在显式设置时开 CDP）
@@ -560,13 +566,13 @@ ARTIFY_DEV_DEBUG_PORT=9222 env -u ELECTRON_RUN_AS_NODE pnpm dev
 node scripts/wb-dev-attach-verify.mjs
 ```
 
-| 断言 | 应用真机实证 |
-|---|---|
+| 断言  | 应用真机实证                                                                                                                                                    |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | W20.0 | 注入链路完整：`__ARTIFY_LAB_URL__=localhost:5100`（dev vite）、`__ARTIFY_LAB_API__=localhost:3008`（express）、preload 的 `electronAPI=true`、桥 registry 36 项 |
-| W20.1 | 真 LiteGraph 注册表就绪（稳定采样，registered=4091、真图 12 节点、真 graphToPrompt、前端 1.51.10） |
-| W20.2 | 真 `buildCanvasDigest` 在用户实例的真图上跑通（真 `/queue`，models 投影 1） |
-| W20.3 | 桥注册进应用实例的真侧栏（extensionManager，6 tabs） |
-| W20.4 | **`Runtime.exceptionThrown` 共 0 条** —— 之前修的两簇裸引用病灶（artifyEmbedWindow / artify_inject×16）在应用真实链路上零现形 |
+| W20.1 | 真 LiteGraph 注册表就绪（稳定采样，registered=4091、真图 12 节点、真 graphToPrompt、前端 1.51.10）                                                              |
+| W20.2 | 真 `buildCanvasDigest` 在用户实例的真图上跑通（真 `/queue`，models 投影 1）                                                                                     |
+| W20.3 | 桥注册进应用实例的真侧栏（extensionManager，6 tabs）                                                                                                            |
+| W20.4 | **`Runtime.exceptionThrown` 共 0 条** —— 之前修的两簇裸引用病灶（artifyEmbedWindow / artify_inject×16）在应用真实链路上零现形                                   |
 
 ### 两个坑
 
