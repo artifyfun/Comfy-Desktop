@@ -317,9 +317,9 @@ describe('CANVAS_EXECUTE 批量：行键「节点id.widget名」→ inputsMappin
 })
 
 describe('其他消息与回传通道', () => {
-  it('GET_CANVAS_STATE → 触发摘要推送', async () => {
+  it('GET_CANVAS_STATE → 强制推送摘要（force=true：工作台刚连上必须拿到，即使画布没变）', async () => {
     await handleArtifyMessage({ type: ARTIFY_MSG.GET_CANVAS_STATE })
-    expect(pushCanvasDigest).toHaveBeenCalled()
+    expect(pushCanvasDigest).toHaveBeenCalledWith(true)
   })
 
   it('DISPLAY_CARD 在画布未就绪时只告警不抛（产物不丢帧、不打断）', async () => {

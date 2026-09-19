@@ -448,23 +448,37 @@ describe('pushCanvasDigest · 画布摘要推送（C → A 实时那一路）', 
     expect(warns).toEqual([])
   })
 
-  it('现状记录：seq/ts 每次递增 → lastDigestJson 去重永不命中（每周期都推）', async () => {
+  it('内容没变（剥离 seq/ts 比较）→ 去重不发；画布变了才发', async () => {
     seedApp()
     stubFetch()
     const posts = []
     setEmbedWindow({ postMessage: vi.fn((s) => posts.push(JSON.parse(s))) })
 
     await pushCanvasDigest(false)
-    expect(posts).toHaveLength(1)
     await pushCanvasDigest(false)
-    // 内容没变，但因 buildCanvasDigest 每次都 ++seq 并打 ts，json 必然不同 →
-    // `if (!force && json === lastDigestJson) return` 是**死逻辑**，实际每 2s 轮询都推一次
-    expect(posts).toHaveLength(2)
-    expect(posts[1].state.seq).toBeGreaterThan(posts[0].state.seq)
+    // 两次构建之间画布没动：虽然 seq/ts 必变，但去重签名剥离了它们 → 第二次被拦
+    expect(posts).toHaveLength(1)
 
-    // ⚠️ 现状是「每次都发」，不是缺陷但也不省：embed 场景下每 2s 一次 postMessage +
-    // 一次 express POST。要去重必须先剥离 seq/ts 再比，且 GET_CANVAS_STATE 得改 force=true
-    // （否则工作台重连时画布未变就拿不到摘要）—— 属行为变更，待定后另起一轮，见
-    // acceptance/workbench/README.md「画布摘要推送」待排项。
+    // 画布真的变了（加节点）→ 内容签名变 → 推送，且 seq 仍递增（接收方防乱序）
+    window.app.graph._nodes.push({
+      id: 9,
+      type: 'KSampler',
+      widgets_values: [1, 2, 3, 'euler'],
+    })
+    await pushCanvasDigest(false)
+    expect(posts).toHaveLength(2)
+    expect(posts[1].state.nodeCount).toBe(3)
+    expect(posts[1].state.seq).toBeGreaterThan(posts[0].state.seq)
+  })
+
+  it('force=true 总是发（GET_CANVAS_STATE / embed 重连依赖它）', async () => {
+    seedApp()
+    stubFetch()
+    const posts = []
+    setEmbedWindow({ postMessage: vi.fn((s) => posts.push(JSON.parse(s))) })
+
+    await pushCanvasDigest(false)
+    await pushCanvasDigest(true) // 内容没变也强制发
+    expect(posts).toHaveLength(2)
   })
 })

@@ -296,8 +296,7 @@ export async function applyOneOp(g, op) {
 
 /** 目标节点解析：op.nodes 指定 > 画布选中 > 全图（与 AlignLayout 语义一致） */
 function resolveCanvasTargets(g, ids) {
-  if (Array.isArray(ids) && ids.length)
-    return ids.map((id) => findNodeById(g, id)).filter(Boolean)
+  if (Array.isArray(ids) && ids.length) return ids.map((id) => findNodeById(g, id)).filter(Boolean)
   const sel = window.app?.canvas?.selected_nodes
   if (sel && Object.keys(sel).length) return Object.values(sel)
   return (g._nodes || []).slice()
@@ -325,11 +324,7 @@ export function getWorkflowTabStore() {
     app.workflowStore,
   ]
   for (const c of cands) {
-    if (
-      c &&
-      typeof c.openWorkflow === 'function' &&
-      typeof c.createTemporary === 'function'
-    )
+    if (c && typeof c.openWorkflow === 'function' && typeof c.createTemporary === 'function')
       return c
   }
   return null
@@ -339,7 +334,7 @@ export function getWorkflowTabStore() {
 function nodeTypeSignature(graph) {
   const nodes = graph && Array.isArray(graph.nodes) ? graph.nodes : []
   return nodes
-    .map((n) => String(n && n.type || ''))
+    .map((n) => String((n && n.type) || ''))
     .filter(Boolean)
     .sort()
     .join('|')
@@ -348,8 +343,7 @@ function nodeTypeSignature(graph) {
 /** 从 activeWorkflow 取当前 graph（activeState 是 UI graph JSON；content 兜底） */
 function activeWorkflowGraph(active) {
   if (!active) return null
-  if (active.activeState && Array.isArray(active.activeState.nodes))
-    return active.activeState
+  if (active.activeState && Array.isArray(active.activeState.nodes)) return active.activeState
   if (typeof active.content === 'string') {
     try {
       const parsed = JSON.parse(active.content)
@@ -370,12 +364,7 @@ function isTabMatchingActive(store, targetGraph, targetName) {
   if (nodeTypeSignature(targetGraph) !== nodeTypeSignature(activeGraph)) return false
   if (!targetName) return true
   // 名字匹配（容忍 .json 后缀/displayName 差异）：改名后视为不同工作流
-  const names = [
-    active.name,
-    active.displayName,
-    active.filename,
-    active.fullFilename,
-  ]
+  const names = [active.name, active.displayName, active.filename, active.fullFilename]
     .filter(Boolean)
     .map((s) => String(s).replace(/\.json$/i, ''))
   const t = String(targetName).replace(/\.json$/i, '')
@@ -395,10 +384,7 @@ async function loadWorkflowToTab(wf, name) {
       return { ok: true, mode: 'already-active', tab: activeTabName(store) }
     }
     try {
-      const temp = store.createTemporary(
-        String(name || 'Unsaved Workflow') + '.json',
-        wf
-      )
+      const temp = store.createTemporary(String(name || 'Unsaved Workflow') + '.json', wf)
       await store.openWorkflow(temp)
       // 实测（ComfyUI 0.33）：createTemporary 的 data 不会随 openWorkflow 进入
       // graph——新 tab 建了但画布空白（graph._nodes.length=0）。手动加载到
@@ -427,8 +413,7 @@ async function loadWorkflowToTab(wf, name) {
  *   序号不可靠）
  */
 function loadWorkflowGraph(wf) {
-  const isOfficial =
-    wf && typeof wf === 'object' && (wf.version != null || wf.last_node_id != null)
+  const isOfficial = wf && typeof wf === 'object' && (wf.version != null || wf.last_node_id != null)
   if (isOfficial) return window.app.loadGraphData(wf)
   return loadGraphManual(wf)
 }
@@ -557,8 +542,12 @@ export async function pushCanvasDigest(force) {
     const digest = await buildCanvasDigest()
     const json = JSON.stringify(digest)
     CANVAS_BRIDGE.lastDigestQueueActive = digest.queue.running + digest.queue.pending > 0
-    if (!force && json === CANVAS_BRIDGE.lastDigestJson) return
-    CANVAS_BRIDGE.lastDigestJson = json
+    // 去重比较**剥离 seq/ts**：这两个字段每次构建必变（seq 递增、ts 时间戳），曾让这段
+    // 去重永不命中 → 每 2s 轮询都冗余推一次（postMessage + POST snapshot）。
+    // 接收方防乱序靠的是「收到才递增比较 seq」，内容没变时不需要新 seq。
+    const sig = JSON.stringify({ ...digest, seq: 0, ts: 0 })
+    if (!force && sig === CANVAS_BRIDGE.lastDigestJson) return
+    CANVAS_BRIDGE.lastDigestJson = sig
     // 1) 工作台 iframe（存在才发；embed 未打开时不白算）
     //    ⚠️ 必须走 getEmbedWindow()：`artifyEmbedWindow` 是 card_bridge 的模块私有变量，
     //    此处曾裸引用它 —— 靠 esbuild 打包时的作用域合并「碰巧」同名才没报错，但
@@ -568,10 +557,7 @@ export async function pushCanvasDigest(force) {
     const embedWin = getEmbedWindow()
     if (embedWin) {
       try {
-        embedWin.postMessage(
-          JSON.stringify({ type: ARTIFY_MSG.CANVAS_STATE, state: digest }),
-          '*',
-        )
+        embedWin.postMessage(JSON.stringify({ type: ARTIFY_MSG.CANVAS_STATE, state: digest }), '*')
       } catch (_e) {
         /* iframe 未就绪/已销毁，忽略 */
       }

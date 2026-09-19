@@ -108,8 +108,9 @@ export async function handleArtifyMessage(data) {
     spawnDisplayCards(data.files)
   }
   if (data.type === ARTIFY_MSG.GET_CANVAS_STATE) {
-    // 工作台 iframe 首次挂载/重连时主动拉一份当前画布摘要
-    pushCanvasDigest()
+    // 工作台 iframe 首次挂载/重连时主动拉一份当前画布摘要。
+    // 必须 force=true：去重是「内容变了才推」，刚连上的工作台即使画布没变也必须拿到一份。
+    pushCanvasDigest(true)
   }
   if (data.type === ARTIFY_MSG.CANVAS_OPS) {
     // 写通道：工作台 diff 确认后下发。回执走同一 iframe postMessage。
@@ -175,7 +176,13 @@ export async function handleArtifyMessage(data) {
         })
         const j = await r.json().catch(() => null)
         if (!r.ok || !j || !j.success) throw new Error((j && j.message) || `HTTP ${r.status}`)
-        postToEmbed({ type: ackType, requestId: data.requestId, ok: true, jobId: j.data.jobId, batch: true })
+        postToEmbed({
+          type: ackType,
+          requestId: data.requestId,
+          ok: true,
+          jobId: j.data.jobId,
+          batch: true,
+        })
       } else {
         const r = await fetch(`${api}/api/canvas/execute`, {
           method: 'POST',
@@ -189,7 +196,12 @@ export async function handleArtifyMessage(data) {
         })
         const j = await r.json().catch(() => null)
         if (!r.ok || !j || !j.success) throw new Error((j && j.message) || `HTTP ${r.status}`)
-        postToEmbed({ type: ackType, requestId: data.requestId, ok: true, promptId: j.data.promptId })
+        postToEmbed({
+          type: ackType,
+          requestId: data.requestId,
+          ok: true,
+          promptId: j.data.promptId,
+        })
       }
     } catch (e) {
       postToEmbed({

@@ -582,3 +582,32 @@ node scripts/wb-dev-attach-verify.mjs
 2. **注入还有第二条路**：应用会把 `artify_inject.js` 同步进 ComfyUI 前端包的 extensions 目录
    （`comfyui_frontend_package/static/extensions/`，见 dev 日志 `[artify] synced artify_inject.js → …`）
    —— 与主进程 `executeJavaScript` 互补；幂等由 `__artifyInjectLoaded` 守。
+
+---
+
+## W21 摘要去重语义修复的真机回归（应用实例 + reload，3/3）
+
+`buildCanvasDigest` 每次都 `++seq` 并打 `ts` → 去重签名永不命中 → **每 2s 轮询都冗余推一次**
+（embed postMessage + `POST /api/canvas/snapshot`）。修为：去重签名**剥离 seq/ts** 再比较
+（接收方 `applyCanvasState` 的防乱序只看「收到的 seq」，内容没变不需要新 seq）；
+同时 `GET_CANVAS_STATE` 改 `pushCanvasDigest(true)` —— 刚连上的工作台**必须**拿到摘要，
+即使画布没变（否则去重会让重连方拿不到）。
+
+```bash
+# 前置：应用 dev 在跑 + 实例已启动；两级产物已重建且已同步 extensions 目录
+node scripts/wb-digest-dedupe-verify.mjs
+```
+
+方法：`Page.addScriptToEvaluateOnNewDocument` 在文档创建前 hook fetch 计数 `/api/canvas/snapshot`
+→ reload（extensions 路径的 `artify_inject.js` 已是去重版）→ 画布不动静置 12s → 桥真 addNode 改图。
+
+| 断言 | 真机实证 |
+|---|---|
+| W21.0 | reload 后桥经 **extensions 路径**重新注入（第二条注入路的实战验证） |
+| W21.1 | 画布无变化：12s / 3 个轮询周期内 snapshot 计数 **2 → 2**（修复前会 +6） |
+| W21.2 | 桥真 addNode 改图：下个轮询周期计数 **恰好 +1**（2 → 3） |
+
+两个坑：① reload 会销毁旧执行上下文 —— 立刻发 `Runtime.evaluate` 报
+`Execution context was destroyed`，先等 ~3s 再发；② 应用 launch 时才把
+`comfy_inject.min.js` 同步到 extensions 目录，改 inject 源码后做真机回归要先手动同步
+（`cp <app产物>/comfy_inject.min.js <site-packages>/comfyui_frontend_package/static/extensions/artify_inject.js`）。

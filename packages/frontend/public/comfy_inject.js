@@ -1315,8 +1315,7 @@
     }
   }
   function resolveCanvasTargets(g, ids) {
-    if (Array.isArray(ids) && ids.length)
-      return ids.map((id) => findNodeById(g, id)).filter(Boolean);
+    if (Array.isArray(ids) && ids.length) return ids.map((id) => findNodeById(g, id)).filter(Boolean);
     const sel = window.app?.canvas?.selected_nodes;
     if (sel && Object.keys(sel).length) return Object.values(sel);
     return (g._nodes || []).slice();
@@ -1342,8 +1341,7 @@
   }
   function activeWorkflowGraph(active) {
     if (!active) return null;
-    if (active.activeState && Array.isArray(active.activeState.nodes))
-      return active.activeState;
+    if (active.activeState && Array.isArray(active.activeState.nodes)) return active.activeState;
     if (typeof active.content === "string") {
       try {
         const parsed = JSON.parse(active.content);
@@ -1360,12 +1358,7 @@
     if (!activeGraph) return false;
     if (nodeTypeSignature(targetGraph) !== nodeTypeSignature(activeGraph)) return false;
     if (!targetName) return true;
-    const names = [
-      active.name,
-      active.displayName,
-      active.filename,
-      active.fullFilename
-    ].filter(Boolean).map((s) => String(s).replace(/\.json$/i, ""));
+    const names = [active.name, active.displayName, active.filename, active.fullFilename].filter(Boolean).map((s) => String(s).replace(/\.json$/i, ""));
     const t = String(targetName).replace(/\.json$/i, "");
     return names.some((n) => n === t || n.endsWith("/" + t));
   }
@@ -1376,10 +1369,7 @@
         return { ok: true, mode: "already-active", tab: activeTabName(store) };
       }
       try {
-        const temp = store.createTemporary(
-          String(name || "Unsaved Workflow") + ".json",
-          wf
-        );
+        const temp = store.createTemporary(String(name || "Unsaved Workflow") + ".json", wf);
         await store.openWorkflow(temp);
         await loadWorkflowGraph(wf);
         return { ok: true, mode: "new-tab", tab: String(name || "Unsaved Workflow") };
@@ -1500,15 +1490,13 @@
       const digest = await buildCanvasDigest();
       const json = JSON.stringify(digest);
       CANVAS_BRIDGE.lastDigestQueueActive = digest.queue.running + digest.queue.pending > 0;
-      if (!force && json === CANVAS_BRIDGE.lastDigestJson) return;
-      CANVAS_BRIDGE.lastDigestJson = json;
+      const sig = JSON.stringify({ ...digest, seq: 0, ts: 0 });
+      if (!force && sig === CANVAS_BRIDGE.lastDigestJson) return;
+      CANVAS_BRIDGE.lastDigestJson = sig;
       const embedWin = getEmbedWindow();
       if (embedWin) {
         try {
-          embedWin.postMessage(
-            JSON.stringify({ type: ARTIFY_MSG.CANVAS_STATE, state: digest }),
-            "*"
-          );
+          embedWin.postMessage(JSON.stringify({ type: ARTIFY_MSG.CANVAS_STATE, state: digest }), "*");
         } catch (_e) {
         }
       }
@@ -1619,7 +1607,7 @@
       spawnDisplayCards(data.files);
     }
     if (data.type === ARTIFY_MSG.GET_CANVAS_STATE) {
-      pushCanvasDigest();
+      pushCanvasDigest(true);
     }
     if (data.type === ARTIFY_MSG.CANVAS_OPS) {
       const ackType = ARTIFY_MSG.CANVAS_OPS_RESULT;
@@ -1677,7 +1665,13 @@
           });
           const j = await r.json().catch(() => null);
           if (!r.ok || !j || !j.success) throw new Error(j && j.message || `HTTP ${r.status}`);
-          postToEmbed({ type: ackType, requestId: data.requestId, ok: true, jobId: j.data.jobId, batch: true });
+          postToEmbed({
+            type: ackType,
+            requestId: data.requestId,
+            ok: true,
+            jobId: j.data.jobId,
+            batch: true
+          });
         } else {
           const r = await fetch(`${api}/api/canvas/execute`, {
             method: "POST",
@@ -1691,7 +1685,12 @@
           });
           const j = await r.json().catch(() => null);
           if (!r.ok || !j || !j.success) throw new Error(j && j.message || `HTTP ${r.status}`);
-          postToEmbed({ type: ackType, requestId: data.requestId, ok: true, promptId: j.data.promptId });
+          postToEmbed({
+            type: ackType,
+            requestId: data.requestId,
+            ok: true,
+            promptId: j.data.promptId
+          });
         }
       } catch (e) {
         postToEmbed({
