@@ -543,3 +543,36 @@ node scripts/wb-real-comfy-bridge-verify.mjs   # [--comfy http://127.0.0.1:8188]
    服务器必须回 CORS 头 + OPTIONS 204，且**预检不能记进请求记账**（否则断言取到空 body）。
 3. **python 环境**：`ComfyUI-Installs/ComfyUI/standalone-env/python.exe` **没有 torch**；
    真正的运行环境是 `ComfyUI-Installs/ComfyUI/ComfyUI/.venv/Scripts/python.exe`（torch 2.12.1+cu130）。
+
+---
+
+## W20 应用自管实例的注入桥（pnpm dev + CDP 附着，5/5）
+
+W16-W19 的宿主都是测试自己搭的（假宿主帧 / 桩 app / 手工起的 ComfyUI）；**应用真实链路**——
+用户在应用里点「运行实例」→ 应用启动 ComfyUI、主进程 `executeJavaScript` 注入桥（`withArtifyLabBootstrap`）
++ preload 注入 `electronAPI` —— 由 W20 覆盖。
+
+```bash
+# ① 起应用（ARTIFY_DEV_DEBUG_PORT 是主进程内建的验收钩子，只在显式设置时开 CDP）
+ARTIFY_DEV_DEBUG_PORT=9222 env -u ELECTRON_RUN_AS_NODE pnpm dev
+# ② 在应用里点「运行实例」，等实例启动
+# ③ 附着验证（等实例视图出现后自动断言）
+node scripts/wb-dev-attach-verify.mjs
+```
+
+| 断言 | 应用真机实证 |
+|---|---|
+| W20.0 | 注入链路完整：`__ARTIFY_LAB_URL__=localhost:5100`（dev vite）、`__ARTIFY_LAB_API__=localhost:3008`（express）、preload 的 `electronAPI=true`、桥 registry 36 项 |
+| W20.1 | 真 LiteGraph 注册表就绪（稳定采样，registered=4091、真图 12 节点、真 graphToPrompt、前端 1.51.10） |
+| W20.2 | 真 `buildCanvasDigest` 在用户实例的真图上跑通（真 `/queue`，models 投影 1） |
+| W20.3 | 桥注册进应用实例的真侧栏（extensionManager，6 tabs） |
+| W20.4 | **`Runtime.exceptionThrown` 共 0 条** —— 之前修的两簇裸引用病灶（artifyEmbedWindow / artify_inject×16）在应用真实链路上零现形 |
+
+### 两个坑
+
+1. **`playwright.connectOverCDP` 对这个 Electron 不可用**：ws 握手成功后挂死到超时（实测两次，
+   与后台是否有其它客户端无关）。改用**原生 CDP**：`/json/list` 拿 page 的 `webSocketDebuggerUrl`，
+   Node 22+ 内置的全局 `WebSocket` 直发 `Runtime.evaluate` / 订阅 `Runtime.exceptionThrown`。
+2. **注入还有第二条路**：应用会把 `artify_inject.js` 同步进 ComfyUI 前端包的 extensions 目录
+   （`comfyui_frontend_package/static/extensions/`，见 dev 日志 `[artify] synced artify_inject.js → …`）
+   —— 与主进程 `executeJavaScript` 互补；幂等由 `__artifyInjectLoaded` 守。
