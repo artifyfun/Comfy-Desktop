@@ -1,6 +1,7 @@
 <template>
   <a-modal
-    v-model:open="open"
+    :open="open"
+    @update:open="(v) => emit('update:open', v)"
     :title="t('templatesList')"
     :closable="true"
     :maskClosable="false"

@@ -1566,7 +1566,7 @@
           @dblclick.stop
           @wheel.stop
           @input="onNoteInput"
-          @keydown="onNoteKeydown"
+          @keydown.exact="onNoteKeydown"
           @keydown.esc.stop.prevent="onNoteEsc"
           @keydown.enter.ctrl.prevent="commitNoteEdit"
           @blur="onNoteBlur"

@@ -319,10 +319,7 @@
                       :running="true"
                       :steps="turnProgressModel(i).steps"
                     />
-                    <template
-                      v-for="({ m: tm, i: tmi }, ti) in turnGroupItems(i)"
-                      :key="tm._key ?? tmi"
-                    >
+                    <template v-for="{ m: tm, i: tmi } in turnGroupItems(i)" :key="tm._key ?? tmi">
                       <!-- 产物缩略图（file part） -->
                       <div
                         v-if="tm.kind === 'artifact' && tm.outputFiles?.length"
@@ -2317,7 +2314,9 @@ async function loadOutputDir() {
   try {
     const { json } = await runtimeApi.info()
     outputDirInfo.value = json?.data ?? null
-  } catch {}
+  } catch {
+    /* info 接口失败不影响主流程：另存为功能降级 */
+  }
 }
 
 function viewUrl(f) {
@@ -2811,7 +2810,9 @@ async function loadArchiveCount() {
     const { json } = await sessionsApi.list()
     const list = json?.data ?? []
     allCounts.value = { total: list.length, archived: list.filter((x) => x.archived).length }
-  } catch {}
+  } catch {
+    /* 列表拉取失败时保留上次计数 */
+  }
 }
 const archivedCount = computed(() => allCounts.value.archived)
 watch(showArchived, () => {

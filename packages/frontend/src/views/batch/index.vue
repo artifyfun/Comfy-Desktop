@@ -809,7 +809,9 @@ function nowMs() {
     if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
       return performance.now()
     }
-  } catch (_) {}
+  } catch (_) {
+    /* performance 不可用时回落 Date.now() */
+  }
   return Date.now()
 }
 
@@ -1074,19 +1076,21 @@ function convertValueByType(value, targetType) {
     case 'string':
       return String(value)
 
-    case 'number':
+    case 'number': {
       const num = Number(value)
       if (isNaN(num)) {
         throw new Error(`Cannot convert "${value}" to number`)
       }
       return num
+    }
 
-    case 'boolean':
+    case 'boolean': {
       if (typeof value === 'boolean') return value
       const lowerValue = String(value).toLowerCase()
       if (['true', '1', 'yes', 'on'].includes(lowerValue)) return true
       if (['false', '0', 'no', 'off'].includes(lowerValue)) return false
       throw new Error(`Cannot convert "${value}" to boolean`)
+    }
 
     case 'object':
       try {

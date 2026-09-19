@@ -45,7 +45,7 @@
     "font:fetch": "node scripts/fetch-font.mjs",
     "sandbox:gen": "node scripts/generate-sandbox.mjs",
     "datadog:sourcemaps:upload": "node ./scripts/upload-datadog-sourcemaps.mjs",
-    "lint": "eslint .",
+    "lint": "eslint . && cd packages/frontend && npx eslint src",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.{ts,vue}\" \"*.{json,ts,yml}\"",
     "format:check": "prettier --check \"src/**/*.{ts,vue}\" \"*.{json,ts,yml}\"",

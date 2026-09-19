@@ -675,7 +675,7 @@ function renderComponent(item) {
             ></textarea>
           </div>
         `
-      case 'select':
+      case 'select': {
         // 选项
         const options = (child.props.options || [])
           .map((opt) => `<option value="${opt.value}">${opt.label}</option>`)
@@ -692,6 +692,7 @@ function renderComponent(item) {
             </select>
           </div>
         `
+      }
       case 'input-number':
         return `
           <div class="mb-6">

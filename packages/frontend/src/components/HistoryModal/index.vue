@@ -1,7 +1,7 @@
 <template>
   <div class="history-modal">
     <transition name="fade">
-      <div class="history-modal-mask" @click.self="handleClickClose">
+      <div class="history-modal-mask" v-if="props.workflow" @click.self="handleClickClose">
         <transition name="slide">
           <div class="history-modal-card" v-if="props.workflow">
             <div class="history-modal-header">

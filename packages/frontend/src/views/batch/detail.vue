@@ -267,7 +267,9 @@ onMounted(async () => {
   if (qid && !store.queue.length) {
     try {
       await store.fetchQueue()
-    } catch {}
+    } catch {
+      /* 拉取失败不阻塞展开逻辑：队列保持现状即可 */
+    }
   }
   if (qid && store.queue.some((j) => j.id === qid)) expandedJobId.value = qid
 })
