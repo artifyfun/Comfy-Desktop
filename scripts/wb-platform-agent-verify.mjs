@@ -36,8 +36,17 @@ const S2_PROMPT = opt('--s2-prompt', '')
 const TIMEOUT_MIN = Number(opt('--timeout-min', SCENARIO === 's4' ? '45' : '20'))
 const EXPECT_SIZE = opt('--expect-size', null)
 const VERSION_APP = opt('--version-app', 'Krea2文生图1024')
-const COMFY_ROOT = 'D:/Comfy-Desktop/ComfyUI-Shared'
-const EVID_DIR = 'D:/artifyfun/tmp/wb-gen-verify'
+// 跨机适配：Windows=D 盘布局；macOS=~/ComfyUI-Shared 与 /tmp。参数可覆盖。
+const COMFY_ROOT = opt(
+  '--comfy-root',
+  process.platform === 'win32'
+    ? 'D:/Comfy-Desktop/ComfyUI-Shared'
+    : `${process.env.HOME}/ComfyUI-Shared`
+)
+const EVID_DIR = opt(
+  '--evid-dir',
+  process.platform === 'win32' ? 'D:/artifyfun/tmp/wb-gen-verify' : '/tmp/wb-gen-verify'
+)
 const stamp = new Date().toISOString().replace(/[:.]/g, '-')
 mkdirSync(EVID_DIR, { recursive: true })
 
@@ -668,7 +677,7 @@ if (SCENARIO === 's5' && versionBefore) {
   )
 }
 
-const outTree = readdirSync('D:/Comfy-Desktop/ComfyUI-Shared/output').slice(0, 3)
+const outTree = readdirSync(COMFY_ROOT.endsWith('/output') ? COMFY_ROOT : `${COMFY_ROOT}/output`).slice(0, 3)
 info(`output/ 目录条目示例：${outTree.join(', ')}`)
 
 writeFileSync(

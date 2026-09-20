@@ -23,12 +23,23 @@ import { join } from 'node:path'
 
 const APP = opt('--app', 'http://127.0.0.1:3008').replace(/\/$/, '')
 const COMFY = opt('--comfy', 'http://127.0.0.1:8188').replace(/\/$/, '')
-const COMFY_OUTPUT = 'D:/Comfy-Desktop/ComfyUI-Shared/output'
+// 跨机适配：Windows=D 盘布局；macOS=~/ComfyUI-Shared + 仓库内 screenshots/。参数可覆盖。
+const IS_WIN = process.platform === 'win32'
+const COMFY_ROOT = opt(
+  '--comfy-root',
+  IS_WIN ? 'D:/Comfy-Desktop/ComfyUI-Shared' : `${process.env.HOME}/ComfyUI-Shared`
+)
+const COMFY_OUTPUT = `${COMFY_ROOT}/output`
 const IMG_APP = opt('--img-app', 'Krea2文生图1024')
 const PROMPT_TEXT = opt('--prompt', 'a red cube on a white table')
 const TIMEOUT_MIN = Number(opt('--timeout-min', '18'))
 
-const SHOT_DIR = 'D:/artifyfun/Comfy-Desktop/acceptance/workbench/screenshots/'
+const SHOT_DIR = opt(
+  '--shot-dir',
+  IS_WIN
+    ? 'D:/artifyfun/Comfy-Desktop/acceptance/workbench/screenshots/'
+    : new URL('../acceptance/workbench/screenshots/', import.meta.url).pathname
+)
 const results = []
 function record(name, pass, evidence = '') {
   results.push({ name, pass })

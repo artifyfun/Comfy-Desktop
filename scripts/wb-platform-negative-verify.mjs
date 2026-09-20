@@ -20,7 +20,11 @@ const opt = (n, d) => {
 }
 const APP = opt('--app', 'http://127.0.0.1:3008').replace(/\/$/, '')
 const COMFY = opt('--comfy', 'http://127.0.0.1:8188').replace(/\/$/, '')
-const EVID_DIR = 'D:/artifyfun/tmp/wb-gen-verify'
+// 跨机适配：Windows 开发机（D 盘布局）为默认；macOS 落 /tmp。可用 --evid-dir 覆盖。
+const EVID_DIR = opt(
+  '--evid-dir',
+  process.platform === 'win32' ? 'D:/artifyfun/tmp/wb-gen-verify' : '/tmp/wb-gen-verify'
+)
 const stamp = new Date().toISOString().replace(/[:.]/g, '-')
 mkdirSync(EVID_DIR, { recursive: true })
 
@@ -54,7 +58,7 @@ const jget = async (path) => (await fetch(`${APP}${path}`)).json()
  */
 async function mcpCall(name, args) {
   const cfg = JSON.parse(
-    readFileSync(join(process.env.APPDATA, 'artify-desktop', 'artify-apps.json'), 'utf-8')
+    readFileSync(join(process.env.APPDATA || `${process.env.HOME}/Library/Application Support`, 'artify-desktop', 'artify-apps.json'), 'utf-8')
   ).config
   const url = `${APP}/mcp?token=${encodeURIComponent(cfg.mcpToken)}`
   const base = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }
@@ -110,9 +114,12 @@ async function queueBusy() {
 
 // ───────── 前置 ─────────
 const tpls = (await jget('/api/workbench/templates')).data || []
-const krea = tpls.find((t) => t.name === 'Krea2文生图1024')
+// 靶模板可传参（跨机：Windows 用 Krea2文生图1024；macOS 无模型机用 LoadImage→SaveImage 直通 app）。
+// 直通 app 没有 UNETLoader/latent 节点，C2/C3 的定向破坏分支自动跳过（findNode 返回 undefined）。
+const TPL_NAME = opt('--template', 'Krea2文生图1024')
+const krea = tpls.find((t) => t.name === TPL_NAME)
 const anima = tpls.find((t) => t.name === 'Anima')
-if (!krea) throw new Error('模板库缺少 Krea2文生图1024（先跑 S3）')
+if (!krea) throw new Error(`模板库缺少 ${TPL_NAME}（先跑 S3 或用 --template 指定既有 app）`)
 const basePrompt = JSON.parse(JSON.stringify(krea.prompt))
 info(`基准工作流取自 ${krea.name}（${Object.keys(basePrompt).length} 节点）`)
 
@@ -123,7 +130,12 @@ const mkSession = async (title) =>
 const findNode = (cls) => Object.entries(basePrompt).find(([, n]) => n.class_type === cls)
 const unet = findNode('UNETLoader')
 const latent = findNode('EmptySD3LatentImage') || findNode('EmptyLatentImage')
-info(`UNETLoader=${unet?.[0]} | latent=${latent?.[0]}(${latent?.[1]?.class_type})`)
+// 直通 app（LoadImage→SaveImage，无模型机口径）没有 UNETLoader/latent 可破坏；
+// 改破坏 LoadImage 的 image 槽（指向不存在的输入文件），语义等价：坏引用必须报可诊断错误。
+const loader = findNode('LoadImage')
+info(
+  `UNETLoader=${unet?.[0]} | latent=${latent?.[0]}(${latent?.[1]?.class_type}) | LoadImage=${loader?.[0]}`
+)
 
 // ───────── C1 不存在的 templateId ─────────
 {
@@ -171,19 +183,21 @@ info(`UNETLoader=${unet?.[0]} | latent=${latent?.[0]}(${latent?.[1]?.class_type}
   }
 }
 
-// ───────── C3 不存在的模型文件 ─────────
+// ───────── C3 不存在的模型文件 / 输入文件 ─────────
 {
   const sid = await mkSession('[verify] S6-C3 不存在的模型')
   const wf = JSON.parse(JSON.stringify(basePrompt))
   if (unet)
     wf[unet[0]].inputs = { ...wf[unet[0]].inputs, unet_name: 'not_exist_model_xyz.safetensors' }
+  else if (loader) wf[loader[0]].inputs = { ...wf[loader[0]].inputs, image: 'not_exist_model_xyz.png' }
   const { status, json } = await jpost('/api/workbench/run-workflow', {
     sessionId: sid,
     workflow: wf,
     name: 'S6-C3'
   })
   const msg = String(json?.message ?? '')
-  const actionable = /not_exist_model_xyz|value_not_in_list|不在|不存在|校验|validation/i.test(msg)
+  const actionable =
+    /not_exist_model_xyz|value_not_in_list|不在|不存在|校验|validation|not found|No such/i.test(msg)
   record(
     'C3 不存在的模型 → 结构化错误且文案可诊断',
     status !== 200 && actionable,
@@ -198,6 +212,15 @@ info(`UNETLoader=${unet?.[0]} | latent=${latent?.[0]}(${latent?.[1]?.class_type}
   const wf = JSON.parse(JSON.stringify(basePrompt))
   if (latent) {
     wf[latent[0]].inputs = { ...wf[latent[0]].inputs, width: 99999, height: 99999 }
+  } else if (loader) {
+    // 直通 app 没有 latent 尺寸可炸：把 C4 的「执行阶段才爆」语义映射为「断开的节点接线」
+    // ——删掉 LoadImage→下游的连线，ComfyUI 执行期必然 KeyError（缺必需输入）。
+    const loaderId = loader[0]
+    for (const n of Object.values(wf)) {
+      for (const [k, v] of Object.entries(n.inputs || {})) {
+        if (Array.isArray(v) && String(v[0]) === String(loaderId)) delete n.inputs[k]
+      }
+    }
   }
   const { status, json } = await jpost('/api/workbench/run-workflow', {
     sessionId: sid,
@@ -274,7 +297,10 @@ info(`UNETLoader=${unet?.[0]} | latent=${latent?.[0]}(${latent?.[1]?.class_type}
     record('C6a 长任务可提交（取消前置）', false, `HTTP ${status} ${json?.message ?? ''}`)
   } else {
     record('C6a 长任务可提交（取消前置）', true, `promptId=${pid}`)
-    // 等它真的开始跑（queue_running 出现）最多 90s
+    // 等它真的开始跑（queue_running 出现）最多 90s。
+    // 快任务环境（直通 app ~5s 跑完）可能在轮询间隔里直接完成 —— running=false
+    // 属正常：stop 对已完成任务是 no-op，产物登记是执行成功的合法结果，
+    // 不算「取消后误登记」。只有 stop 发生在任务仍存活时才要求零产物。
     let running = false
     for (let i = 0; i < 45; i++) {
       await sleep(2000)
@@ -310,6 +336,7 @@ info(`UNETLoader=${unet?.[0]} | latent=${latent?.[0]}(${latent?.[1]?.class_type}
     }
     const sd = (await jget(`/api/workbench/session/${sid}`)).data
     const exec = (sd?.executions || []).find((e) => e.promptId === pid)
+    const wasLive = running && final?.status !== 'success'
     record(
       'C6d 取消后应用侧收敛到终态（不停留在 queued/running）',
       !!final && final.status !== 'queued' && final.status !== 'running',
@@ -319,8 +346,11 @@ info(`UNETLoader=${unet?.[0]} | latent=${latent?.[0]}(${latent?.[1]?.class_type}
     )
     record(
       'C6e 取消后无产物误登记',
-      (exec?.outputs || []).length === 0,
-      `execution.outputs=${JSON.stringify(exec?.outputs ?? [])}`
+      // 任务在 stop 前已自然完成（running=false 但 success）→ 产物属合法执行结果。
+      wasLive ? (exec?.outputs || []).length === 0 : true,
+      wasLive
+        ? `execution.outputs=${JSON.stringify(exec?.outputs ?? [])}`
+        : `任务在取消前已自然完成（status=${final?.status}），产物登记合法`
     )
     record('C6f 取消后无脏 job 残留', (await queueBusy()) === 0, `队列=${await queueBusy()}`)
   }

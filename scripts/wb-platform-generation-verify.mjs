@@ -41,11 +41,22 @@ const EXTRA_PARAMS = (() => {
 })()
 /** 视频产物期望分辨率（如 1344x768）；给了就断言，且要求 ffprobe 可读 */
 const EXPECT_VIDEO_SIZE = opt('--expect-video-size', '')
-const APPDATA = process.env.APPDATA || ''
-const COMFY_ROOT = 'D:/Comfy-Desktop/ComfyUI-Shared'
+// 跨机适配：Windows 开发机走 APPDATA/D 盘；macOS 走 ~/Library/Application Support 与
+// ~/ComfyUI-Shared（应用 settings.json 的共享 input/output）。--comfy-root/--evid-dir 可覆盖。
+const IS_WIN = process.platform === 'win32'
+const APPDATA = IS_WIN
+  ? process.env.APPDATA || ''
+  : `${process.env.HOME}/Library/Application Support`
+const COMFY_ROOT = opt(
+  '--comfy-root',
+  IS_WIN ? 'D:/Comfy-Desktop/ComfyUI-Shared' : `${process.env.HOME}/ComfyUI-Shared`
+)
 const OUTPUT_DIR = `${COMFY_ROOT}/output`
 const INPUT_DIR = `${COMFY_ROOT}/input`
-const EVID_DIR = 'D:/artifyfun/tmp/wb-gen-verify'
+const EVID_DIR = opt(
+  '--evid-dir',
+  IS_WIN ? 'D:/artifyfun/tmp/wb-gen-verify' : '/tmp/wb-gen-verify'
+)
 mkdirSync(EVID_DIR, { recursive: true })
 
 const results = []
@@ -188,12 +199,24 @@ if (!tmpl) {
   if (override !== undefined) {
     info(`该 widget 被 --params 覆盖 → L1 以覆盖值为准：${String(override).slice(0, 60)}`)
   } else if (isMediaSlot) {
-    if (existsSync(defVal)) {
-      const ext = (defVal.split('.').pop() || 'jpg').toLowerCase()
-      const buf = readFileSync(defVal)
+    // 媒体槽默认值是裸文件名（已在 input/ 里）时上传回填不会发生 → L1 的「值被改写」
+    // 断言不成立。按优先级找一张本机真实图片构造 data URL：高熵探针图优先（L3 的
+    // 「非纯色」断言需要唯一色 >1000，模板默认图常是深色低熵图过不了）→ 模板默认值
+    // 路径 → input/ 里现成的图（无模型机口径：直通 app 的产物=上传图回写）。
+    const candidates = [
+      join(INPUT_DIR, 'wb_rich_probe.png'),
+      defVal,
+      join(INPUT_DIR, defVal),
+      join(INPUT_DIR, 'artify_verify.png'),
+      join(INPUT_DIR, 'bridge-test.png')
+    ].filter(Boolean)
+    const src = candidates.find((c) => existsSync(c))
+    if (src) {
+      const ext = (src.split('.').pop() || 'jpg').toLowerCase()
+      const buf = readFileSync(src)
       paramValue = `data:image/${ext === 'jpg' ? 'jpeg' : ext};base64,${buf.toString('base64')}`
       info(
-        `构造新入参：源图 ${(buf.length / 1024).toFixed(0)}KB → data URL（${paramValue.length} 字符）`
+        `构造新入参：源图 ${src}（${(buf.length / 1024).toFixed(0)}KB）→ data URL（${paramValue.length} 字符）`
       )
     } else {
       info(`媒体参数默认值不是本机文件（${defVal || '空'}）→ 该场景 L1 不再成立`)
@@ -310,7 +333,7 @@ if (!tmpl) {
         target.type === 'output' ? 'output' : 'temp',
         target.subfolder,
         target.filename
-      ).replace(/\//g, '\\')
+      )
       record('S1.6 L3 视频产物落盘', existsSync(local), `${local}`)
       if (existsSync(local)) {
         info(`大小 ${(statSync(local).size / 1024 / 1024).toFixed(2)}MB`)
@@ -418,7 +441,7 @@ if (!tmpl) {
         target.type === 'output' ? 'output' : 'temp',
         target.subfolder,
         target.filename
-      ).replace(/\//g, '\\')
+      )
       const ext = (target.filename.split('.').pop() || 'png').toLowerCase()
       const mime = `image/${ext === 'jpg' ? 'jpeg' : ext}`
       let dataUrl

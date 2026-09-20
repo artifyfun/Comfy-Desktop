@@ -24,7 +24,14 @@ import { join } from 'node:path'
 
 const APP = opt('--app', 'http://127.0.0.1:3008')
 const COMFY = opt('--comfy', 'http://127.0.0.1:8188')
-const COMFY_OUTPUT = 'D:/Comfy-Desktop/ComfyUI-Shared/output'
+// 跨机适配：Windows=D 盘布局；macOS=~/ComfyUI-Shared。--comfy-root 可覆盖。
+const COMFY_ROOT = opt(
+  '--comfy-root',
+  process.platform === 'win32'
+    ? 'D:/Comfy-Desktop/ComfyUI-Shared'
+    : `${process.env.HOME}/ComfyUI-Shared`
+)
+const COMFY_OUTPUT = `${COMFY_ROOT}/output`
 const IMG_APP = opt('--img-app', 'Krea2文生图1024')
 
 const results = []

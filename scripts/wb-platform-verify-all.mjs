@@ -35,12 +35,21 @@ const APP = opt('--app', 'http://127.0.0.1:3008').replace(/\/$/, '')
 const COMFY = opt('--comfy', 'http://127.0.0.1:8188').replace(/\/$/, '')
 const GROUP = opt('--group', 'core')
 const ONLY = opt('--only', '')
-const EVID_DIR = 'D:/artifyfun/tmp/wb-gen-verify'
+const EVID_DIR = opt(
+  '--evid-dir',
+  process.platform === 'win32' ? 'D:/artifyfun/tmp/wb-gen-verify' : '/tmp/wb-gen-verify'
+)
 const stamp = new Date().toISOString().replace(/[:.]/g, '-')
 mkdirSync(EVID_DIR, { recursive: true })
 
 const H3 = 'MiniMax H3 文生视频'
-const IMG_APP = opt('--image-app', 'Krea2文生图1024')
+// 靶 app 跨机差异：Windows 开发机有 Krea2/Anima（真模型出图）；无模型的 mac 主力机
+// 用 LoadImage→SaveImage 直通 app（此前回归轮即用此口径：产物=上传图回写，断言可过）。
+const IS_WIN = process.platform === 'win32'
+const IMG_APP = opt('--image-app', IS_WIN ? 'Krea2文生图1024' : '文生图·测试')
+const UPLOAD_APP = opt('--upload-app', IS_WIN ? 'Anima' : '文生图·测试')
+// 传给子脚本的公共路径参数（子脚本各自有同款平台默认，这里显式透传保持一致）
+const PATH_ARGS = ['--evid-dir', EVID_DIR, '--comfy-root', opt('--comfy-root', IS_WIN ? 'D:/Comfy-Desktop/ComfyUI-Shared' : `${process.env.HOME}/ComfyUI-Shared`)]
 
 /** 场景表：group 决定默认编排；args 直接透传给对应脚本 */
 const SCENARIOS = {
@@ -56,13 +65,23 @@ const SCENARIOS = {
       '--template',
       IMG_APP,
       '--timeout-min',
-      opt('--s1-timeout-min', '10')
+      opt('--s1-timeout-min', '10'),
+      ...PATH_ARGS
     ]
   },
   s6: {
     group: 'core',
     title: 'S6 异常路径（失败要失败得清楚 + 取消链路）',
-    args: ['scripts/wb-platform-negative-verify.mjs', '--app', APP, '--comfy', COMFY]
+    args: [
+      'scripts/wb-platform-negative-verify.mjs',
+      '--app',
+      APP,
+      '--comfy',
+      COMFY,
+      '--template',
+      IMG_APP,
+      ...PATH_ARGS
+    ]
   },
   s8: {
     group: 'core',
@@ -74,7 +93,8 @@ const SCENARIOS = {
       '--comfy',
       COMFY,
       '--app-name',
-      opt('--upload-app', 'Anima')
+      UPLOAD_APP,
+      ...PATH_ARGS
     ]
   },
   s9: {

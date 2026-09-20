@@ -19,6 +19,7 @@
  */
 import { spawnSync } from 'node:child_process'
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -32,9 +33,17 @@ import { join } from 'node:path'
 
 const APP = opt('--app', 'http://127.0.0.1:3008')
 const COMFY = opt('--comfy', 'http://127.0.0.1:8188')
-/** ComfyUI input 目录（应用把上传件转发到这里；路径来自本机安装布局） */
-const COMFY_INPUT = 'D:/Comfy-Desktop/ComfyUI-Shared/input'
-const COMFY_OUTPUT = 'D:/Comfy-Desktop/ComfyUI-Shared/output'
+/** ComfyUI input/output 目录（应用把上传件转发到这里）。跨机：Windows=D 盘布局，
+ *  macOS=应用共享目录（~/ComfyUI-Shared，即 settings.json 的 inputDir/outputDir）。
+ *  可用 --comfy-root 覆盖。 */
+const COMFY_ROOT = opt(
+  '--comfy-root',
+  process.platform === 'win32'
+    ? 'D:/Comfy-Desktop/ComfyUI-Shared'
+    : `${process.env.HOME}/ComfyUI-Shared`
+)
+const COMFY_INPUT = `${COMFY_ROOT}/input`
+const COMFY_OUTPUT = `${COMFY_ROOT}/output`
 /**
  * 靶 app 默认 Anima（媒体槽 + 执行必成功 + PreviewImage 出真实 img2img 预览帧）。
  * 反推类 app（QWEN3图片反推等）的 CR Save Text To File 写相对路径 tags/florence/，
@@ -71,8 +80,27 @@ function makeTestJpeg() {
     '1',
     dst
   ])
-  if (ff.status !== 0 || !existsSync(dst)) throw new Error('ffmpeg 生成测试图失败: ' + ff.stderr)
-  return dst
+  if (ff.status === 0 && existsSync(dst)) return dst
+  // ffmpeg 不在本机 PATH（mac 主力机常无）→ 用本机 ComfyUI input 里现成的
+  // 真实图片当测试图（上传链路只需要「一张真实解码得开的图」，内容无关）。
+  // wb_rich_probe.png 是高熵探针图（渐变+噪点，唯一色 >1000），优先用。
+  // ⚠️ 必须拷到 tmp 再用：脚本收尾 rmSync 测试图，直接引用会误删 input 里的源文件
+  //    （曾把模板默认引用的 artify_verify.png 删掉，导致后续 S6 全线 400）。
+  const fallbacks = [
+    join(COMFY_INPUT, 'wb_rich_probe.png'),
+    join(COMFY_INPUT, 'artify_verify.png'),
+    join(COMFY_INPUT, 'bridge-test.png')
+  ]
+  for (const f of fallbacks) {
+    if (!existsSync(f)) continue
+    const dst2 = join(tmpdir(), `wb-s8-upload-${Date.now()}${f.match(/\.[a-z0-9]+$/i)?.[0] ?? '.png'}`)
+    copyFileSync(f, dst2)
+    return dst2
+  }
+  throw new Error(
+    'ffmpeg 不可用且 ComfyUI input 无现成测试图（先放一张任意图片进 input/ 或装 ffmpeg）: ' +
+      String(ff.stderr || '').slice(0, 120)
+  )
 }
 
 async function multipartUpload(path, filePath, sessionId) {
@@ -132,7 +160,7 @@ async function main() {
   // ── S8.2 文件真实落 ComfyUI input ──
   // meta.name 可能带 subfolder 前缀（"sub/dir/file.jpg"）；input 根下按名字找
   const baseName = uploadedName.split('/').pop()
-  const local = join(COMFY_INPUT, uploadedName.replace(/\//g, '\\'))
+  const local = join(COMFY_INPUT, uploadedName)
   const found = existsSync(local) || !!findInInput(COMFY_INPUT, baseName)
   record('S8.2 上传件落 ComfyUI input 目录', found, `期望 ${local}`)
 
