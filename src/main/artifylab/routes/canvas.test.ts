@@ -128,6 +128,10 @@ describe('canvas routes', () => {
             { id: 'img_main', kind: 'image', label: 'cat.png', size: '256×256' },
             { id: 'note_main', kind: 'note', label: 'a cute cat' },
             { id: 'bad', kind: '', label: '' }
+          ],
+          selection: [
+            { id: 'img_main', kind: 'image', label: 'cat.png' },
+            { kind: 'note', label: 'no id row' }
           ]
         })
       })
@@ -141,6 +145,7 @@ describe('canvas routes', () => {
             links?: number
             appNodes?: Array<{ id: string; name: string }>
             objects?: Array<{ id: string; kind: string; label: string }>
+            selection?: Array<{ id: string; kind: string; label: string }>
           } | null
         }
       }
@@ -150,6 +155,8 @@ describe('canvas routes', () => {
       expect(stt?.appNodes).toEqual([{ id: 'app1', name: '文生图', status: 'running' }])
       expect(stt?.objects).toHaveLength(3) // 无 id 的脏行才被过滤；kind/label 空仍保留（宽松寻址）
       expect(stt?.objects?.[0]).toMatchObject({ id: 'img_main', kind: 'image' })
+      // 选区与 objects 同构：无 id 行过滤，其余保留（AI 寻址「用户选中的物件」）
+      expect(stt?.selection).toEqual([{ id: 'img_main', kind: 'image', label: 'cat.png' }])
     } finally {
       await new Promise<void>((resolve) => s3.close(() => resolve()))
     }

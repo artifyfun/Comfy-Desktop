@@ -36,21 +36,24 @@ const MAIN_RULES = `规则：
 2. intent=text 走纯文本生成（文案/起名/总结等），把生成结果放 reply。
 3. intent=chat 用于追问澄清或闲聊，回复放 reply。`
 
-/** 画布执行规则（3.1-3.3；仅画布状态可用时注入） */
+/** 画布执行规则（3.1-3.3；仅 C 界面画布（surface=c-canvas）注入——A 画布无 ComfyUI 图语义，走 3.4） */
 export const CANVAS_RUN_RULES = `3.1 **把工作流加载到画布**（用户说「把工作流同步到画布 / 加载工作流 / 打开某模板的画布布局」）→ intent=workflow + templateId 选目标模板（模板库清单里的 id）。画布会自动开新 tab 加载该模板的布局（当前 tab 已是同一工作流时复用，不重复开）；模板未保存布局时系统会从模板参数自动生成节点布局（无连线，可手动整理）。
 3.1b **模板执行自动加载画布**：intent=image/video/audio 执行模板时，系统**自动**先把该模板工作流加载到画布（新 tab；当前 tab 已是同一工作流则复用）再执行——无需额外字段。（兼容：显式带 "syncCanvasBeforeExec":true 同样生效。）
 3.2 **执行画布当前工作流**（用户说「执行画布上的工作流 / 跑一下当前图 / 按画布参数生成 / 用当前画布出图」）→ intent=canvas-run（**不指定 templateId**；可带 nodeOverrides 按节点 id 覆盖 widget，如 {"16":{"widgetOverrides":{"steps":40}}}）。
 3.3 **画布批量执行**（对当前画布多变体/多参数组合批量出图）→ intent=canvas-run + batch.items（每行=一组变体）。行内键用「节点id.widget名」格式（如 "16.steps":40、"9.text":"新提示词"），值=该 widget 新值；共有的固定变体放 sharedParams（同格式）。系统按行逐条执行画布当前工作流。
 `
 
-/** A 画布 App 节点操作规则（3.4；仅 surface=a-canvas 注入） */
+/** A 画布 App 节点操作规则（3.4；仅 surface=a-canvas 注入）。与 CANVAS_RUN_RULES 互斥：
+ *  A 画布是物件画布（app 节点/图片/便签），没有 ComfyUI 节点图——canvas-run 的
+ *  nodeOverrides/batch 键格式在这里无意义，跑节点一律走 run_node。 */
 export const CANVAS_OPS_RULES = `3.4 **A 画布 App 节点操作**（用户在 A 画布侧栏工作台说「跑一下节点 X / 新建一个 XX 应用节点 / 把节点 X 参数改成… / 连一下 A→B」）→ intent=canvas-ops + canvasOps 指令数组：
-  - {"type":"run_node","nodeId":"a17…"} 触发某 App 节点运行（params 可选覆盖 {"节点id":{"widget":值}}）
-  - {"type":"add_app_node","appId":"模板id","name":"…","x":…,"y":…} 在画布新建 App 节点
+  - {"type":"run_node","nodeId":"a17…"} 触发某 App 节点运行（params 可选覆盖 {"参数名": 值}，**平铺格式**，键=模板参数名，不是按节点 id 嵌套）
+  - {"type":"add_app_node","appId":"模板id","name":"…","x":…,"y":…,"nodeId":"自定 id"} 在画布新建 App 节点（nodeId 可选：同批 connect_nodes/select_nodes 想引用它时带上）
   - {"type":"update_node","id":"节点id","patch":{"params":{…}}} 改节点参数/位置
-  - {"type":"connect_nodes","from":"上游物件id","to":"节点id"} 建数据管道（上游产物/便签喂下游）
+  - {"type":"connect_nodes","from":"上游物件id","to":"节点id","fromName":"…","toName":"…"} 建数据管道（上游产物/便签喂下游）；**务必带 fromName/toName**（确认卡显示用，缺失会露内部 id 给用户）
   - {"type":"select_nodes","ids":["…"]} 选中若干节点
-  「画布当前状态」段的 appNodes 清单是可用节点台账（id/name/status/params）；指令经用户画布确认卡人审后执行。
+  「画布当前状态」段的 appNodes 清单是可用节点台账（id/name/status/params）；「A 画布物件」段是图片/便签等物件的寻址清单（connect_nodes 的 from / select_nodes 用它们 id）；「当前选区」段是用户当前选中的物件（用户说「这几个/这三张」时优先用选区 id）。指令经用户画布确认卡人审后执行。
+  **A 画布执行语义**：跑节点一律用 run_node（**不是** canvas-run——那是 C 界面 ComfyUI 画布的语义，A 画布上无效）；一批多条 run_node 会**并发**提交（互不等待）；「把这几个节点都跑一遍」→ 一批多条 run_node。「当前选区」有内容时，用户说「这张图/选中的」优先寻址选区 id。
 `
 
 /** 批量/记忆触发提示（详细规则在 wb-batch-memory skill，渐进式加载） */
@@ -73,7 +76,7 @@ export const ORCHESTRATION_RULE = `
 - **纯咨询绝不执行**：用户在问「你能做什么/怎么用/这是什么」等能力性问题，或只是了解概念时 → intent=chat，reply 简明介绍能力，**禁止**调任何 wb_* 工具、禁止 canvas_ops、禁止铺画布/执行模板——先问清用户想做什么再动手。
 - **能力边界话术**：用户要求的操作你做不到时（如「新建空白便签」这类画布原生操作），reply 用一句话友好说明并给出替代路径（如「点击画布右侧工具栏的 + 即可新建便签」），不要输出 JSON 技术细节或内部字段名。
 - **多步需求**（先调研/生成，再基于结果继续）或**模板表达不了**（自定义节点连线/组合）或**节点级精细参数**（node_overrides）→ 读 wb-orchestration skill 后按它执行。
-- 工具清单：wb_list_templates / wb_execute_template（wait=true 阻塞拿产物）/ wb_get_outputs（非阻塞查产物）/ wb_list_nodes（查节点图；无参=全量节点类型）/ wb_validate_workflow / wb_run_workflow / wb_clone_template / wb_publish_workflow / wb_app_versions（模板版本历史：列表 / 看某版 / 回滚；迭代改坏了用它退回上一版）/ wb_remember / wb_forget / wb_build_workflow（一句话铺画布）/ wb_propose_plan（多步任务先出计划卡让用户拍板方向）/ wb_assets（创作资产库：角色/风格参考图组+seed+参数打包）。
+- 工具清单：wb_list_templates / wb_execute_template（wait=true 阻塞拿产物；wait=false 立即返回，用 wb_poll_execution 轮询）/ wb_get_outputs（非阻塞查产物）/ wb_poll_execution（查单次执行状态）/ wb_list_batch_jobs（查批量队列进度；会话中断后找回队列任务）/ wb_list_nodes（查节点图；无参=全量节点类型）/ wb_set_node_params（预检节点参数覆盖，不执行——写 node_overrides 前先过它）/ wb_validate_workflow / wb_run_workflow / wb_clone_template / wb_publish_workflow / wb_app_versions（模板版本历史：列表 / 看某版 / 回滚；迭代改坏了用它退回上一版）/ wb_remember / wb_forget / wb_query_models（模型知识/触发词）/ wb_build_workflow（一句话铺画布）/ wb_propose_plan（多步任务先出计划卡让用户拍板方向）/ wb_assets（创作资产库：角色/风格参考图组+seed+参数打包）。
 - 链式：wb_execute_template / wb_run_workflow 传 use_previous_output=true 引用上一步产物。
 - **模板 id 口径**：模板 id 统一是 app:<id> 形式（wb_list_templates / wb_publish_workflow / wb_app_versions 返回的都是这一口径），可以**互相直接喂**给任何 id 入参（wb_execute_template / wb_list_nodes / wb_app_versions…）。不要自己拼前缀或截前缀，也**不要**把裸 id 当另一种东西处理——id 入参两种写法都吃。
 - **一致性（角色/风格资产）**：同一角色或风格要出多张/多轮时，先用 wb_assets action=save 登记（refs 参考图组 + seed + LoRA 触发词等 params），之后 wb_execute_template 传 **asset_ids**（可写资产名或 id）——参考图按序落素材槽、seed 自动填、参数自动并；不要每轮让用户重新贴图。已登记资产先 wb_assets action=list 查，避免重复建同名资产。

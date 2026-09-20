@@ -686,34 +686,61 @@ class WorkbenchService {
               objects?: Array<{ id: string; kind: string; label: string; size?: string }>
             }
           ).objects ?? []
+        const aObjectsTotal = aObjLine.length
         const aObjectsLine = aObjLine.length
           ? aObjLine
               .slice(0, 30)
               .map((o) => `${o.id}(${o.kind}${o.size ? ` ${o.size}` : ''}「${o.label}」)`)
               .join('、')
           : ''
+        // 选区（用户当前选中物件；「这几个/选中的」类指代优先寻址这里）
+        const selLine =
+          (
+            canvasState as {
+              selection?: Array<{ id: string; kind: string; label: string; size?: string }>
+            }
+          ).selection ?? []
+        const selectionLine = selLine.length
+          ? selLine
+              .slice(0, 30)
+              .map((o) => `${o.id}(${o.kind}「${o.label}」)`)
+              .join('、')
+          : ''
         const surface = (canvasState as { surface?: string }).surface
-        const aTag = surface === 'a-canvas' ? 'A 画布（无限画布）' : 'C 界面当前激活 tab'
-        canvasSection = `\n## 画布当前状态（${aTag}；无则忽略）
+        const isA = surface === 'a-canvas'
+        const aTag = isA ? 'A 画布（无限画布）' : 'C 界面当前激活 tab'
+        if (isA) {
+          // A 画布专属渲染：无 ComfyUI 节点图语义——workflowName 固定「无限画布」、
+          // models/keyParams 恒空，渲染它们只会产生「模型：（无）」噪音误导 AI。
+          canvasSection = `\n## 画布当前状态（${aTag}；无则忽略）
+物件 ${canvasState.nodeCount} 个 · 连线 ${(canvasState as { links?: number }).links ?? 0} 条
+队列：running ${canvasState.queue?.running ?? 0} / pending ${canvasState.queue?.pending ?? 0}${appNodesLine ? `\n${appNodesLine}` : ''}${aObjectsLine ? `\nA 画布物件（canvasOps 可用 id 寻址${aObjectsTotal > 30 ? `；共 ${aObjectsTotal} 个，仅列前 30` : ''}）：${aObjectsLine}` : ''}${selectionLine ? `\n当前选区（用户选中的物件）：${selectionLine}` : '\n当前选区：（空）'}
+`
+        } else {
+          canvasSection = `\n## 画布当前状态（${aTag}；无则忽略）
 工作流：${canvasState.workflowName} · 节点 ${canvasState.nodeCount} 个
 模型：${(canvasState.models ?? []).join('、') || '（无）'}
 关键参数：${renderKeyParams(canvasState.keyParams)}
 队列：running ${canvasState.queue?.running ?? 0} / pending ${canvasState.queue?.pending ?? 0}
 节点清单：${nodesLine || '（空画布）'}${appNodesLine ? `\n${appNodesLine}` : ''}${
-          aObjectsLine ? `\nA 画布物件（canvasOps 可用 id 寻址）：${aObjectsLine}` : ''
-        }
+            aObjectsLine ? `\nA 画布物件（canvasOps 可用 id 寻址）：${aObjectsLine}` : ''
+          }
 `
+        }
       }
     } catch (e) {
       logger.debug('workbench canvas state render failed', e)
     }
-    // 画布规则按上下文条件注入（无画布状态=桥未连/非画布界面时整段省略，省 ~350 tok）；
-    // A 画布专属的 App 节点操作（3.4）只在 surface=a-canvas 时注入。
-    const canvasRunRules = canvasSection ? CANVAS_RUN_RULES : ''
-    const canvasOpsRules =
-      canvasSection && (canvasState as { surface?: string }).surface === 'a-canvas'
-        ? CANVAS_OPS_RULES
-        : ''
+    // 画布规则按上下文条件注入（无画布状态=桥未连/非画布界面时整段省略，省 ~350 tok）。
+    // surface 分流（A/C 画布触发词互斥，防 AI 选错 intent）：
+    //  - c-canvas：CANVAS_RUN_RULES（3.1-3.3，ComfyUI 节点图语义：canvas-run/batch）
+    //  - a-canvas：CANVAS_OPS_RULES（3.4，物件画布语义：run_node/add_app_node）
+    // 两段同时在场时，用户说「跑一下这个」AI 会在 canvas-run 与 run_node 间摇摆；
+    // A 画布上 canvas-run 无消费方（wb_canvas_exec 只对接 C 注入桥），ops 会静默丢。
+    const canvasSurface = canvasSection ? (canvasState as { surface?: string }).surface : undefined
+    const isACanvas = canvasSurface === 'a-canvas'
+    const canvasRunRules = canvasSection && !isACanvas ? CANVAS_RUN_RULES : ''
+    const canvasOpsRules = canvasSection && isACanvas ? CANVAS_OPS_RULES : ''
     // P1 会话入口感知：agent 明确「我在哪个模式」——旧会话无 entry 时不注入，
     // 由画布段标题兜底。画布操作可用性以「画布当前状态」段是否出现为准。
     const entryLabel =
@@ -725,7 +752,7 @@ class WorkbenchService {
             ? '独立工作台'
             : ''
     const entrySection = entryLabel
-      ? `\n## 当前入口\n${entryLabel}。画布协同操作（规则 3.x）仅在后文出现「画布当前状态」段时可用；该段缺失时不要假装操作了画布——改用 wb_* 自组工作流执行，或提示用户切到 ComfyUI 界面/无限画布。\n`
+      ? `\n## 当前入口\n${entryLabel}。画布协同操作（规则 3.x）仅在后文出现「画布当前状态」段时可用；该段缺失时不要假装操作了画布——改用 wb_* 自组工作流执行，或提示用户切到 ComfyUI 界面/无限画布。「画布当前状态」来自画布页的上报快照：若画布页已被关闭，指令仍会发出但无人消费——用户此前打开过画布而现在应答异常时，先确认画布页还开着再下发画布指令。\n`
       : ''
     return renderDecisionSpec({
       selfKnowledge: SELF_KNOWLEDGE_TEXT,

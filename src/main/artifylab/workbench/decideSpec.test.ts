@@ -97,6 +97,36 @@ describe('renderDecisionSpec', () => {
     expect(spec).toContain('3.4 **A 画布 App 节点操作**')
   })
 
+  it('A 画布与 C 画布规则互斥：surface 分流后不同时出现（防「跑一下」摇摆）', () => {
+    // C 画布：3.1-3.3 在场、3.4 缺席
+    const cSpec = renderDecisionSpec({
+      ...base,
+      canvasSection: '## 画布当前状态（C 界面当前激活 tab）\n...',
+      canvasRunRules: CANVAS_RUN_RULES,
+      canvasOpsRules: ''
+    })
+    expect(cSpec).toContain('3.2 **执行画布当前工作流**')
+    expect(cSpec).not.toContain('3.4 **A 画布 App 节点操作**')
+    // A 画布：3.4 在场、3.1-3.3 缺席
+    const aSpec = renderDecisionSpec({
+      ...base,
+      canvasSection: '## 画布当前状态（A 画布（无限画布））\n...',
+      canvasRunRules: '',
+      canvasOpsRules: CANVAS_OPS_RULES
+    })
+    expect(aSpec).toContain('3.4 **A 画布 App 节点操作**')
+    expect(aSpec).not.toContain('3.2 **执行画布当前工作流**')
+    // A 画布执行语义防误导：run_node 是正解、canvas-run 明确无效
+    expect(aSpec).toContain('**不是** canvas-run')
+  })
+
+  it('run_node params 口径 = 平铺（模板参数名直接作键，非按节点 id 嵌套）', () => {
+    // 回归：spec 曾写 {"节点id":{"widget":值}}，与实现（useAppNodes 平铺浅合并）
+    // 相反——AI 按旧 spec 传参会把参数污染成 {a17:{…}}，模板参数没被覆盖
+    expect(CANVAS_OPS_RULES).toContain('{"参数名": 值}')
+    expect(CANVAS_OPS_RULES).not.toContain('{"节点id":{"widget":值}}')
+  })
+
   it('orchestration 段由调用方条件注入（空=省略）', () => {
     const spec = renderDecisionSpec({ ...base, orchestrationRule: '' })
     expect(spec).not.toContain('## 多步编排')

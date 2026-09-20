@@ -52,6 +52,8 @@ export interface CanvasDigest {
   appNodes?: Array<{ id: string; name: string; status?: string; params?: string }>
   /** A 画布全量物件可寻址清单（图片/便签/frame/媒体；canvasOps 寻址用） */
   objects?: Array<{ id: string; kind: string; label: string; size?: string }>
+  /** A 画布当前选区（结构化物件摘要；用户说「这几个/选中的」时 AI 寻址用） */
+  selection?: Array<{ id: string; kind: string; label: string; size?: string }>
   /** A 画布连线数（上下文提示用） */
   links?: number
 }
@@ -182,6 +184,21 @@ export function createCanvasRouter(
         : undefined,
       objects: Array.isArray(body.objects)
         ? body.objects
+            .slice(0, 60)
+            .filter(
+              (o: unknown): o is { id: string; kind: string; label: string; size?: string } =>
+                !!o && typeof o === 'object' && typeof (o as { id?: unknown }).id === 'string'
+            )
+            .map((o) => ({
+              id: String(o.id),
+              kind: String(o.kind ?? ''),
+              label: String(o.label ?? '').slice(0, 40),
+              size: typeof o.size === 'string' ? o.size : undefined
+            }))
+        : undefined,
+      // 选区与 objects 同构（前端 digest 已结构化）；截断同 60 上限
+      selection: Array.isArray(body.selection)
+        ? body.selection
             .slice(0, 60)
             .filter(
               (o: unknown): o is { id: string; kind: string; label: string; size?: string } =>

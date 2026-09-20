@@ -655,7 +655,9 @@ export function useAppNodes(deps) {
     if (op.type === 'run_node') {
       const node = objects.value.find((o) => o.id === resolveAgentRef(op.nodeId))
       if (!node || node.type !== 'app') return
-      // params 覆写：{nodeId:{widget:value}} 直写 node.params
+      // params 覆写：平铺格式 {参数名: 值}（键=模板参数名）直接浅合并进 node.params。
+      // ⚠️ 不是按节点 id 嵌套——spec（CANVAS_OPS_RULES）与测试（composables.test.js
+      // 的 {steps:30}）都是平铺口径。
       if (op.params && typeof op.params === 'object') {
         node.params = { ...node.params, ...op.params }
       }
