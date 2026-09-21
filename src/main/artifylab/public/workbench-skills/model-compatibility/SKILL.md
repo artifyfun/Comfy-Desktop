@@ -381,6 +381,8 @@ ControlNets are also **model-family specific**:
 | `sdxl_vae.safetensors` | SDXL family | External SDXL VAE option |
 | `ae.safetensors` (Flux VAE) | Flux only | Required for Flux, incompatible with SD |
 | SD3 built-in VAE | SD3 family | Integrated, no external needed |
+| `qwen_image_vae.safetensors` (16ch RGB) | Qwen-Image 1.0 / Edit 2511 / 2512 系 | Krea2 也用同名 VAE（Qwen image VAE 系） |
+| `qwen_image_2.1_vae_bf16.safetensors` (64ch RGBA) | **Qwen-Image-2.1 only** | 与 1.0 系 16ch RGB VAE **不通用**，装错必出噪声图 |
 
 **Rule**: Never mix VAEs across model families. An SD 1.5 VAE decoding Flux latents will produce garbage.
 
@@ -405,6 +407,7 @@ Most samplers work across all models, but some combinations are optimal:
 | Flux Schnell | `euler` | `simple` | 4 steps only |
 | Flux Dev | `euler` | `sgm_uniform` | 20-50 steps |
 | SD3 | `euler`, `dpmpp_2m` | `sgm_uniform`, `normal` | Lower CFG needed |
+| Qwen-Image-2.1 | `euler` | `simple` | **cfg=1 + 空负向**（蒸馏口径），25 步实测够用；抠图场景 `resolution=0`；需 ComfyUI ≥ 0.36，TE 走 `CLIPLoader type=qwen_image` 直载 w4a8 |
 
 ## Quick Decision Guide
 

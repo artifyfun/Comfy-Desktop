@@ -10,6 +10,7 @@
     "krea2-txt2img": "image",
     "krea2-identity-edit": "image",
     "flux-image-best-practices": "image",
+    "qwen-image-21": "image",
     "prompt-engineering": "prompt",
     "wan-t2v-video": "video",
     "wan-flf-video": "video",

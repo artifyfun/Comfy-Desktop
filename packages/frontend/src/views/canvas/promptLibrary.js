@@ -16,9 +16,9 @@
  *
  * - 本应用内置技能（`src/main/artifylab/public/workbench-skills/`）：
  *   `prompt-engineering`、`flux-image-best-practices`、`krea2-txt2img`、`anima-base`、
- *   `krea2-identity-edit`、`h3-prompt-writing`、`minimax-h3-video`、`wan-t2v-video`、
- *   `wan-flf-video`、`wan-scail-replacement`、`ltxv2-video`、`video-extend`、`director`、
- *   `model-compatibility`、`model-registry`
+ *   `krea2-identity-edit`、`qwen-image-21`、`h3-prompt-writing`、`minimax-h3-video`、
+ *   `wan-t2v-video`、`wan-flf-video`、`wan-scail-replacement`、`ltxv2-video`、`video-extend`、
+ *   `director`、`model-compatibility`、`model-registry`
  * - 社区方法论：`cclank/lanshu-awesome-ai-video-kit`（视频 8 要素骨架 / 运镜词典 /
  *   约束词清单 / 每模型官方公式，每周自动巡检 32 个官方端点对抗版本漂移）、
  *   `ZHO-ZHO-ZHO/ZHO-nano-banana-Creation`、`PicoTrex/Awesome-Nano-Banana-images`、
@@ -26,7 +26,7 @@
  * - 编辑类"先锁不变项再写唯一改动"与五个动作词（Add/Change/Make/Remove/Replace）
  *   来自 Nano Banana / Qwen-Image-Edit 社区实测共识
  *
- * 模型分档是这份库的重点：**Flux / Krea2-Turbo / Qwen-Edit 不吃质量词与负面词**
+ * 模型分档是这份库的重点：**Flux / Krea2-Turbo / Qwen-Edit / Qwen-Image-2.1 不吃质量词与负面词**
  * （cfg=1 的蒸馏模型），**SD1.5 / SDXL / Anima / WAN 才是必需负面**。写错档位等于白写。
  */
 
@@ -70,6 +70,10 @@ export function builtinLibrary() {
         {
           text: 'single full-frame photograph, no diptych, split screen or collage',
           hint: 'Krea2 能用的少数负面：编辑/生成时压掉拼贴分屏（放在负面槽做安全兜底）',
+        },
+        {
+          text: 'transparent background, crisp alpha edges, isolated subject',
+          hint: 'Qwen-Image-2.1 档：cfg=1 蒸馏不吃质量词/负面词（25 步 euler/simple 够用）；原生 RGBA 透明图直出。注意与 1.0 系共用名字但 VAE 不通用（64ch RGBA vs 16ch RGB）',
         },
       ],
     },
@@ -138,6 +142,14 @@ export function builtinLibrary() {
         {
           text: 'matte ceramic surface, brushed metal, subtle reflection',
           hint: '材质词比 "premium / 高级感" 这类抽象词有效——模型只认可见细节',
+        },
+        {
+          text: 'a transparent PNG sticker of {主体}, isolated on transparent background, crisp alpha edges, no backdrop',
+          hint: 'Qwen-Image-2.1 独有：原生 RGBA 透明图直出（alpha 随采样生成，不用抠图节点），贴纸/素材/合成直接复用。原生 2K（2048² 起，16:9 到 2752×1536）。所有输出都是 RGBA 模式，消费端要做 alpha 合成',
+        },
+        {
+          text: '背包上印着"城市漫游指南"，字体清晰，帆布质感',
+          hint: 'Qwen-Image-2.1 中英文图内文字渲染开源第一档：引号包住要渲染的字，中文长句也稳',
         },
       ],
     },
@@ -310,6 +322,10 @@ export function builtinLibrary() {
           text: '{image1} {image2} Use the {元素} from the second image above to replace {目标}. Blend edges and match lighting.',
           hint: '多参考图占位符写法：把图放在引用它的句子前，方便对照粘贴；每张参考图都要有明确分工',
         },
+        {
+          text: '把图1中的{人物}换上图2中的{服装}，保持面部特征、姿势与光照完全不变',
+          hint: 'Qwen-Image-2.1 多参考图合成（≤10 张）：Prefix KV Cache 参考图只编码一次，多图反而快。≥3 张参考一致性开始下降（发色/发型漂移），关键参考放最前、一次只合成一处',
+        },
       ],
     },
 
@@ -340,6 +356,10 @@ export function builtinLibrary() {
         {
           text: 'Keep {不变项} exactly the same. Change only {改动}. Match the original lighting.',
           hint: '图像编辑（先锁后改；一次一处）',
+        },
+        {
+          text: 'Remove the background, extract {主体} with hair-level alpha edge, transparent background',
+          hint: 'Qwen-Image-2.1 RGBA 抠图（工作流 QWEN21_RGBA_BACKGROUND_REMOVAL）：resolution=0（参考图原尺寸）是采样稳定关键，设 1024 出纯噪点；输出背景区 RGB 是噪声、靠 alpha 遮罩，下游必须 alpha 合成',
         },
         {
           text: '[Shot 1] {描述} [Shot 2] At 00:03.500, the camera cuts to {描述}',

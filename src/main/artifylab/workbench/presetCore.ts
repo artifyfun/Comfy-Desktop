@@ -81,7 +81,13 @@ export const BUILTIN_PRESETS: WorkbenchPreset[] = [
     intentHint: 'image',
     promptTemplate: '{input}',
     // 默认技能组合（复制预设即继承，可在捆绑编辑里增删）
-    skillIds: ['anima-base', 'krea2-txt2img', 'flux-image-best-practices', 'prompt-engineering']
+    skillIds: [
+      'qwen-image-21',
+      'anima-base',
+      'krea2-txt2img',
+      'flux-image-best-practices',
+      'prompt-engineering'
+    ]
   },
   {
     id: 'image-to-image',
@@ -95,6 +101,7 @@ export const BUILTIN_PRESETS: WorkbenchPreset[] = [
     intentHint: 'image',
     promptTemplate: '以我上传的图片为参考：{input}',
     skillIds: [
+      'qwen-image-21',
       'krea2-identity-edit',
       'krea2-txt2img',
       'flux-image-best-practices',
@@ -134,6 +141,7 @@ export const BUILTIN_PRESETS: WorkbenchPreset[] = [
     // 只列领域代表技能；通用层（wb-* 编排/模型知识/提示词工程等）由
     // presetConstraintText 自动并入，不在存储列表中重复
     skillIds: [
+      'qwen-image-21',
       'krea2-txt2img',
       'krea2-identity-edit',
       'anima-base',

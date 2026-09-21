@@ -71,6 +71,21 @@ Comfy-Org repackages everything: `huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repac
 | Qwen-Image-Edit 2511 Lightning LoRA | `huggingface.co/lightx2v/Qwen-Image-Edit-2511-Lightning` | `loras/` |
 | Qwen-Image 2512 Turbo LoRA | `huggingface.co/Wuli-art/Qwen-Image-2512-Turbo-LoRA` | `loras/` |
 
+### Qwen-Image-2.1 (see `qwen-image-21` skill; Qwen Research License, 非商用)
+
+Comfy-Org 官方重打包，HF 与魔搭（国内直连无需代理）同名同路径：
+`huggingface.co/Comfy-Org/Qwen-Image-2.1` ≍ `modelscope.cn/Comfy-Org/Qwen-Image-2.1`。
+⚠️ 2.1 的 VAE 是新的 64 通道 RGBA VAE，**与上面 1.0 系的 `qwen_image_vae.safetensors`（16ch RGB）不通用**。
+
+| File | Target | Notes |
+|---|---|---|
+| `qwen_image_2.1_int8_convrot.safetensors` (7.26GB) | `diffusion_models/` | INT8 ConvRot，8GB 显存可跑（Reddit 实测） |
+| `qwen3vl_8b_w4a8.safetensors` (6.31GB) | `text_encoders/` | `CLIPLoader type=qwen_image` 直载；每 prompt 只跑一次可卸载 |
+| `qwen_image_2.1_vae_bf16.safetensors` (0.68GB) | `vae/` | 64ch RGBA |
+| GGUF（Abiray Q8_0 7.59GB / Q6_K 5.88GB） | `diffusion_models/` | 仅 HF 源，需 ComfyUI-GGUF + 代理 |
+
+**版本门槛**：ComfyUI ≥ 0.36（2.1 原生支持）。
+
 ## MiniMax H3 video (see `minimax-h3-video` skill)
 
 Comfy-Org INT8 pack: `huggingface.co/Comfy-Org/MiniMax-H3`. Local weights are
