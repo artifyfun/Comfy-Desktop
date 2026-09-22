@@ -10,7 +10,8 @@ import {
   isValidPresetId,
   mergeUniversalSkills,
   parseSlashToken,
-  presetConstraintText
+  presetConstraintText,
+  presetIntentIssue
 } from './presetCore'
 
 describe('presetCore', () => {
@@ -186,7 +187,70 @@ describe('presetCore', () => {
       expect(s).toContain('prefer templates [app:flux] when suitable')
       // 通用技能层并入在前，领域技能追加在后
       expect(s).toContain('my-style] when suitable')
-      expect(s).toContain('(read the SKILL.md first)')
+      expect(s).toContain('(when a skill matches the task, read its SKILL.md before acting)')
+    })
+    it('deployedSkills 过滤：未部署技能不进 prefer 行（含通用层与捆绑技能）', () => {
+      // 回归背景：video-gen 捆绑的 wan-t2v-video/wan-flf-video/ltxv2-video 是
+      // DEFAULT_DISABLED_BUILTIN_SKILLS 默认禁用项——不过滤时 prefer 指向
+      // $CODEX_HOME/skills/ 里不存在的 SKILL.md，AI 按「read the SKILL.md」指示扑空
+      const video = BUILTIN_PRESETS.find((p) => p.id === 'video-gen')!
+      const deployed = new Set([
+        'wb-orchestration',
+        'wb-media-params',
+        'wb-batch-memory',
+        'wb-model-knowledge',
+        'model-compatibility',
+        'model-registry',
+        'troubleshooting',
+        'workflow-layout',
+        'debug-render',
+        'prompt-engineering',
+        'h3-prompt-writing',
+        'minimax-h3-video',
+        'video-upscale',
+        'director'
+      ])
+      const s = presetConstraintText(video, deployed)
+      const list = s.match(/prefer skills \[([^\]]+)\]/)![1]!.split(', ')
+      expect(list).not.toContain('wan-t2v-video')
+      expect(list).not.toContain('wan-flf-video')
+      expect(list).not.toContain('ltxv2-video')
+      expect(list).toContain('video-upscale')
+      expect(list).toContain('director')
+      // 不传 deployed（缺省）：不过滤，保持纯函数层旧行为（service 层负责注入）
+      const unfiltered = presetConstraintText(video)
+      const listAll = unfiltered.match(/prefer skills \[([^\]]+)\]/)![1]!.split(', ')
+      expect(listAll).toContain('wan-t2v-video')
+    })
+    it('deployedSkills 全空时省略 prefer 技能行（无可用技能不硬指）', () => {
+      const standard = BUILTIN_PRESETS.find((p) => p.id === 'standard')!
+      const s = presetConstraintText(standard, new Set())
+      expect(s).not.toContain('prefer skills')
+    })
+  })
+
+  describe('presetIntentIssue（预设意图逃生白名单）', () => {
+    const video = { id: 'video-gen', intentHint: 'video' as const }
+    it('生成类意图违反锁定 → issue', () => {
+      const r = presetIntentIssue(video, 'image')
+      expect(r).not.toBeNull()
+      expect(r!.message).toContain('锁定 intent=video')
+    })
+    it('命中锁定意图 → 无 issue', () => {
+      expect(presetIntentIssue(video, 'video')).toBeNull()
+    })
+    it('memory/chat/text 逃生（记偏好/提问不消耗生成预算）', () => {
+      for (const i of ['memory', 'chat', 'text']) expect(presetIntentIssue(video, i)).toBeNull()
+    })
+    it('画布三意图逃生（回归：A 画布 + 预设会话的画布操作曾被硬拦）', () => {
+      // 场景：用户带 video-gen 预设会话进 A 画布说「跑一下节点 X」→
+      // canvas-ops 是正确决策；旧白名单缺画布意图会拒绝并让画布功能失效
+      for (const i of ['workflow', 'canvas-run', 'canvas-ops'])
+        expect(presetIntentIssue(video, i)).toBeNull()
+    })
+    it('无预设/无 intentHint → 恒无 issue', () => {
+      expect(presetIntentIssue(undefined, 'image')).toBeNull()
+      expect(presetIntentIssue({ id: 'std' }, 'video')).toBeNull()
     })
   })
 

@@ -60,6 +60,7 @@ import {
   assignAttachmentsToSlots,
   attachmentSummary,
   presetConstraintText,
+  presetIntentIssue,
   type AttachmentKind,
   type AttachmentMeta,
   type WorkbenchPreset
@@ -611,9 +612,18 @@ class WorkbenchService {
     const chainHint = lastExec
       ? `\n## 上一次执行产物\n模板 ${lastExec.templateId}，promptId ${lastExec.promptId}，产物 ${lastExec.outputs.join('、') || '（无）'}。usePreviousOutput=true 时可将其作为图/视频输入。`
       : ''
+    // 预设约束的 prefer 技能行只指向已部署（enabled+valid）技能：捆绑清单里
+    // 默认禁用的内置技能（wan 系/ltxv2 等）不部署到 $CODEX_HOME/skills/，
+    // 指过去就是「read the SKILL.md」读空气。
+    const deployedSkills = new Set(
+      defaultSkillLibrary()
+        .list()
+        .filter((s) => s.enabled && s.valid)
+        .map((s) => s.name)
+    )
     const constraint =
-      opts.preset && presetConstraintText(opts.preset)
-        ? `\n## 会话预设约束（必须遵守）\n${presetConstraintText(opts.preset)}`
+      opts.preset && presetConstraintText(opts.preset, deployedSkills)
+        ? `\n## 会话预设约束（必须遵守）\n${presetConstraintText(opts.preset, deployedSkills)}`
         : ''
     // 本会话已上传素材（跨轮保留）：恢复轮/后续轮决策 agent 仍能看到文件名，
     // 避免「附件只在本轮传入、下一轮丢失 → 素材槽没值可传」的传参错乱。
@@ -926,20 +936,11 @@ class WorkbenchService {
     // 模板快捷方式：强制锁定 templateId（技能语义：用户显式点名）
     if (templateShortcut) plan.templateId = templateShortcut
     // 会话预设意图约束：codex 违反时本地校验会拦（下面 validatePlanLocal 前
-    // 先人工补一条 issue，给出明确错误指向预设）
+    // 先人工补一条 issue，给出明确错误指向预设）。逃生白名单（画布三意图 +
+    // memory/chat/text）见 presetIntentIssue 注释——纯函数层可单测。
     const presetIssues: PlanValidationIssue[] = []
-    if (
-      preset?.intentHint &&
-      plan.intent !== preset.intentHint &&
-      plan.intent !== 'memory' &&
-      plan.intent !== 'chat' &&
-      plan.intent !== 'text'
-    ) {
-      presetIssues.push({
-        field: 'intent',
-        message: `预设 ${preset.id} 锁定 intent=${preset.intentHint}，但决策为 ${plan.intent}`
-      })
-    }
+    const issue = presetIntentIssue(preset, plan.intent)
+    if (issue) presetIssues.push(issue)
     const validation = validatePlanLocal(plan, templateLibrary.list())
     // P2e：标题自动生成（PLAN 顺带 title 字段，用户手改过则不覆盖）
     if (plan.title && session.title !== plan.title && !session.titleLocked) {

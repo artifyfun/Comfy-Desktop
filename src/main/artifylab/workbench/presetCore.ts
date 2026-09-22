@@ -8,6 +8,44 @@
 
 export type WorkbenchIntent = 'image' | 'video' | 'audio' | 'text' | 'chat'
 
+/** 画布宿主操作意图（PLAN 输出契约的另一族；非生成类） */
+export type CanvasIntent = 'workflow' | 'canvas-run' | 'canvas-ops'
+
+/**
+ * 预设 intentHint 的逃生白名单 = 非生成类意图。
+ * - memory/chat/text：用户在锁定意图的会话里记偏好/提问，不消耗生成预算；
+ * - workflow/canvas-run/canvas-ops：宿主画布侧操作。A 画布侧栏内嵌工作台
+ *   与独立工作台共享会话列表——用户带着 video-gen 预设会话进画布说
+ *   「跑一下节点 X」时，AI 产出 canvas-ops 是正确行为，被预设拦掉会让
+ *   画布功能在该会话里整体失效。
+ */
+export const PRESET_ESCAPABLE_INTENTS: ReadonlySet<string> = new Set([
+  'memory',
+  'chat',
+  'text',
+  'workflow',
+  'canvas-run',
+  'canvas-ops'
+])
+
+/** 预设意图校验（decide 内联用）：非逃生意图且 ≠ 锁定值时给 issue */
+export function presetIntentIssue(
+  preset: { id: string; intentHint?: WorkbenchIntent } | undefined,
+  planIntent: string
+): { field: string; message: string } | null {
+  if (
+    preset?.intentHint &&
+    !PRESET_ESCAPABLE_INTENTS.has(planIntent) &&
+    planIntent !== preset.intentHint
+  ) {
+    return {
+      field: 'intent',
+      message: `预设 ${preset.id} 锁定 intent=${preset.intentHint}，但决策为 ${planIntent}`
+    }
+  }
+  return null
+}
+
 export interface WorkbenchPreset {
   id: string
   name: { zh: string; en: string }
@@ -125,6 +163,7 @@ export const BUILTIN_PRESETS: WorkbenchPreset[] = [
       'wan-t2v-video',
       'wan-flf-video',
       'ltxv2-video',
+      'video-upscale',
       'director'
     ]
   },
@@ -203,8 +242,18 @@ export function applyPromptTemplate(preset: WorkbenchPreset | undefined, input: 
 /**
  * 决策 spec 用的预设约束段（注入 codex 决策提示，见 service.buildDecisionSpec）。
  * 无约束返回空串。
+ *
+ * @param deployedSkills 已部署（enabled+valid）技能名集合——prefer 行只指向真实
+ *   存在于 $CODEX_HOME/skills/ 的技能。不过滤时，预设捆绑里默认禁用的技能
+ *   （DEFAULT_DISABLED_BUILTIN_SKILLS，如 wan-t2v-video/ltxv2-video）会出现在
+ *   prefer 列表里而文件不存在：AI 按「read the SKILL.md first」指示去找空气，
+ *   轻则浪费工具调用，重则按 description 幻觉参数。缺省不过滤（纯函数层
+ *   不做 IO，由 service 注入 skillLibrary.list() 的启用集）。
  */
-export function presetConstraintText(preset: WorkbenchPreset | undefined): string {
+export function presetConstraintText(
+  preset: WorkbenchPreset | undefined,
+  deployedSkills?: ReadonlySet<string>
+): string {
   if (!preset) return ''
   const parts: string[] = []
   if (preset.intentHint) {
@@ -218,9 +267,16 @@ export function presetConstraintText(preset: WorkbenchPreset | undefined): strin
     parts.push(`prefer templates [${preset.templateIds.join(', ')}] when suitable`)
   }
   // 捆绑技能=知识文档（SKILL.md，已部署到 $CODEX_HOME/skills/），软约束；
-  // 通用技能层始终并入（所有预设都应具备编排/模型知识/提示词工程等跨领域能力）
-  const skillIds = mergeUniversalSkills(preset.skillIds)
-  parts.push(`prefer skills [${skillIds.join(', ')}] when suitable (read the SKILL.md first)`)
+  // 通用技能层始终并入（所有预设都应具备编排/模型知识/提示词工程等跨领域能力）。
+  // deployedSkills 给出时过滤未部署项（含通用层——内置技能也可能被用户禁用）。
+  const filterDeployed = (ids: readonly string[]): string[] =>
+    deployedSkills ? ids.filter((id) => deployedSkills.has(id)) : [...ids]
+  const skillIds = filterDeployed(mergeUniversalSkills(preset.skillIds))
+  if (skillIds.length > 0) {
+    parts.push(
+      `prefer skills [${skillIds.join(', ')}] when suitable (when a skill matches the task, read its SKILL.md before acting)`
+    )
+  }
   if (preset.defaultParams && Object.keys(preset.defaultParams).length > 0) {
     parts.push(`default params baseline: ${JSON.stringify(preset.defaultParams)}`)
   }
