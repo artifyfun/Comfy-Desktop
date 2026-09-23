@@ -40,9 +40,9 @@ const PAGES = [
     },
     diagram: {
       nodes: [
-        { x: 24, y: 56, w: 64, h: 64, kind: 'image', label: '🖼' },
-        { x: 148, y: 56, w: 64, h: 64, kind: 'app', label: 'App' },
-        { x: 236, y: 56, w: 60, h: 64, kind: 'out', label: '' },
+        { x: 24, y: 56, w: 64, h: 64, kind: 'image', label: '🐱' },
+        { x: 148, y: 56, w: 64, h: 64, kind: 'app', label: 'App', icon: '🧩' },
+        { x: 236, y: 56, w: 60, h: 64, kind: 'out', label: '✨' },
       ],
       links: [
         { from: 0, to: 1, label: { zh: '作输入', en: 'input' } },
@@ -75,9 +75,9 @@ const PAGES = [
     },
     diagram: {
       nodes: [
-        { x: 36, y: 46, w: 88, h: 88, kind: 'app', label: 'App' },
-        { x: 190, y: 40, w: 62, h: 56, kind: 'out', label: '' },
-        { x: 190, y: 110, w: 62, h: 56, kind: 'out', label: '' },
+        { x: 36, y: 46, w: 88, h: 88, kind: 'app', label: 'App', icon: '🧩' },
+        { x: 190, y: 40, w: 62, h: 56, kind: 'out', label: '🎨' },
+        { x: 190, y: 110, w: 62, h: 56, kind: 'out', label: '🎨' },
       ],
       links: [
         { from: 0, to: 1 },
@@ -110,11 +110,11 @@ const PAGES = [
     },
     diagram: {
       nodes: [
-        { x: 30, y: 56, w: 84, h: 62, kind: 'video', label: '▶' },
-        { x: 176, y: 56, w: 62, h: 62, kind: 'image', label: '🖼' },
+        { x: 76, y: 56, w: 84, h: 62, kind: 'video', label: '🎬' },
+        { x: 234, y: 58, w: 64, h: 58, kind: 'image', label: '📷' },
       ],
       links: [{ from: 0, to: 1, label: { zh: '取帧', en: 'frame' } }],
-      gestures: [{ type: 'click', x: 102, y: 108, label: '⏮' }],
+      gestures: [{ type: 'click', x: 90, y: 110, label: '⏮' }],
     },
   },
   {
@@ -140,9 +140,12 @@ const PAGES = [
       ],
     },
     diagram: {
-      nodes: [{ x: 56, y: 48, w: 92, h: 84, kind: 'note', label: 'a cat in rain' }],
-      links: [],
-      gestures: [{ type: 'drag', x1: 150, y1: 48, x2: 236, y2: 90, label: '✨' }],
+      nodes: [
+        { x: 40, y: 44, w: 96, h: 88, kind: 'note', label: 'a cat in rain' },
+        { x: 212, y: 52, w: 72, h: 72, kind: 'image', label: '🐱' },
+      ],
+      links: [{ from: 0, to: 1, label: { zh: '生成图片', en: 'render' } }],
+      gestures: [],
     },
   },
   {
@@ -169,9 +172,9 @@ const PAGES = [
     },
     diagram: {
       nodes: [
-        { x: 26, y: 32, w: 150, h: 120, kind: 'frame', label: 'Scene B' },
-        { x: 42, y: 66, w: 52, h: 52, kind: 'image', label: '' },
-        { x: 106, y: 66, w: 52, h: 52, kind: 'image', label: '' },
+        { x: 54, y: 30, w: 222, h: 122, kind: 'frame', label: '🐱 主角' },
+        { x: 86, y: 64, w: 56, h: 56, kind: 'image', label: '🐱' },
+        { x: 188, y: 64, w: 56, h: 56, kind: 'image', label: '🌆' },
       ],
       links: [],
       gestures: [],
@@ -201,9 +204,9 @@ const PAGES = [
     },
     diagram: {
       nodes: [
-        { x: 24, y: 52, w: 80, h: 72, kind: 'shot', label: '#1' },
-        { x: 118, y: 52, w: 80, h: 72, kind: 'shot', label: '#2' },
-        { x: 212, y: 52, w: 80, h: 72, kind: 'shot', label: '#3' },
+        { x: 24, y: 52, w: 80, h: 72, kind: 'shot', label: '🌄 #1' },
+        { x: 118, y: 52, w: 80, h: 72, kind: 'shot', label: '🐈 #2' },
+        { x: 212, y: 52, w: 80, h: 72, kind: 'shot', label: '🏁 #3' },
       ],
       links: [],
       gestures: [],
@@ -229,16 +232,16 @@ const PAGES = [
       en: [
         'T2I: write a prompt on a note → "Generate Image"; or add an App node directly',
         'I2I: click "+" on the image\'s reference bar and pick a node type — it auto-links',
-        'An image → App node link means: this image is the workflow\'s input reference',
+        "An image → App node link means: this image is the workflow's input reference",
         'Keep linking outputs rightward to iterate version after version',
       ],
     },
     diagram: {
       nodes: [
-        { x: 20, y: 84, w: 62, h: 62, kind: 'image', label: '🖼' },
+        { x: 20, y: 84, w: 62, h: 62, kind: 'image', label: '🐱' },
         { x: 30, y: 16, w: 62, h: 44, kind: 'note', label: 'prompt' },
-        { x: 138, y: 60, w: 70, h: 74, kind: 'app', label: 'App' },
-        { x: 246, y: 60, w: 56, h: 74, kind: 'out', label: '' },
+        { x: 138, y: 60, w: 70, h: 74, kind: 'app', label: 'App', icon: '🧩' },
+        { x: 246, y: 60, w: 56, h: 74, kind: 'out', label: '🎨' },
       ],
       links: [
         { from: 0, to: 2, label: { zh: '参考图', en: 'ref' } },
@@ -272,8 +275,8 @@ const PAGES = [
     },
     diagram: {
       nodes: [
-        { x: 44, y: 44, w: 96, h: 88, kind: 'image', label: '🖼' },
-        { x: 208, y: 52, w: 72, h: 72, kind: 'out', label: '' },
+        { x: 44, y: 44, w: 96, h: 88, kind: 'image', label: '🐱' },
+        { x: 208, y: 52, w: 72, h: 72, kind: 'out', label: '😎' },
       ],
       links: [{ from: 0, to: 1, dash: true, label: { zh: '仅改涂抹区', en: 'masked only' } }],
       gestures: [{ type: 'drag', x1: 70, y1: 70, x2: 112, y2: 104, label: '🖌' }],
@@ -285,7 +288,7 @@ const PAGES = [
     title: { zh: '一图多变', en: 'One Image, Many Tricks' },
     tip: {
       zh: '右键菜单就是图片的变身菜单，全部入口在一处。',
-      en: 'The right-click menu is the image\'s transform menu, all in one place.',
+      en: "The right-click menu is the image's transform menu, all in one place.",
     },
     steps: {
       zh: [
@@ -303,10 +306,10 @@ const PAGES = [
     },
     diagram: {
       nodes: [
-        { x: 34, y: 58, w: 76, h: 70, kind: 'image', label: '🖼' },
-        { x: 176, y: 12, w: 62, h: 40, kind: 'out', label: '2×' },
-        { x: 176, y: 66, w: 62, h: 40, kind: 'out', label: '↔' },
-        { x: 176, y: 122, w: 62, h: 40, kind: 'video', label: '▶' },
+        { x: 34, y: 58, w: 76, h: 70, kind: 'image', label: '🐱' },
+        { x: 176, y: 12, w: 62, h: 40, kind: 'out', label: '🔍 2×' },
+        { x: 176, y: 66, w: 62, h: 40, kind: 'out', label: '↔ 🌄' },
+        { x: 176, y: 122, w: 62, h: 40, kind: 'video', label: '🎞' },
       ],
       links: [
         { from: 0, to: 1, dash: true },
@@ -340,11 +343,11 @@ const PAGES = [
     },
     diagram: {
       nodes: [
-        { x: 24, y: 62, w: 60, h: 60, kind: 'image', label: '👤' },
+        { x: 24, y: 62, w: 60, h: 60, kind: 'image', label: '🧑' },
         { x: 148, y: 16, w: 64, h: 60, kind: 'app', label: 'App A' },
         { x: 148, y: 104, w: 64, h: 60, kind: 'app', label: 'App B' },
-        { x: 250, y: 16, w: 52, h: 60, kind: 'out', label: '' },
-        { x: 250, y: 104, w: 52, h: 60, kind: 'out', label: '' },
+        { x: 250, y: 16, w: 52, h: 60, kind: 'out', label: '🧑' },
+        { x: 250, y: 104, w: 52, h: 60, kind: 'out', label: '🧑' },
       ],
       links: [
         { from: 0, to: 1 },
@@ -357,7 +360,7 @@ const PAGES = [
   },
   {
     id: 'scene-compose',
-    icon: 'fas fa-object-union',
+    icon: 'fas fa-object-group',
     title: { zh: '多图合成与网格排布', en: 'Compose & Grid Arrange' },
     tip: {
       zh: '多选之后，画布就是拼图台。',
@@ -379,10 +382,10 @@ const PAGES = [
     },
     diagram: {
       nodes: [
-        { x: 30, y: 20, w: 54, h: 42, kind: 'image', label: '' },
-        { x: 30, y: 96, w: 54, h: 42, kind: 'image', label: '' },
-        { x: 104, y: 58, w: 54, h: 42, kind: 'image', label: '' },
-        { x: 208, y: 40, w: 80, h: 76, kind: 'out', label: '' },
+        { x: 30, y: 20, w: 54, h: 42, kind: 'image', label: '🐱' },
+        { x: 30, y: 96, w: 54, h: 42, kind: 'image', label: '🌆' },
+        { x: 104, y: 58, w: 54, h: 42, kind: 'image', label: '🎩' },
+        { x: 208, y: 40, w: 80, h: 76, kind: 'out', label: '🎭' },
       ],
       links: [
         { from: 0, to: 3, dash: true },
@@ -416,11 +419,11 @@ const PAGES = [
     },
     diagram: {
       nodes: [
-        { x: 16, y: 70, w: 54, h: 54, kind: 'image', label: '🖼' },
-        { x: 106, y: 70, w: 60, h: 54, kind: 'app', label: 'A' },
-        { x: 198, y: 70, w: 60, h: 54, kind: 'app', label: 'B' },
-        { x: 262, y: 24, w: 46, h: 48, kind: 'out', label: '' },
-        { x: 262, y: 116, w: 46, h: 48, kind: 'out', label: '' },
+        { x: 14, y: 70, w: 54, h: 54, kind: 'image', label: '🐱' },
+        { x: 96, y: 70, w: 58, h: 54, kind: 'app', label: 'App A', icon: '🎨' },
+        { x: 180, y: 70, w: 58, h: 54, kind: 'app', label: 'App B', icon: '🔍' },
+        { x: 268, y: 22, w: 48, h: 50, kind: 'out', label: '🖼' },
+        { x: 268, y: 120, w: 48, h: 50, kind: 'out', label: '🖼' },
       ],
       links: [
         { from: 0, to: 1 },
@@ -428,14 +431,14 @@ const PAGES = [
         { from: 2, to: 3 },
         { from: 2, to: 4 },
       ],
-      gestures: [{ type: 'click', x: 196, y: 132, label: '⟳' }],
+      gestures: [{ type: 'click', x: 172, y: 134, label: '⟳' }],
     },
   },
 ]
 
 /** 取指南页（当前语言；缺失回退 zh）。渲染无关的纯数据。 */
 export function guidePages(lang = 'zh') {
-  const pick = (v) => (v && typeof v === 'object' ? v[lang] ?? v.zh ?? '' : String(v ?? ''))
+  const pick = (v) => (v && typeof v === 'object' ? (v[lang] ?? v.zh ?? '') : String(v ?? ''))
   return PAGES.map((p) => ({
     id: p.id,
     icon: p.icon,

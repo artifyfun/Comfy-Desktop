@@ -29,7 +29,11 @@
             <i :class="page.icon"></i>
             <h3>{{ page.title }}</h3>
           </div>
-          <button class="guide-close" :title="lang === 'en' ? 'Close' : '关闭'" @click="$emit('close')">
+          <button
+            class="guide-close"
+            :title="lang === 'en' ? 'Close' : '关闭'"
+            @click="$emit('close')"
+          >
             <i class="fas fa-xmark"></i>
           </button>
         </header>
@@ -80,22 +84,28 @@
               >
                 {{ n.label }}
               </text>
-              <text
-                v-else
-                :x="n.x + n.w / 2"
-                :y="n.y + n.h / 2 + (n.label && n.label.length > 8 ? -4 : 5)"
-                class="guide-node-label"
-                :class="{ multi: n.label && n.label.length > 8 }"
-              >
-                <tspan
-                  v-for="(line, li) in labelLines(n)"
-                  :key="li"
+              <template v-else>
+                <!-- 语义 emoji：有文字标签时居上，无标签时独占中心 -->
+                <text v-if="n.icon" :x="n.x + n.w / 2" :y="nodeIconY(n)" class="guide-node-icon">
+                  {{ n.icon }}
+                </text>
+                <text
+                  v-if="n.label"
                   :x="n.x + n.w / 2"
-                  :dy="li === 0 ? 0 : 15"
+                  :y="nodeLabelY(n)"
+                  class="guide-node-label"
+                  :class="{ multi: isLongLabel(n), emoji: !n.icon && isEmojiLabel(n) }"
                 >
-                  {{ line }}
-                </tspan>
-              </text>
+                  <tspan
+                    v-for="(line, li) in labelLines(n)"
+                    :key="li"
+                    :x="n.x + n.w / 2"
+                    :dy="li === 0 ? 0 : 14"
+                  >
+                    {{ line }}
+                  </tspan>
+                </text>
+              </template>
             </g>
             <!-- 手势标注 -->
             <g v-for="(ges, i) in page.diagram.gestures" :key="'g' + i">
@@ -107,14 +117,7 @@
                 />
                 <circle :cx="ges.x1" :cy="ges.y1" r="4" class="guide-gesture-dot" />
               </template>
-              <circle
-                v-else
-                :cx="ges.x"
-                :cy="ges.y"
-                r="12"
-                class="guide-gesture-ring"
-                marker-end="undefined"
-              />
+              <circle v-else :cx="ges.x" :cy="ges.y" r="12" class="guide-gesture-ring" />
               <text
                 v-if="ges.label"
                 :x="ges.type === 'drag' ? (ges.x1 + ges.x2) / 2 : ges.x"
@@ -143,8 +146,8 @@
           </button>
           <button v-else class="guide-pager primary" @click="$emit('close')">
             {{ lang === 'en' ? 'Done' : '开始使用' }}
-            <i class="fas fa-check"></i
-          ></button>
+            <i class="fas fa-check"></i>
+          </button>
         </footer>
       </section>
     </div>
@@ -167,7 +170,12 @@ const groups = computed(() => guideGroups(lang))
 const pages = computed(() => guidePages(lang))
 const activeId = ref(pages.value[0]?.id)
 const page = computed(() => pages.value.find((p) => p.id === activeId.value) || pages.value[0])
-const pageIndex = computed(() => Math.max(0, pages.value.findIndex((p) => p.id === activeId.value)))
+const pageIndex = computed(() =>
+  Math.max(
+    0,
+    pages.value.findIndex((p) => p.id === activeId.value),
+  ),
+)
 
 function step(dir) {
   const next = pageIndex.value + dir
@@ -216,6 +224,35 @@ function labelLines(n) {
   }
   const mid = Math.ceil(s.length / 2)
   return [s.slice(0, mid), s.slice(mid)]
+}
+
+function isLongLabel(n) {
+  return String(n?.label || '').length > 8
+}
+
+/** 纯 emoji 标签（无字母/数字/井号）：放大渲染当视觉锚点，11px 太小看不清 */
+function isEmojiLabel(n) {
+  const s = String(n?.label || '').trim()
+  return !!s && s.length <= 4 && !/[a-zA-Z0-9#]/.test(s)
+}
+
+/**
+ * 文字基线位置。CSS 用 dominant-baseline:middle 居中，故单行 y=中心；
+ * 两行时首行上移半行距，让整个标签块仍以节点中心对称（此前 +5/-4 的
+ * 补偿与 middle 叠加，短标签整体偏下 ~5px）。
+ */
+function nodeLabelY(n) {
+  const cy = n.y + n.h / 2
+  if (n.icon) return cy + 12
+  if (isLongLabel(n)) return cy - 7
+  // 纯 emoji 的墨迹在 em 盒里略偏上（实测 bbox 中心比节点中心高 ~2px），补正
+  return isEmojiLabel(n) ? cy + 2 : cy
+}
+
+/** emoji 图标基线：与文字标签并存时居上，独占时居中 */
+function nodeIconY(n) {
+  const cy = n.y + n.h / 2
+  return n.label ? cy - 7 : cy
 }
 </script>
 
@@ -277,7 +314,9 @@ function labelLines(n) {
   font-size: 12px;
   color: var(--wb-text-2);
   text-align: left;
-  transition: background 0.12s, color 0.12s;
+  transition:
+    background 0.12s,
+    color 0.12s;
 }
 .guide-nav i {
   width: 16px;
@@ -339,8 +378,7 @@ function labelLines(n) {
   border-radius: 12px;
   border: 1px solid var(--wb-stroke);
   background:
-    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.05) 1px, transparent 0) 0 0 / 18px
-      18px,
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.05) 1px, transparent 0) 0 0 / 18px 18px,
     rgba(0, 0, 0, 0.16);
   flex-shrink: 0;
 }
@@ -397,6 +435,17 @@ function labelLines(n) {
   font-size: 11px;
   font-weight: 600;
   fill: var(--wb-text-1);
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+/* 纯 emoji 标签：放大当视觉锚点（11px 的 emoji 在卡片里几乎看不见） */
+.guide-node-label.emoji {
+  font-size: 20px;
+  font-weight: 400;
+}
+/* 与文字标签并存的 emoji 图标：居中于节点上半部 */
+.guide-node-icon {
+  font-size: 17px;
   text-anchor: middle;
   dominant-baseline: middle;
 }
@@ -489,7 +538,10 @@ function labelLines(n) {
   border: 1px solid var(--wb-stroke);
   font-size: 12px;
   color: var(--wb-text-2);
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
+  transition:
+    border-color 0.12s,
+    color 0.12s,
+    background 0.12s;
 }
 .guide-pager:hover {
   border-color: var(--wb-accent);
