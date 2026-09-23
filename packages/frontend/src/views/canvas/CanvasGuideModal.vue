@@ -135,6 +135,7 @@
                 :y="gestureLabel(ges).y"
                 :style="{ textAnchor: gestureLabel(ges).anchor }"
                 class="guide-gesture-label"
+                :class="{ icon: isRingGesture(ges) }"
               >
                 {{ gestureLabel(ges).text }}
               </text>
@@ -272,7 +273,8 @@ function nodeIconY(n) {
  * （与连线标签同口径）。各类型标注位置：
  *  - drag：线段中点上方
  *  - box ：选框左上角外侧（不遮挡框内节点）
- *  - click：圆环中心
+ *  - click（圆形操作环）：环心正中——图标就是环内符号，偏 1px 都看得出没居中
+ *    （此前 +4px 与 dominant-baseline:middle 叠加，实测偏下 2.7px）
  */
 function gestureLabel(ges) {
   const raw = ges.label
@@ -289,7 +291,13 @@ function gestureLabel(ges) {
       anchor: 'start',
     }
   }
-  return { text, x: ges.x, y: ges.y + 4, anchor: 'middle' }
+  // 符号墨迹在 em 盒里略偏上（实测 bbox 中心比环心高 ~2px）→ 补正后居中
+  return { text, x: ges.x, y: ges.y + 2, anchor: 'middle' }
+}
+
+/** 圆形操作环手势：图标画在 24px 环内，用更大字号填充（区别于 drag/box 的文字标签） */
+function isRingGesture(ges) {
+  return ges.type !== 'drag' && ges.type !== 'box'
 }
 </script>
 
@@ -524,6 +532,10 @@ function gestureLabel(ges) {
   fill: var(--wb-accent);
   text-anchor: middle;
   dominant-baseline: middle;
+}
+/* 圆形操作环内的符号图标：12px 在 24px 环里只占 58%，显得空 → 放大到 17px */
+.guide-gesture-label.icon {
+  font-size: 17px;
 }
 
 /* —— 步骤 —— */

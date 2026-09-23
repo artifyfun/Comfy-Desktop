@@ -317,7 +317,7 @@ const PAGES = [
         { from: 0, to: 2, dash: true },
         { from: 0, to: 3, dash: true },
       ],
-      gestures: [{ type: 'click', x: 116, y: 96, label: '☑' }],
+      gestures: [{ type: 'click', x: 116, y: 96, label: '🖱' }],
     },
   },
   {
