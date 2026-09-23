@@ -86,19 +86,31 @@ const mockedScanCustomNodes = vi.mocked(scanCustomNodes)
  * `listSnapshots` / `deduplicateRestartSnapshot` paths without spinning up
  * real disk I/O. Reset in each `beforeEach` via `installFsMemory()`.
  */
+/**
+ * Key for the in-memory fs mock. Production sorts snapshot paths through
+ * `path.resolve` (`resolveSnapshotPath`), which on Windows prepends the current
+ * drive to a POSIX-style test path (`/test/install` → `D:\test\install`), while
+ * every other call site stays in the `path.join` form. Keying the mock by the
+ * resolved form puts all readers and writers in one key space on every
+ * platform; on POSIX the two forms are identical strings.
+ */
+function memKey(p: string): string {
+  return path.resolve(p)
+}
+
 function installFsMemory(): Map<string, string> {
   const memory = new Map<string, string>()
   vi.mocked(fs.promises.writeFile).mockImplementation(async (p, data) => {
-    memory.set(String(p), String(data))
+    memory.set(memKey(String(p)), String(data))
   })
   vi.mocked(fs.promises.rename).mockImplementation(async (from, to) => {
-    const data = memory.get(String(from))
+    const data = memory.get(memKey(String(from)))
     if (data === undefined) throw new Error(`rename: missing ${String(from)}`)
-    memory.set(String(to), data)
-    memory.delete(String(from))
+    memory.set(memKey(String(to)), data)
+    memory.delete(memKey(String(from)))
   })
   vi.mocked(fs.promises.readdir).mockImplementation(async (dir) => {
-    const prefix = String(dir).replace(/[\\/]+$/, '') + path.sep
+    const prefix = memKey(String(dir).replace(/[\\/]+$/, '')) + path.sep
     const files: string[] = []
     for (const key of memory.keys()) {
       if (key.startsWith(prefix) && !key.slice(prefix.length).includes(path.sep)) {
@@ -108,12 +120,12 @@ function installFsMemory(): Map<string, string> {
     return files as unknown as Awaited<ReturnType<typeof fs.promises.readdir>>
   })
   vi.mocked(fs.promises.readFile).mockImplementation(async (p) => {
-    const data = memory.get(String(p))
+    const data = memory.get(memKey(String(p)))
     if (data === undefined) throw new Error(`readFile: missing ${String(p)}`)
     return data as unknown as Awaited<ReturnType<typeof fs.promises.readFile>>
   })
   vi.mocked(fs.promises.unlink).mockImplementation(async (p) => {
-    memory.delete(String(p))
+    memory.delete(memKey(String(p)))
   })
   return memory
 }
@@ -373,7 +385,7 @@ describe('captureSnapshotIfChanged telemetry', () => {
     // `listSnapshots`).
     const intermediateFilename = '20260101_120000_000-restart-aaaaaa.json'
     memory.set(
-      path.join('/test/install', '.launcher', 'snapshots', intermediateFilename),
+      memKey(path.join('/test/install', '.launcher', 'snapshots', intermediateFilename)),
       JSON.stringify(intermediate)
     )
 
@@ -440,7 +452,7 @@ describe('ensureCurrentSnapshotOnTop', () => {
 
   function seedTopSnapshot(memory: Map<string, string>, snapshot: object, filename: string): void {
     memory.set(
-      path.join('/test/install', '.launcher', 'snapshots', filename),
+      memKey(path.join('/test/install', '.launcher', 'snapshots', filename)),
       JSON.stringify(snapshot)
     )
   }
@@ -461,17 +473,19 @@ describe('ensureCurrentSnapshotOnTop', () => {
     // The imported snapshot is kept (retry can still use it).
     expect(
       memory.has(
-        path.join(
-          '/test/install',
-          '.launcher',
-          'snapshots',
-          '20250101_000000_000-manual-imported.json'
+        memKey(
+          path.join(
+            '/test/install',
+            '.launcher',
+            'snapshots',
+            '20250101_000000_000-manual-imported.json'
+          )
         )
       )
     ).toBe(true)
     // The written snapshot records the live commit.
     const written = JSON.parse(
-      memory.get(path.join('/test/install', '.launcher', 'snapshots', result.filename!))!
+      memory.get(memKey(path.join('/test/install', '.launcher', 'snapshots', result.filename!)))!
     )
     expect(written.comfyui.commit).toBe('abc1234')
     expect(written.trigger).toBe('post-restore')
