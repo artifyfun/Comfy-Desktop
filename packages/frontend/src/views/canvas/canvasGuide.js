@@ -84,7 +84,7 @@ const PAGES = [
         { from: 0, to: 1 },
         { from: 0, to: 2 },
       ],
-      gestures: [{ type: 'click', x: 44, y: 122, label: '▶' }],
+      gestures: [{ type: 'click', x: 50, y: 118, label: '▶' }],
     },
   },
   {
@@ -118,7 +118,7 @@ const PAGES = [
       ],
       links: [{ from: 0, to: 2, label: { zh: '取帧', en: 'frame' } }],
       // ⏮（抓首帧）贴在视频节点左下角，与其它页「操作环压在目标节点上」一致
-      gestures: [{ type: 'click', x: 60, y: 70, label: '⏮' }],
+      gestures: [{ type: 'click', x: 58, y: 68, label: '⏮' }],
     },
   },
   {
@@ -320,7 +320,7 @@ const PAGES = [
         { from: 0, to: 2, dash: true },
         { from: 0, to: 3, dash: true },
       ],
-      gestures: [{ type: 'click', x: 116, y: 96, label: '🖱' }],
+      gestures: [{ type: 'click', x: 48, y: 112, label: '🖱' }],
     },
   },
   {
@@ -445,7 +445,7 @@ const PAGES = [
         { from: 2, to: 3 },
         { from: 2, to: 4 },
       ],
-      gestures: [{ type: 'click', x: 172, y: 134, label: '⟳' }],
+      gestures: [{ type: 'click', x: 180, y: 128, label: '⟳' }],
     },
   },
 ]
