@@ -100,7 +100,7 @@ import type { WriteStream } from 'fs'
 import { getCoreBetaGrantsAsync, selectCoreBetaGrantArgs } from '../../coreBetaGrants'
 import { armBetaActivationNotice, clearBetaActivationClaim } from '../../betaActivationNotice'
 import type { CoreBetaGrant } from '../../coreBetaGrants'
-import { coreRecordCurrent, coreSemver, coreSemverExact, coreSemverVerified } from '../../version'
+import { coreGateVersion, coreRecordCurrent, coreSemver } from '../../version'
 import type { CoreCheckout } from '../../version'
 import { gitDirPresence, readGitHead, resolveGitDir } from '../../git'
 import type { ComfyArgsSchema } from '../../comfy-args'
@@ -1047,15 +1047,19 @@ async function runLaunch(
           }
         }
 
+        // The gate's version, not the display label: the `[core-beta]` log line and the
+        // `core_beta.applied` telemetry report the comparison that authorized the grant, so on
+        // an install whose label is unverified they name the lower ancestry-proven release.
+        const gate = coreGateVersion(inst)
         const built = buildLaunchArgs({
           prefixArgs,
           userArgs,
           desktopFlagArgs,
           schema,
           betaFlags: await getCoreBetaGrantsAsync(),
-          coreVersion: coreSemver(inst),
-          coreVersionExact: coreSemverExact(inst),
-          coreVersionVerified: coreSemverVerified(inst),
+          coreVersion: gate.semver,
+          coreVersionExact: gate.exact,
+          coreVersionVerified: gate.verified,
           // Read here rather than reused from `revision` above: that one falls back to the
           // record when HEAD is unreadable, which is the very disagreement being checked for.
           coreVersionCurrent: coreRecordCurrent(inst, resolveCoreCheckout(path.dirname(mainPyAbs))),
