@@ -110,12 +110,15 @@ const PAGES = [
       ],
     },
     diagram: {
+      // 标题含「音频」→ 配图补音频占位节点；取帧产物是静态图（📸 抓拍）而非相机设备
       nodes: [
-        { x: 76, y: 56, w: 84, h: 62, kind: 'video', label: '🎬' },
-        { x: 234, y: 58, w: 64, h: 58, kind: 'image', label: '📷' },
+        { x: 40, y: 26, w: 100, h: 56, kind: 'video', label: '🎬' },
+        { x: 40, y: 104, w: 100, h: 56, kind: 'audio', label: '🎵' },
+        { x: 224, y: 64, w: 84, h: 60, kind: 'image', label: '📸' },
       ],
-      links: [{ from: 0, to: 1, label: { zh: '取帧', en: 'frame' } }],
-      gestures: [{ type: 'click', x: 90, y: 110, label: '⏮' }],
+      links: [{ from: 0, to: 2, label: { zh: '取帧', en: 'frame' } }],
+      // ⏮（抓首帧）贴在视频节点左下角，与其它页「操作环压在目标节点上」一致
+      gestures: [{ type: 'click', x: 60, y: 70, label: '⏮' }],
     },
   },
   {

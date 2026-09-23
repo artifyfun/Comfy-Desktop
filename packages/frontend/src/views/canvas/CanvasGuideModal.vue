@@ -467,6 +467,12 @@ function isRingGesture(ges) {
   fill: color-mix(in srgb, #eab308 14%, transparent);
   stroke: color-mix(in srgb, #eab308 60%, transparent);
 }
+/* 媒体占位节点（视频/音频）：此前无专属样式，退化成灰色通用卡片、与图片节点难区分 */
+.guide-node-video,
+.guide-node-audio {
+  fill: color-mix(in srgb, #38bdf8 12%, transparent);
+  stroke: color-mix(in srgb, #38bdf8 50%, transparent);
+}
 .guide-node-frame {
   fill: none;
   stroke: var(--wb-text-3);
