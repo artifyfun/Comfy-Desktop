@@ -9,7 +9,8 @@
  * diagram spec：
  *   nodes: [{ x, y, w, h, kind, label }]   kind: image|app|out|note|frame|shot|video|audio
  *   links: [{ from, to, dash?, label? }]   from/to = nodes 下标，默认右缘中点 → 左缘中点贝塞尔
- *   gestures: [{ type: 'drag'|'click', x1, y1, x2?, y2?, label? }]
+ *   gestures: [{ type: 'drag'|'click'|'box', x1, y1, x2?, y2?, label? }]
+ *     box = 框选橡皮筋（x1,y1→x2,y2 矩形；样式对齐真实画布 rubberConfig）
  *
  * 双语：zh 为主（与 promptLibrary.js 同惯例），en 同步给出；取当前语言回退 zh。
  */
@@ -382,17 +383,27 @@ const PAGES = [
     },
     diagram: {
       nodes: [
-        { x: 30, y: 20, w: 54, h: 42, kind: 'image', label: '🐱' },
-        { x: 30, y: 96, w: 54, h: 42, kind: 'image', label: '🌆' },
-        { x: 104, y: 58, w: 54, h: 42, kind: 'image', label: '🎩' },
-        { x: 208, y: 40, w: 80, h: 76, kind: 'out', label: '🎭' },
+        { x: 24, y: 36, w: 62, h: 48, kind: 'image', label: '🐱' },
+        { x: 24, y: 116, w: 62, h: 48, kind: 'image', label: '🌆' },
+        { x: 98, y: 76, w: 62, h: 48, kind: 'image', label: '🎩' },
+        { x: 216, y: 68, w: 88, h: 74, kind: 'out', label: '🎭' },
       ],
       links: [
         { from: 0, to: 3, dash: true },
         { from: 1, to: 3, dash: true },
         { from: 2, to: 3, dash: true },
       ],
-      gestures: [{ type: 'drag', x1: 14, y1: 12, x2: 172, y2: 148, label: '⬚' }],
+      // 框选橡皮筋：真实画布同款样式（浅蓝半透明 + 实线），把三张源图圈在框内
+      gestures: [
+        {
+          type: 'box',
+          x1: 10,
+          y1: 26,
+          x2: 170,
+          y2: 172,
+          label: { zh: '框选这几张', en: 'drag to select' },
+        },
+      ],
     },
   },
   {

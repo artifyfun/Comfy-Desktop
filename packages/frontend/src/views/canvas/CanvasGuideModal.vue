@@ -117,14 +117,26 @@
                 />
                 <circle :cx="ges.x1" :cy="ges.y1" r="4" class="guide-gesture-dot" />
               </template>
+              <!-- 框选橡皮筋：与真实画布 rubberConfig 同款（浅蓝 12% 填充 + 实线描边）。
+                   此前用 drag 斜箭头表达「框选」，看不出是选框。 -->
+              <rect
+                v-else-if="ges.type === 'box'"
+                :x="Math.min(ges.x1, ges.x2)"
+                :y="Math.min(ges.y1, ges.y2)"
+                :width="Math.abs(ges.x2 - ges.x1)"
+                :height="Math.abs(ges.y2 - ges.y1)"
+                rx="2"
+                class="guide-marquee"
+              />
               <circle v-else :cx="ges.x" :cy="ges.y" r="12" class="guide-gesture-ring" />
               <text
                 v-if="ges.label"
-                :x="ges.type === 'drag' ? (ges.x1 + ges.x2) / 2 : ges.x"
-                :y="ges.type === 'drag' ? (ges.y1 + ges.y2) / 2 - 10 : ges.y + 4"
+                :x="gestureLabel(ges).x"
+                :y="gestureLabel(ges).y"
+                :style="{ textAnchor: gestureLabel(ges).anchor }"
                 class="guide-gesture-label"
               >
-                {{ ges.label }}
+                {{ gestureLabel(ges).text }}
               </text>
             </g>
           </svg>
@@ -253,6 +265,31 @@ function nodeLabelY(n) {
 function nodeIconY(n) {
   const cy = n.y + n.h / 2
   return n.label ? cy - 7 : cy
+}
+
+/**
+ * 手势标注的位置与文案。label 支持纯字符串（符号，语言无关）或 {zh,en} 双语对象
+ * （与连线标签同口径）。各类型标注位置：
+ *  - drag：线段中点上方
+ *  - box ：选框左上角外侧（不遮挡框内节点）
+ *  - click：圆环中心
+ */
+function gestureLabel(ges) {
+  const raw = ges.label
+  const text = raw && typeof raw === 'object' ? (raw[lang] ?? raw.zh ?? '') : String(raw ?? '')
+  if (ges.type === 'drag') {
+    return { text, x: (ges.x1 + ges.x2) / 2, y: (ges.y1 + ges.y2) / 2 - 10, anchor: 'middle' }
+  }
+  if (ges.type === 'box') {
+    // 标签放在选框左上角外侧，留 8px 让文字不压框线
+    return {
+      text,
+      x: Math.min(ges.x1, ges.x2) + 2,
+      y: Math.min(ges.y1, ges.y2) - 8,
+      anchor: 'start',
+    }
+  }
+  return { text, x: ges.x, y: ges.y + 4, anchor: 'middle' }
 }
 </script>
 
@@ -475,6 +512,12 @@ function nodeIconY(n) {
   fill: color-mix(in srgb, var(--wb-accent) 18%, transparent);
   stroke: var(--wb-accent);
   stroke-width: 1.5;
+}
+/* 框选橡皮筋：色值与真实画布 rubberConfig 一致（浅蓝半透明填充 + 实线细描边） */
+.guide-marquee {
+  fill: rgba(56, 189, 248, 0.12);
+  stroke: rgba(56, 189, 248, 0.55);
+  stroke-width: 1;
 }
 .guide-gesture-label {
   font-size: 12px;
