@@ -38,7 +38,13 @@ function opaquePanelBg(): string {
  *  an opaque surface instead of black. Overlay modes (downloads / feedback)
  *  deliberately stay transparent. */
 function isOpaqueBodyMode(mode: BodyMode): boolean {
-  return mode === 'chooser' || mode === 'new-install' || mode === 'comfy-lifecycle'
+  return (
+    mode === 'chooser' ||
+    mode === 'performance-test' ||
+    mode === 'benchmarks' ||
+    mode === 'new-install' ||
+    mode === 'comfy-lifecycle'
+  )
 }
 
 /**
@@ -288,7 +294,13 @@ export function setActivePanel(windowKey: number, panel: ComfyPanelKey): void {
   const entry = comfyWindows.get(windowKey)
   if (!entry || entry.window.isDestroyed()) return
   const prevPanel = entry.activePanel
-  if (prevPanel === panel) return
+  // Full-page tool selections must reassert their renderer state. A dashboard
+  // renderer can still be showing after main has recorded one of these keys;
+  // treating the menu click as a no-op then strands the user on the dashboard
+  // until they select a different page first. (upstream #1555-era rule, merged
+  // with this fork's prevPanel/overlay diffing below.)
+  const reassertFullPageTool = panel === 'performance-test' || panel === 'benchmarks'
+  if (prevPanel === panel && !reassertFullPageTool) return
 
   const openingOverlay = isOverlayPanel(panel) && !isOverlayPanel(prevPanel)
   const closingOverlay = isOverlayPanel(prevPanel) && !isOverlayPanel(panel)
