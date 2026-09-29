@@ -22,9 +22,12 @@ function stateForUserIds(userIds: Set<string>): ComfyDesktop2FirebaseAuthState {
   return { status: 'signed_in', userId: [...userIds][0]! }
 }
 
-/** One over main's own limit, so an over-long uid is rejected HERE rather than crossing IPC to be
- *  rejected there. `normalizePostHogUserId` in main remains the real validator; this only bounds
- *  what a page can push through the bridge, since the record is entirely page-controlled. */
+/** Bounds what a page can push through the bridge, since the record is entirely page-controlled —
+ *  it is NOT the validator and does not reject every uid main will refuse. It is deliberately ONE
+ *  OVER main's 256: a 257-character uid passes here and is rejected there, so the decision stays
+ *  with `normalizePostHogUserId` rather than a page-side truncation quietly producing a 256-character
+ *  match. What this stops is the unbounded case — a megabyte of page-controlled string crossing IPC
+ *  into main-process memory and any crash dump taken from it. */
 const MAX_UID_CHARS = 257
 
 function uidFromRecord(value: unknown): string | null {
@@ -109,8 +112,16 @@ function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   })
 }
 
-/** Legacy path, for frontends old enough to still persist here. Unreachable on any frontend that
- *  lists `browserLocalPersistence`, which every version since #3514 (2025-04) does. */
+/** The SECOND persistence reader, and a live path rather than a legacy one. `observe()` reaches it
+ *  when localStorage is READABLE AND EMPTY, or genuinely absent, and `indexedDB` itself is present —
+ *  not merely "when localStorage holds no record": an UNREADABLE localStorage abstains before this,
+ *  as does an unreadable or absent `indexedDB`.
+ *
+ *  The readable-and-empty case arises DURING boot on the released frontend, not at the first read
+ *  of one: localStorage still holds the previous session's record, so the first polls take the
+ *  localStorage path. The SDK's IndexedDB-first migration then drains localStorage, and this reader
+ *  answers until the auth store's later `setPersistence` moves the record back.
+ *  See `shared/firebaseAuthStorage.ts`. */
 async function readFromIndexedDb(): Promise<ComfyDesktop2FirebaseAuthState> {
   try {
     const databases = await indexedDB.databases()

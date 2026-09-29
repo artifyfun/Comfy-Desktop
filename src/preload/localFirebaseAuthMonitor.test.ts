@@ -20,12 +20,16 @@ function installLocalStorage(records: Record<string, unknown>): void {
   })
 }
 
-/** The ONLY thing that licenses the IndexedDB fallback: the mechanism is absent. */
+/** The only thing that lets a RECORD in IndexedDB be the answer: the mechanism is absent. IndexedDB
+ *  is also consulted when localStorage is readable and empty — but a record found there then means
+ *  the stores disagree, and the reader abstains rather than answering from it. */
 function removeLocalStorage(): void {
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: undefined })
 }
 
-/** Present but throwing — a blocked or partitioned context. Also counts as unavailable. */
+/** Present but throwing — a blocked or partitioned context. Classified `unreadable`, NOT
+ *  `unavailable`: the store exists and cannot be read, so IndexedDB does not get to answer and
+ *  these cases expect `pending`. */
 function installThrowingLocalStorage(): void {
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,

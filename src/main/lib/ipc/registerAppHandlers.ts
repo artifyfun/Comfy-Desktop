@@ -3,7 +3,6 @@ import {
   dialog,
   shell,
   BrowserWindow,
-  app,
   fs,
   path,
   os,
@@ -40,6 +39,7 @@ import { getCloudSession } from '../../devplatform/session'
 import { getCloudFreeRunsEnabledAsync } from '../cloudFreeRuns'
 import { getUserTierAsync } from '../userTier'
 import { getStableTags } from '../comfyui-releases'
+import { defaultBenchmarksDir } from '../paths'
 import { deriveGpuTier } from '../../../shared/gpuTier'
 import { PERSONAL_WORKSPACE_ID } from '../../../shared/workspaces'
 import {
@@ -58,6 +58,8 @@ import {
 } from '../performanceTestWorkflows'
 
 export function registerAppHandlers(): void {
+  const benchmarksDir = defaultBenchmarksDir()
+
   // App version
   ipcMain.handle('get-app-version', () => getAppVersion())
 
@@ -171,7 +173,7 @@ export function registerAppHandlers(): void {
       sourcePath = filePaths[0]!
     }
     try {
-      const filePath = await storePerformanceTestWorkflow(sourcePath, app.getPath('userData'))
+      const filePath = await storePerformanceTestWorkflow(sourcePath, benchmarksDir)
       return { ok: true, filePath }
     } catch (error) {
       return { ok: false, message: (error as Error)?.message || String(error) }
@@ -180,7 +182,7 @@ export function registerAppHandlers(): void {
 
   ipcMain.handle('delete-performance-test-workflow', async (_event, filePath: string) => {
     try {
-      const status = await deletePerformanceTestWorkflow(filePath, app.getPath('userData'))
+      const status = await deletePerformanceTestWorkflow(filePath, benchmarksDir)
       return {
         ok: true,
         status,
@@ -197,7 +199,7 @@ export function registerAppHandlers(): void {
   ipcMain.handle('save-performance-test-logs', async (_event, filePath: string, logs: string) => {
     try {
       if (typeof logs !== 'string') throw new Error('Invalid performance test logs.')
-      const logsPath = await savePerformanceTestLogs(logs, filePath, app.getPath('userData'))
+      const logsPath = await savePerformanceTestLogs(logs, filePath, benchmarksDir)
       return { ok: true, logsPath }
     } catch (error) {
       return { ok: false, message: (error as Error)?.message || String(error) }
@@ -207,8 +209,7 @@ export function registerAppHandlers(): void {
   ipcMain.handle(
     'list-performance-test-benchmarks',
     async (_event, selectedFolderPath?: string) => {
-      const folderPath =
-        selectedFolderPath || path.join(app.getPath('userData'), 'performance-tests')
+      const folderPath = selectedFolderPath || benchmarksDir
       return {
         folderPath,
         benchmarks: await listPerformanceTestBenchmarks(folderPath)
@@ -250,7 +251,7 @@ export function registerAppHandlers(): void {
   )
 
   ipcMain.handle('read-performance-test-results-summary', (_event, filePath: string) =>
-    readPerformanceTestResultsSummary(filePath, app.getPath('userData'))
+    readPerformanceTestResultsSummary(filePath, benchmarksDir)
   )
 
   ipcMain.handle(
@@ -345,7 +346,7 @@ export function registerAppHandlers(): void {
         const sessionUrl = session.url || `http://127.0.0.1:${session.port}`
         await submitPerformanceTestWorkflow(
           filePath,
-          app.getPath('userData'),
+          benchmarksDir,
           sessionUrl,
           measuredRuns,
           warmupRuns,
@@ -382,7 +383,7 @@ export function registerAppHandlers(): void {
         const resultPath = await savePerformanceTestJobsResponse(
           jobsResponse,
           filePath,
-          app.getPath('userData')
+          benchmarksDir
         )
         const hardware = session.getAcceleratorInfo?.() ?? null
         const systemInfo = await getSystemInfo()
@@ -396,13 +397,13 @@ export function registerAppHandlers(): void {
           hardware,
           systemInfo,
           filePath,
-          app.getPath('userData'),
+          benchmarksDir,
           successfulRuns,
           failedRuns
         )
         const resultsSummary = await readPerformanceTestResultsSummary(
           resultsSummaryPath,
-          app.getPath('userData')
+          benchmarksDir
         )
         return {
           ok: true,

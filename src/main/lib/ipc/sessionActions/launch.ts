@@ -97,12 +97,19 @@ import { writeComfyEnvironment } from '../../../sources/standalone/envPaths'
 import { syncArtifyExtension } from '../../../artifylab/extensions'
 import type { PersistedTorchStack } from '../../../sources/standalone/torchStackTypes'
 import type { WriteStream } from 'fs'
-import { getCoreBetaGrantsAsync, selectCoreBetaGrantArgs } from '../../coreBetaGrants'
+import {
+  NO_CORE_COMMITS,
+  commitGrantShas,
+  getCoreBetaGrantsAsync,
+  isCommitGrant,
+  selectCoreBetaGrantArgs
+} from '../../coreBetaGrants'
 import { armBetaActivationNotice, clearBetaActivationClaim } from '../../betaActivationNotice'
-import type { CoreBetaGrant } from '../../coreBetaGrants'
-import { coreGateVersion, coreRecordCurrent, coreSemver } from '../../version'
+import type { CoreBetaGrant, CoreCommitState } from '../../coreBetaGrants'
+import { coreGateVersion, coreRecordCurrent, coreSemver, formatComfyVersion } from '../../version'
 import type { CoreCheckout } from '../../version'
 import { gitDirPresence, readGitHead, resolveGitDir } from '../../git'
+import { resolveCoreCommitState } from '../../coreBetaAncestry'
 import type { ComfyArgsSchema } from '../../comfy-args'
 
 // Feature flags injected on a spawned ComfyUI, gated by the running install's
@@ -148,6 +155,28 @@ function resolveCoreCheckout(comfyuiDir: string): CoreCheckout {
   }
 }
 
+/** `null`, not the record, for an unreadable git checkout: the record may be what went stale. */
+function fullSha(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const sha = value.trim().toLowerCase()
+  return /^[0-9a-f]{40}$/.test(sha) ? sha : null
+}
+
+export function launchedCoreCommit(
+  inst: InstallationRecord,
+  checkout: CoreCheckout
+): string | null {
+  switch (checkout.kind) {
+    case 'head':
+      return fullSha(checkout.commit)
+    case 'not-git':
+      // Typed as a string, but legacy records predate the field; see `coreRecordCurrent`.
+      return fullSha(inst.comfyVersion?.commit)
+    case 'unreadable':
+      return null
+  }
+}
+
 /** The single post-filter view of this launch's Core beta grants: what survived
  *  BOTH the version/toggle selection and the running core's args schema, plus
  *  what selection granted that the schema then refused. Every downstream signal
@@ -177,7 +206,14 @@ function noCoreBeta(optedIn: boolean): CoreBetaLaunch {
 
 /** Newline-terminated because `writeLog` and `sendOutput` forward text verbatim:
  *  without it the first child-process line joins the record. */
-function coreBetaLogRecord(grant: CoreBetaGrant, coreVersion: string): string {
+function coreBetaLogRecord(
+  grant: CoreBetaGrant,
+  coreVersion: string | null,
+  coreHead: string | null
+): string {
+  if (isCommitGrant(grant)) {
+    return `[core-beta] ${grant.arg} (core ${coreHead?.slice(0, 12)} in a granted commit range, opted in)\n`
+  }
   return `[core-beta] ${grant.arg} (core ${coreVersion} >= ${grant.minCoreVersion}, opted in)\n`
 }
 
@@ -200,10 +236,12 @@ export function buildLaunchArgs(input: {
   coreVersionExact: boolean
   coreVersionVerified: boolean
   coreVersionCurrent: boolean
+  coreCommits: CoreCommitState
   betaEnabled: boolean
 }): { args: string[]; beta: CoreBetaLaunch } {
   const { prefixArgs, userArgs, desktopFlagArgs, schema, coreVersion } = input
   const filtered = filterUnsupportedArgs([...userArgs], schema)
+  const withheld: string[] = []
   const selected = selectCoreBetaGrantArgs(
     input.betaFlags,
     {
@@ -213,7 +251,9 @@ export function buildLaunchArgs(input: {
       current: input.coreVersionCurrent
     },
     input.betaEnabled,
-    userArgs
+    userArgs,
+    input.coreCommits,
+    withheld
   )
   const supported = new Set(
     filterUnsupportedArgs(
@@ -230,8 +270,13 @@ export function buildLaunchArgs(input: {
       droppedUnsupported: selected
         .filter((grant) => !supported.has(grant.arg))
         .map((grant) => grant.arg),
-      logRecords:
-        coreVersion === null ? [] : applied.map((grant) => coreBetaLogRecord(grant, coreVersion)),
+      logRecords: [
+        ...applied.map((grant) => coreBetaLogRecord(grant, coreVersion, input.coreCommits.head)),
+        ...withheld.map((line) => `${line}\n`),
+        ...selected
+          .filter((grant) => !supported.has(grant.arg))
+          .map((grant) => `[core-beta] ${grant.arg} withheld: not supported by this core\n`)
+      ],
       coreVersion,
       optedIn: input.betaEnabled
     }
@@ -264,12 +309,16 @@ export function emitCoreBetaTelemetry(input: {
   appliedArgs: readonly string[]
   droppedUnsupported: readonly string[]
   coreVersion: string | null
+  coreCommit: string | null
+  coreVersionLabel: string | null
   optedIn: boolean
 }): void {
   if (input.appliedArgs.length > 0 || input.droppedUnsupported.length > 0) {
     telemetry.emit('comfy.desktop.core_beta.applied', {
       args: [...input.appliedArgs],
       core_version: input.coreVersion,
+      core_commit: input.coreCommit,
+      core_version_label: input.coreVersionLabel,
       dropped_unsupported: [...input.droppedUnsupported]
     })
   }
@@ -469,13 +518,24 @@ async function describeExitCode(code: number | null): Promise<string> {
 
 async function openLogStream(installPath: string): Promise<WriteStream> {
   const logDir = getLogDir(installPath)
-  fs.mkdirSync(logDir, { recursive: true })
+  try {
+    fs.mkdirSync(logDir, { recursive: true })
+  } catch (err) {
+    // Same rule as the stream below: the open then fails into its listener and the launch runs on.
+    console.warn('[launch] log directory unavailable:', err)
+  }
   await rotateLogFiles(logDir, 'comfyui.log')
-  return fs.createWriteStream(path.join(logDir, 'comfyui.log'), { flags: 'w' })
+  const stream = fs.createWriteStream(path.join(logDir, 'comfyui.log'), { flags: 'w' })
+  // Attached at creation: the file opens asynchronously, and a stream error with no listener is an
+  // uncaught exception in the main process. A log that cannot be opened or written costs the
+  // launch its log file, never the launch itself.
+  stream.on('error', (err) => console.warn('[launch] comfyui.log unavailable:', err))
+  return stream
 }
 
 export function writeLog(stream: WriteStream, text: string): void {
-  if (!stream.writableEnded) stream.write(stripAnsi(text))
+  // `destroyed` too: a stream that errored is not `writableEnded`, and each write would warn again.
+  if (!stream.writableEnded && !stream.destroyed) stream.write(stripAnsi(text))
 }
 
 export function _resolveLaunchMode(
@@ -638,6 +698,13 @@ async function runLaunch(
   // Resolved during arg assembly below, then read by the taps, the launch log
   // records and the beta telemetry - all after assembly, never before.
   let coreBeta: CoreBetaLaunch = noCoreBeta(betaEnabled)
+  let coreCommit: string | null = null
+  // Read at each use: launch prep (recovery, migration, torch repair) can replace `inst`, and the
+  // label must describe the same record as the `core_version` sent beside it.
+  const coreVersionLabel = (): string | null =>
+    typeof (inst.comfyVersion?.commit as unknown) === 'string'
+      ? formatComfyVersion(inst.comfyVersion, 'short')
+      : null
   // LAUNCH-SCOPED on purpose. `tryLaunch` recurses on reboot and port retries, re-entering
   // past the report site, so an unlatched report fires once per attempt; a module-global
   // latch would instead silence every launch after the first in the process lifetime.
@@ -791,13 +858,17 @@ async function runLaunch(
         installationId,
         variant: (inst.variant as string | undefined) ?? null,
         release: (inst.release as string | undefined) ?? null,
-        coreBetaFlags
+        coreBetaFlags,
+        coreCommit,
+        coreVersionLabel: coreVersionLabel()
       })
       const hwTap = createHardwareTap({
         installationId,
         variant: (inst.variant as string | undefined) ?? null,
         release: (inst.release as string | undefined) ?? null,
-        coreBetaFlags
+        coreBetaFlags,
+        coreCommit,
+        coreVersionLabel: coreVersionLabel()
       })
       const assetsTap = createAssetsTapSafe({
         installationId,
@@ -832,6 +903,8 @@ async function runLaunch(
         appliedArgs: coreBeta.applied.map((grant) => grant.arg),
         droppedUnsupported: coreBeta.droppedUnsupported,
         coreVersion: coreBeta.coreVersion,
+        coreCommit,
+        coreVersionLabel: coreVersionLabel(),
         optedIn: coreBeta.optedIn
       })
     } catch {
@@ -848,12 +921,16 @@ async function runLaunch(
     assets_enabled: boolean
     core_beta_opted_in: boolean
     core_version: string | null
+    core_commit: string | null
+    core_version_label: string | null
   } {
     return {
       core_beta_flags: coreBeta.applied.map((grant) => grant.arg),
       assets_enabled: launchCmd.args?.includes('--enable-assets') === true,
       core_beta_opted_in: coreBeta.optedIn,
-      core_version: coreSemver(inst)
+      core_version: coreSemver(inst),
+      core_commit: coreCommit,
+      core_version_label: coreVersionLabel()
     }
   }
 
@@ -1014,6 +1091,11 @@ async function runLaunch(
       const revision = inst.comfyVersion?.commit ?? (inst.version as string | undefined)
       const prefixArgs = launchCmd.args.slice(0, sIdx + 2)
       const userArgs = launchCmd.args.slice(sIdx + 2)
+      const comfyuiDir = path.dirname(mainPyAbs)
+      // Read here rather than reused from `revision` above: that one falls back to the
+      // record when HEAD is unreadable, which is the very disagreement being checked for.
+      const checkout = resolveCoreCheckout(comfyuiDir)
+      coreCommit = launchedCoreCommit(inst, checkout)
       // Take ownership of the array before anything downstream mutates it in place:
       // `applyStorageLaunchArgs` pushes onto `launchCmd.args`, and when discovery fails there is
       // no `built.args` to replace it, so those pushes would otherwise reach the array the
@@ -1047,6 +1129,16 @@ async function runLaunch(
           }
         }
 
+        const betaFlags = await getCoreBetaGrantsAsync()
+        // Opted-out launches skip it: the checks can reach the network and could grant nothing.
+        const coreCommits = betaEnabled
+          ? await resolveCoreCommitState(
+              comfyuiDir,
+              checkout,
+              commitGrantShas(betaFlags, userArgs),
+              abort.signal
+            )
+          : NO_CORE_COMMITS
         // The gate's version, not the display label: the `[core-beta]` log line and the
         // `core_beta.applied` telemetry report the comparison that authorized the grant, so on
         // an install whose label is unverified they name the lower ancestry-proven release.
@@ -1056,13 +1148,12 @@ async function runLaunch(
           userArgs,
           desktopFlagArgs,
           schema,
-          betaFlags: await getCoreBetaGrantsAsync(),
+          betaFlags,
           coreVersion: gate.semver,
           coreVersionExact: gate.exact,
           coreVersionVerified: gate.verified,
-          // Read here rather than reused from `revision` above: that one falls back to the
-          // record when HEAD is unreadable, which is the very disagreement being checked for.
-          coreVersionCurrent: coreRecordCurrent(inst, resolveCoreCheckout(path.dirname(mainPyAbs))),
+          coreVersionCurrent: coreRecordCurrent(inst, checkout),
+          coreCommits,
           betaEnabled
         })
         launchCmd.args = built.args

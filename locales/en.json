@@ -751,6 +751,19 @@
       "imageAlt": "Comfy Cloud nodes announcement",
       "unmute": "Unmute video",
       "mute": "Mute video"
+    },
+    "comfyRouter": {
+      "title": "Introducing Comfy Router",
+      "lead": "One API for the latest frontier media models",
+      "highlights": [
+        "Call the latest image, video, 3D, and audio models from your own scripts, tools, and apps using the Comfy credits you already have.",
+        "Add new models without setting up a separate account or integration for every provider.",
+        "When a model has multiple providers, choose based on price or availability and switch without rewriting your integration."
+      ],
+      "primaryCta": "Learn About Comfy Router",
+      "imageAlt": "Comfy Router announcement",
+      "unmute": "Unmute video",
+      "mute": "Mute video"
     }
   },
   "tray": {
@@ -1317,9 +1330,11 @@
       "loadError": "Couldn't load workspaces. Retry",
       "refresh": "Refresh workspaces",
       "promoteToWorkspace": "Create Build",
+      "promoteToWorkspaceHint": "Create a Build from this instance in Comfy Developer Platform.",
+      "readMore": "Read more",
       "promoting": "Creating...",
       "promoteFailedTitle": "Could not create build",
-      "promoteFailedMessage": "Could not create a draft in Comfy Builder."
+      "promoteFailedMessage": "Could not create a draft in Comfy Developer Platform."
     },
     "build": {
       "version": "Build v{version}",
@@ -1472,7 +1487,6 @@
     "selectInstancePlaceholder": "Select an instance",
     "dropWorkflow": "2. Drop a workflow in API format",
     "dropWorkflowHint": "Drop a workflow .json file here, or click to browse",
-    "apiFormatHint": "Need an API-format file? In ComfyUI, enable Dev mode in Settings, then use Export (API) to save the workflow.",
     "importingWorkflow": "Importing workflow...",
     "importFailed": "Could not import the workflow.",
     "deleteWorkflow": "Delete workflow",
@@ -1483,7 +1497,6 @@
     "stopFailed": "Could not stop the instance.",
     "measurementSettings": "3. Set measurement settings",
     "warmupRuns": "Warm-up runs",
-    "warmupRunsHint": "Warm-up runs prime model loading and caches. Only measured runs count toward your results.",
     "measuredRuns": "Measured runs",
     "logsPlaceholder": "Instance logs will appear here.",
     "results": "Results",
