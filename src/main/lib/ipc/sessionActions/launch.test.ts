@@ -1105,6 +1105,11 @@ describe('core beta report placement', () => {
 
   function gitInitComfyUI(): string {
     const cwd = path.join(installDir, 'ComfyUI')
+    // `os.devNull` is `\\.\nul` on Windows, a path git refuses to open as its global config
+    // ("unable to access '\\.\nul': Invalid argument"), so isolate the global config with a real
+    // empty file instead — it works on every platform and still blocks the user's own gitconfig.
+    const emptyGlobalConfig = path.join(installDir, 'empty-gitconfig')
+    if (!fs.existsSync(emptyGlobalConfig)) fs.writeFileSync(emptyGlobalConfig, '')
     const env = {
       ...process.env,
       GIT_AUTHOR_NAME: 't',
@@ -1112,7 +1117,7 @@ describe('core beta report placement', () => {
       GIT_COMMITTER_NAME: 't',
       GIT_COMMITTER_EMAIL: 't@example.com',
       GIT_CONFIG_NOSYSTEM: '1',
-      GIT_CONFIG_GLOBAL: os.devNull
+      GIT_CONFIG_GLOBAL: emptyGlobalConfig
     }
     execFileSync('git', ['init', '-q'], { cwd, env })
     execFileSync('git', ['commit', '--allow-empty', '-q', '-m', 'c'], { cwd, env })

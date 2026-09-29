@@ -349,16 +349,22 @@ describe('resolveCoreCommitState', () => {
       fs.rmSync(common, { recursive: true, force: true })
     })
 
-    it('treats a shallow marker it cannot stat as unknown, not as a full clone', async () => {
-      const notADir = path.join(git.gitDir, 'plain-file')
-      fs.writeFileSync(notADir, '')
-      fs.writeFileSync(path.join(git.gitDir, 'commondir'), notADir)
-      git.fetchCommitSha.mockResolvedValue(false)
+    it.skipIf(process.platform === 'win32')(
+      // Windows cannot report ENOTDIR here: libuv maps ERROR_PATH_NOT_FOUND to ENOENT, so
+      // `plain-file\shallow` reads as a proven absence and only POSIX can tell "could not look"
+      // apart from it. The production branch under test is reachable on Linux/macOS builds only.
+      'treats a shallow marker it cannot stat as unknown, not as a full clone',
+      async () => {
+        const notADir = path.join(git.gitDir, 'plain-file')
+        fs.writeFileSync(notADir, '')
+        fs.writeFileSync(path.join(git.gitDir, 'commondir'), notADir)
+        git.fetchCommitSha.mockResolvedValue(false)
 
-      const state = await resolveCoreCommitState(REPO, { kind: 'head', commit: HEAD }, [UPPER])
+        const state = await resolveCoreCommitState(REPO, { kind: 'head', commit: HEAD }, [UPPER])
 
-      expect(state.ancestry.has(UPPER), 'ENOTDIR is "could not look", not absence').toBe(false)
-    })
+        expect(state.ancestry.has(UPPER), 'ENOTDIR is "could not look", not absence').toBe(false)
+      }
+    )
 
     it('normalizes SHA case and never hands git anything but a full SHA', async () => {
       const state = await resolveCoreCommitState(REPO, { kind: 'head', commit: HEAD }, [
