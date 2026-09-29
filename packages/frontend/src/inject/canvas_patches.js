@@ -2,12 +2,7 @@ import { colorizeLinks, colorizeCanvas, getRandomColor } from './uuid_color.js'
 // ⚠️ 曾经裸引用 artify_inject / isIframe / artify_playground / isArtifyLoading
 // 而不 import（拆单体时的漏改）→ 打包后名字被重命名 → 调用 doHandleComfyuiContext() /
 // colorizeCanvas() 等时抛 `ReferenceError: artify_inject is not defined`（静默失效）。
-import {
-  artify_inject,
-  artify_playground,
-  isIframe,
-  setIsArtifyLoading,
-} from './context.js'
+import { artify_inject, artify_playground, isIframe, setIsArtifyLoading } from './context.js'
 // 从 comfy_inject.js 单体机械切分（技术债重构），逻辑零改动。
 function serializer(replacer, cycleReplacer) {
   var stack = [],
@@ -76,7 +71,37 @@ export function getComfyUIApp() {
   return { app, LiteGraph }
 }
 
+/** onReady 只允许真正触发一次：doHandleComfyuiContext 末尾会调它，但中途抛错时
+ *  不会——外层 catch 需要补一次，又不能重复调用（会重复 loadWorkflow /
+ *  重复向父页 postMessage onload）。 */
+function once(fn) {
+  let called = false
+  return (...args) => {
+    if (called) {
+      return undefined
+    }
+    called = true
+    return fn(...args)
+  }
+}
+
+/**
+ * 包一层 try/catch 调 doHandleComfyuiContext：它是几百行的猴补丁（画布绘制、
+ * 节点、workflowManager、事件总线……），末尾才调 onReady()。中途任一处抛错，
+ * 上层的 loadWorkflow（standalone 首屏加载）与 onload 通知（playground/父页
+ * modal）就会**整链静默失效**。这里保证 onReady 恰好被调用一次并留 error 日志。
+ */
+function runContext(app, LiteGraph, ready) {
+  try {
+    doHandleComfyuiContext(app, LiteGraph, ready)
+  } catch (e) {
+    console.error('[ArtifyInject] comfyui context patching failed; notifying ready anyway:', e)
+    ready()
+  }
+}
+
 export function handleComfyuiContext(onReady) {
+  const ready = once(onReady || (() => {}))
   const { app, LiteGraph } = getComfyUIApp()
 
   if (!app || !LiteGraph) {
@@ -87,15 +112,15 @@ export function handleComfyuiContext(onReady) {
         console.warn('[ArtifyInject] Could not find ComfyUI app instance after retry')
         // 仍回调 onReady，避免父页面（如工作流编辑器 modal）因等不到 onload 而永久转圈；
         // app 缺失会在后续交互中自然暴露，warn 已记录原因。
-        onReady()
+        ready()
         return
       }
-      doHandleComfyuiContext(retryApp, retryLiteGraph, onReady)
+      runContext(retryApp, retryLiteGraph, ready)
     }, 1000)
     return
   }
 
-  doHandleComfyuiContext(app, LiteGraph, onReady)
+  runContext(app, LiteGraph, ready)
 }
 
 function doHandleComfyuiContext(app, LiteGraph, onReady) {

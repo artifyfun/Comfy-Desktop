@@ -116,21 +116,41 @@
     }
     return { app, LiteGraph };
   }
+  function once(fn) {
+    let called = false;
+    return (...args) => {
+      if (called) {
+        return void 0;
+      }
+      called = true;
+      return fn(...args);
+    };
+  }
+  function runContext(app, LiteGraph, ready) {
+    try {
+      doHandleComfyuiContext(app, LiteGraph, ready);
+    } catch (e) {
+      console.error("[ArtifyInject] comfyui context patching failed; notifying ready anyway:", e);
+      ready();
+    }
+  }
   function handleComfyuiContext(onReady) {
+    const ready = once(onReady || (() => {
+    }));
     const { app, LiteGraph } = getComfyUIApp();
     if (!app || !LiteGraph) {
       setTimeout(() => {
         const { app: retryApp, LiteGraph: retryLiteGraph } = getComfyUIApp();
         if (!retryApp || !retryLiteGraph) {
           console.warn("[ArtifyInject] Could not find ComfyUI app instance after retry");
-          onReady();
+          ready();
           return;
         }
-        doHandleComfyuiContext(retryApp, retryLiteGraph, onReady);
+        runContext(retryApp, retryLiteGraph, ready);
       }, 1e3);
       return;
     }
-    doHandleComfyuiContext(app, LiteGraph, onReady);
+    runContext(app, LiteGraph, ready);
   }
   function doHandleComfyuiContext(app, LiteGraph, onReady) {
     const isArtifyMode = artify_inject === "readonly" || isIframe || artify_playground;
@@ -744,21 +764,25 @@
       setTimeout(() => loadWorkflow(), 500);
       return;
     }
-    const config = await getConfig();
-    if (!config || !config.activeAppId) {
-      console.warn("[ArtifyInject] No active app found in config");
-      return;
-    }
-    const currentApp = await getAppById(config.activeAppId);
-    if (!currentApp) {
-      console.warn("[ArtifyInject] Could not fetch current app");
-      return;
-    }
-    const workflowName = currentApp.name || "ArtifyLab Workflow";
-    const { workflow } = currentApp.template;
-    console.log(`[ArtifyInject] Standalone mode: Loading workflow "${workflowName}"`);
     setIsArtifyLoading(true);
     try {
+      const config = await getConfig();
+      if (!config || !config.activeAppId) {
+        console.warn("[ArtifyInject] No active app found in config");
+        return;
+      }
+      const currentApp = await getAppById(config.activeAppId);
+      if (!currentApp) {
+        console.warn("[ArtifyInject] Could not fetch current app");
+        return;
+      }
+      if (!currentApp.template) {
+        console.warn("[ArtifyInject] Active app has no template; nothing to load");
+        return;
+      }
+      const workflowName = currentApp.name || "ArtifyLab Workflow";
+      const { workflow } = currentApp.template;
+      console.log(`[ArtifyInject] Standalone mode: Loading workflow "${workflowName}"`);
       if (workflow && typeof workflow === "object") {
         workflow.name = workflowName;
         workflow.extra_data = workflow.extra_data || {};
@@ -1990,33 +2014,17 @@
 
   // src/inject/bootstrap.js
   function installBootstrap() {
-    window.addEventListener("load", function() {
-      let timer = null;
-      if (artify_inject === "readonly") {
-        let hideReadonlyUI = function() {
-          const selectors = [
-            ".comfyui-body-top",
-            ".comfyui-body-left",
-            ".comfyui-body-right",
-            ".comfyui-body-bottom",
-            ".workflow-tabs-container",
-            ".workflow-tabs-container-desktop",
-            ".side-tool-bar-container",
-            ".floating-sidebar",
-            ".connected-sidebar",
-            ".comfy-menu-button-wrapper",
-            ".comfy-command-menu",
-            ".selection-toolbox",
-            "rgthree-progress-bar"
-          ];
-          selectors.forEach((selector) => {
-            document.querySelectorAll(selector).forEach((el) => {
-              el.style.display = "none";
-            });
-          });
-        };
-        loadCssCode(
-          `/* Hide main UI containers - use !important to override inline styles */
+    let timer = null;
+    let counter = 0;
+    let lastNodeTypesCount = -1;
+    let stableNodeTypesCount = 0;
+    let comfyReady = false;
+    function applyReadonlyStyles() {
+      if (artify_inject !== "readonly") {
+        return;
+      }
+      loadCssCode(
+        `/* Hide main UI containers - use !important to override inline styles */
       body.litegraph .comfyui-body-top,
       body.litegraph .comfyui-body-left,
       body.litegraph .comfyui-body-right,
@@ -2050,62 +2058,104 @@
         display: none !important;
       }
     `,
-          window
-        );
-        hideReadonlyUI();
-        setTimeout(hideReadonlyUI, 100);
-        setTimeout(hideReadonlyUI, 500);
-        setTimeout(hideReadonlyUI, 1e3);
+        window
+      );
+      function hideReadonlyUI() {
+        const selectors = [
+          ".comfyui-body-top",
+          ".comfyui-body-left",
+          ".comfyui-body-right",
+          ".comfyui-body-bottom",
+          ".workflow-tabs-container",
+          ".workflow-tabs-container-desktop",
+          ".side-tool-bar-container",
+          ".floating-sidebar",
+          ".connected-sidebar",
+          ".comfy-menu-button-wrapper",
+          ".comfy-command-menu",
+          ".selection-toolbox",
+          "rgthree-progress-bar"
+        ];
+        selectors.forEach((selector) => {
+          document.querySelectorAll(selector).forEach((el) => {
+            el.style.display = "none";
+          });
+        });
       }
-      let counter = 0;
-      let lastNodeTypesCount = -1;
-      let stableNodeTypesCount = 0;
-      function checkComfyUIReady() {
-        counter++;
-        clearTimeout(timer);
-        if (counter > 600) {
-          console.warn("[ArtifyInject] Timeout waiting for ComfyUI");
-          return;
-        }
-        const vueApp = document.querySelector("#vue-app");
-        const hasVueApp = vueApp && vueApp.childNodes.length > 0;
-        const hasVersion = typeof window.__COMFYUI_FRONTEND_VERSION__ !== "undefined";
-        const hasLiteGraph = !!window.LiteGraph;
-        const nodeTypesCount = hasLiteGraph ? Object.keys(window.LiteGraph.registered_node_types || {}).length : 0;
-        if (nodeTypesCount > 0 && nodeTypesCount === lastNodeTypesCount) {
-          stableNodeTypesCount++;
-        } else {
-          stableNodeTypesCount = 0;
-          lastNodeTypesCount = nodeTypesCount;
-        }
-        const isFullyReady = hasVersion && hasLiteGraph && stableNodeTypesCount >= 5;
-        if (isFullyReady && window.app && window.app.graph) {
-          if (artify_inject === "readonly" || isIframe || artify_playground) {
-            console.log(
-              `[ArtifyInject] Playground mode detected (Node types: ${nodeTypesCount}), waiting for stability...`
-            );
-            setTimeout(() => {
-              handleComfyuiContext(() => {
-                const message = JSON.stringify({ eventType: "onload" });
-                window.parent.postMessage(message, "*");
-              });
-            }, 2500);
-          } else {
+      hideReadonlyUI();
+      setTimeout(hideReadonlyUI, 100);
+      setTimeout(hideReadonlyUI, 500);
+      setTimeout(hideReadonlyUI, 1e3);
+    }
+    function checkComfyUIReady() {
+      counter++;
+      clearTimeout(timer);
+      if (counter > 600) {
+        console.warn("[ArtifyInject] Timeout waiting for ComfyUI");
+        return;
+      }
+      const vueApp = document.querySelector("#vue-app");
+      const hasVueApp = vueApp && vueApp.childNodes.length > 0;
+      const hasVersion = typeof window.__COMFYUI_FRONTEND_VERSION__ !== "undefined";
+      const hasLiteGraph = !!window.LiteGraph;
+      const nodeTypesCount = hasLiteGraph ? Object.keys(window.LiteGraph.registered_node_types || {}).length : 0;
+      if (nodeTypesCount > 0 && nodeTypesCount === lastNodeTypesCount) {
+        stableNodeTypesCount++;
+      } else {
+        stableNodeTypesCount = 0;
+        lastNodeTypesCount = nodeTypesCount;
+      }
+      const isFullyReady = hasVersion && hasLiteGraph && stableNodeTypesCount >= 5;
+      if (isFullyReady && window.app && window.app.graph) {
+        if (artify_inject === "readonly" || isIframe || artify_playground) {
+          console.log(
+            `[ArtifyInject] Playground mode detected (Node types: ${nodeTypesCount}), waiting for stability...`
+          );
+          setTimeout(() => {
             handleComfyuiContext(() => {
-              console.log("[ArtifyInject] Standalone mode detected, loading default workflow");
-              loadWorkflow();
-              window.__artifyReloadWorkflow = () => {
-                console.log("[ArtifyInject] Reload workflow requested by desktop");
-                loadWorkflow();
-              };
+              const message = JSON.stringify({ eventType: "onload" });
+              window.parent.postMessage(message, "*");
             });
-          }
-          return;
+          }, 2500);
+        } else {
+          handleComfyuiContext(() => {
+            console.log("[ArtifyInject] Standalone mode detected, loading default workflow");
+            comfyReady = true;
+            loadWorkflow();
+          });
         }
-        timer = setTimeout(checkComfyUIReady, 100);
+        return;
       }
+      timer = setTimeout(checkComfyUIReady, 100);
+    }
+    let pollingStarted = false;
+    function startReadyPolling() {
+      if (pollingStarted) {
+        return;
+      }
+      pollingStarted = true;
       checkComfyUIReady();
+    }
+    if (artify_inject !== "readonly" && !isIframe && !artify_playground) {
+      window.__artifyReloadWorkflow = () => {
+        console.log("[ArtifyInject] Reload workflow requested by desktop");
+        if (comfyReady) {
+          loadWorkflow();
+        } else {
+          console.log(
+            "[ArtifyInject] ComfyUI not ready yet; pending initial load will pick up the latest active app"
+          );
+        }
+      };
+    }
+    window.addEventListener("load", () => {
+      applyReadonlyStyles();
+      startReadyPolling();
     });
+    if (document.readyState === "complete") {
+      applyReadonlyStyles();
+      startReadyPolling();
+    }
     startArtifySidebarTab();
   }
 

@@ -423,6 +423,12 @@ card_bridge 侧被重命名为 `artifyEmbedWindow2`，而 digest 段保留裸名
 
 ## W18 真注入桥端到端（playwright + **真构建产物**，12/12）
 
+> ⚠️ **2026-09-29 复核：现状 11/12，W18.5 为既有红线。** 该断言（画布摘要真推给
+> 工作台 iframe）用**修复前源码**（`git stash push -- packages/frontend/src/inject`
+> 后重建产物）跑**同样红**，故非 W23 改动引入；W18.6（摘要落 express，3 次调用）仍绿，
+> 说明 `pushCanvasDigest` 确实跑到了，断的是 **bridge → iframe 的 postMessage 那一跳**。
+> 未归因，先记帐（下方 12/12 与两处「还原 → 12/12」均为历史记录，未改写）。
+
 W15 验非嵌入态降级语义、W16 用**假宿主帧**验工作台这一侧、W17 用单测验桥的实现语义 ——
 「**真桥产物在浏览器里跑**」这条一直空着。W18 补上：把 W16 的假宿主换成**真 inject**。
 
@@ -659,5 +665,92 @@ W22_SEED=0 node scripts/wb-real-queue-verify.mjs   # 直接执行用户当前画
 ### 至此注入桥六层闭环
 
 W17 单测(47) → W16 假宿主(9) → W18 真产物+桩 app(12) → W19 真产物+手工 ComfyUI(10) →
-W20 应用自管实例(5) → W21 摘要去重真机(3) → **W22 真队列出图(7)**。
+W20 应用自管实例(5) → W21 摘要去重真机(3) → **W22 真队列出图(7)** → **W23 注入时序(9)**。
 侧栏聊天的真 LLM 决策链路由 S11（真 LLM + 真 ComfyUI）覆盖 —— C 侧栏的执行链路已全部真实闭环。
+
+---
+
+## W23 注入**晚于 window load** 时的 A→C 工作流重放（真产物 + 桩宿主，9/9）
+
+**用户报障**：在 A 界面（独立工作台）某个 app 里点「打开工作流」，切到 C 界面（ComfyUI 侧栏）
+**没有加载**那个工作流；且「不知道什么时候出现的」。
+
+```bash
+cd /d/artifyfun/Comfy-Desktop
+pnpm --filter artifylab-frontend run build:inject   # 必须：dev 读的就是 public/comfy_inject.js
+node scripts/wb-inject-timing-verify.mjs            # 自带路由，无需端口/服务器
+```
+
+### 根因：一个挂在 `load` 上的时序竞态，且全程零信号
+
+`bootstrap.js` 原先把「ready 轮询 + `loadWorkflow()` + 定义 `window.__artifyReloadWorkflow`」
+**整块**放进 `window.addEventListener('load')` 回调。但注入是**在 dom-ready 之后**做的
+（`attach.ts` → `executeJavaScript`，要先读 82KB 产物再跨 IPC 传），**可能晚于 load**：
+
+```
+注入晚于 load → load 监听器永不触发 → 轮询不启动 → onReady 不回调
+              → 工作流不加载 + 重放入口从未定义
+              → 主进程 `window.__artifyReloadWorkflow && f()` 静默 no-op
+              → 叠加 __artifyInjectLoaded 幂等守卫（本页不再重注入）→ 整页永久失效，只能重载
+```
+
+它是**纯时序竞态**（注入延迟 vs 页面 load 谁先），取决于本机负载与缓存状态 —— 所以会"某天突然坏"。
+而且零信号：无日志、无异常，main 侧那行还套在 `.catch(() => {})` 里。
+
+**为什么既有 6 层测试全绿却漏掉**：W18/W19 都用 `addInitScript` / 页面内 `<script>`
+在**load 之前**注入（必然早于 load），恰好绕开了真机时序；e2e/acceptance 里也没有任何用例断言 A→C 重放。
+
+### 修复是**两层**，每层各有独立判别点
+
+| 层  | 改动 | 判别断言 |
+| --- | ---- | -------- |
+| 1 | ready 轮询启动不再只挂在 `'load'` 上：`installBootstrap` 作用域内加幂等入口 `startReadyPolling()`，`document.readyState === 'complete'` 时直接启动（`applyReadonlyStyles` 同理补一次） | W23.1 / W23.2 |
+| 2 | 重放入口**提前到「就绪之前」**就定义（不再等 onReady），未就绪时记一条日志而非静默丢弃 | W23.3 / W23.6 |
+
+| 断言 | 覆盖 |
+| ---- | ---- |
+| W23.0 | 对照组（load **前**注入）自证 harness 有效：轮询起 + 工作流装进画布 |
+| W23.1 | **【层1】**晚注入下 ready 轮询确实启动（出现 `Standalone mode detected`） |
+| W23.2 | **【层1】**晚注入下首屏 `loadWorkflow` 真装图（`loadGraphData` 收到 name、`clear=true`） |
+| W23.3 | **【层2】**改服务端 `activeAppId` → 重放 → 画布换成**新** app（重放读到的是最新值） |
+| W23.4 | **【层2】**同 tick 连发两次重放只加载一次（守卫覆盖取配置窗口，日志 `skipped: already loading`） |
+| W23.5 | 全程零未捕获异常 / 零 unhandled rejection |
+| W23.6 | **【层2 判别】**重放**早于就绪**到达：注入瞬间入口已是 function，且被首屏加载兜住 |
+| W23.7/8 | 产物新鲜度：dev 与 prod 两个产物都含兜底代码（防「源码修了、产物没重建」） |
+
+顺带修掉两处孪生病灶（都在 `api_workflow.js`，注释声称已覆盖但实现没有）：
+`getConfig()` / `getAppById()` / `currentApp.template` 解构原本在 `try` **之外** → 失败变成
+unhandled rejection。现在把「取配置 → 取 app → 装图」全链收进同一个 `try/finally`，
+`setIsArtifyLoading(true)` 也提到取配置之前（守卫覆盖整个流程，且每个出口都经 finally 清位）。
+`canvas_patches.js` 的 `onReady()` 加 `once` + 外层 `try/catch`：它是几百行猴补丁的最后一行，
+中途任一处抛错都会让「首屏加载 / 父页 onload 通知」整链静默失效。
+
+### 变异验证：**分层**废掉，看断言是否真的死
+
+只跑绿不算数 —— 每条断言必须能杀死它要守护的那一层。实测（变异打在真产物上）：
+
+| 变异 | 结果 |
+| ---- | ---- |
+| 基线 | **9/9** |
+| 废掉层 1（`if (false && document.readyState === 'complete')`） | **4/9** — W23.1/2/3/4/6 全红，W23.0/5/7/8 绿 |
+| 废掉层 2（`if (false)` 掉提前定义那一段） | **6/9** — W23.3/4/6 红（W23.6 报 `typeof=undefined`） |
+
+> **踩到的假绿**：最初把「核心断言」写成 `typeof __artifyReloadWorkflow === 'function'`，
+> 结果**废掉层 1 后它依然是绿的** —— 因为层 2 的提前定义已经把入口保住了。
+> 断言与修复层必须一一对应：入口**存在**要由层 2 的断言守，轮询**启动**要由层 1 的断言守；
+> 一条断言守两层，等于两层都没守。
+>
+> **顺带一个反直觉观察**：变异 B 下 W23.6 的**最终画布结果仍是对的**
+> （`graphLoads=[换脸工作流-2]`）—— 因为首屏那次加载发生在重放之后，它自己会读到最新
+> `activeAppId`，把丢掉的切换"顺带"补上。所以只看产物结果会漏判，必须断言
+> 「注入瞬间入口是否已存在」这个**中间态**。
+
+### 这次的两个方法论坑
+
+1. **区分"既有红"与"我引入的红"**：`git stash push -- packages/frontend/src/inject`
+   → 用**原源码**重建产物 → 跑同一条用例。只有这样才能把 W18.5 定性为既有（README 的 12/12 已过时），
+   而不是替自己的改动背锅或漏报回归。
+2. **`grep` 收不到脚本崩溃后的行**：变异 B 时脚本在 `window.__artifyReloadWorkflow()` 上
+   `TypeError` 直接死掉，输出只剩前 3 行。断言里的「被调用方」一律要写成
+   `typeof f === 'function' && f()` —— 主进程那行本身就带 `&&` 守卫，用例也该等价。
+

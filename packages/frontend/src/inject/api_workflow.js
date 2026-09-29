@@ -97,23 +97,35 @@ export async function loadWorkflow() {
     return
   }
 
-  const config = await getConfig()
-  if (!config || !config.activeAppId) {
-    console.warn('[ArtifyInject] No active app found in config')
-    return
-  }
-  const currentApp = await getAppById(config.activeAppId)
-  if (!currentApp) {
-    console.warn('[ArtifyInject] Could not fetch current app')
-    return
-  }
-
-  const workflowName = currentApp.name || 'ArtifyLab Workflow'
-  const { workflow } = currentApp.template
-  console.log(`[ArtifyInject] Standalone mode: Loading workflow "${workflowName}"`)
-
+  // loading 位必须在**取配置之前**置位，让上面的重入守卫覆盖整个加载流程
+  // （主进程 A→C 重放与首屏加载可能打进来）；代价是**每一个出口都必须清位**，
+  // 所以下面把「取配置 → 取 app → 装图」全链收进同一个 try/finally。
+  //
+  // 历史病灶：getConfig()/getAppById() 与 `currentApp.template` 解构原本都在
+  // try 之外，任一失败（网络异常 / 接口 404 / app 无 template）都会变成
+  // unhandled rejection——而 catch 的注释却声称已覆盖它们。
   setIsArtifyLoading(true)
   try {
+    const config = await getConfig()
+    if (!config || !config.activeAppId) {
+      console.warn('[ArtifyInject] No active app found in config')
+      return
+    }
+    const currentApp = await getAppById(config.activeAppId)
+    if (!currentApp) {
+      console.warn('[ArtifyInject] Could not fetch current app')
+      return
+    }
+    if (!currentApp.template) {
+      // 与「取不到 app」同义：没有 template 就没有 workflow 可加载。
+      console.warn('[ArtifyInject] Active app has no template; nothing to load')
+      return
+    }
+
+    const workflowName = currentApp.name || 'ArtifyLab Workflow'
+    const { workflow } = currentApp.template
+    console.log(`[ArtifyInject] Standalone mode: Loading workflow "${workflowName}"`)
+
     // Inject name into graph data
     if (workflow && typeof workflow === 'object') {
       workflow.name = workflowName
@@ -199,7 +211,9 @@ export async function loadWorkflow() {
       if (standaloneNamingAttempts >= 20) clearInterval(standaloneNamingInterval)
     }, 500)
   } catch (e) {
-    // getConfig/getAppById/apiRequest/loadGraphData 任一失败原本会变成 unhandled rejection。
+    // 取配置 / 取 app / 装图全链的兜底：任何一步失败都不再是 unhandled
+    // rejection，且 finally 一定会清 loading 位（否则本页将永久
+    // 「skipped: already loading」，比不加载更糟）。
     console.error('[ArtifyInject] loadWorkflow failed:', e)
   } finally {
     setIsArtifyLoading(false)
