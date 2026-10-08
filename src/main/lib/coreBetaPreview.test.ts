@@ -1,4 +1,5 @@
 // @vitest-environment node
+import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CoreBetaGrant } from './coreBetaGrants'
 import type { CoreCheckout } from './version'
@@ -79,6 +80,12 @@ const launchCmd = (...userArgs: string[]): LaunchCommand => ({
   cwd: '/install'
 })
 
+// `splitLaunchCommand` resolves `main.py` against `cwd`, so on Windows the fake
+// install directory comes back with a drive letter (`D:\install\ComfyUI`). The
+// expectation has to be resolved the same way instead of hard-coding the POSIX
+// literal, which only holds on Linux/macOS.
+const COMFYUI_DIR = path.resolve('/install', 'ComfyUI')
+
 const proven = (relations: Record<string, boolean | null>) =>
   h.prove.mockImplementation(async (_repo: string, sha: string) => ({
     relation: relations[sha] ?? null,
@@ -141,8 +148,8 @@ describe('previewCoreBetaArgs', () => {
   it('proves each SHA against the current HEAD, outside the pygit2 breaker', async () => {
     await preview()
     expect(h.prove.mock.calls).toEqual([
-      ['/install/ComfyUI', SHA_A, HEAD],
-      ['/install/ComfyUI', SHA_B, HEAD]
+      [COMFYUI_DIR, SHA_A, HEAD],
+      [COMFYUI_DIR, SHA_B, HEAD]
     ])
     expect(h.exempt).toHaveBeenCalledTimes(2)
   })

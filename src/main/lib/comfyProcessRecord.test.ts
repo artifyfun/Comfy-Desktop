@@ -1688,7 +1688,10 @@ describe('commandLineIsInstall with an exact argv', () => {
   })
 
   it('resolves a relative interpreter or main.py against the working directory', () => {
-    const root = '/home/a/My ComfyUI'
+    // The production code resolves the relative argv with `path.resolve`, which
+    // on Windows prefixes a drive letter, so the fake install root must be
+    // resolved the same way -- the POSIX literal only matches on Linux/macOS.
+    const root = path.resolve('/home/a/My ComfyUI')
     const venv = ['./ComfyUI/.venv/bin/python3', '-s', 'ComfyUI/main.py']
     expect(commandLineIsInstall(venv, root)).toBe(false)
     expect(commandLineIsInstall(venv, root, root)).toBe(true)

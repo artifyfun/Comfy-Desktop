@@ -290,7 +290,11 @@ describe('applyStorageLaunchArgs', () => {
       '--input-directory',
       globalInput,
       '--output-directory',
-      globalOutput
+      globalOutput,
+      // artifylab fork: the workbench live-preview feed needs ComfyUI to emit
+      // latent previews, so `applyStorageLaunchArgs` appends this pair last.
+      '--preview-method',
+      'latent2rgb'
     ])
     // Every section header, root and default in the YAML, in order: one
     // section per dir, the shared dir first and the default.
