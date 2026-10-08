@@ -741,11 +741,24 @@ export function getAppVersion(): string {
   if (!app.isPackaged) {
     try {
       // Restrict to release tags so unrelated tags (e.g. `bootstrap-v1`) don't bleed in.
+      //
+      // `--first-parent` keeps upstream tags out: our release lineage is the
+      // first-parent chain, and every upstream tag (v1.1.6, …) reaches HEAD only
+      // through a sync merge's SECOND parent. Without the flag describe walks
+      // history in commit-date order, hits a recent upstream merge's second
+      // parent first, and reports e.g. `v1.1.6-563-g…` for a fork release that is
+      // actually `v1.10.0` — wrong (and newer-looking) version in About, the
+      // updates pane, and `app_version` telemetry. Older git (< 2.36) rejects the
+      // flag; the catch below then falls back to package.json's version.
       version =
-        execFileSync('git', ['describe', '--tags', '--always', '--match', 'v[0-9]*'], {
-          cwd: __dirname,
-          encoding: 'utf8'
-        }).trim() || version
+        execFileSync(
+          'git',
+          ['describe', '--tags', '--always', '--first-parent', '--match', 'v[0-9]*'],
+          {
+            cwd: __dirname,
+            encoding: 'utf8'
+          }
+        ).trim() || version
     } catch {}
   }
   _appVersion = version.replace(/^v/, '')
