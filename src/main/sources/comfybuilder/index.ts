@@ -71,7 +71,9 @@ const ENTRY_SWAP_MARKER = '.comfybuilder-entry-swap'
 const ACTIVE_CODE_MARKER = '.comfybuilder-active-code'
 const ROLLBACK_FIELD = 'comfybuilderRollback'
 /** Record field: false when the installed release's author turned
- *  ComfyUI-Manager off. Written once the release's environment has landed. */
+ *  ComfyUI-Manager off. A governed ComfyUI, master 3d9b2d5 (#16167), turns
+ *  it off itself under any custom-node policy. Written once the release's
+ *  environment has landed. */
 const MANAGER_ALLOWED_FIELD = 'comfybuilderManagerAllowed'
 
 /** The record fields that carry a release's manager answer: the answer itself

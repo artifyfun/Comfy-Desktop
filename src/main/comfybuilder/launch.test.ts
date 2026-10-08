@@ -26,6 +26,8 @@ function layout(
   }
 }
 
+/** Write a policy envelope shaped like a governed archive's (signature unchecked). */
+
 describe('launch', () => {
   let dir: string
   beforeEach(() => {

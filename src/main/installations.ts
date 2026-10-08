@@ -49,10 +49,10 @@ export interface InstallationRecord {
    *  settings; else uses the per-install `outputDir` below or ComfyUI's
    *  `<installPath>/output` default. */
   useSharedOutput?: boolean
-  /** Per-install extra (external) model directories, always applied in
-   *  addition to the shared dirs (when those are enabled). Never includes the
-   *  install's own models dir. Written to the per-install
-   *  `--extra-model-paths-config` YAML at launch. */
+  /** Per-install extra (external) model directories, applied in addition to
+   *  the shared dirs (when those are enabled). Never includes the install's own
+   *  models dir. Written to the per-install `--extra-model-paths-config` YAML at
+   *  launch. */
   modelDirs?: string[]
   /** Effective dir promoted to primary (`is_default`); may point at a shared
    *  or per-install dir. Null/absent means the first shared dir when shared

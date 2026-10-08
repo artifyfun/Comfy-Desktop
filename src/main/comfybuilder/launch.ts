@@ -116,8 +116,8 @@ export function buildLaunchSpec(installPath: string, opts: LaunchOptions = {}): 
 
   const raw = (opts.launchArgs ?? DEFAULT_LAUNCH_ARGS).trim()
   const all = raw.length > 0 ? parseArgs(raw) : []
-  const parsed =
-    opts.managerAllowed === false ? all.filter((arg) => !isManagerEnablingArg(arg)) : all
+  const managerAllowed = opts.managerAllowed !== false
+  const parsed = managerAllowed ? all : all.filter((arg) => !isManagerEnablingArg(arg))
   return {
     cmd: python,
     args: ['-s', path.join('ComfyUI', 'main.py'), ...parsed],

@@ -253,6 +253,19 @@ export interface DetailFieldOption {
   data?: Record<string, unknown>
 }
 
+/** One Core beta grant as the settings view shows it. */
+export interface BetaArgView {
+  arg: string
+  /** Payload-supplied feature name, or `null` when the payload named none. */
+  name: string | null
+}
+
+/** The running session's grants, or while stopped those the next launch is eligible for. */
+export interface CoreBetaArgs {
+  timing: 'session' | 'next-launch'
+  args: BetaArgView[]
+}
+
 export interface ComfyArgDef {
   name: string
   flag: string
@@ -512,6 +525,14 @@ export interface PortConflictInfo {
   pids?: number[]
   nextPort?: number
   isComfy?: boolean
+  /** The holder is this install's ComfyUI left running by an earlier Desktop, and it is still
+   *  running a prompt. "Stop" relaunches with `stopBusyPriorProcess`, which re-proves ownership
+   *  and stops it through the launch path rather than by port. */
+  priorBusy?: boolean
+  /** With `priorBusy`: it never answered whether it is working, so nothing may claim it is. */
+  priorUnknown?: boolean
+  /** With `priorBusy`: it is not the earlier ComfyUI but processes it left behind (`pids`). */
+  priorSurvivors?: boolean
 }
 
 export interface AddResult {
@@ -738,6 +759,18 @@ export interface NvidiaDriverCheck {
   driverVersion: string
   minimumVersion: string
   supported: boolean
+}
+
+export type TemplateDownloadStatus = 'resolving' | 'downloading' | 'done' | 'error' | 'cancelled'
+
+/** Model download progress for a prepared performance-test example workflow. */
+export interface ExampleWorkflowDownload {
+  status: TemplateDownloadStatus
+  /** 0–100, or -1 while the total is unknown. */
+  percent: number
+  /** Localized progress line, e.g. "model.safetensors (1 of 3) — 2.1 / 14 GB …". */
+  message: string
+  error?: string
 }
 
 export interface DiskSpaceInfo {
@@ -1268,6 +1301,23 @@ export interface ElectronApi {
     message?: string
     canceled?: boolean
   }>
+  getPerformanceTestExampleWorkflows(
+    installationId: string
+  ): Promise<{ options: FieldOption[]; diskSpace: DiskSpaceInfo | null }>
+  /** Stores the workflow and starts its model download in the background; later
+   *  progress arrives through `onPerformanceTestExampleDownload`. */
+  preparePerformanceTestExampleWorkflow(
+    installationId: string,
+    templateId: string
+  ): Promise<{
+    ok: boolean
+    filePath?: string
+    /** Model download progress at start. */
+    download?: ExampleWorkflowDownload
+    /** `offline`: the workflow repository was unreachable. `unavailable`: it has no such example. */
+    reason?: 'offline' | 'unavailable'
+    message?: string
+  }>
   deletePerformanceTestWorkflow(
     filePath: string
   ): Promise<{ ok: boolean; status?: 'deleted' | 'preserved'; message?: string }>
@@ -1567,6 +1617,7 @@ export interface ElectronApi {
   getListActions(installationId: string): Promise<ListAction[]>
   getDetailSections(installationId: string): Promise<DetailSection[]>
   getComfyArgs(installationId: string): Promise<{ args: ComfyArgDef[]; error?: string } | null>
+  getCoreBetaArgs(installationId: string, launchArgs?: string): Promise<CoreBetaArgs>
   runAction(
     installationId: string,
     actionId: string,
@@ -1740,6 +1791,10 @@ export interface ElectronApi {
   onComfyOutput(callback: (data: ComfyOutputData) => void): Unsubscribe
   onPerformanceTestProgress(
     callback: (data: { sessionId: string; completedRuns: number; totalRuns: number }) => void
+  ): Unsubscribe
+  /** Model download progress of a prepared example workflow, until it settles. */
+  onPerformanceTestExampleDownload(
+    callback: (data: { filePath: string; download: ExampleWorkflowDownload }) => void
   ): Unsubscribe
   onComfyExited(callback: (data: ComfyExitedData) => void): Unsubscribe
   /** Crash broadcast to every renderer (unlike `onComfyExited`, which only
@@ -2031,11 +2086,13 @@ export const PICKER_SETTINGS_CHANNELS = {
   importSnapshotsConfirm: 'comfy-titlepopup:picker-settings-import-snapshots-confirm',
   previewSnapshotFile: 'comfy-titlepopup:picker-settings-preview-snapshot-file',
   getComfyArgs: 'comfy-titlepopup:picker-settings-get-comfy-args',
+  getCoreBetaArgs: 'comfy-titlepopup:picker-settings-get-core-beta-args',
   browseFolder: 'comfy-titlepopup:picker-settings-browse-folder',
   previewLocalMigration: 'comfy-titlepopup:picker-settings-preview-local-migration',
   relaunchApp: 'comfy-titlepopup:picker-settings-relaunch-app',
   getLocaleMessages: 'comfy-titlepopup:picker-settings-get-locale-messages',
   getLocale: 'comfy-titlepopup:picker-settings-get-locale',
   getStableTags: 'comfy-titlepopup:picker-settings-get-stable-tags',
-  getUniqueName: 'comfy-titlepopup:picker-settings-get-unique-name'
+  getUniqueName: 'comfy-titlepopup:picker-settings-get-unique-name',
+  openGlobalSettings: 'comfy-titlepopup:picker-settings-open-global-settings'
 } as const
