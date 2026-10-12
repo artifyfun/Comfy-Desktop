@@ -59,12 +59,15 @@ export const APPROVAL_WHITELIST_DEFAULT: readonly string[] = [
 export type ToolRiskTier = 'read' | 'write' | 'execute'
 
 /**
- * 会话级审批模式(前端下拉 保守/标准,随 agent/run 请求透传):
- * - conservative:只 read 自动放行;write + execute 都弹卡审批(最严)。
+ * 会话级审批模式(前端下拉 询问/保守/标准,随 agent/run 请求透传):
+ * - ask         :只读对话模式(借鉴 ai-art-engine Ask 模式,服务端硬约束而非
+ *                 提示词)——工具面整体收窄:ListTools 不返回任何工具,CallTool
+ *                 一律被拒(拦截点在 approvalRegistry 的门控包装层,不走审批卡)。
+ * - conservative:只 read 自动放行;write + execute 都弹卡审批(最严可执行档)。
  * - standard    :read + write 自动放行;只有 execute 弹卡(≈ C14 白名单语义,
  *                 默认值,与门控引入前的行为等价——红线:默认不突变)。
  */
-export type ApprovalMode = 'conservative' | 'standard'
+export type ApprovalMode = 'ask' | 'conservative' | 'standard'
 
 /** 默认审批模式:standard(= legacy whitelist 语义:执行家族弹卡、其余自动放行) */
 export const APPROVAL_MODE_DEFAULT: ApprovalMode = 'standard'
@@ -161,6 +164,8 @@ export interface ApprovalGate {
    * 未设置的 thread 走 defaultMode(= standard,与 legacy whitelist 语义等价)。
    */
   setMode(threadId: string, mode: ApprovalMode): void
+  /** 读取某 thread 当前审批模式(未设置走 defaultMode;ask 模式拦截层用) */
+  modeOf(threadId: string): ApprovalMode
   /**
    * 登记终态回执钩子(与 notify 同生命周期,unregister 一并清理;审查修复 M4)。
    * 审批被 resolve(应答/超时兜底)时回调 {requestId, threadId, toolName, approved}。
@@ -292,6 +297,10 @@ export function createApprovalGate(opts: {
 
     setMode(threadId, mode) {
       modes.set(threadId, mode)
+    },
+
+    modeOf(threadId) {
+      return modes.get(threadId) ?? defaultMode
     },
 
     rejectPending(threadId) {

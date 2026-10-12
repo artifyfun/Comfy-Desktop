@@ -854,6 +854,8 @@
   "workbenchApprovalModeTitle": "Tool approval mode: auto-release policy for low-risk tools",
   "workbenchApprovalModeStandardShort": "Standard",
   "workbenchApprovalModeConservativeShort": "Conservative",
+  "workbenchApprovalModeAskShort": "Ask",
+  "workbenchApprovalAsk": "Ask: read-only chat, all tools disabled",
   "workbenchApprovalStandard": "Standard: read & local-write auto-run, only execute asks",
   "workbenchApprovalConservative": "Conservative: read-only auto-runs, local-write & execute ask",
   "workbenchReasoningEffort": "Thinking",

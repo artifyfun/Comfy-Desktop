@@ -1,6 +1,6 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import type { WBToolFn } from './shared'
-import { requireSession, text, pollUntilDone } from './shared'
+import { requireSession, text, pollUntilDone, unknownArgWarnings } from './shared'
 import { inferFirstMediaSlot } from '../executor'
 
 import { getObjectInfo } from '../../comfyClient'
@@ -252,6 +252,17 @@ export const workflowTools: Array<{ tool: Tool; fn: WBToolFn }> = [
         workflow
       )
       if (remote.length > 0) return text({ ok: false, stage: 'validation', issues: remote })
+      // warnings 化（同 wb_execute_template）：schema 外的顶层参数逐条点名回告
+      const warnings = unknownArgWarnings(args, [
+        'workflow',
+        'name',
+        'seed',
+        'randomize_seed',
+        'node_overrides',
+        'nodeOverrides',
+        'use_previous_output',
+        'wait'
+      ])
       const execution = await workbenchService.executeWorkflow(sessionId, workflow, {
         name: args.name ? String(args.name) : undefined,
         seed: args.seed != null ? Number(args.seed) : null,
@@ -260,9 +271,15 @@ export const workflowTools: Array<{ tool: Tool; fn: WBToolFn }> = [
       })
       workbenchService.markOrchestrated(sessionId)
       if (args.wait === false) {
-        return text({ ok: true, stage: 'submitted', prompt_id: execution.promptId })
+        return text({
+          ok: true,
+          stage: 'submitted',
+          prompt_id: execution.promptId,
+          ...(warnings.length > 0 ? { warnings } : {})
+        })
       }
-      return text(await pollUntilDone(sessionId, execution.promptId))
+      const done = await pollUntilDone(sessionId, execution.promptId)
+      return text(warnings.length > 0 ? { ...done, warnings } : done)
     }
   }
 ]

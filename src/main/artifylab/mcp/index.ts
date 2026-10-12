@@ -24,6 +24,7 @@ import {
   mcpIdentityStorage
 } from '../agui/approvalRegistry'
 import { getOrCreateMcpToken, validateMcpToken } from './auth'
+import { appendAudit } from './auditLog'
 import { logger } from '../utils/logger'
 
 export function getMcpToken(): string {
@@ -53,6 +54,9 @@ export function createMcpRouter(): Router {
       // decide agent（带会话身份）只暴露 wb_* 编排工具：app 工具是给外部 MCP
       // 客户端的，对决策线程是纯常驻噪音。无身份（外部）返回全量清单。
       const identity = mcpIdentityStorage.getStore()
+      // ask 模式(服务端硬约束):工具清单直接清空,模型侧没有任何执行抓手——
+      // 与 CallTool 拦截层双保险(ListTools 缓存失效时调用仍会被拒)
+      if (identity && getApprovalGate().modeOf(identity) === 'ask') return { tools: [] }
       const tools = identity
         ? registry.list().filter((t) => !EXTERNAL_ONLY_TOOL_NAMES.has(t.name))
         : registry.list()
@@ -60,16 +64,29 @@ export function createMcpRouter(): Router {
     })
     s.setRequestHandler(CallToolRequestSchema, async (req) => {
       const { name, arguments: args } = req.params
+      // 审计日志（借鉴 ai-art-engine mcp-audit.jsonl）：全量工具调用落盘
+      // （时间/工具/参数摘要/耗时/结果），排查「跑绿≠有效」的第一手证据
+      const startedAt = Date.now()
+      const hasIdentity = Boolean(mcpIdentityStorage.getStore())
+      let result: { content: unknown[]; isError?: boolean }
       try {
         // 身份经 AsyncLocalStorage 透传(HTTP 层 mcpIdentityStorage.run 注入,
         // 门控 registry 层读取)——此处无需显式传第三参
-        return (await registry.handle(name, args ?? {})) as {
+        result = (await registry.handle(name, args ?? {})) as {
           content: unknown[]
           isError?: boolean
         }
       } catch (e) {
-        return { content: [{ type: 'text', text: `Error: ${String(e)}` }], isError: true }
+        result = { content: [{ type: 'text', text: `Error: ${String(e)}` }], isError: true }
       }
+      appendAudit({
+        tool: name,
+        args: args ?? {},
+        durationMs: Date.now() - startedAt,
+        isError: result.isError === true,
+        hasIdentity
+      })
+      return result
     })
     return s
   }

@@ -107,6 +107,22 @@ export function text(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
 }
 
+/**
+ * 未知顶层参数 → warnings（借鉴 ai-art-engine workflow_commit 的 warnings 语义：
+ * 不可解析的参数「逐条列 warnings 不静默丢弃」，杜绝静默 no-op）。
+ * known 为该工具 inputSchema 声明 + 兼容别名的全量键；额外参数
+ * （additionalProperties:false 语义下模型仍可能输出）一律点名回告。
+ */
+export function unknownArgWarnings(
+  args: Record<string, unknown>,
+  known: readonly string[]
+): string[] {
+  const knownSet = new Set(known)
+  return Object.keys(args ?? {})
+    .filter((k) => !knownSet.has(k))
+    .map((k) => `未知参数被忽略：${k}（不在本工具的入参 schema 内，检查拼写或别名）`)
+}
+
 /** wb_execute_template 参数 → WorkbenchPlan（与 decide 快路径同构，命名 snake_case 亲和 MCP） */
 export function toPlan(args: Record<string, unknown>): WorkbenchPlan {
   const intent = String(args.intent ?? 'image') as WorkbenchPlan['intent']

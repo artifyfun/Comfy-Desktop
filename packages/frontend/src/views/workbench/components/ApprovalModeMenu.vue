@@ -9,6 +9,15 @@
     </button>
     <template #overlay>
       <a-menu @click="onMenu">
+        <a-menu-item key="ask">
+          <span class="flex flex-col py-0.5">
+            <span class="flex items-center gap-2 text-[13px]">
+              <i v-if="mode === 'ask'" class="fas fa-check text-[var(--wb-accent)] w-3.5"></i>
+              <i v-else class="fas fa-check w-3.5 opacity-0"></i>
+              {{ t('workbenchApprovalAsk') }}
+            </span>
+          </span>
+        </a-menu-item>
         <a-menu-item key="standard">
           <span class="flex flex-col py-0.5">
             <span class="flex items-center gap-2 text-[13px]">
@@ -47,11 +56,11 @@ const emit = defineEmits(['update:mode'])
 
 const { t } = useI18n()
 
-const currentLabel = computed(() =>
-  props.mode === 'conservative'
-    ? t('workbenchApprovalModeConservativeShort')
-    : t('workbenchApprovalModeStandardShort'),
-)
+const currentLabel = computed(() => {
+  if (props.mode === 'ask') return t('workbenchApprovalModeAskShort')
+  if (props.mode === 'conservative') return t('workbenchApprovalModeConservativeShort')
+  return t('workbenchApprovalModeStandardShort')
+})
 
 /** a-menu 点击：antd-vue 事件载荷为 { key, keyPath, item, domEvent } */
 function onMenu({ key }) {

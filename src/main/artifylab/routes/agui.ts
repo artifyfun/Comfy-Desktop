@@ -157,7 +157,7 @@ export function createAguiRouter(deps: { store?: EventStore } = {}): express.Rou
     const gate = getApprovalGate()
     // B1:会话级审批模式落 gate(per-thread)。run 结束 finally 的 unregister
     // 会一并清理 mode——同 thread 下一次 run 不带 approvalMode 时回到默认 standard。
-    if (approvalMode === 'conservative' || approvalMode === 'standard') {
+    if (approvalMode === 'ask' || approvalMode === 'conservative' || approvalMode === 'standard') {
       gate.setMode(threadId, approvalMode)
     }
     // E1:effort 枚举校验(非法值/缺省 = undefined = 不传,decide 保持会话现状)。

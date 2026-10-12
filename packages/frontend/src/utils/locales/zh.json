@@ -854,6 +854,8 @@
   "workbenchApprovalModeTitle": "工具审批模式：低危操作自动放行策略",
   "workbenchApprovalModeStandardShort": "标准",
   "workbenchApprovalModeConservativeShort": "保守",
+  "workbenchApprovalModeAskShort": "询问",
+  "workbenchApprovalAsk": "询问：只读对话模式，所有工具禁用",
   "workbenchApprovalStandard": "标准：只读与本地写自动放行，仅执行类需确认",
   "workbenchApprovalConservative": "保守：只读自动放行，本地写与执行类都需确认",
   "workbenchReasoningEffort": "思考",

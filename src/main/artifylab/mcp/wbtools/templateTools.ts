@@ -1,6 +1,13 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import type { WBToolFn } from './shared'
-import { requireSession, text, toPlan, pollUntilDone, pollBatchUntilDone } from './shared'
+import {
+  requireSession,
+  text,
+  toPlan,
+  pollUntilDone,
+  pollBatchUntilDone,
+  unknownArgWarnings
+} from './shared'
 
 import { workbenchService } from '../../workbench/service'
 import { validatePlanLocal } from '../../workbench/plan'
@@ -160,6 +167,23 @@ export const templateTools: Array<{ tool: Tool; fn: WBToolFn }> = [
     fn: async (args, identity) => {
       const sessionId = requireSession(identity)
       const plan = toPlan(args)
+      // warnings 化（借鉴 ai-art-engine workflow_commit）：schema 外的顶层参数
+      // 逐条点名回告，不静默丢弃——toPlan 只映射已知键，多出来的键原本无声蒸发
+      const warnings = unknownArgWarnings(args, [
+        'intent',
+        'template_id',
+        'templateId',
+        'params',
+        'node_overrides',
+        'nodeOverrides',
+        'asset_ids',
+        'assetIds',
+        'use_previous_output',
+        'batch_items',
+        'batch_shared_params',
+        'wait',
+        'reason'
+      ])
       const templates = workbenchService.listTemplates(sessionId)
       const validation = validatePlanLocal(plan, templates)
       if (validation.issues.length > 0 || !validation.template) {
@@ -206,7 +230,8 @@ export const templateTools: Array<{ tool: Tool; fn: WBToolFn }> = [
           status: done.status,
           outputs: done.results.flatMap((r) => r.files ?? []),
           assets: assetMount.applied,
-          asset_issues: assetMount.issues
+          asset_issues: assetMount.issues,
+          ...(warnings.length > 0 ? { warnings } : {})
         })
       }
       const execution = await workbenchService.execute(sessionId, plan, validation.template, [])
@@ -217,13 +242,15 @@ export const templateTools: Array<{ tool: Tool; fn: WBToolFn }> = [
           prompt_id: execution.promptId,
           status: execution.status,
           assets: assetMount.applied,
-          asset_issues: assetMount.issues
+          asset_issues: assetMount.issues,
+          ...(warnings.length > 0 ? { warnings } : {})
         })
       }
       return text({
         ...(await pollUntilDone(sessionId, execution.promptId)),
         assets: assetMount.applied,
-        asset_issues: assetMount.issues
+        asset_issues: assetMount.issues,
+        ...(warnings.length > 0 ? { warnings } : {})
       })
     }
   }

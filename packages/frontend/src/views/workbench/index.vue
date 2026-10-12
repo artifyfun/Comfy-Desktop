@@ -1388,10 +1388,11 @@ const curSession = ref(null)
 // B1 工具审批模式(会话级偏好,低危自动放行策略):localStorage 持久化,
 // 每轮 run 随请求透传 → 后端 gate per-thread 生效。同样须在桥前声明——
 // 桥经 getApprovalMode 每轮自取,自动恢复/画布嵌入链路同源生效。
+const APPROVAL_MODE_UI = ['ask', 'conservative', 'standard']
+const storedApprovalMode =
+  typeof localStorage !== 'undefined' ? localStorage.getItem('wb.approvalMode') : null
 const approvalMode = ref(
-  typeof localStorage !== 'undefined' && localStorage.getItem('wb.approvalMode') === 'conservative'
-    ? 'conservative'
-    : 'standard',
+  APPROVAL_MODE_UI.includes(storedApprovalMode) ? storedApprovalMode : 'standard',
 )
 // E1 决策推理强度(会话级偏好,思考投入档位):localStorage 持久化(UI 偏好而非
 // 会话数据——不开历史会话联动),每轮 run 随请求透传 → 后端 codex 引擎
@@ -1937,7 +1938,7 @@ async function saveModelOverride(v) {
  * 后端 gate per-thread 生效(run 结束即失效,无跨会话泄漏)。
  */
 function saveApprovalMode(v) {
-  const mode = v === 'conservative' ? 'conservative' : 'standard'
+  const mode = APPROVAL_MODE_UI.includes(v) ? v : 'standard'
   approvalMode.value = mode
   try {
     localStorage.setItem('wb.approvalMode', mode)

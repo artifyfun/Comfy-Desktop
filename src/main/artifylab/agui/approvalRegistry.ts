@@ -88,6 +88,19 @@ export function createApprovalGatedRegistry(inner: ToolRegistry, gate: ApprovalG
       const threadId = mcpIdentityStorage.getStore()
       // 无身份(外部 MCP 客户端)→ 完全直通,不传身份(保持旧单槽语义,零行为变化)
       if (!threadId) return inner.handle(name, args)
+      // ask 模式(借鉴 ai-art-engine,服务端硬约束而非提示词):工具一律拒绝,
+      // 不进审批卡——只读对话模式下模型不该有任何执行抓手
+      if (gate.modeOf(threadId) === 'ask') {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `当前为只读对话模式(询问),工具 ${name} 不可用。请直接用文字回答用户;需要执行操作时请用户把审批模式切到「标准」或「保守」。`
+            }
+          ],
+          isError: true
+        }
+      }
       const result = await gate.intercept(threadId, name, args)
       if (!result.approved) {
         return {

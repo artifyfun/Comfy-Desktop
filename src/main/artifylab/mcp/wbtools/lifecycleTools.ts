@@ -8,6 +8,8 @@ import { listBatchQueue, type BatchJobSummary } from '../../services/batchRunner
 import { workbenchService } from '../../workbench/service'
 import { canvasWorkflowStore } from '../../workbench/canvasWorkflowStore'
 import { toTemplateId } from '../../workbench/templateCore'
+import appStoreManager from '../../appStore'
+import { contentWithImages, outputThumbnails } from './thumbnails'
 
 export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
   {
@@ -171,7 +173,7 @@ export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
     tool: {
       name: 'wb_get_outputs',
       description:
-        '读取会话最近一次（或指定 prompt_id 的）执行产物文件清单，非阻塞、立即返回。用于执行提交后（wait=false 或跨轮）取产物文件名/引用；要「等跑完再继续」请用 wb_execute_template 的 wait 模式。',
+        '读取会话最近一次（或指定 prompt_id 的）执行产物文件清单，非阻塞、立即返回；图片类产物会附带缩略图（最多 4 张、最长边 512px 的 image content），多模态客户端可直接看图自查质量。用于执行提交后（wait=false 或跨轮）取产物文件名/引用；要「等跑完再继续」请用 wb_execute_template 的 wait 模式。',
       inputSchema: {
         type: 'object',
         properties: {
@@ -202,13 +204,20 @@ export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
           hint: 'still running — use wb_poll_execution to await completion'
         })
       }
-      return text({
-        ok: true,
-        status: exec.status,
-        prompt_id: exec.promptId,
-        outputs: exec.outputs ?? [],
-        error: exec.error
-      })
+      const outputs = exec.outputs ?? []
+      // 回图（借鉴 ai-art-engine 多模态回图）：图片产物附缩略图，agent 可自查
+      // 生成质量（四道关的「肉眼开图」自动化）；失败逐张跳过不影响文本清单
+      const thumbnails = await outputThumbnails(outputs, appStoreManager.getConfig().comfyHost)
+      return contentWithImages(
+        {
+          ok: true,
+          status: exec.status,
+          prompt_id: exec.promptId,
+          outputs,
+          error: exec.error
+        },
+        thumbnails
+      )
     }
   },
   {
