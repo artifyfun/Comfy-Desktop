@@ -1,6 +1,6 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import type { WBToolFn } from './shared'
-import { requireSession, text } from './shared'
+import { requireSession, text, thumbnailsForExec } from './shared'
 import type { WorkbenchPlan } from '../../workbench/plan'
 import type { ComfyPrompt, ParamNode } from '../../appStore'
 import { listBatchQueue, type BatchJobSummary } from '../../services/batchRunner'
@@ -165,8 +165,11 @@ export const lifecycleTools: Array<{ tool: Tool; fn: WBToolFn }> = [
     },
     fn: async (args, identity) => {
       const sessionId = requireSession(identity)
-      const r = await workbenchService.pollExecution(sessionId, String(args.prompt_id))
-      return text({ status: r.status, outputs: r.outputs, error: r.error })
+      const promptId = String(args.prompt_id)
+      const r = await workbenchService.pollExecution(sessionId, promptId)
+      // 回图：终态产物附缩略图（wb_get_outputs 同款，agent 无需多调一轮）
+      const thumbs = r.status === 'success' ? await thumbnailsForExec(sessionId, promptId) : []
+      return contentWithImages({ status: r.status, outputs: r.outputs, error: r.error }, thumbs)
     }
   },
   {

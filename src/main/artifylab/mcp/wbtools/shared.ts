@@ -10,6 +10,7 @@ import { workbenchService } from '../../workbench/service'
 import type { WorkbenchPlan } from '../../workbench/plan'
 import { listBatchQueue, type BatchJobSummary } from '../../services/batchRunner'
 import { emitSessionCustom } from '../../agui/sessionEmit'
+import { outputThumbnails, type McpImageContent } from './thumbnails'
 
 export type WBToolFn = (args: Record<string, unknown>, identity?: string) => Promise<unknown>
 
@@ -105,6 +106,29 @@ export function requireSession(identity?: string): string {
 
 export function text(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] }
+}
+
+/**
+ * 按执行记录取产物缩略图（AIAE 多模态回图，wb_get_outputs 同款）：
+ * wait=true 阻塞执行 / wb_poll_execution 路径用——agent 拿到最终产物时
+ * 直接看图自查质量，不必再调 wb_get_outputs。无执行记录/非图片/失败
+ * 返回空数组（增强不阻断主结果）。
+ */
+export async function thumbnailsForExec(
+  sessionId: string,
+  promptId: string
+): Promise<McpImageContent[]> {
+  try {
+    // appStore 动态引入：静态引会把 electron 依赖链拉进模块加载期，
+    // previewEmit.test 这类「vi.mock 掉 workbench/service」的测试会炸
+    const { default: appStoreManager } = await import('../../appStore')
+    const exec = workbenchService
+      .getSession(sessionId)
+      ?.executions.find((e) => e.promptId === promptId)
+    return await outputThumbnails(exec?.outputs, appStoreManager.getConfig().comfyHost)
+  } catch {
+    return []
+  }
 }
 
 /**

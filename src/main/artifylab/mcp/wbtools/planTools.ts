@@ -20,6 +20,7 @@ import {
   clearSessionEmitsForTest,
   sessionEmitFor
 } from '../../agui/sessionEmit'
+import { getApprovalGate } from '../../agui/approvalRegistry'
 import { logger } from '../../utils/logger'
 
 // ==================== SSE 桥（共享注册表，见 agui/sessionEmit.ts） ====================
@@ -160,30 +161,38 @@ export const planTools: Array<{ tool: Tool; fn: WBToolFn }> = [
 
       // 有分歧点：先收口该会话的旧挂起(防多卡并存),再登记新挂起
       cancelAllPlans(sessionId)
+      // AIAE Plan 语义：拍板前把本会话压到「只读」——gate 层收窄 ListTools
+      // 并拒 write/execute（服务端硬约束）。唤醒/超时/异常统一在 finally 清除。
+      getApprovalGate().setPlanPending(sessionId, true)
       const pendingId = randomUUID()
       logger.info(`[planTools] 挂起 pendingId=${pendingId} sessionId=${sessionId}`)
-      if (emit) {
-        emit({
-          type: 'CUSTOM',
-          name: 'plan_proposed',
-          value: { title, steps, options, sessionId, requestId: pendingId }
-        } as never)
-      } else {
-        pendingChoices.delete(pendingId)
-        return text({
-          ok: true,
-          acknowledged: true,
-          note: '当前无活跃画布会话通道，计划无法展示。请按最保守方案继续或向用户询问。'
+      let choice: { approved: boolean; optionId?: string }
+      try {
+        if (emit) {
+          emit({
+            type: 'CUSTOM',
+            name: 'plan_proposed',
+            value: { title, steps, options, sessionId, requestId: pendingId }
+          } as never)
+        } else {
+          return text({
+            ok: true,
+            acknowledged: true,
+            note: '当前无活跃画布会话通道，计划无法展示。请按最保守方案继续或向用户询问。'
+          })
+        }
+        choice = await new Promise<{ approved: boolean; optionId?: string }>((settle) => {
+          const timer = setTimeout(() => {
+            pendingChoices.delete(pendingId)
+            settle({ approved: false })
+          }, PLAN_TIMEOUT_MS)
+          timer.unref?.()
+          pendingChoices.set(pendingId, { sessionId, settle, timer })
         })
+      } finally {
+        // 拍板/跳过/超时/异常任一出口都解除只读压紧（run 收口另有 unregister 兜底）
+        getApprovalGate().setPlanPending(sessionId, false)
       }
-      const choice = await new Promise<{ approved: boolean; optionId?: string }>((settle) => {
-        const timer = setTimeout(() => {
-          pendingChoices.delete(pendingId)
-          settle({ approved: false })
-        }, PLAN_TIMEOUT_MS)
-        timer.unref?.()
-        pendingChoices.set(pendingId, { sessionId, settle, timer })
-      })
       if (!choice.approved) {
         return text({
           ok: false,

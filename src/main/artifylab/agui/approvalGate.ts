@@ -180,6 +180,19 @@ export interface ApprovalGate {
    */
   rejectPending(threadId: string): number
   /**
+   * 设置某 thread 的「计划待拍板」状态（AIAE Plan 语义，借鉴 ai-art-engine）：
+   * pending 期间 ListTools 只回 read 级工具、CallTool 拒绝 write/execute——
+   * 拍板前模型没有任何写/执行抓手（由 planTools 挂起/唤醒时调用）。
+   */
+  setPlanPending(threadId: string, pending: boolean): void
+  /** 该 thread 是否处于「计划待拍板」（ListTools 过滤与 CallTool 拦截共用） */
+  isPlanPending(threadId: string): boolean
+  /**
+   * 调用前置检查（门控 registry 在 intercept 之前用）：ask 模式全拒、
+   * plan 待拍板拒 write/execute。返回 reason 供合成拒绝文本。
+   */
+  checkCall(threadId: string, toolName: string): { allowed: boolean; reason?: string }
+  /**
    * 工具执行前拦截:无需人审(低危自动放行/白名单外)直通;需人审(高风险工具)
    * 置 pending + notify 并挂起 Promise。args 非对象时归一化为 {}(防御 MCP 入参)。
    */
@@ -231,6 +244,9 @@ export function createApprovalGate(opts: {
 
   /** threadId → 审批模式(AG-UI run 生命周期;未设置走 defaultMode) */
   const modes = new Map<string, ApprovalMode>()
+
+  /** threadId → 计划待拍板（planTools 挂起/唤醒；unregister 一并清理） */
+  const planPending = new Set<string>()
 
   /** 工具风险级:优先 tiers,未声明时 whitelist 命中按 execute、否则 read(兼容旧语义) */
   function tierOf(toolName: string): ToolRiskTier {
@@ -293,6 +309,39 @@ export function createApprovalGate(opts: {
       onResolvedHooks.delete(threadId)
       // B1:run 生命周期结束,审批模式一并失效(防同 id 复用泄漏上一会话的模式)
       modes.delete(threadId)
+      // AIAE Plan 语义:run 结束计划拍板状态一并清理(与 cancelAllPlans 同口径)
+      planPending.delete(threadId)
+    },
+
+    setPlanPending(threadId, pending) {
+      if (pending) planPending.add(threadId)
+      else planPending.delete(threadId)
+    },
+
+    isPlanPending(threadId) {
+      return planPending.has(threadId)
+    },
+
+    checkCall(threadId, toolName) {
+      // ask 模式:工具一律拒绝(服务端硬约束,不走审批卡)
+      const mode = modes.get(threadId) ?? defaultMode
+      if (mode === 'ask') {
+        return {
+          allowed: false,
+          reason:
+            '当前为只读对话模式(询问),工具不可用。请直接用文字回答用户;需要执行操作时请用户把审批模式切到「标准」或「保守」。'
+        }
+      }
+      // 计划待拍板:确认前只放行 read 级(write/execute 一律拒——拍板前模型
+      // 不该有任何写/执行抓手,对齐 ai-art-engine Plan 语义)
+      if (planPending.has(threadId) && tierOf(toolName) !== 'read') {
+        return {
+          allowed: false,
+          reason:
+            '当前有计划待用户拍板,写/执行类工具暂不可用。等待用户拍板(工具会返回所选方案)后再继续;或先用只读工具补充信息。'
+        }
+      }
+      return { allowed: true }
     },
 
     setMode(threadId, mode) {

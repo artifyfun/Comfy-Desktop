@@ -6,13 +6,17 @@ import {
   toPlan,
   pollUntilDone,
   pollBatchUntilDone,
+  thumbnailsForExec,
   unknownArgWarnings
 } from './shared'
+import { contentWithImages } from './thumbnails'
 
 import { workbenchService } from '../../workbench/service'
 import { validatePlanLocal } from '../../workbench/plan'
 import { assetsStore, type CreativeAsset } from '../../workbench/assetsStore'
 import { mountAssetsToTemplate } from '../../workbench/assetMount'
+import appStoreManager from '../../appStore'
+import { outputThumbnails } from './thumbnails'
 
 /** 资产引用参数归一：数组 / 逗号串 / 单个字符串都收（模型输出形态不一） */
 function normalizeAssetKeys(raw: unknown): string[] {
@@ -220,19 +224,27 @@ export const templateTools: Array<{ tool: Tool; fn: WBToolFn }> = [
           []
         )
         const done = await pollBatchUntilDone(jobId)
-        return text({
-          ok: done.status === 'completed',
-          stage: 'batch',
-          job_id: jobId,
-          total,
-          success: done.success,
-          failed: done.failed,
-          status: done.status,
-          outputs: done.results.flatMap((r) => r.files ?? []),
-          assets: assetMount.applied,
-          asset_issues: assetMount.issues,
-          ...(warnings.length > 0 ? { warnings } : {})
-        })
+        // 回图：批量行的产物文件附缩略图（前 4 张，失败跳过不影响文本结果）
+        const batchThumbs = await outputThumbnails(
+          done.results.flatMap((r) => r.files ?? []),
+          appStoreManager.getConfig().comfyHost
+        )
+        return contentWithImages(
+          {
+            ok: done.status === 'completed',
+            stage: 'batch',
+            job_id: jobId,
+            total,
+            success: done.success,
+            failed: done.failed,
+            status: done.status,
+            outputs: done.results.flatMap((r) => r.files ?? []),
+            assets: assetMount.applied,
+            asset_issues: assetMount.issues,
+            ...(warnings.length > 0 ? { warnings } : {})
+          },
+          batchThumbs
+        )
       }
       const execution = await workbenchService.execute(sessionId, plan, validation.template, [])
       if (args.wait === false) {
@@ -246,12 +258,17 @@ export const templateTools: Array<{ tool: Tool; fn: WBToolFn }> = [
           ...(warnings.length > 0 ? { warnings } : {})
         })
       }
-      return text({
-        ...(await pollUntilDone(sessionId, execution.promptId)),
-        assets: assetMount.applied,
-        asset_issues: assetMount.issues,
-        ...(warnings.length > 0 ? { warnings } : {})
-      })
+      // 回图：wait=true 终态产物附缩略图（agent 直接看图自查，四道关的自动化）
+      const thumbs = await thumbnailsForExec(sessionId, execution.promptId)
+      return contentWithImages(
+        {
+          ...(await pollUntilDone(sessionId, execution.promptId)),
+          assets: assetMount.applied,
+          asset_issues: assetMount.issues,
+          ...(warnings.length > 0 ? { warnings } : {})
+        },
+        thumbs
+      )
     }
   }
 ]

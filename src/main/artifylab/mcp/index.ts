@@ -19,6 +19,7 @@ import {
   EXTERNAL_ONLY_TOOL_NAMES
 } from './workbenchTools'
 import {
+  APPROVAL_TOOL_TIERS,
   createApprovalGatedRegistry,
   getApprovalGate,
   mcpIdentityStorage
@@ -54,12 +55,21 @@ export function createMcpRouter(): Router {
       // decide agent（带会话身份）只暴露 wb_* 编排工具：app 工具是给外部 MCP
       // 客户端的，对决策线程是纯常驻噪音。无身份（外部）返回全量清单。
       const identity = mcpIdentityStorage.getStore()
+      const gate = getApprovalGate()
       // ask 模式(服务端硬约束):工具清单直接清空,模型侧没有任何执行抓手——
       // 与 CallTool 拦截层双保险(ListTools 缓存失效时调用仍会被拒)
-      if (identity && getApprovalGate().modeOf(identity) === 'ask') return { tools: [] }
-      const tools = identity
+      if (identity && gate.modeOf(identity) === 'ask') return { tools: [] }
+      let tools = identity
         ? registry.list().filter((t) => !EXTERNAL_ONLY_TOOL_NAMES.has(t.name))
         : registry.list()
+      // 计划待拍板(AIAE Plan 语义):清单收窄到 read 级——拍板前模型看不到
+      // 写/执行工具(即使 ListTools 缓存过期,CallTool 侧 checkCall 仍会拒)
+      if (identity && gate.isPlanPending(identity)) {
+        tools = tools.filter((t) => {
+          const tier = APPROVAL_TOOL_TIERS[t.name]
+          return tier !== 'write' && tier !== 'execute'
+        })
+      }
       return { tools }
     })
     s.setRequestHandler(CallToolRequestSchema, async (req) => {

@@ -88,16 +88,12 @@ export function createApprovalGatedRegistry(inner: ToolRegistry, gate: ApprovalG
       const threadId = mcpIdentityStorage.getStore()
       // 无身份(外部 MCP 客户端)→ 完全直通,不传身份(保持旧单槽语义,零行为变化)
       if (!threadId) return inner.handle(name, args)
-      // ask 模式(借鉴 ai-art-engine,服务端硬约束而非提示词):工具一律拒绝,
-      // 不进审批卡——只读对话模式下模型不该有任何执行抓手
-      if (gate.modeOf(threadId) === 'ask') {
+      // 调用前置检查(ask 全拒 / 计划待拍板拒 write-execute)——服务端硬约束
+      // 而非提示词;理由注入上下文,模型自行改道(对齐 waa「拒绝原因注入」)
+      const chk = gate.checkCall(threadId, name)
+      if (!chk.allowed) {
         return {
-          content: [
-            {
-              type: 'text',
-              text: `当前为只读对话模式(询问),工具 ${name} 不可用。请直接用文字回答用户;需要执行操作时请用户把审批模式切到「标准」或「保守」。`
-            }
-          ],
+          content: [{ type: 'text', text: chk.reason ?? `工具 ${name} 当前不可用。` }],
           isError: true
         }
       }

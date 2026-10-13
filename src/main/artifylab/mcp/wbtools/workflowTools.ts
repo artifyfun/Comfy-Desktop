@@ -1,6 +1,13 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 import type { WBToolFn } from './shared'
-import { requireSession, text, pollUntilDone, unknownArgWarnings } from './shared'
+import {
+  requireSession,
+  text,
+  pollUntilDone,
+  thumbnailsForExec,
+  unknownArgWarnings
+} from './shared'
+import { contentWithImages } from './thumbnails'
 import { inferFirstMediaSlot } from '../executor'
 
 import { getObjectInfo } from '../../comfyClient'
@@ -279,7 +286,9 @@ export const workflowTools: Array<{ tool: Tool; fn: WBToolFn }> = [
         })
       }
       const done = await pollUntilDone(sessionId, execution.promptId)
-      return text(warnings.length > 0 ? { ...done, warnings } : done)
+      // 回图：wait=true 终态产物附缩略图（wb_execute_template 同款）
+      const thumbs = await thumbnailsForExec(sessionId, execution.promptId)
+      return contentWithImages(warnings.length > 0 ? { ...done, warnings } : done, thumbs)
     }
   }
 ]
