@@ -30,6 +30,7 @@ import {
   civitaiMcpTomlLines,
   preWarmCivitaiMcp
 } from './agentEnv'
+import { extraMcpTomlLinesAsync } from './extraMcp'
 import { getServerPort } from '../server'
 import { getOrCreateMcpToken } from '../mcp/auth'
 import appStoreManager from '../appStore'
@@ -255,6 +256,11 @@ export class AgentRuntime {
           // 不可用时整段省略——wb_query_models action=civitai（主进程
           // fetch，零依赖）兜底，两条通路不互斥。
           ...(uvxAvailable() ? civitaiMcpTomlLines() : []),
+          ``,
+          // stdio 反向桥（借鉴 ai-art-engine）：extra-mcp.json 声明的外部
+          // stdio MCP server（如 blender-mcp）逐条展开——codex 自己 spawn
+          // 子进程，会话级临时 HOME 天然隔离。文件缺失/非法时返回空。
+          ...(await extraMcpTomlLinesAsync(app.getPath('userData'))),
           ``,
           // workspace-write 沙箱默认禁网 —— MCP(streamable HTTP) 属 executor 侧
           // 网络，不放行则每次工具调用被 sandbox network proxy 拦截（探针实测
