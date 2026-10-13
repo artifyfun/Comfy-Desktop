@@ -41,6 +41,9 @@ export const APPROVAL_TOOL_TIERS: Record<string, ToolRiskTier> = {
   wb_validate_workflow: 'read',
   wb_poll_execution: 'read',
   wb_get_outputs: 'read',
+  // —— 宽工具面（ffmpeg/像素分析，纯只读）——
+  wb_extract_frames: 'read',
+  wb_asset_qc: 'read',
   // —— write:本地写(进程内会话数据),conservative 弹卡 ——
   wb_clone_template: 'write',
   wb_remember: 'write',
