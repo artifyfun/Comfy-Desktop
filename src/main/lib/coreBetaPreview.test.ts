@@ -58,15 +58,15 @@ const SHA_A = 'a'.repeat(40)
 const SHA_B = 'b'.repeat(40)
 
 const versionGrant: CoreBetaGrant = {
-  arg: '--enable-assets',
+  arg: '--enable-asset-hashing',
   minCoreVersion: '0.3.80',
-  notice: { description: 'Asset library' }
+  notice: { description: 'Asset hashing' }
 }
 const commitGrant: CoreBetaGrant = { arg: '--enable-agent', commitRanges: [[SHA_A, SHA_B]] }
 
 const SCHEMA: ComfyArgsSchema = {
   args: [],
-  knownFlags: new Set(['enable-assets', 'enable-agent', 'disable-assets'])
+  knownFlags: new Set(['enable-asset-hashing', 'enable-agent', 'disable-assets'])
 }
 
 const INST = {
@@ -114,8 +114,15 @@ afterEach(() => {
 describe('previewCoreBetaArgs', () => {
   it('lists every grant the next launch is eligible for, with its feature name', async () => {
     await expect(preview()).resolves.toEqual([
-      { arg: '--enable-assets', name: 'Asset library' },
+      { arg: '--enable-asset-hashing', name: 'Asset hashing' },
       { arg: '--enable-agent', name: null }
+    ])
+  })
+
+  it('never lists the assets force-off as a beta feature', async () => {
+    h.grants = [versionGrant, { arg: '--disable-assets', minCoreVersion: '0.3.80' }]
+    await expect(preview()).resolves.toEqual([
+      { arg: '--enable-asset-hashing', name: 'Asset hashing' }
     ])
   })
 
@@ -140,7 +147,7 @@ describe('previewCoreBetaArgs', () => {
 
   it("runs no git when the user's own args already decide every commit grant", async () => {
     await expect(preview(launchCmd('--enable-agent'))).resolves.toEqual([
-      { arg: '--enable-assets', name: 'Asset library' }
+      { arg: '--enable-asset-hashing', name: 'Asset hashing' }
     ])
     expect(h.prove).not.toHaveBeenCalled()
   })
@@ -173,7 +180,9 @@ describe('previewCoreBetaArgs', () => {
 
   it('hides a grant git cannot prove, and does not cache that', async () => {
     proven({ [SHA_A]: true })
-    await expect(preview()).resolves.toEqual([{ arg: '--enable-assets', name: 'Asset library' }])
+    await expect(preview()).resolves.toEqual([
+      { arg: '--enable-asset-hashing', name: 'Asset hashing' }
+    ])
     proven({ [SHA_A]: true, [SHA_B]: false })
     await expect(preview()).resolves.toHaveLength(2)
     expect(h.prove.mock.calls.filter((call) => call[1] === SHA_B)).toHaveLength(2)
@@ -181,7 +190,9 @@ describe('previewCoreBetaArgs', () => {
 
   it('hides a grant whose proof failed outright', async () => {
     h.prove.mockRejectedValue(new Error('spawn failed'))
-    await expect(preview()).resolves.toEqual([{ arg: '--enable-assets', name: 'Asset library' }])
+    await expect(preview()).resolves.toEqual([
+      { arg: '--enable-asset-hashing', name: 'Asset hashing' }
+    ])
   })
 
   it('shares one proof between concurrent requests', async () => {
@@ -208,7 +219,9 @@ describe('previewCoreBetaArgs', () => {
     })
     const pending = preview()
     await vi.advanceTimersByTimeAsync(PREVIEW_PROOF_BUDGET_MS)
-    await expect(pending).resolves.toEqual([{ arg: '--enable-assets', name: 'Asset library' }])
+    await expect(pending).resolves.toEqual([
+      { arg: '--enable-asset-hashing', name: 'Asset hashing' }
+    ])
 
     release()
     await vi.advanceTimersByTimeAsync(0)
@@ -259,7 +272,7 @@ describe('withCommittedArgs', () => {
   })
 
   it('withholds a grant the committed args override, before the write lands', async () => {
-    const committed = withCommittedArgs(stored, '--port 8188 --disable-assets')
+    const committed = withCommittedArgs(stored, '--port 8188 --enable-asset-hashing')
     const cmd = launchCmd(...String(committed.launchArgs).split(' '))
     await expect(previewCoreBetaArgs('inst-1', committed, cmd)).resolves.toEqual([
       { arg: '--enable-agent', name: null }
@@ -276,7 +289,7 @@ describe('answerCoreBetaArgs', () => {
   })
 
   it('answers a running install from its session, with no preview', async () => {
-    const args = [{ arg: '--enable-assets', name: 'Asset library' }]
+    const args = [{ arg: '--enable-asset-hashing', name: 'Asset hashing' }]
     await expect(
       answerCoreBetaArgs('inst-1', undefined, lookup({ sessionArgs: () => args }))
     ).resolves.toEqual({ timing: 'session', args })
@@ -293,7 +306,7 @@ describe('answerCoreBetaArgs', () => {
     await expect(answerCoreBetaArgs('inst-1', undefined, lookup())).resolves.toEqual({
       timing: 'next-launch',
       args: [
-        { arg: '--enable-assets', name: 'Asset library' },
+        { arg: '--enable-asset-hashing', name: 'Asset hashing' },
         { arg: '--enable-agent', name: null }
       ]
     })

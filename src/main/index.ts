@@ -122,7 +122,8 @@ import {
   hasCompletedFirstLaunch,
   hasPersistedDeviceId,
   initDeviceId,
-  markIdentityMigrationCompleted
+  markIdentityMigrationCompleted,
+  startMachineIdLookup
 } from './lib/deviceId'
 import { getInitialAnonymousDistinctId } from './lib/websiteAnonymousIdentity'
 import { recoverPendingIdentityRotation } from './lib/pendingIdentityMerge'
@@ -1366,6 +1367,9 @@ const hostReentryGate = createStartupReentryGate()
 if (app.isPackaged && !app.requestSingleInstanceLock()) {
   app.quit()
 } else {
+  // The hardware-id lookup is slow on cold Windows starts; overlap it with Electron start-up.
+  if (process.platform === 'win32') startMachineIdLookup()
+
   if (app.isPackaged) {
     app.on('second-instance', () => {
       // OS-level "open another instance" attempt - focus an existing
