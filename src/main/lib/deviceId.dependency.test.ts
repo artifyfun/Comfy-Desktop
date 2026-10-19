@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest'
 import fs from 'fs'
 import path from 'path'
 
-const VERIFIED_SYSTEMINFORMATION_VERSION = '5.31.5'
+// Lockfile has 5.33.10 since the fork's own dep bump 9b861fca (2026-09-16);
+// upstream wrote this guard against their 5.31.5. Invariant re-verified on
+// win32 with 5.33.10: si.uuid().hardware === si.system().uuid (same string).
+const VERIFIED_SYSTEMINFORMATION_VERSION = '5.33.10'
 
 const LOCKFILE = path.resolve(__dirname, '..', '..', '..', 'pnpm-lock.yaml')
 
