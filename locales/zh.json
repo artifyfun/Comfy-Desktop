@@ -504,6 +504,8 @@
       "launchStart": "正在启动 ComfyUI…",
       "repair": "正在修复安装…",
       "torchRepair": "正在恢复 GPU PyTorch…",
+      "agentRequirements": "正在安装智能体依赖…",
+      "frontendRestore": "正在恢复前端…",
       "securityScan": "正在进行安全扫描…",
       "mountLibraries": "正在加载库…",
       "gpu": "正在初始化 GPU…",
@@ -1330,7 +1332,12 @@
       "database": "正在更新数据库…",
       "nodes": "正在加载自定义节点…"
     },
-    "viewLogs": "查看日志"
+    "viewLogs": "查看日志",
+    "agentRequirements": {
+      "deferred": "正在后台下载智能体；下次启动时生效",
+      "deferredUpdate": "正在后台下载新版智能体；下次启动时生效",
+      "failed": "无法安装智能体依赖；智能体可能无法启动"
+    }
   },
   "devPlatform": {
     "signIn": {

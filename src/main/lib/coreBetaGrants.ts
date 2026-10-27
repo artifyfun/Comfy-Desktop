@@ -275,7 +275,7 @@ const DISABLE_PREFIX = '--disable-'
  *  the `--enable-`/`--disable-` prefix pair rather than a hardcoded table, so a new allowlist
  *  entry gets its conflict rule for free. Swapping only the prefix keeps the stem exact, so
  *  `--enable-assets` pairs with `--disable-assets` and never with `--disable-asset-hashing`. */
-function oppositeArg(arg: string): string | null {
+export function oppositeArg(arg: string): string | null {
   if (arg.startsWith(ENABLE_PREFIX)) return DISABLE_PREFIX + arg.slice(ENABLE_PREFIX.length)
   if (arg.startsWith(DISABLE_PREFIX)) return ENABLE_PREFIX + arg.slice(DISABLE_PREFIX.length)
   return null
@@ -634,7 +634,8 @@ export function toBetaArgView(grant: CoreBetaGrant): BetaArgView {
 // forever. It now persists the late `false`.
 //
 // A saved decision applies at once and is refreshed in the background; a cut lands on the first
-// ComfyUI launch after the refresh answers. Only an install with nothing saved waits, up to 5 s.
+// ComfyUI launch after the refresh answers. Only an install with nothing saved, or a launch during a
+// staff-change refresh (`refreshCoreBetaFlags`), waits, up to 5 s.
 const flag = makeOpsFlag<CoreBetaGrant[]>({
   key: CORE_BETA_FEATURES_FLAG_KEY,
   fallback: [],
@@ -647,5 +648,7 @@ const flag = makeOpsFlag<CoreBetaGrant[]>({
 export const initCoreBetaGrants = flag.init
 
 export const getCoreBetaGrantsAsync = flag.get
+
+export const refreshCoreBetaGrants = flag.refresh
 
 export const _resetForTest = flag._resetForTest
