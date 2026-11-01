@@ -10,6 +10,8 @@ import {
   effectiveAgentRequirements,
   installedConstraints,
   isRevertedFor,
+  corePinsPlaceholderAgent,
+  keepableAgent,
   nextOverrideState,
   overrideSignature,
   parseAgentRequirementsOverride,
@@ -362,7 +364,7 @@ describe('the start-failure latch', () => {
   it(`reverts on the ${START_FAILURES_TO_REVERT}nd consecutive failure, and reports it once`, () => {
     const first = nextOverrideState(null, p, 'failed')!
     expect(first).toEqual({
-      state: { signature: 'comfy-agent==0.2.3', failures: 1 },
+      state: { signature: 'comfy-agent==0.2.3', failures: 1, startFailures: 1 },
       reverted: false
     })
     const second = nextOverrideState(first.state, p, 'failed')!
@@ -378,6 +380,18 @@ describe('the start-failure latch', () => {
     const started = nextOverrideState(first.state, p, 'started')!
     expect(started.state.failures).toBe(0)
     expect(nextOverrideState(started.state, p, 'failed')!.reverted).toBe(false)
+  })
+
+  it("counts an install failure toward retiring the override, not as the agent's start failure", () => {
+    const installFailed = nextOverrideState(null, p, 'failed', false)!
+    expect(installFailed.state).toEqual({
+      signature: 'comfy-agent==0.2.3',
+      failures: 1,
+      startFailures: 0
+    })
+    const twice = nextOverrideState(installFailed.state, p, 'failed', false)!
+    expect(twice.reverted, 'install failures still retire it').toBe(true)
+    expect(nextOverrideState(twice.state, p, 'failed')!.state.startFailures).toBe(1)
   })
 
   it('leaves the state alone for an inconclusive start', () => {
@@ -396,6 +410,8 @@ describe('the start-failure latch', () => {
     const record = (value: unknown): InstallationRecord =>
       ({ id: 'i', agentRequirementsOverride: value }) as unknown as InstallationRecord
     expect(readOverrideState(record(state))).toEqual(state)
+    const counted = { ...state, startFailures: 0 }
+    expect(readOverrideState(record(counted))).toEqual(counted)
     expect(readOverrideState(record(undefined))).toBeNull()
     expect(readOverrideState(record({ signature: 'x', failures: '1' }))).toBeNull()
   })
@@ -458,6 +474,104 @@ describe('pinsOverBareLines', () => {
     expect(
       pinsOverBareLines(core, pins({ 'comfy-agent': '0.2.3', 'comfy-cli': '1.22.0' }))
     ).toEqual(new Map([['comfy-agent', '0.2.3']]))
+  })
+})
+
+describe('keepableAgent', () => {
+  const CORE = 'comfy-agent==0.0.0.dev0\ncomfy-cli==1.21.0\n'
+  const listed = (version: string): string =>
+    JSON.stringify([
+      { name: 'comfy_agent', version },
+      { name: 'comfy-cli', version: '1.21.0' }
+    ])
+
+  it('keeps a real installed agent, named as core names it', () => {
+    expect(keepableAgent(CORE, listed('0.1.0rc5'), null)).toBe('comfy-agent==0.1.0rc5')
+  })
+
+  it('keeps nothing when only the placeholder, or no agent, is installed', () => {
+    expect(keepableAgent(CORE, listed('0.0.0.dev0'), null)).toBeNull()
+    expect(keepableAgent(CORE, JSON.stringify([]), null)).toBeNull()
+    expect(keepableAgent(CORE, 'not json', null)).toBeNull()
+  })
+
+  it('keeps nothing when core names no agent package', () => {
+    expect(keepableAgent('comfy-cli==1.21.0\n', listed('0.1.0rc5'), null)).toBeNull()
+  })
+
+  it('keeps nothing at the version a recorded override saw fail, extras and all', () => {
+    const failed = { signature: 'comfy-agent[go,x]==0.1.0rc5,comfy-cli==1.22.0', failures: 1 }
+    expect(keepableAgent(CORE, listed('0.1.0rc5'), failed)).toBeNull()
+    expect(keepableAgent(CORE, listed('0.1.0rc4'), failed)).toBe('comfy-agent==0.1.0rc4')
+  })
+
+  it('compares the failed version as a version, not as a string', () => {
+    const failed = { signature: 'comfy-agent==0.1rc1', failures: 1 }
+    expect(keepableAgent(CORE, listed('0.1.0rc1'), failed)).toBeNull()
+  })
+
+  it('keeps the agent when its override failed only to install another pin', () => {
+    const companion = {
+      signature: 'comfy-agent==0.1.0rc5,comfy-cli==9.9.9',
+      failures: 1,
+      startFailures: 0
+    }
+    expect(keepableAgent(CORE, listed('0.1.0rc5'), companion)).toBe('comfy-agent==0.1.0rc5')
+    expect(
+      keepableAgent(CORE, listed('0.1.0rc5'), { ...companion, startFailures: 1 }),
+      'but not once the agent itself failed to start'
+    ).toBeNull()
+  })
+
+  it('keeps nothing that would run under a Go carrier that failed to start', () => {
+    const withGo = (go: string): string =>
+      JSON.stringify([
+        { name: 'comfy-agent', version: '0.1.0rc5' },
+        { name: 'comfy_agent_go', version: go }
+      ])
+    const goFailed = { signature: 'comfy-agent-go==0.1.0rc6', failures: 2, startFailures: 2 }
+    expect(keepableAgent(CORE, withGo('0.1.0rc6'), goFailed)).toBeNull()
+    expect(keepableAgent(CORE, withGo('0.1.0rc5'), goFailed), 'another carrier since').toBe(
+      'comfy-agent==0.1.0rc5'
+    )
+    expect(
+      keepableAgent(CORE, withGo('0.1.0rc6'), { ...goFailed, startFailures: 0 }),
+      'it only failed to install'
+    ).toBe('comfy-agent==0.1.0rc5')
+    expect(
+      keepableAgent(CORE, withGo('0.1.0rc6+local'), goFailed),
+      'a local carrier build is not the failed pin, and must not throw'
+    ).toBe('comfy-agent==0.1.0rc5')
+    const olderFailed = { signature: 'comfy-agent-go==0.1.0rc4', failures: 2, startFailures: 2 }
+    expect(
+      keepableAgent(CORE, withGo('0.1.0rc4'), olderFailed),
+      'an agent newer than the carrier runs its bundled one'
+    ).toBe('comfy-agent==0.1.0rc5')
+  })
+
+  it('treats a record from before start failures were kept apart as a start failure', () => {
+    const legacy = { signature: 'comfy-agent==0.1.0rc5', failures: 1 }
+    expect(keepableAgent(CORE, listed('0.1.0rc5'), legacy)).toBeNull()
+  })
+
+  it('keeps the version a recorded override last started cleanly', () => {
+    const started = { signature: 'comfy-agent==0.1.0rc5', failures: 0 }
+    expect(keepableAgent(CORE, listed('0.1.0rc5'), started)).toBe('comfy-agent==0.1.0rc5')
+  })
+})
+
+describe('corePinsPlaceholderAgent', () => {
+  it.each([
+    ['comfy-agent==0.0.0.dev0\n', true],
+    ['comfy_agent==0.0.0\n', true],
+    ['comfy-agent[go]==0.0.0.dev0\n', true],
+    ['comfy-agent-oss==0.0.0.dev0\ncomfy-cli==1.21.0\n', true],
+    ['comfy-agent==0.1.0rc5\n', false],
+    ['comfy-agent==0.0.01\n', false],
+    ['comfy-agent\n', false],
+    ['comfy-cli==0.0.0\n', false]
+  ])('%j → %s', (coreText, expected) => {
+    expect(corePinsPlaceholderAgent(coreText)).toBe(expected)
   })
 })
 
@@ -982,5 +1096,61 @@ describe('indexKind', () => {
       indexKind({ pypiMirror: 'https://mirror.example/simple/', useChineseMirrors: true })
     ).toBe('custom')
     expect(indexKind({ pypiMirror: '  ' }), 'a blank mirror setting is no mirror').toBe('pypi')
+  })
+})
+
+describe('reportOverrideDecision: a kept agent', () => {
+  it('reports one event per decision, the kept agent on the original one', () => {
+    const emit = vi.spyOn(telemetry, 'emit').mockImplementation(() => {})
+    try {
+      reportOverrideDecision('i', {
+        decision: 'reverted',
+        reason: 'install_failed',
+        pins: pins({ 'comfy-agent': '0.2.3' }),
+        install: {
+          outcome: 'exited',
+          exitCode: 2,
+          elapsedMs: 900,
+          budgetMs: 20_000,
+          errorTail: 'x'
+        },
+        kept: 'comfy-agent==0.1.0rc5'
+      })
+      reportOverrideDecision('i', {
+        decision: 'kept_installed',
+        reason: 'no_answer',
+        kept: 'comfy-agent==0.1.0rc5'
+      })
+      reportOverrideDecision('i', { decision: 'refused', reason: 'bad_version' })
+
+      expect(
+        emit.mock.calls.map(([, props]) => {
+          const { decision, reason, pins, kept_agent } = props as Record<string, unknown>
+          return { decision, reason, pins, kept_agent }
+        })
+      ).toEqual([
+        {
+          decision: 'reverted',
+          reason: 'install_failed',
+          pins: 'comfy-agent==0.2.3',
+          kept_agent: 'comfy-agent==0.1.0rc5'
+        },
+        {
+          decision: 'kept_installed',
+          reason: 'no_answer',
+          pins: null,
+          kept_agent: 'comfy-agent==0.1.0rc5'
+        },
+        { decision: 'refused', reason: 'bad_version', pins: null, kept_agent: null }
+      ])
+      expect(
+        emit.mock.calls.map(([, props]) => (props as Record<string, unknown>).exit_code)
+      ).toEqual([2, null, null])
+      expect(new Set(emit.mock.calls.map(([name]) => name))).toEqual(
+        new Set(['comfy.desktop.agent_requirements_override'])
+      )
+    } finally {
+      emit.mockRestore()
+    }
   })
 })
