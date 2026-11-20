@@ -28,6 +28,23 @@ export interface KnownSettings {
   language?: string
   theme?: string
   autoUpdate?: boolean
+  /**
+   * 工作台 agent 沙箱档位:
+   * - 'standard'(默认): A+B —— 产物另存为(系统保存对话框) + 本地文件引用;
+   *   decide 沙箱保持 workspace-write,不直接写用户目录
+   * - 'full': C —— 完全放开,decide 沙箱 danger-full-access,agent 可读写
+   *   用户电脑任意路径(仅当用户显式开启;风险自担)
+   */
+  workbenchAgentAccess?: 'standard' | 'full'
+  /**
+   * 工作台 agent 传输通道(实验):'exec'(默认)| 'appserver'(codex app-server)|
+   * 'acp'(外部 ACP agent,Agent Client Protocol,见 agui/acp/)|
+   * 'claude'(Claude Code CLI stream-json,见 agui/claude/)。
+   */
+  workbenchAgentTransport?: 'exec' | 'appserver' | 'acp' | 'claude'
+  /** 外部 agent 通道的二进制:'acp' 必填(如 "kimi"/"qwen");'claude' 缺省 'claude'
+   * 走 PATH。二进制需支持对应协议(ACP server 模式 / claude -p stream-json)。 */
+  workbenchAcpAgentBin?: string
   autoInstallUpdates?: boolean
   autoLaunchOnStartup?: string
   autoStartAwaitingFirstStart?: string
@@ -69,6 +86,7 @@ type DefaultedSettingKey =
   | 'cacheDir'
   | 'maxCachedDownloads'
   | 'onAppClose'
+  | 'workbenchAgentAccess'
   | 'modelsDirs'
   | 'inputDir'
   | 'outputDir'
@@ -228,7 +246,8 @@ export const defaults: SettingsDefaults = {
   modelsDirs: [path.join(SHARED_ROOT, 'models')],
   inputDir: path.join(SHARED_ROOT, 'input'),
   outputDir: path.join(SHARED_ROOT, 'output'),
-  installDir: builtinDefaultInstallDir()
+  installDir: builtinDefaultInstallDir(),
+  workbenchAgentAccess: 'standard'
 }
 
 const systemDefault = defaults.modelsDirs[0]!

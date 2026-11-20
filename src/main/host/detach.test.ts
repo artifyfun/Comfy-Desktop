@@ -106,6 +106,8 @@ function makeEntry(window: FakeWindow): ComfyWindowEntry {
     previewInstallationId: null,
     coldStartPendingReveal: false,
     _installCleanup: null,
+    panelSurface: 'chooser',
+    surfaceBeforeOverlay: null,
     detachInstall: () => {}
   }
 }
@@ -268,7 +270,7 @@ describe('closing the last Desktop window while an app uses a ComfyUI Desktop st
     await confirmAndCloseHostWindow(win as unknown as Electron.BrowserWindow)
 
     expect(mocks.asked.map((asked) => asked.spec.message)).toEqual([
-      'Close this window? This stops ComfyUI and quits Comfy Desktop.'
+      'Close this window? This stops ComfyUI and quits Artify.'
     ])
     expect(win.closed).toBe(false)
     expect(mocks.stopAppsBuilds).not.toHaveBeenCalled()
@@ -343,7 +345,7 @@ describe('closing a window while ComfyUI runs on this computer', () => {
     await confirmAndCloseHostWindow(win as unknown as Electron.BrowserWindow)
 
     expect(mocks.asked.map((asked) => asked.spec.message)).toEqual([
-      'Close this window? This stops ComfyUI and quits Comfy Desktop.'
+      'Close this window? This stops ComfyUI and quits Artify.'
     ])
     expect(mocks.stopAppsBuilds).toHaveBeenCalledTimes(1)
     expect(win.closed).toBe(true)
@@ -386,7 +388,7 @@ describe('closing a window while ComfyUI runs on this computer', () => {
         await confirmAndCloseHostWindow(win as unknown as Electron.BrowserWindow)
 
         expect(mocks.asked.map((asked) => asked.spec.message)).toEqual([
-          'Close this window? This stops ComfyUI and quits Comfy Desktop.'
+          'Close this window? This stops ComfyUI and quits Artify.'
         ])
         expect(win.closed).toBe(false)
       }

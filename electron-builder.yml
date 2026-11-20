@@ -1,5 +1,5 @@
-appId: com.todesktop.241012ess7yxs0e
-productName: Comfy Desktop
+appId: com.artifyfun.desktop
+productName: Artify
 directories:
   buildResources: resources
 files:
@@ -14,18 +14,66 @@ files:
   - '!out/**/*.map'
   - '!reference/*'
   - '!**/*.wsb'
+  # ===== 排除非运行时内容，避免 app.asar 体积膨胀导致 Electron 无法加载 =====
+  # .npmrc 将 pnpm store 指向项目内 .pnpm-store（~1.2GB / 6 万文件），
+  # 不排除会被整个打进 asar，asar 膨胀到 1.5GB 后主进程加载失败（打包安装后白屏/无日志）。
+  - '!.pnpm-store/**'
+  # bootstrap-python 已由 win/mac/linux 的 extraResources 复制到 resources/，asar 内不需要
+  - '!bootstrap-python/**'
+  # 前端源码已由 build:frontend 产出到 src/main/artifylab/public/frontend（extraResources）
+  - '!packages/**'
+  # 开发期产物与工具文件
+  - '!.codegraph/**'
+  - '!e2e/**'
+  - '!**/*.log'
+  - '!CLAUDE.md'
+  - '!release-cache.json'
+  - '!todesktop.json'
+  - '!TESTING.md'
+  - '!linux-dev.sh'
+  - '!vitest.*.ts'
+  - '!playwright.config.ts'
+  - '!tsconfig.e2e.json'
+  - '!tsconfig.test.json'
 extraResources:
   - from: lib
     to: lib
+  # artifylab 前端产物（artifylab-frontend 的 build:copy 写入源码目录，
+  # server.ts 的 getFrontendPath() 在生产环境从这里读取）
+  - from: src/main/artifylab/public/frontend
+    to: frontend
+  # 构建应用（Codex agent）的设计体系指引：ui-ux-pro-max 设计智能 + minimalist-ui 极简反 slop 协议。
+  # agentDriver 在 build 目录里把它拷给 Codex 读取，替代原本固化的提示词、提升出图质感。
+  - from: src/main/artifylab/public/design-system
+    to: design-system
+  # 工作台 skill（渐进式加载）：workbench service 每次会话创建时把这里的
+  # <name>/SKILL.md 部署进 codex 临时 CODEX_HOME/skills/，长规则按需读取。
+  - from: src/main/artifylab/public/workbench-skills
+    to: workbench-skills
+  # codex 原生二进制（scripts/copy-codex-bin.mjs 从 @openai/codex-<platform> 平台包拷入）。
+  # agentDriver 通过 Codex SDK 的 codexPathOverride 直接 spawn 内置 exe —— 用户无需安装 codex CLI / node，
+  # 只填 DeepSeek key 即可构建应用。
+  - from: src/main/artifylab/public/codex-bin
+    to: codex-bin
+# Skip the node-gyp rebuild pass: node-pty (the only native dependency)
+# ships N-API prebuilds for win32-x64 that are ABI-agnostic across
+# Electron versions, and its winpty git-submodule sources are not fully
+# present in the npm package, so a forced rebuild fails locally.
+npmRebuild: false
 asarUnpack:
   - node_modules/7zip-bin/**/*
   - node_modules/node-pty/**/*
+  # @ngrok/ngrok 的原生绑定（platform 包）：.node 无法从 asar 内加载，
+  # 且 pnpm 下 optionalDependencies 不会自动进产物，需显式依赖 + 解包
+  - node_modules/@ngrok/ngrok-win32-x64-msvc/**/*
 afterPack: ./scripts/afterPack.mjs
+# 注：打包前的历史产物清理走 npm 脚本 clean:dist-resources（见 package.json 的 build:unpack/build:win 等），
+# 不用 beforeBuild 钩子——钩子的输出会被打包日志吞掉，成败不可见。
 publish:
   provider: github
-  owner: Comfy-Org
+  owner: artifyfun
   repo: Comfy-Desktop
-artifactName: Comfy-Desktop-${version}-${os}-${arch}.${ext}
+artifactName: Artify-${version}-${os}-${arch}.${ext}
 win:
   target: nsis
   icon: assets/Comfy_Logo_x256.png
@@ -52,7 +100,7 @@ mac:
       filter:
         - '**/*'
 dmg:
-  title: Comfy Desktop
+  title: Artify
   background: dmg/background.png
   iconSize: 84
   iconTextSize: 11

@@ -34,5 +34,9 @@
   "src/renderer/src/views/PerformanceTestView.vue": {
     "reason": "Preserve the existing performance-test-download-pulse animation.",
     "sha256": "c5a9975e80a57536162bb3a9bebb3b4f251e9852012051178ef7bab9eb8a7c97"
+  },
+  "src/renderer/src/views/mcp/McpSetupModal.vue": {
+    "reason": "Artify MCP setup modal: scoped layout/media styles predate the Tailwind mandate.",
+    "sha256": "379b3a8d639a929246a7e3ead553ca480a2290afe94bc62b0e916b4d05681401"
   }
 }

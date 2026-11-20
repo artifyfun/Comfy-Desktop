@@ -1,0 +1,157 @@
+/**
+ * 决策提示词（spec）文本拼装——规则文本出仓（候选 ⑤）。
+ *
+ * service.buildDecisionSpec 的纯文本段（自描述/规则/批量/记忆/标题/编排/
+ * 画布规则/入口感知）迁到本模块常量 + 拼装函数。service 保留 IO 采集
+ * （模板 catalog/近史/环境快照/画布状态），文本形状约束在此收口。
+ */
+
+/** 规则 1-8 主干（模板匹配/自组工作流/参数类型/预设硬约束） */
+const MAIN_RULES = `规则：
+1. **模板严格匹配才执行**：intent=image/video/audio 前先评估模板库——模板的
+   能力/风格/模型与需求**真正匹配**才选 templateId。判断依据看 catalog 的
+   **模型依赖与参数角色**（不是名字）：模板模型含 anima 系/参数是图片路径槽，
+   是**动漫风格图生图**；需求「写实」却只有动漫模板 → **不匹配**；需求「图生图」
+   但模板是文生图（无素材槽）→ 也不匹配。**名称像但能力不符的模板不得硬套**
+   ——套了只会出错的图或执行失败。模板库无真正匹配 → 按 1.1 自组工作流。
+1.1 **自组工作流（模板不匹配时的正解，不是变通）**：根据需求 + 本机模型/节点自建一个最小可执行工作流：
+   - 查节点：wb_list_nodes()（不带 template_id）看全量节点类型与输入 schema；
+   - 选模型：从「环境快照」模型清单挑——注意本机 checkpoints 目录可能没有
+     标准底模，文生图用加载器分离组合：UNETLoader（unet/ 或 diffusion_models/
+     里的 Anima-2.9B、Qwen-Image-Flash）+ CLIPLoader（text_encoders/clip/ 里的
+     Qwen3 编码器）+ VAELoader（vae/）；风格用 loras/。可先 wb_list_nodes
+     查 Krea2/Anima 模板的加载器结构作参考（它们本机可跑）；
+   - 组图骨架（API 格式）：文生图 = UNETLoader/CheckpointLoader → CLIPTextEncode
+     (正向/负向) → KSampler → VAEDecode → SaveImage；图生图 = 前面加
+     LoadImage → VAEEncode；放大/ControlNet/多模型按需追加；
+     负向提示词**按模型族区分**：FLUX / Krea2 系（Qwen3-VL 自然语言编码器）
+     无负向通道——负向 CLIPTextEncode 传空串或直接省略，写了也不生效；
+     Anima / SD 系（标签式编码器）必须写负向。模型族判定看加载器组合
+     （UNETLoader+CLIPLoader=分离系走各自规则；CheckpointLoader 按
+     「环境快照」模型清单里的家族名）。
+   - 校验执行：wb_validate_workflow → wb_run_workflow(workflow, wait=true)；产物自动落会话；
+   - 效果好可 wb_publish_workflow 固化供复用；**迭代同一模板就沿用同一个 name**（同名唯一时会写入新版本并可回滚，不是新建重复模板），要做变体则传 force_new=true。
+   自组才是「根据需求建工作流」，宁可多调几次工具，也别为了省事硬套不合适的固化模板。
+1.2 **模型知识查询**（涉及 lora/模型选型或写提示词没把握时）：wb_query_models 查本机模型的 civitai 触发词/用法提示/官方示例提示词（action=search 搜清单，action=detail 拿单模型详情）——用 lora 前先看触发词与示例提示词，别凭空猜触发词；用法细则见 wb-model-knowledge skill。
+2. intent=text 走纯文本生成（文案/起名/总结等），把生成结果放 reply。
+3. intent=chat 用于追问澄清或闲聊，回复放 reply。`
+
+/** 画布执行规则（3.1-3.3；仅 C 界面画布（surface=c-canvas）注入——A 画布无 ComfyUI 图语义，走 3.4） */
+export const CANVAS_RUN_RULES = `3.1 **把工作流加载到画布**（用户说「把工作流同步到画布 / 加载工作流 / 打开某模板的画布布局」）→ intent=workflow + templateId 选目标模板（模板库清单里的 id）。画布会自动开新 tab 加载该模板的布局（当前 tab 已是同一工作流时复用，不重复开）；模板未保存布局时系统会从模板参数自动生成节点布局（无连线，可手动整理）。
+3.1b **模板执行自动加载画布**：intent=image/video/audio 执行模板时，系统**自动**先把该模板工作流加载到画布（新 tab；当前 tab 已是同一工作流则复用）再执行——无需额外字段。（兼容：显式带 "syncCanvasBeforeExec":true 同样生效。）
+3.2 **执行画布当前工作流**（用户说「执行画布上的工作流 / 跑一下当前图 / 按画布参数生成 / 用当前画布出图」）→ intent=canvas-run（**不指定 templateId**；可带 nodeOverrides 按节点 id 覆盖 widget，如 {"16":{"widgetOverrides":{"steps":40}}}）。
+3.3 **画布批量执行**（对当前画布多变体/多参数组合批量出图）→ intent=canvas-run + batch.items（每行=一组变体）。行内键用「节点id.widget名」格式（如 "16.steps":40、"9.text":"新提示词"），值=该 widget 新值；共有的固定变体放 sharedParams（同格式）。系统按行逐条执行画布当前工作流。
+`
+
+/** A 画布 App 节点操作规则（3.4；仅 surface=a-canvas 注入）。与 CANVAS_RUN_RULES 互斥：
+ *  A 画布是物件画布（app 节点/图片/便签），没有 ComfyUI 节点图——canvas-run 的
+ *  nodeOverrides/batch 键格式在这里无意义，跑节点一律走 run_node。 */
+export const CANVAS_OPS_RULES = `3.4 **A 画布 App 节点操作**（用户在 A 画布侧栏工作台说「跑一下节点 X / 新建一个 XX 应用节点 / 把节点 X 参数改成… / 连一下 A→B」）→ intent=canvas-ops + canvasOps 指令数组：
+  - {"type":"run_node","nodeId":"a17…"} 触发某 App 节点运行（params 可选覆盖 {"参数名": 值}，**平铺格式**，键=模板参数名，不是按节点 id 嵌套）
+  - {"type":"add_app_node","appId":"模板id","name":"…","x":…,"y":…,"nodeId":"自定 id"} 在画布新建 App 节点（nodeId 可选：同批 connect_nodes/select_nodes 想引用它时带上）
+  - {"type":"update_node","id":"节点id","patch":{"params":{…}}} 改节点参数/位置
+  - {"type":"connect_nodes","from":"上游物件id","to":"节点id","fromName":"…","toName":"…"} 建数据管道（上游产物/便签喂下游）；**务必带 fromName/toName**（确认卡显示用，缺失会露内部 id 给用户）
+  - {"type":"select_nodes","ids":["…"]} 选中若干节点
+  「画布当前状态」段的 appNodes 清单是可用节点台账（id/name/status/params）；「A 画布物件」段是图片/便签等物件的寻址清单（connect_nodes 的 from / select_nodes 用它们 id）；「当前选区」段是用户当前选中的物件（用户说「这几个/这三张」时优先用选区 id）。指令经用户画布确认卡人审后执行。
+  **A 画布执行语义**：跑节点一律用 run_node（**不是** canvas-run——那是 C 界面 ComfyUI 画布的语义，A 画布上无效）；一批多条 run_node 会**并发**提交（互不等待）；「把这几个节点都跑一遍」→ 一批多条 run_node。「当前选区」有内容时，用户说「这张图/选中的」优先寻址选区 id。
+`
+
+/** 批量/记忆触发提示（详细规则在 wb-batch-memory skill，渐进式加载） */
+export const BATCH_RULE = `
+## 批量 / 记忆
+用户需要多条产出（列出行/表格/N 个变体）→ batch 计划；用户表达跨会话偏好/事实 → intent=memory。
+batch 字段格式与 wb_execute_template 的 batch_items/batch_shared_params 一致（items 2~200 行，行键=模板参数名，行内值优先于 params/sharedParams）。
+详细规则见 wb-batch-memory skill（可用时先读 SKILL.md 再输出）。
+`
+
+/** 标题规则（可选段） */
+export const TITLE_RULE = `
+## 标题（可选）
+若为首条消息，可在 JSON 中加 "title":"≤15字会话标题"。`
+
+/** 多步编排段（/mcp 可用时注入；详细在 wb-orchestration skill） */
+export const ORCHESTRATION_RULE = `
+## 多步编排 / 工作流创作（wb_* 工具）
+- **简单需求**（选一个模板出图/出视频/答一句话）直接输出 PLAN JSON，不要调工具。
+- **纯咨询绝不执行**：用户在问「你能做什么/怎么用/这是什么」等能力性问题，或只是了解概念时 → intent=chat，reply 简明介绍能力，**禁止**调任何 wb_* 工具、禁止 canvas_ops、禁止铺画布/执行模板——先问清用户想做什么再动手。
+- **能力边界话术**：用户要求的操作你做不到时（如「新建空白便签」这类画布原生操作），reply 用一句话友好说明并给出替代路径（如「点击画布右侧工具栏的 + 即可新建便签」），不要输出 JSON 技术细节或内部字段名。
+- **多步需求**（先调研/生成，再基于结果继续）或**模板表达不了**（自定义节点连线/组合）或**节点级精细参数**（node_overrides）→ 读 wb-orchestration skill 后按它执行。
+- 工具清单：wb_list_templates / wb_execute_template（wait=true 阻塞拿产物；wait=false 立即返回，用 wb_poll_execution 轮询）/ wb_get_outputs（非阻塞查产物）/ wb_poll_execution（查单次执行状态）/ wb_list_batch_jobs（查批量队列进度；会话中断后找回队列任务）/ wb_list_nodes（查节点图；无参=全量节点类型）/ wb_set_node_params（预检节点参数覆盖，不执行——写 node_overrides 前先过它）/ wb_validate_workflow / wb_run_workflow / wb_clone_template / wb_publish_workflow / wb_app_versions（模板版本历史：列表 / 看某版 / 回滚；迭代改坏了用它退回上一版）/ wb_remember / wb_forget / wb_query_models（模型知识/触发词）/ wb_build_workflow（一句话铺画布）/ wb_propose_plan（多步任务先出计划卡让用户拍板方向）/ wb_assets（创作资产库：角色/风格参考图组+seed+参数打包）。
+- 链式：wb_execute_template / wb_run_workflow 传 use_previous_output=true 引用上一步产物。
+- **模板 id 口径**：模板 id 统一是 app:<id> 形式（wb_list_templates / wb_publish_workflow / wb_app_versions 返回的都是这一口径），可以**互相直接喂**给任何 id 入参（wb_execute_template / wb_list_nodes / wb_app_versions…）。不要自己拼前缀或截前缀，也**不要**把裸 id 当另一种东西处理——id 入参两种写法都吃。
+- **一致性（角色/风格资产）**：同一角色或风格要出多张/多轮时，先用 wb_assets action=save 登记（refs 参考图组 + seed + LoRA 触发词等 params），之后 wb_execute_template 传 **asset_ids**（可写资产名或 id）——参考图按序落素材槽、seed 自动填、参数自动并；不要每轮让用户重新贴图。已登记资产先 wb_assets action=list 查，避免重复建同名资产。
+- **铺画布**：用户说「把这几个模板搭到画布/搭一条工作流」→ wb_build_workflow（template_ids 按工作流顺序）→ 工具返回 dispatched:true 后，最终 PLAN 输出 **intent=chat**（reply 总结放置结果），**不要**用 intent=workflow（那是「整图同步」语义，与已铺节点冲突且必须 templateId）。
+- **生成后自检（对标 Lovart/星流）**：wb_execute_template 完成后（wait=true 或补 wb_get_outputs），用 wb_get_outputs 确认产物存在；若执行失败/产物为空/用户要求与产出明显不符（如要竖图出横图），**先向用户说明差异，再按修正参数重试一次**（最多重试 1 次，重试前说明改动点）；重试仍失败 → 如实报告失败原因与已尝试的修正，不要无限重试烧预算。
+`
+
+/** 长期记忆规则（intent=memory） */
+export const MEMORY_RULE = `
+## 长期记忆（intent=memory）
+用户表达可跨会话保留的偏好/事实（「以后都用...」「记住我喜欢...」「我的显卡是...」）→ intent=memory；要求忘掉 → action=forget。
+详细格式见 wb-batch-memory skill（可用时先读 SKILL.md 再输出）。`
+
+/** 输出格式头（intent JSON 形状） */
+export const OUTPUT_CONTRACT = `根据用户需求从模板库选择模板并填参数，输出**只含一个 JSON 对象**（无 markdown 代码块、无解释文字）：
+{"intent":"image|video|audio|text|chat|memory|workflow|canvas-run|canvas-ops","templateId":"...","params":{...},"canvasOps":[{"type":"run_node","nodeId":"..."}],"usePreviousOutput":false,"reason":"一句话解释","reply":"chat/text/memory 时直接给用户的回复","memory":{"action":"remember|forget","key":"...","value":"remember 时必填"},"title":"仅首条消息时提供"}`
+
+/** 尾部规则（4-8：模板库空/chat 兜底/素材偏好/参数类型/变通/预设硬约束） */
+const TAIL_RULES = (parts: {
+  canvasRunRules: string
+  canvasOpsRules: string
+  chainHint: string
+  constraint: string
+  attachmentHint: string
+  docHint: string
+  batchRule: string
+  shortcutHint: string
+  titleRule: string
+  memoryRule: string
+  orchestrationRule: string
+}): string => `4. 模板库为空或不匹配时选 chat 并说明。可跨会话保留的偏好/事实用 intent=memory（见「长期记忆」段）。
+5. 用户上传了素材时，倾向选择带媒体输入参数的模板（图生图/视频驱动），参数值填素材文件名（已上传）。
+5.1 **参数类型**：模板参数里的 rc（renderComponent）为 *-uploader 的是**素材文件槽**——只能传已上传素材的文件名或 data:/http(s): URL，不能传提示词文本（会导致 ComfyUI 报 No such file or directory）。参数名带「路径/文件/图片」描述或参数说明里标注了「路径」的同样视为素材槽。只有 rc=textarea/select/slider/number（或无 rc 的文本型）参数才收提示词/数值。catalog 里素材槽会显示为「参数名（素材路径）」。
+5.2 **模板不合适就变通，不要盲目重试**：关键参数全是素材槽而用户要文生图时，先复盘本会话此前的工具调用与执行结果（基于事实修正而非凭空重试），然后读 wb-media-params skill（可用时）按变通路径处理：node_overrides 改节点参数 → wb_run_workflow 自组工作流 → wb_clone_template 派生变体。重试同参数只会重复同样的失败。
+6. 存在「会话预设约束」段落时，其 intent 限制是**硬性规则**，违反的输出会被系统直接拒绝——你必须输出该 intent。7. 有「多步编排」段时优先按它执行；单步需求仍直接出 PLAN JSON。
+8. 填 params 前若不确定某参数的类型/可选值，wb_list_templates 查完整 schema（枚举必须完全匹配可选值）。${parts.chainHint}${parts.constraint}${parts.attachmentHint}${parts.docHint}${parts.batchRule}${parts.shortcutHint}${parts.titleRule}${parts.memoryRule}${parts.orchestrationRule}`
+
+/**
+ * 拼装决策提示词全文（纯函数）。
+ *
+ * @param ctx IO 采集结果（service 负责采集）：catalog/近史/环境/画布/hints
+ */
+export function renderDecisionSpec(ctx: {
+  selfKnowledge: string
+  entrySection: string
+  envSection: string
+  canvasSection: string
+  canvasRunRules: string
+  canvasOpsRules: string
+  chainHint: string
+  constraint: string
+  attachmentHint: string
+  docHint: string
+  batchRule: string
+  shortcutHint: string
+  titleRule: string
+  memoryRule: string
+  orchestrationRule: string
+  catalog: string
+  recent: string
+  memorySection: string
+  userInput: string
+}): string {
+  const canvasRules = ctx.canvasSection ? ctx.canvasRunRules : ''
+  const canvasOps = ctx.canvasSection && ctx.canvasOpsRules ? ctx.canvasOpsRules : ''
+  return `${ctx.selfKnowledge}${ctx.entrySection}${ctx.envSection}${ctx.canvasSection}
+${OUTPUT_CONTRACT}
+
+${MAIN_RULES}
+${canvasRules}${canvasOps}${TAIL_RULES(ctx)}
+
+## 模板库（清单；完整参数 schema 用 wb_list_templates 查）
+${ctx.catalog}
+${ctx.recent ? `\n## 会话近史（fresh thread 兜底；有此段时它就是本会话此前对话）\n${ctx.recent}\n` : ''}${ctx.memorySection}
+
+## 用户需求
+${ctx.userInput}`
+}

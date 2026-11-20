@@ -17,6 +17,7 @@ import type {
   TerminalRestore
 } from '../types/comfyDesktopBridge'
 import { startLocalFirebaseAuthMonitor } from './localFirebaseAuthMonitor'
+import { electronAPI } from './electronAPI'
 
 export type LegacyTerminalBridge = ComfyDesktop2TerminalBridge & {
   restore(): Promise<TerminalRestore>
@@ -341,3 +342,6 @@ const bridge = {
 } satisfies ComfyDesktop2BridgeImplementation
 
 contextBridge.exposeInMainWorld('__comfyDesktop2', bridge)
+// Legacy bridge for the injected artifylab floating switch button
+// (comfy_inject.min.js reads `window.electronAPI.ArtifyLab`).
+contextBridge.exposeInMainWorld('electronAPI', electronAPI)

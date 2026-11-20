@@ -1,0 +1,1200 @@
+<template>
+  <div class="config-modal">
+    <transition name="fade">
+      <div
+        v-show="true"
+        class="flex overflow-auto fixed inset-0 justify-center items-start p-4 z-500 bg-black/70"
+      >
+        <transition name="slide">
+          <div
+            v-show="true"
+            class="p-6 w-full max-w-md rounded-xl border border-[var(--wb-stroke)] bg-[var(--wb-surface-deep)] shadow-2xl"
+          >
+            <div class="flex justify-between items-center mb-6">
+              <h3 class="text-xl font-bold text-white">
+                {{ t('settings') }}
+              </h3>
+              <button
+                @click="handleClickCancel"
+                class="text-[var(--wb-text-3)] hover:text-[var(--wb-text)]"
+              >
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+
+            <!-- Tab 切换 -->
+            <div class="flex mb-6 space-x-2">
+              <button
+                v-for="tab in tabs"
+                :key="tab.key"
+                @click="activeTab = tab.key"
+                :class="[
+                  'px-4 py-2 rounded-t-lg font-medium transition',
+                  activeTab === tab.key
+                    ? 'bg-[var(--wb-accent)]/15 text-[var(--wb-accent-hover)] border-b-2 border-[var(--wb-accent)]'
+                    : 'text-[var(--wb-text-2)] hover:text-[var(--wb-text)] hover:bg-[var(--wb-surface-hover)]',
+                ]"
+              >
+                {{ tab.label }}
+              </button>
+            </div>
+
+            <div class="space-y-6">
+              <!-- Tab1: 基础配置 -->
+              <div v-if="activeTab === 'base'">
+                <!-- 新增：供应商选择 - 图标按钮 -->
+                <div>
+                  <label class="block mb-3 text-[var(--wb-text-2)]">
+                    {{ t('provider') }}
+                  </label>
+                  <div class="flex space-x-3">
+                    <button
+                      @click="setProvider('deepseek')"
+                      :class="{
+                        'bg-[var(--wb-accent)]/20 border-[var(--wb-accent)] text-[var(--wb-accent-hover)]':
+                          state.config.provider === 'deepseek',
+                        'border-[var(--wb-stroke)] text-[var(--wb-text-2)] hover:bg-[var(--wb-surface-hover)]':
+                          state.config.provider !== 'deepseek',
+                      }"
+                      class="flex flex-col items-center p-3 w-full rounded-lg transition duration-300"
+                    >
+                      <i class="mb-1.5 text-xl fas fa-robot"></i>
+                      <span>DeepSeek</span>
+                    </button>
+                    <button
+                      @click="setProvider('openai')"
+                      :class="{
+                        'bg-[var(--wb-accent)]/20 border-[var(--wb-accent)] text-[var(--wb-accent-hover)]':
+                          state.config.provider === 'openai',
+                        'border-[var(--wb-stroke)] text-[var(--wb-text-2)] hover:bg-[var(--wb-surface-hover)]':
+                          state.config.provider !== 'openai',
+                      }"
+                      class="flex flex-col items-center p-3 w-full rounded-lg transition duration-300"
+                    >
+                      <i class="mb-1.5 text-xl fas fa-bolt"></i>
+                      <span>OpenAI</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Base URL 输入 -->
+                <div>
+                  <label class="block mb-2 text-[var(--wb-text-2)]">{{ t('baseUrl') }}</label>
+                  <input
+                    v-model="state.config.base_url"
+                    type="text"
+                    class="px-4 py-2.5 w-full text-white rounded-lg tech-input focus:outline-none"
+                    :placeholder="getDefaultBaseUrl()"
+                  />
+                </div>
+
+                <!-- API Key - 带可见性切换 -->
+                <div>
+                  <label class="block mb-2 text-[var(--wb-text-2)]">{{ t('apiKey') }}</label>
+                  <div class="relative">
+                    <input
+                      v-model="state.config.api_key"
+                      :type="showApiKey ? 'text' : 'password'"
+                      class="px-4 py-2.5 pr-12 w-full text-white rounded-lg tech-input focus:outline-none"
+                      placeholder="sk-xxxxxxxxxxxxxxxx"
+                    />
+                    <button
+                      @click="showApiKey = !showApiKey"
+                      class="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--wb-text-3)] hover:text-[var(--wb-text)]"
+                    >
+                      <i :class="showApiKey ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 测试连接按钮 -->
+                <div>
+                  <button
+                    @click="testConnection"
+                    :disabled="isTesting"
+                    class="flex justify-center items-center px-4 py-2.5 mt-3 w-full text-white rounded-lg transition duration-300"
+                    :class="{
+                      'btn-comfy-primary': !isTesting,
+                      'bg-[var(--wb-surface-hover)] text-[var(--wb-text-3)] cursor-not-allowed':
+                        isTesting,
+                    }"
+                  >
+                    <i v-if="isTesting" class="mr-2 fas fa-spinner fa-spin"></i>
+                    <i v-else class="mr-2 fas fa-plug"></i>
+                    {{ isTesting ? t('testing') : t('testConnection') }}
+                  </button>
+
+                  <!-- 测试结果提示 -->
+                  <div
+                    v-if="testResult"
+                    class="p-3 mt-3 text-sm rounded-lg"
+                    :class="{
+                      'bg-green-500/20 border border-green-500/30 text-green-400': testResult.ok,
+                      'bg-red-500/20 border border-red-500/30 text-red-400': !testResult.ok,
+                    }"
+                  >
+                    <div class="flex items-center">
+                      <i
+                        :class="testResult.ok ? 'fas fa-check-circle' : 'fas fa-exclamation-circle'"
+                        class="mr-2"
+                      ></i>
+                      <span>{{ testResult.message }}</span>
+                    </div>
+                    <div v-if="testResult.response" class="mt-2 text-xs opacity-80">
+                      {{ testResult.response }}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 模型选择 - 下拉菜单 + 自定义输入 -->
+                <div>
+                  <label class="block mb-2 text-[var(--wb-text-2)]">
+                    {{ t('model') }}
+                  </label>
+                  <div class="relative">
+                    <select
+                      v-model="selectedModelType"
+                      @change="handleModelTypeChange"
+                      class="px-4 py-2.5 w-full text-white rounded-lg appearance-none tech-input focus:outline-none"
+                    >
+                      <option value="preset">{{ t('presetModels') }}</option>
+                      <option value="custom">{{ t('customModel') }}</option>
+                    </select>
+                    <div
+                      class="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                    >
+                      <i class="fas fa-chevron-down text-[var(--wb-text-3)]"></i>
+                    </div>
+                  </div>
+
+                  <!-- 预设模型选择 -->
+                  <div v-if="selectedModelType === 'preset'" class="mt-3">
+                    <div class="relative">
+                      <select
+                        v-model="state.config.model"
+                        class="px-4 py-2.5 w-full text-white rounded-lg appearance-none tech-input focus:outline-none"
+                      >
+                        <option v-for="model in getModelList()" :key="model" :value="model">
+                          {{ model }}
+                        </option>
+                      </select>
+                      <div
+                        class="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                      >
+                        <i class="fas fa-chevron-down text-[var(--wb-text-3)]"></i>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 自定义模型输入 -->
+                  <div v-if="selectedModelType === 'custom'" class="mt-3">
+                    <input
+                      v-model="state.config.model"
+                      type="text"
+                      class="px-4 py-2.5 w-full text-white rounded-lg tech-input focus:outline-none"
+                      :placeholder="t('enterCustomModel')"
+                    />
+                  </div>
+
+                  <!-- 构建应用模型（Codex agent） -->
+                  <div class="pt-4 mt-4 border-t border-[var(--wb-stroke)]">
+                    <label class="block mb-2 text-[var(--wb-text-2)]">{{ t('buildModel') }}</label>
+                    <input
+                      v-model="state.config.buildModel"
+                      type="text"
+                      class="px-4 py-2.5 w-full text-white rounded-lg tech-input focus:outline-none"
+                      :placeholder="t('enterBuildModel')"
+                    />
+                    <p class="mt-1.5 text-xs text-[var(--wb-text-3)]">{{ t('buildModelHint') }}</p>
+                  </div>
+
+                  <!-- 工作台 agent 文件权限 -->
+                  <div class="pt-4 mt-4 border-t border-[var(--wb-stroke)]">
+                    <label class="block mb-2 text-[var(--wb-text-2)]">{{
+                      t('workbenchAgentAccess')
+                    }}</label>
+                    <div class="flex space-x-3">
+                      <button
+                        type="button"
+                        @click="state.config.workbenchAgentAccess = 'standard'"
+                        :class="{
+                          'bg-[var(--wb-accent)]/20 border-[var(--wb-accent)] text-[var(--wb-accent-hover)]':
+                            state.config.workbenchAgentAccess !== 'full',
+                          'border-[var(--wb-stroke)] text-[var(--wb-text-2)] hover:bg-[var(--wb-surface-hover)]':
+                            state.config.workbenchAgentAccess === 'full',
+                        }"
+                        class="flex-1 p-3 rounded-lg transition duration-300"
+                      >
+                        <div class="text-sm font-medium">标准（推荐）</div>
+                        <div class="mt-1 text-xs text-left leading-4 opacity-80">
+                          产物另存到任意目录 · 引用本地文件参与工作流 · agent 不直接写你的文件
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        @click="state.config.workbenchAgentAccess = 'full'"
+                        :class="{
+                          'bg-red-500/70': state.config.workbenchAgentAccess === 'full',
+                          'border-[var(--wb-stroke)] text-[var(--wb-text-2)] hover:bg-[var(--wb-surface-hover)]':
+                            state.config.workbenchAgentAccess !== 'full',
+                        }"
+                        class="flex-1 p-3 rounded-lg transition duration-300"
+                      >
+                        <div class="text-sm font-medium">完全访问</div>
+                        <div class="mt-1 text-xs text-left leading-4 opacity-80">
+                          agent
+                          可读写电脑任意路径与执行命令，风险自担。仅在你明确需要本地批处理等场景时开启。
+                        </div>
+                      </button>
+                    </div>
+                    <p class="mt-1.5 text-xs text-[var(--wb-text-3)]">
+                      {{ t('workbenchAgentAccessHint') }}
+                    </p>
+                  </div>
+
+                  <!-- 外部 Agent 接入（实验） -->
+                  <div class="pt-4 mt-4 border-t border-[var(--wb-stroke)]">
+                    <label class="block mb-2 text-[var(--wb-text-2)]">
+                      {{ t('externalAgentTitle') }}
+                      <span
+                        class="ml-1.5 px-1.5 py-0.5 text-[10px] rounded bg-amber-500/20 text-amber-400 align-middle"
+                        >{{ t('externalAgentBeta') }}</span
+                      >
+                    </label>
+                    <div class="grid grid-cols-2 gap-2">
+                      <button
+                        v-for="opt in [
+                          { value: 'exec', label: t('externalAgentExec'), desc: t('externalAgentExecDesc') },
+                          { value: 'appserver', label: t('externalAgentAppserver'), desc: t('externalAgentAppserverDesc') },
+                          { value: 'acp', label: t('externalAgentAcp'), desc: t('externalAgentAcpDesc') },
+                          { value: 'claude', label: t('externalAgentClaude'), desc: t('externalAgentClaudeDesc') },
+                        ]"
+                        :key="opt.value"
+                        type="button"
+                        @click="state.config.workbenchAgentTransport = opt.value"
+                        :class="{
+                          'bg-[var(--wb-accent)]/20 border-[var(--wb-accent)] text-[var(--wb-accent-hover)]':
+                            (state.config.workbenchAgentTransport || 'exec') === opt.value,
+                          'border-[var(--wb-stroke)] text-[var(--wb-text-2)] hover:bg-[var(--wb-surface-hover)]':
+                            (state.config.workbenchAgentTransport || 'exec') !== opt.value,
+                        }"
+                        class="p-2.5 rounded-lg transition duration-300 text-left"
+                      >
+                        <div class="text-sm font-medium">{{ opt.label }}</div>
+                        <div class="mt-0.5 text-xs leading-4 opacity-80">{{ opt.desc }}</div>
+                      </button>
+                    </div>
+                    <div
+                      v-if="
+                        state.config.workbenchAgentTransport === 'acp' ||
+                        state.config.workbenchAgentTransport === 'claude'
+                      "
+                      class="mt-3"
+                    >
+                      <label class="block mb-2 text-[var(--wb-text-2)]">{{
+                        t('externalAgentBinLabel')
+                      }}</label>
+                      <input
+                        v-model="state.config.workbenchAcpAgentBin"
+                        type="text"
+                        class="px-4 py-2.5 w-full text-white rounded-lg tech-input focus:outline-none"
+                        :placeholder="
+                          state.config.workbenchAgentTransport === 'acp'
+                            ? t('externalAgentBinPlaceholderAcp')
+                            : t('externalAgentBinPlaceholderClaude')
+                        "
+                      />
+                      <p class="mt-1.5 text-xs text-[var(--wb-text-3)]">
+                        {{ t('externalAgentBinHint') }}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tab3: AI 接入（MCP） -->
+              <div v-if="activeTab === 'mcp'">
+                <div v-if="mcpLoading" class="py-4 text-[var(--wb-text-3)]">
+                  {{ t('loading') }}
+                </div>
+                <div
+                  v-else-if="mcpError"
+                  class="p-3 text-sm rounded-lg bg-red-500/20 border border-red-500/30 text-red-400"
+                >
+                  {{ mcpError }}
+                </div>
+                <template v-else-if="mcp">
+                  <p class="mb-4 text-xs leading-5 text-[var(--wb-text-3)]">
+                    {{ t('mcpIntro') }}
+                  </p>
+
+                  <!-- 局域网监听告警 -->
+                  <div
+                    v-if="!mcp.loopback"
+                    class="p-3 mb-4 text-xs rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300"
+                  >
+                    <i class="mr-1 fas fa-exclamation-triangle"></i>
+                    {{ t('mcpLanWarning') }}
+                  </div>
+
+                  <!-- 端点 -->
+                  <div class="mb-4">
+                    <label class="block mb-2 text-[var(--wb-text-2)]">{{ t('mcpEndpoint') }}</label>
+                    <div class="flex items-center gap-2">
+                      <code
+                        class="flex-1 px-3 py-2 text-xs text-cyan-200 break-all rounded-lg bg-black/30"
+                        >{{ mcp.url }}</code
+                      >
+                      <button
+                        @click="copyText(mcp.url)"
+                        class="px-3 py-2 text-xs text-white rounded-lg transition duration-200 btn-comfy-primary"
+                      >
+                        <i class="fas fa-copy"></i>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Token -->
+                  <div class="mb-4">
+                    <label class="block mb-2 text-[var(--wb-text-2)]">{{ t('mcpToken') }}</label>
+                    <div class="flex items-center gap-2">
+                      <code
+                        class="flex-1 px-3 py-2 text-xs text-cyan-200 break-all rounded-lg bg-black/30"
+                        >{{ maskedMcpToken }}</code
+                      >
+                      <button
+                        @click="showMcpToken = !showMcpToken"
+                        class="px-3 py-2 text-xs text-[var(--wb-text-2)] rounded-lg border border-[var(--wb-stroke-strong)] hover:text-[var(--wb-text)] hover:border-[var(--wb-accent)]"
+                      >
+                        <i :class="showMcpToken ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                      </button>
+                      <button
+                        @click="copyText(mcp.token)"
+                        class="px-3 py-2 text-xs text-white rounded-lg transition duration-200 btn-comfy-primary"
+                      >
+                        <i class="fas fa-copy"></i>
+                      </button>
+                      <button
+                        @click="regenerateMcpToken"
+                        :disabled="mcpRegenerating"
+                        class="px-3 py-2 text-xs text-red-300 rounded-lg border border-red-500/40 bg-red-500/10 hover:bg-red-500/20 disabled:opacity-50"
+                      >
+                        <i
+                          :class="mcpRegenerating ? 'fas fa-spinner fa-spin' : 'fas fa-rotate'"
+                        ></i>
+                        {{ t('mcpRegenerate') }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- 客户端配置 snippet -->
+                  <div class="mb-4">
+                    <label class="block mb-2 text-[var(--wb-text-2)]">{{
+                      t('mcpClientSnippets')
+                    }}</label>
+                    <div class="space-y-2">
+                      <div v-for="snippet in mcpSnippets" :key="snippet.key">
+                        <div class="mb-1 text-xs text-[var(--wb-text-3)]">{{ snippet.label }}</div>
+                        <div class="relative">
+                          <pre
+                            class="pt-2 pr-14 pb-2 pl-3 text-[11px] leading-4 text-cyan-200 break-all whitespace-pre-wrap rounded-lg bg-black/30 max-h-28 overflow-y-auto"
+                            >{{ snippet.cmd }}</pre
+                          >
+                          <button
+                            @click="copyText(snippet.cmd)"
+                            class="absolute top-1.5 right-1.5 px-2 py-1 text-[11px] text-white rounded transition duration-200 btn-comfy-primary"
+                          >
+                            <i class="fas fa-copy"></i>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 工具数说明 -->
+                  <div class="text-xs text-[var(--wb-text-3)]">
+                    <i class="mr-1 fas fa-circle-info"></i>
+                    {{ t('mcpAppCount') }}:
+                    <span class="font-bold text-[var(--wb-accent-hover)]">{{ mcp.appCount }}</span>
+                    <span class="block mt-1 text-[var(--wb-text-3)]">{{ t('mcpAutoSync') }}</span>
+                  </div>
+                </template>
+              </div>
+
+              <!-- Tab4: 分享配置 -->
+              <div v-if="activeTab === 'share'">
+                <div>
+                  <label class="block mb-2 text-[var(--wb-text-2)]">{{
+                    t('ngrokAuthtoken')
+                  }}</label>
+                  <div class="relative">
+                    <input
+                      v-model="state.config.ngrokAuthtoken"
+                      :type="showNgrokToken ? 'text' : 'password'"
+                      class="relative px-4 py-2.5 pr-12 w-full text-white rounded-lg tech-input focus:outline-none"
+                      :placeholder="t('enterNgrokAuthtoken')"
+                    />
+                    <button
+                      @click="showNgrokToken = !showNgrokToken"
+                      class="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--wb-text-3)] hover:text-[var(--wb-text)]"
+                    >
+                      <i :class="showNgrokToken ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                    </button>
+                  </div>
+                  <button
+                    @click="testNgrok"
+                    :disabled="ngrokTestLoading"
+                    class="flex items-center px-4 py-2.5 mt-3 mb-2 w-full text-white rounded-lg transition duration-300"
+                    :class="
+                      ngrokTestLoading
+                        ? 'bg-[var(--wb-surface-hover)] text-[var(--wb-text-3)] cursor-not-allowed'
+                        : 'btn-comfy-primary'
+                    "
+                  >
+                    <i v-if="ngrokTestLoading" class="mr-2 fas fa-spinner fa-spin"></i>
+                    <i v-else class="mr-2 fas fa-plug"></i>
+                    {{ ngrokTestLoading ? t('testingNgrok') : t('testNgrok') }}
+                  </button>
+                  <div
+                    v-if="ngrokTestResult"
+                    class="p-3 text-sm rounded-lg"
+                    :class="
+                      ngrokTestResult.ok
+                        ? 'bg-green-500/20 border border-green-500/30 text-green-400'
+                        : 'bg-red-500/20 border border-red-500/30 text-red-400'
+                    "
+                  >
+                    <div class="flex items-center">
+                      <i
+                        :class="
+                          ngrokTestResult.ok ? 'fas fa-check-circle' : 'fas fa-exclamation-circle'
+                        "
+                        class="mr-2"
+                      ></i>
+                      <span>{{ ngrokTestResult.message }}</span>
+                    </div>
+
+                    <!-- 分享按钮 - 仅在测试成功且有分享URL时显示 -->
+                    <div
+                      v-if="ngrokTestResult.ok && shareUrl"
+                      class="pt-3 mt-3 border-t border-green-500/30"
+                    >
+                      <div class="flex justify-between items-center">
+                        <div class="flex-1 mr-3">
+                          <div class="mb-1 text-xs text-green-300">{{ t('shareUrl') }}</div>
+                          <div class="flex items-center text-xs text-green-400 break-all">
+                            {{ shareUrl }}
+                          </div>
+                        </div>
+                        <button
+                          @click="copyShareUrl"
+                          class="flex items-center px-3 py-1.5 text-xs font-medium text-green-400 rounded-lg border transition duration-200 bg-green-500/20 border-green-500/40 hover:bg-green-500/30"
+                        >
+                          <i class="mr-1 fas fa-copy"></i>
+                          {{ t('copyLink') }}
+                        </button>
+                        <button
+                          @click="showQr = true"
+                          class="flex items-center px-2 py-2 ml-2 text-xs font-medium text-green-400 rounded-lg border transition duration-200 bg-green-500/20 border-green-500/40 hover:bg-green-500/30"
+                        >
+                          <i class="mr-1 fas fa-qrcode"></i>
+                        </button>
+                      </div>
+                      <!-- 二维码弹窗 -->
+                      <div
+                        v-if="showQr"
+                        class="flex fixed inset-0 justify-center items-center z-1000"
+                        @click.self="showQr = false"
+                      >
+                        <div
+                          class="relative p-4 bg-white rounded-lg shadow-lg"
+                          style="width: 220px; height: 230px"
+                        >
+                          <img
+                            :src="qrDataUrl"
+                            alt="QR Code"
+                            class="mx-auto"
+                            style="width: 200px; height: 200px"
+                          />
+                          <button
+                            @click="showQr = false"
+                            class="absolute top-1 right-1.5 text-[var(--wb-text-3)] hover:text-[var(--wb-danger)]"
+                          >
+                            <i class="fas fa-times"></i>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 导出/导入应用功能（独立于 ngrok 测试结果，始终可见） -->
+                <div class="flex gap-2 mt-6">
+                  <button
+                    @click="exportApps"
+                    class="flex relative flex-1 justify-center items-center px-4 py-2.5 text-white btn-comfy-primary rounded-md transition"
+                  >
+                    <i class="mr-2 fas fa-download"></i>{{ t('exportApps') }}
+                  </button>
+                  <label
+                    class="flex relative flex-1 justify-center items-center px-4 py-2.5 text-white btn-comfy-primary rounded-md transition cursor-pointer"
+                  >
+                    <i class="mr-2 fas fa-upload"></i>{{ t('importApps') }}
+                    <input type="file" accept=".json" class="hidden" @change="importApps" />
+                  </label>
+                </div>
+              </div>
+
+              <!-- Tab5: 快捷操作 -->
+              <div v-if="activeTab === 'quick'">
+                <div class="space-y-4">
+                  <div class="grid grid-cols-1 gap-3">
+                    <button
+                      @click="openRootFolder('')"
+                      class="flex items-center px-4 py-3 text-white btn-comfy-primary rounded-md transition"
+                    >
+                      <i class="mr-3 text-xl fas fa-folder-open"></i>
+                      <span>{{ t('openRootFolder') }}</span>
+                    </button>
+
+                    <button
+                      @click="openRootFolder('input')"
+                      class="flex items-center px-4 py-3 text-white btn-comfy-primary rounded-md transition"
+                    >
+                      <i class="mr-3 text-xl fas fa-upload"></i>
+                      <span>{{ t('openInputFolder') }}</span>
+                    </button>
+
+                    <button
+                      @click="openRootFolder('output')"
+                      class="flex items-center px-4 py-3 text-white btn-comfy-primary rounded-md transition"
+                    >
+                      <i class="mr-3 text-xl fas fa-download"></i>
+                      <span>{{ t('openOutputFolder') }}</span>
+                    </button>
+
+                    <button
+                      @click="openRootFolder('custom_nodes')"
+                      class="flex items-center px-4 py-3 text-white btn-comfy-primary rounded-md transition"
+                    >
+                      <i class="mr-3 text-xl fas fa-puzzle-piece"></i>
+                      <span>{{ t('openPluginsFolder') }}</span>
+                    </button>
+
+                    <button
+                      @click="openRootFolder('models')"
+                      class="flex items-center px-4 py-3 text-white btn-comfy-primary rounded-md transition"
+                    >
+                      <i class="mr-3 text-xl fas fa-cube"></i>
+                      <span>{{ t('openModelsFolder') }}</span>
+                    </button>
+                    <button
+                      @click="openCMD('python')"
+                      class="flex items-center px-4 py-3 text-white btn-comfy-primary rounded-md transition"
+                    >
+                      <i class="mr-3 text-xl fa-brands fa-python"></i>
+                      <span>{{ t('openPythonVenv') }}</span>
+                    </button>
+                    <div
+                      v-if="cmdHintVisible && cmdText"
+                      class="p-3 mt-2 text-xs text-cyan-300 rounded-lg border bg-cyan-500/10 border-cyan-500/30"
+                    >
+                      <div class="flex justify-between items-start">
+                        <div class="flex-1 mr-2">
+                          <div class="mb-1">{{ t('executeInTerminal') }}</div>
+                          <code
+                            class="block p-2 text-[11px] leading-4 rounded bg-black/30 text-cyan-200 break-all"
+                            >{{ cmdText }}</code
+                          >
+                        </div>
+                        <button
+                          class="ml-2 text-cyan-400 hover:text-cyan-200"
+                          @click="cmdHintVisible = false"
+                          aria-label="close"
+                        >
+                          <i class="fas fa-times"></i>
+                        </button>
+                      </div>
+                      <div class="flex gap-2 mt-2">
+                        <button
+                          @click="copyCmd"
+                          class="px-3 py-1 text-[11px] text-white btn-comfy-primary rounded"
+                        >
+                          {{ t('copyCommand') }}
+                        </button>
+                        <div class="self-center text-[11px] opacity-80">
+                          {{ t('copy') }} → {{ t('paste') || 'Paste' }} → Enter
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="pt-4" v-if="!['quick', 'mcp'].includes(activeTab)">
+                <button
+                  @click="handleClickConfirm"
+                  class="py-3 w-full font-medium text-white btn-comfy-primary rounded-md transition cursor-pointer"
+                >
+                  {{ t('saveSettings') }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </transition>
+      </div>
+    </transition>
+  </div>
+</template>
+
+<script setup name="ConfigModal">
+import { reactive, onMounted, ref, watch, computed } from 'vue'
+import QRCode from 'qrcode'
+import { t } from '@/utils/i18n'
+import { showError, showSuccess, uuidv4 } from '@/utils'
+import { useAppStore } from '@/stores/appStore'
+
+const appStore = useAppStore()
+
+// Tab相关
+const tabs = [
+  { key: 'base', label: t('baseConfig') },
+  // { key: 'build', label: t('buildConfig') },
+  { key: 'mcp', label: t('aiAccess') },
+  { key: 'share', label: t('shareApps') },
+  { key: 'quick', label: t('quickActions') },
+]
+const activeTab = ref('base')
+
+const showApiKey = ref(false)
+// openCMD 提示
+const cmdHintVisible = ref(false)
+const cmdText = ref('')
+
+const copyCmd = async () => {
+  if (!cmdText.value) return
+  try {
+    await navigator.clipboard.writeText(cmdText.value)
+    showSuccess('copySuccess')
+  } catch (e) {
+    showError('copyFailed')
+  }
+}
+const showNgrokToken = ref(false)
+const isTesting = ref(false)
+const testResult = ref(null)
+const selectedModelType = ref('preset')
+const showQr = ref(false)
+
+const state = reactive({
+  config: {
+    comfyHost: '',
+    serverHost: '',
+    lang: 'zh',
+    theme: 'dark',
+    activeAppId: '',
+    max_tokens: 64000,
+    temperature: 0,
+    api_key: '',
+    base_url: 'https://api.deepseek.com/v1',
+    model: 'glm-5.3-flash',
+    provider: 'deepseek', // 新增供应商字段
+    buildModel: 'glm-5.3-flash', // 构建应用（Codex agent）使用的模型
+    buildStyleId: 'tech', // 新增构建风格ID
+    workbenchAgentAccess: 'standard', // 工作台 agent 文件权限档位
+    workbenchAgentTransport: 'exec', // 外部 Agent 传输通道(实验):'exec'|'appserver'|'acp'|'claude'
+    workbenchAcpAgentBin: '', // 外部 agent 二进制(ACP 必填;claude 缺省走 PATH)
+    ngrokAuthtoken: '', // 新增ngrok authtoken
+  },
+})
+
+const emit = defineEmits(['cancel', 'confirm'])
+
+const handleClickCancel = () => {
+  emit('cancel')
+}
+
+const handleClickConfirm = () => {
+  emit('confirm', state.config)
+}
+
+// 获取当前供应商的模型列表
+// 官方现役模型（2026-04 起）：
+// DeepSeek V4 系列（deepseek-chat/reasoner 旧名 2026-07-24 停用，不再列出）
+// OpenAI GPT-5.6 家族（gpt-5.6 别名默认指向 sol）
+const getModelList = () => {
+  if (state.config.provider === 'deepseek') {
+    return ['deepseek-v4-flash', 'deepseek-v4-pro']
+  } else if (state.config.provider === 'zhipu') {
+    return ['glm-5.3-flash', 'glm-5.3', 'glm-5.3-air']
+  } else if (state.config.provider === 'openai') {
+    return ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']
+  }
+  return []
+}
+
+// 获取默认的Base URL
+const getDefaultBaseUrl = () => {
+  if (state.config.provider === 'deepseek') {
+    return 'https://api.deepseek.com/v1'
+  } else if (state.config.provider === 'zhipu') {
+    return 'https://open.bigmodel.cn/api/paas/v4'
+  } else if (state.config.provider === 'openai') {
+    return 'https://api.openai.com/v1'
+  }
+  return ''
+}
+
+// 设置供应商
+const setProvider = (provider) => {
+  state.config.provider = provider
+  // 自动设置对应的base_url
+  state.config.base_url = getDefaultBaseUrl()
+  // 重置模型为第一个选项
+  const models = getModelList()
+  if (models.length > 0) {
+    state.config.model = models[0]
+  }
+  // 重置模型类型为预设
+  selectedModelType.value = 'preset'
+}
+
+// 处理模型类型变化
+const handleModelTypeChange = () => {
+  if (selectedModelType.value === 'preset') {
+    // 切换到预设模式时，设置为第一个预设模型
+    const models = getModelList()
+    if (models.length > 0) {
+      state.config.model = models[0]
+    }
+  } else {
+    // 切换到自定义模式时，清空模型名称
+    state.config.model = ''
+  }
+}
+
+// 测试连接
+const testConnection = async () => {
+  if (!state.config.api_key || !state.config.base_url || !state.config.model) {
+    testResult.value = {
+      ok: false,
+      message: t('pleaseCompleteAllFields'),
+    }
+    return
+  }
+
+  isTesting.value = true
+  testResult.value = null
+
+  try {
+    const response = await fetch(`${state.config.serverHost}/api/test-connection`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        api_key: state.config.api_key,
+        base_url: state.config.base_url,
+        model: state.config.model,
+      }),
+    })
+
+    const result = await response.json()
+
+    if (response.status === 200 && result.ok) {
+      testResult.value = {
+        ok: true,
+        message: t('connectionTestSuccessful'),
+        response: result.response,
+      }
+    } else {
+      testResult.value = {
+        ok: false,
+        message: result.message || t('connectionTestFailed'),
+      }
+    }
+  } catch (error) {
+    console.error('Test connection error:', error)
+    testResult.value = {
+      ok: false,
+      message: t('connectionTestError'),
+    }
+  } finally {
+    isTesting.value = false
+  }
+}
+
+const ngrokTestLoading = ref(false)
+const ngrokTestResult = ref(null)
+const shareUrl = ref('')
+// 本地生成二维码（不依赖外网 qrserver，分享链接不出本机）
+const qrDataUrl = ref('')
+watch(shareUrl, async (url) => {
+  qrDataUrl.value = url ? await QRCode.toDataURL(url, { width: 200 }) : ''
+})
+
+// —— AI 接入（MCP）——
+const mcp = ref(null)
+const mcpLoading = ref(false)
+const mcpError = ref('')
+const showMcpToken = ref(false)
+const mcpRegenerating = ref(false)
+
+const loadMcpConfig = async () => {
+  if (mcpLoading.value) return
+  mcpLoading.value = true
+  mcpError.value = ''
+  try {
+    const res = await fetch(`${state.config.serverHost}/api/mcp/config`)
+    const { ok, data, message } = await res.json()
+    if (ok) {
+      mcp.value = data
+    } else {
+      mcpError.value = message || t('requestFail')
+    }
+  } catch (e) {
+    mcpError.value = t('requestFail') + ': ' + (e.message || e.toString())
+  } finally {
+    mcpLoading.value = false
+  }
+}
+
+watch(activeTab, (tab) => {
+  if (tab === 'mcp' && !mcp.value) loadMcpConfig()
+})
+
+const maskedMcpToken = computed(() => {
+  const token = mcp.value?.token
+  if (!token) return ''
+  return showMcpToken.value ? token : token.slice(0, 4) + '•'.repeat(16)
+})
+
+const mcpSnippets = computed(() => {
+  const url = mcp.value?.url || ''
+  const token = mcp.value?.token || ''
+  return [
+    {
+      key: 'claude',
+      label: t('mcpClaudeCode'),
+      cmd: `claude mcp add --transport http artify ${url} --header "Authorization: Bearer ${token}"`,
+    },
+    {
+      key: 'json',
+      label: t('mcpCursorJson'),
+      cmd: JSON.stringify(
+        { mcpServers: { artify: { url, headers: { Authorization: `Bearer ${token}` } } } },
+        null,
+        2,
+      ),
+    },
+    { key: 'generic', label: t('mcpGeneric'), cmd: `URL: ${url}\nToken: ${token}` },
+  ]
+})
+
+const copyText = async (text) => {
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    showSuccess('copySuccess')
+  } catch (e) {
+    showError('copyFailed')
+  }
+}
+
+const regenerateMcpToken = async () => {
+  if (mcpRegenerating.value) return
+  if (!window.confirm(t('mcpRegenerateConfirm'))) return
+  mcpRegenerating.value = true
+  try {
+    const res = await fetch(`${state.config.serverHost}/api/mcp/regenerate-token`, {
+      method: 'POST',
+    })
+    const { ok, data } = await res.json()
+    if (ok && data?.token && mcp.value) {
+      mcp.value.token = data.token
+      showSuccess('mcpTokenRegenerated')
+    } else {
+      showError('requestFail')
+    }
+  } catch (e) {
+    showError('requestFail')
+  } finally {
+    mcpRegenerating.value = false
+  }
+}
+
+const testNgrok = async () => {
+  if (!state.config.ngrokAuthtoken) {
+    ngrokTestResult.value = { ok: false, message: t('ngrokFillToken') }
+    return
+  }
+  if (ngrokTestLoading.value) return // 防止重复点击
+  ngrokTestLoading.value = true
+  ngrokTestResult.value = null
+  shareUrl.value = ''
+  try {
+    const res = await fetch(`${state.config.serverHost}/api/ngrok/url`, {
+      method: 'post',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ngrokAuthtoken: state.config.ngrokAuthtoken,
+      }),
+    })
+    const { ok, data, message } = await res.json()
+    if (ok) {
+      ngrokTestResult.value = {
+        ok: true,
+        message: t('ngrokSuccess'),
+      }
+      // 保存分享URL
+      shareUrl.value = `${data.server_origin}/?comfy_origin=${encodeURIComponent(data.comfy_origin)}&server_origin=${encodeURIComponent(data.server_origin)}&lang=${state.config.lang}`
+    } else {
+      ngrokTestResult.value = {
+        ok: false,
+        message: message || t('ngrokFail') + ` (HTTP ${res.status})`,
+      }
+    }
+  } catch (e) {
+    ngrokTestResult.value = {
+      ok: false,
+      message: t('requestFail') + ': ' + (e.message || e.toString()),
+    }
+  } finally {
+    ngrokTestLoading.value = false
+  }
+}
+
+// 复制分享链接
+const copyShareUrl = async () => {
+  if (!shareUrl.value) return
+
+  try {
+    await navigator.clipboard.writeText(shareUrl.value)
+    // 可以添加一个临时的成功提示
+    const originalMessage = ngrokTestResult.value.message
+    ngrokTestResult.value.message = t('copySuccess')
+    setTimeout(() => {
+      ngrokTestResult.value.message = originalMessage
+    }, 2000)
+  } catch (err) {
+    console.error('复制失败:', err)
+  }
+}
+
+// 导出应用
+const exportApps = async () => {
+  const data = appStore.apps ? appStore.apps : []
+  if (data.length === 0) {
+    showError('noAppsToExport')
+    return
+  }
+  const json = JSON.stringify(data, null, 2)
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `artifylab-apps-[${data.length}]-${new Date().toLocaleDateString()}.json`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+// 导入应用
+const importApps = (e) => {
+  const file = e.target.files[0]
+  if (!file) return
+
+  // 检查文件类型
+  if (!file.name.toLowerCase().endsWith('.json')) {
+    showError('onlyJsonFilesAllowed')
+    e.target.value = ''
+    return
+  }
+
+  const reader = new FileReader()
+  reader.onload = async (event) => {
+    try {
+      const data = JSON.parse(event.target.result)
+
+      // 判断数据类型：如果是对象，视为单个应用；如果是数组，视为多个应用
+      let appsToImport = []
+
+      if (Array.isArray(data)) {
+        // 数组：多个应用
+        appsToImport = data
+      } else if (typeof data === 'object' && data !== null) {
+        // 对象：单个应用
+        appsToImport = [data]
+      } else {
+        throw new Error('Invalid data format')
+      }
+
+      // 验证应用数据结构
+      const validApps = appsToImport.filter((app) => {
+        return app && typeof app === 'object' && app.name && app.template && app.template.prompt
+      })
+
+      if (validApps.length === 0) {
+        showError('noValidAppsFound')
+        return
+      }
+
+      // 为每个应用生成新的ID并导入
+      const appsWithNewIds = validApps.map((app) => ({ ...app, id: uuidv4() }))
+      await appStore.mergeApps(appsWithNewIds)
+
+      showSuccess('importSuccess', { count: validApps.length })
+    } catch (error) {
+      console.error('导入应用失败:', error)
+      showError('importAppsError')
+    }
+  }
+  reader.readAsText(file)
+  // 清空input以便连续导入
+  e.target.value = ''
+}
+
+const openRootFolder = async (path) => {
+  try {
+    if (window.electronAPI) {
+      await window.electronAPI.ArtifyLab.openRootFolder(path)
+    } else {
+      showError('electronNotAvailable')
+    }
+  } catch (error) {
+    console.error('打开目录失败:', error)
+    showError('openFolderError')
+  }
+}
+
+const openCMD = async (type) => {
+  try {
+    if (window.electronAPI) {
+      const { cmd } = await window.electronAPI.ArtifyLab.openCMD(type)
+      if (cmd) {
+        cmdText.value = cmd
+        cmdHintVisible.value = true
+        try {
+          await navigator.clipboard.writeText(cmd)
+          showSuccess('copySuccess')
+        } catch (e) {
+          // ignore clipboard failure here
+        }
+        // 自动收起
+        setTimeout(() => {
+          cmdHintVisible.value = false
+        }, 8000)
+      }
+    } else {
+      showError('electronNotAvailable')
+    }
+  } catch (error) {
+    console.error('打开命令行失败:', error)
+    showError('openCMDError')
+  }
+}
+
+onMounted(async () => {
+  state.config = JSON.parse(JSON.stringify(appStore.config))
+
+  // 初始化provider（如果未设置）
+  if (!state.config.provider) {
+    // 根据base_url推断provider
+    if (state.config.base_url && state.config.base_url.includes('openai')) {
+      state.config.provider = 'openai'
+    } else {
+      state.config.provider = 'deepseek'
+    }
+  }
+
+  // 确保model在当前供应商的模型列表中
+  const models = getModelList()
+  if (!models.includes(state.config.model)) {
+    // 如果当前模型不在预设列表中，设置为自定义模式
+    selectedModelType.value = 'custom'
+  } else {
+    selectedModelType.value = 'preset'
+  }
+})
+</script>
+
+<style lang="less" scoped>
+.config-modal {
+  height: 100%;
+  width: 100%;
+  font-family: var(--wb-font);
+  // background: var(--wb-bg-base);
+  min-height: 100vh;
+  color: var(--wb-text);
+  overflow-x: hidden;
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  z-index: 1000;
+}
+</style>
+
+<style>
+body {
+  font-family: var(--wb-font);
+  background: var(--wb-bg-base);
+  min-height: 100vh;
+  color: var(--wb-text);
+  overflow-x: hidden;
+}
+
+.tech-input {
+  background: var(--wb-bg-base);
+  border: 1px solid var(--wb-stroke-strong);
+  transition:
+    background 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+.tech-input:focus {
+  border-color: var(--wb-accent);
+  box-shadow: 0 0 0 2px rgba(11, 140, 233, 0.2);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.slide-enter-active {
+  transition: opacity 0.3s ease-out;
+}
+
+.slide-leave-active {
+  transition:
+    opacity 0.25s ease-out,
+    transform 0.25s ease-out;
+}
+
+.slide-enter-from,
+.slide-leave-to {
+  opacity: 0;
+  transform: translateY(20px);
+}
+
+.card-enter-active {
+  transition:
+    opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.card-enter-from {
+  opacity: 0;
+  transform: translateY(30px) scale(0.9);
+}
+</style>

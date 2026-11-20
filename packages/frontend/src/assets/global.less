@@ -1,0 +1,234 @@
+.full-modal {
+  &.workflow-modal {
+    .ant-modal-content {
+      height: unset;
+    }
+  }
+  .ant-modal {
+    max-width: 100%;
+    top: 0;
+    padding-bottom: 0;
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    & > div {
+      width: 100%;
+      height: 100%;
+    }
+  }
+  .ant-modal-content {
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100vh);
+    width: 100%;
+    height: 100%;
+    background: var(--wb-surface-deep);
+    border: 1px solid var(--wb-stroke);
+    border-radius: 16px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  }
+  .ant-modal-header {
+    background: transparent;
+    border-bottom: 1px solid var(--wb-stroke);
+    padding: 20px 24px;
+  }
+  .ant-modal-title {
+    color: var(--wb-text);
+    font-family: var(--wb-font);
+    font-weight: 600;
+  }
+  .ant-modal-body {
+    flex: 1;
+    background: transparent;
+    color: var(--wb-text);
+    // padding: 24px;
+    .editor-box {
+      width: 100%;
+      height: 100%;
+      .preview-iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+        user-select: none;
+      }
+    }
+  }
+  .ant-modal-footer {
+    background: transparent;
+    border-top: 1px solid var(--wb-stroke);
+    padding: 16px 24px;
+  }
+}
+.ant-spin-nested-loading {
+  width: 100% !important;
+  height: 100% !important;
+  .ant-spin-container {
+    width: 100% !important;
+    height: 100% !important;
+  }
+}
+
+/* 额外的 Ant Design Vue 组件样式覆盖（令牌化：surface 实底 + stroke 描边） */
+.ant-message-notice-content {
+  background: var(--wb-surface-deep);
+  border: 1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-card);
+  color: var(--wb-text);
+  font-family: var(--wb-font);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.ant-notification-notice {
+  background: var(--wb-surface-deep);
+  border: 1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-card);
+  color: var(--wb-text);
+  font-family: var(--wb-font);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.ant-notification-notice-message {
+  color: var(--wb-text);
+  font-family: var(--wb-font);
+}
+
+.ant-notification-notice-description {
+  color: var(--wb-text-2);
+  font-family: var(--wb-font);
+}
+
+/* 确保所有 Ant Design Vue 组件都使用统一的字体（--wb-font = Inter，与 comfy.css 一致） */
+.ant-btn,
+.ant-input,
+.ant-select,
+.ant-dropdown-menu-item,
+.ant-modal-title,
+.ant-tooltip-inner,
+.ant-spin-text,
+.ant-message-notice-content,
+.ant-notification-notice {
+  font-family: var(--wb-font) !important;
+}
+
+/* Input 和 Select 组件样式（令牌化：surface 实底 / stroke 描边 / 6px 圆角，
+   与 antd-theme.js 同值；历史 slate 半透明底 + sky-500 在此退役） */
+.ant-input,
+.ant-select-selector {
+  background: var(--wb-surface) !important;
+  border: 1px solid var(--wb-stroke) !important;
+  color: var(--wb-text) !important;
+  border-radius: var(--wb-r-ctrl) !important;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease !important;
+}
+
+/* 大号搜索框 wrapper 与右侧按钮严格等高（antd large 默认有 1-2px 偏差） */
+.ant-input-affix-wrapper-lg {
+  height: 40px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.ant-input-affix-wrapper-lg .ant-input {
+  height: 100%;
+}
+
+/* Input.Search 输入框与搜索按钮融合为一个整体，避免出现“两层框” */
+.ant-input-search .ant-input-wrapper .ant-input-affix-wrapper {
+  border-radius: 6px 0 0 6px;
+}
+.ant-input-search .ant-input-wrapper .ant-input-search-button {
+  border-radius: 0 6px 6px 0;
+}
+
+.ant-input:focus,
+.ant-select-focused .ant-select-selector {
+  border-color: var(--wb-accent) !important;
+  box-shadow: 0 0 0 2px rgba(11, 140, 233, 0.2) !important;
+}
+
+.ant-input:hover,
+.ant-select:hover .ant-select-selector {
+  border-color: var(--wb-accent-hover) !important;
+}
+
+.ant-select-dropdown {
+  background: var(--wb-surface-hover) !important;
+  border: 1px solid var(--wb-stroke) !important;
+  border-radius: var(--wb-r-card) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+}
+
+.ant-select-item {
+  color: var(--wb-text) !important;
+  font-family: var(--wb-font) !important;
+}
+
+.ant-select-item-option-selected {
+  background: var(--wb-accent-bg) !important;
+  color: var(--wb-accent-hover) !important;
+}
+
+.ant-select-item-option-active {
+  background: var(--wb-surface-active) !important;
+  color: var(--wb-text) !important;
+}
+
+/* 确保所有表单控件都有一致的样式 */
+.ant-form-item-label > label {
+  color: var(--wb-text) !important;
+  font-family: var(--wb-font) !important;
+}
+
+.ant-checkbox-wrapper {
+  color: var(--wb-text) !important;
+  font-family: var(--wb-font) !important;
+}
+
+.ant-radio-wrapper {
+  color: var(--wb-text) !important;
+  font-family: var(--wb-font) !important;
+}
+
+input::placeholder,
+textarea::placeholder,
+select::placeholder {
+  color: var(--wb-text-3); /* 更暗的灰色 */
+  opacity: 1;
+}
+
+/* 动效可访问性：尊重系统「减少动态效果」 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* hover 动效只在支持精确指针的设备上启用 */
+@media (hover: hover) and (pointer: fine) {
+  .group:hover .group-hover\:scale-105,
+  .group:hover .group-hover\:scale-110 {
+    transform: scale(1.05);
+  }
+}
+
+/* 辅助文字对比度提亮：Tailwind slate-400 → 令牌次文字（--wb-text-2） */
+.text-slate-400 {
+  color: var(--wb-text-2) !important;
+}
+
+/* 超长代码/文本横溢兜底：布局壳内容区 overflow-x-hidden 后，不换行的 pre/code 会造成
+   内容被横向裁剪或页面级横向滚动条；pre-wrap + break-word 在保持代码可读的同时防溢出 */
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+code {
+  white-space: pre-wrap;
+  word-break: break-all;
+}

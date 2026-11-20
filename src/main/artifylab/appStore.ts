@@ -1,0 +1,225 @@
+import Store from 'electron-store'
+import { EventEmitter } from 'events'
+import { getServerPort } from './server'
+import { normalizeAppForStorage, serializeApp, snapshotAppVersion } from './appAssets'
+
+/** A UI app 参数节点 —— 对应 ComfyUI 工作流里被挑出来的 widget（MCP 工具入参来源） */
+export interface ParamNode {
+  id: number
+  category: 'input' | 'output'
+  type: string
+  name: string
+  description?: string
+  selectedWidget?: {
+    name?: string
+    type?: string
+    options?: { values?: unknown[]; min?: number; max?: number; step?: number; precision?: number }
+  }
+  renderComponent?: string
+  color?: string
+  key?: string
+}
+
+/** ComfyUI API 格式 prompt: { [nodeId]: { class_type, inputs } } */
+export type ComfyPrompt = Record<string, { class_type: string; inputs: Record<string, unknown> }>
+
+export interface AppTemplate {
+  workflow?: unknown
+  prompt?: ComfyPrompt
+  paramsNodes?: ParamNode[]
+}
+
+export interface App {
+  id: string
+  name: string
+  description?: string
+  createdAt: number
+  updatedAt: number
+  /** A UI 生成的完整模板（前端透传，服务端此前未声明类型） */
+  template?: AppTemplate
+}
+
+export interface AppStore {
+  apps: App[]
+}
+
+const getDefaultConfig = () => {
+  // 直接读 server 端口，不再经 index.ts 聚合导出——切断 appStore→index→server→mcp→appStore 循环依赖
+  const port = getServerPort() ?? 8188
+  return {
+    comfyHost: 'http://localhost:8188',
+    serverHost: `http://localhost:${port}`,
+    /** server 绑定地址：默认仅回环（含 MCP token 面）。需要局域网访问时改为 '0.0.0.0'。 */
+    listenHost: '127.0.0.1',
+    lang: 'zh',
+    theme: 'dark',
+    activeAppId: '',
+    max_tokens: 64000,
+    temperature: 0,
+    api_key: '',
+    base_url: 'https://api.deepseek.com/v1',
+    model: 'glm-5.3-flash',
+    provider: 'deepseek', // 供应商标识（设置弹窗供应商卡片用）
+    workbenchAgentAccess: 'standard', // 工作台 agent 文件权限:'standard'|'full'
+    workbenchAgentTransport: 'exec', // 工作台 agent 传输:'exec'|'appserver'|'acp'|'claude'(实验)
+    workbenchAcpAgentBin: '', // 外部 agent 二进制(ACP 必填;claude 缺省走 PATH)
+    buildModel: 'glm-5.3-flash', // 工作台 decide/构建 agent 模型
+    buildStyleId: 'tech', // 新增构建风格ID
+    ngrokAuthtoken: '' // 新增ngrok authtoken
+  }
+}
+
+class AppStoreManager extends EventEmitter {
+  private store: Store<AppStore>
+
+  constructor() {
+    super()
+    this.store = new Store<AppStore>({
+      name: 'artify-apps',
+      defaults: {
+        apps: []
+      }
+    })
+  }
+
+  // 获取所有apps（出口序列化：app-asset:// → HTTP URL）
+  getAllApps(): App[] {
+    const serverOrigin = `http://localhost:${getServerPort() ?? ''}`
+    return this.getAllRawApps().map(
+      (app) =>
+        serializeApp(app as unknown as Record<string, unknown>, serverOrigin) as unknown as App
+    )
+  }
+
+  // 获取所有apps（存储态，未序列化）
+  private getAllRawApps(): App[] {
+    return this.store.get('apps', [])
+  }
+
+  // 根据ID获取app
+  getAppById(id: string): App | undefined {
+    const apps = this.getAllApps()
+    return apps.find((app) => app.id === id)
+  }
+
+  /**
+   * 按名称精确查找（同名可能不止一个——历史遗留的重复固化）。
+   * 调用方通常只关心 id，故用序列化视图即可。
+   */
+  findAppsByName(name: string): App[] {
+    return this.getAllApps().filter((app) => app.name === name)
+  }
+
+  // 创建app
+  createApp(appData: Omit<App, 'id' | 'createdAt' | 'updatedAt'>): App {
+    const apps = this.getAllRawApps()
+    normalizeAppForStorage(appData as Record<string, unknown>)
+    const newApp: App = {
+      ...appData,
+      id: this.generateId(),
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    }
+
+    apps.unshift(newApp)
+    this.store.set('apps', apps)
+    this.emit('change')
+    return newApp
+  }
+
+  // 更新app
+  updateApp(id: string, appData: Partial<Omit<App, 'id' | 'createdAt'>>): App | null {
+    const apps = this.getAllRawApps()
+    const appIndex = apps.findIndex((app) => app.id === id)
+
+    if (appIndex === -1) {
+      return null
+    }
+
+    const existingApp = apps[appIndex]!
+    // 覆盖前快照旧版本（版本历史，gallery.db），失败不阻塞
+    snapshotAppVersion(existingApp as unknown as Record<string, unknown>)
+    normalizeAppForStorage(appData as Record<string, unknown>)
+    const updatedApp: App = {
+      ...existingApp,
+      ...appData,
+      updatedAt: Date.now()
+    }
+
+    apps[appIndex] = updatedApp
+    this.store.set('apps', apps)
+    this.emit('change')
+    return updatedApp
+  }
+
+  // 删除app
+  removeApp(id: string): boolean {
+    const apps = this.getAllRawApps()
+    const filteredApps = apps.filter((app) => app.id !== id)
+
+    if (filteredApps.length === apps.length) {
+      return false // 没有找到要删除的app
+    }
+
+    this.store.set('apps', filteredApps)
+    this.emit('change')
+    return true
+  }
+
+  // 导入apps（unshift到原apps，id相同则覆盖）
+  importApps(apps: App[]): void {
+    for (const app of apps) {
+      normalizeAppForStorage(app as unknown as Record<string, unknown>)
+    }
+    const oldApps = this.getAllRawApps()
+    // 用Map去重，优先保留新导入的
+    const appMap = new Map<string, App>()
+    // 先插入新apps（顺序反转保证unshift效果）
+    for (let i = apps.length - 1; i >= 0; i--) {
+      const app = apps[i]!
+      appMap.set(app.id, app)
+    }
+    // 再插入旧apps（如果id已存在则跳过）
+    for (const app of oldApps) {
+      if (!appMap.has(app.id)) {
+        appMap.set(app.id, app)
+      }
+    }
+    // 保证顺序：新apps在前，旧apps在后
+    const mergedApps = Array.from(appMap.values())
+    this.store.set('apps', mergedApps)
+    this.emit('change')
+  }
+
+  // 获取config
+  getConfig(): any {
+    const defaultConfig = getDefaultConfig()
+    // 已存配置与新默认值做浅合并：新增字段（如 provider/buildModel）能补齐到老用户，
+    // 同时用户显式设过的值不被默认值覆盖
+    const config = { ...defaultConfig, ...this.store.get('config', {}) }
+    config.comfyHost = defaultConfig.comfyHost
+    config.serverHost = defaultConfig.serverHost
+    return config
+  }
+
+  // 保存config
+  saveConfig(config: any): void {
+    const oldConfig = this.getConfig()
+    this.store.set('config', {
+      ...oldConfig,
+      ...config
+    })
+  }
+
+  // 生成唯一ID
+  private generateId(): string {
+    return (([1e7] as any) + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (a: any) =>
+      (a ^ ((Math.random() * 16) >> (a / 4))).toString(16)
+    )
+  }
+}
+
+// 创建单例实例
+const appStoreManager = new AppStoreManager()
+
+export default appStoreManager

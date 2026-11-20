@@ -135,6 +135,19 @@ export function createFakeBridge(seed: BridgeSeed = {}): FakeBridge {
   }
 
   const defaults: BridgeCalls = {
+    getMcpConfig: async () => null,
+    artify: {
+      selectFile: async () => undefined,
+      getConfig: async () => ({}),
+      loadComfyUI: async () => {},
+      loadArtifyLab: async () => {},
+      getAppInfo: async () => ({ version: '0.0.0', name: 'Artify', repository: '' }),
+      openOutputFolder: async () => ({ success: true }),
+      getOutputPath: async () => ({ success: true }),
+      scanFolder: async () => [],
+      openRootFolder: async () => ({ success: true }),
+      openCMD: async () => ({ success: true })
+    },
     getSources: async () => SOURCES,
     getFieldOptions: async (_sourceId, fieldId) => fieldOptionsFor(machine, fieldId),
     buildInstallation: async (sourceId, selections) => ({

@@ -1,0 +1,385 @@
+<template>
+  <div class="compact-list-container">
+    <!-- 虚拟滚动容器 -->
+    <div
+      v-show="filteredApps.length"
+      ref="scrollContainer"
+      class="virtual-scroll-container"
+      @scroll="handleScroll"
+    >
+      <!-- 总高度占位 -->
+      <div :style="{ height: totalHeight + 'px' }" class="virtual-scroll-spacer"></div>
+
+      <!-- 可见项目容器 -->
+      <div :style="{ transform: `translateY(${offsetY}px)` }" class="virtual-items-container">
+        <transition-group name="card" tag="div" class="space-y-2">
+          <div
+            v-for="app in visibleApps"
+            :key="app.id"
+            class="compact-app-item"
+            @click="$emit('view-detail', app)"
+          >
+            <!-- 应用图标 -->
+            <div class="overflow-hidden flex-shrink-0 mr-4 w-12 h-12 rounded-md bg-tech-darker">
+              <img
+                v-if="app.imageUrl"
+                :src="app.imageUrl"
+                :alt="app.name"
+                class="object-cover w-full h-full"
+              />
+              <div v-else class="flex justify-center items-center w-full h-full text-[var(--wb-text-2)]">
+                <i class="text-xl fas fa-robot"></i>
+              </div>
+            </div>
+
+            <!-- 应用信息 -->
+            <div class="flex-1 min-w-0">
+              <div class="flex justify-between items-center mb-1">
+                <h3 class="text-sm font-semibold text-white truncate">
+                  {{ app.name }}
+                </h3>
+                <div class="flex items-center space-x-2">
+                  <!-- 分类标签 -->
+                  <span
+                    class="px-2 py-1 text-xs font-medium rounded-full text-tech-blue bg-tech-blue/10"
+                  >
+                    {{ t(app.category) }}
+                  </span>
+                  <!-- 评分 -->
+                  <div class="flex items-center text-[var(--wb-text-2)]">
+                    <i class="mr-1 text-xs fas fa-star"></i>
+                    <span class="text-xs">{{ app.rating }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <p class="text-xs text-[var(--wb-text-2)] line-clamp-2">
+                {{ app.description }}
+              </p>
+
+              <!-- 元数据 -->
+              <div class="flex items-center mt-2 space-x-4 text-xs text-[var(--wb-text-2)]">
+                <span class="flex items-center">
+                  <i class="mr-1 fas fa-clock"></i>
+                  {{ formatDate(app.createdAt) }}
+                </span>
+                <!-- <span class="flex items-center">
+                  <i class="mr-1 fas fa-download"></i>
+                  {{ app.downloads }}
+                </span> -->
+                <!-- <span class="flex items-center">
+                  <i class="mr-1 fas fa-code"></i>
+                  {{ app.powerLevel }}
+                </span> -->
+                <!-- <span v-if="app.author" class="flex items-center">
+                  <i class="mr-1 fas fa-user"></i>
+                  {{ app.author }}
+                </span> -->
+              </div>
+            </div>
+
+          </div>
+        </transition-group>
+      </div>
+    </div>
+
+    <!-- 空状态 -->
+    <div v-if="filteredApps.length === 0" class="flex justify-center items-center h-64">
+      <div class="text-center">
+        <div class="mb-4 text-6xl text-[var(--wb-text-2)]">
+          <i class="fas fa-store"></i>
+        </div>
+        <h3 class="mb-2 text-xl font-semibold text-white">
+          {{ getEmptyMessage() }}
+        </h3>
+        <p class="text-[var(--wb-text-2)]">
+          {{ getEmptyDescription() }}
+        </p>
+        <div v-if="searchQuery || selectedCategory" class="mt-4 space-x-2">
+          <button
+            v-if="searchQuery"
+            @click="$emit('clear-search')"
+            class="px-4 py-2 text-sm font-medium text-white rounded-md transition-colors btn-comfy-primary"
+          >
+            {{ t('clearSearch') }}
+          </button>
+          <button
+            v-if="selectedCategory"
+            @click="$emit('clear-filter')"
+            class="px-4 py-2 text-sm font-medium text-white rounded-md transition-colors btn-comfy-primary"
+          >
+            {{ t('clearFilter') }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { computed, ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { t } from '@/utils/i18n'
+
+const props = defineProps({
+  apps: {
+    type: Array,
+    default: () => [],
+  },
+  searchQuery: {
+    type: String,
+    default: '',
+  },
+  selectedCategory: {
+    type: String,
+    default: '',
+  },
+})
+
+defineEmits(['view-detail', 'install', 'clear-search', 'clear-filter'])
+
+// 虚拟滚动相关状态
+const scrollContainer = ref(null)
+const scrollTop = ref(0)
+const containerHeight = ref(0)
+const itemHeight = ref(80) // 紧凑列表项的高度
+const bufferSize = ref(5) // 缓冲区大小
+const resizeObserver = ref(null)
+
+// 动态测量第一个compact-app-item高度
+const measureItemHeight = () => {
+  nextTick(() => {
+    const item = document.querySelector('.virtual-items-container .compact-app-item')
+    if (item) {
+      // 取高度+margin-bottom（8px）
+      itemHeight.value = item.offsetHeight + 8
+    }
+  })
+}
+
+// 计算属性：过滤后的应用列表
+const filteredApps = computed(() => {
+  let filtered = props.apps
+
+  // 按搜索关键词过滤
+  if (props.searchQuery) {
+    const query = props.searchQuery.toLowerCase()
+    filtered = filtered.filter(
+      (app) =>
+        app.name.toLowerCase().includes(query) ||
+        app.description.toLowerCase().includes(query) ||
+        app.category.toLowerCase().includes(query),
+    )
+  }
+
+  // 按分类过滤
+  if (props.selectedCategory) {
+    filtered = filtered.filter((app) => app.category === props.selectedCategory)
+  }
+
+  return filtered
+})
+
+// 计算总高度
+const totalHeight = computed(() => {
+  return filteredApps.value.length * itemHeight.value
+})
+
+// 计算可见范围
+const visibleRange = computed(() => {
+  const start = Math.floor(scrollTop.value / itemHeight.value)
+  const visibleItems = Math.ceil(containerHeight.value / itemHeight.value) + bufferSize.value * 2
+  const end = Math.min(start + visibleItems, filteredApps.value.length)
+
+  return {
+    start: Math.max(0, start - bufferSize.value),
+    end: Math.min(filteredApps.value.length, end + bufferSize.value),
+  }
+})
+
+// 计算偏移量
+const offsetY = computed(() => {
+  return Math.max(0, visibleRange.value.start * itemHeight.value)
+})
+
+// 可见的应用列表
+const visibleApps = computed(() => {
+  return filteredApps.value.slice(visibleRange.value.start, visibleRange.value.end)
+})
+
+// 防抖函数
+const debounce = (func, wait) => {
+  let timeout
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout)
+      func(...args)
+    }
+    clearTimeout(timeout)
+    timeout = setTimeout(later, wait)
+  }
+}
+
+// 格式化日期
+const formatDate = (date) => {
+  if (!date) return ''
+  const d = new Date(date)
+  return d.toLocaleDateString()
+}
+
+// 处理滚动事件
+const handleScroll = debounce(() => {
+  if (scrollContainer.value) {
+    scrollTop.value = scrollContainer.value.scrollTop
+  }
+}, 16) // 约60fps
+
+// 监听容器大小变化
+const updateContainerHeight = () => {
+  if (scrollContainer.value) {
+    containerHeight.value = scrollContainer.value.clientHeight
+  }
+  measureItemHeight() // 容器变化时重新测量高度
+}
+
+// 监听窗口大小变化
+const handleResize = () => {
+  updateContainerHeight()
+}
+
+// 监听过滤结果变化，重置滚动位置
+watch(filteredApps, () => {
+  if (scrollContainer.value) {
+    scrollContainer.value.scrollTop = 0
+    scrollTop.value = 0
+  }
+})
+
+// 获取空状态消息
+function getEmptyMessage() {
+  if (props.searchQuery) {
+    return t('noAppsFoundWithQuery', { query: props.searchQuery })
+  }
+  if (props.selectedCategory) {
+    return t('noAppsInCategory', { category: props.selectedCategory })
+  }
+  return t('noAppsAvailable')
+}
+
+// 获取空状态描述
+function getEmptyDescription() {
+  if (props.searchQuery || props.selectedCategory) {
+    return t('tryOtherKeywords')
+  }
+  return t('marketEmptyDescription')
+}
+
+onMounted(() => {
+  nextTick(() => {
+    updateContainerHeight()
+    handleResize()
+    window.addEventListener('resize', handleResize)
+    measureItemHeight() // 初始测量高度
+    if (scrollContainer.value) {
+      resizeObserver.value = new ResizeObserver(() => {
+        updateContainerHeight()
+        measureItemHeight() // 容器变化时重新测量高度
+      })
+      resizeObserver.value.observe(scrollContainer.value)
+    }
+  })
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleResize)
+  if (resizeObserver.value) {
+    resizeObserver.value.disconnect()
+  }
+})
+</script>
+
+<style scoped>
+.compact-list-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.virtual-scroll-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  min-height: 0; /* 重要：确保flex子元素可以收缩 */
+}
+
+.virtual-scroll-spacer {
+  position: relative;
+}
+
+.virtual-items-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+
+.compact-app-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--wb-surface-deep);
+  border: 1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-card);
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease;
+  margin-bottom: 8px;
+}
+
+.compact-app-item:last-child {
+  margin-bottom: 0;
+}
+
+.compact-app-item:hover {
+  background: var(--wb-surface-hover);
+  border-color: var(--wb-stroke-strong);
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card-enter-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.card-enter-from {
+  opacity: 0;
+  transform: translateY(20px) scale(0.95);
+}
+
+/* 自定义滚动条 */
+.virtual-scroll-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.virtual-scroll-container::-webkit-scrollbar-track {
+  background: var(--wb-surface-deep);
+  border-radius: 3px;
+}
+
+.virtual-scroll-container::-webkit-scrollbar-thumb {
+  background: var(--wb-accent);
+  border-radius: 3px;
+}
+
+.virtual-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: var(--wb-accent-hover);
+}
+</style>

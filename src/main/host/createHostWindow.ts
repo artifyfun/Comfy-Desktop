@@ -62,6 +62,7 @@ import {
   hasRunningSessionForEntry,
   isChooserHost,
   isInstallHost,
+  isOverlayPanel,
   nextWindowKey,
   registerHostEntry,
   revealColdStartHostIfPending,
@@ -154,7 +155,7 @@ export function shouldBailAfterCloseChoice(
 const APP_ICON = path.join(__dirname, '..', '..', 'assets', 'Comfy_Logo_x256.png')
 const APP_VERSION = getAppVersion()
 
-export const CHOOSER_HOST_TITLE_TEXT = 'Comfy Desktop'
+export const CHOOSER_HOST_TITLE_TEXT = 'Artify'
 export const CHOOSER_HOST_WINDOW_TITLE = `${CHOOSER_HOST_TITLE_TEXT} · v${APP_VERSION}`
 
 const CHOOSER_HOST_BOUNDS_KEY = 'chooser'
@@ -200,7 +201,7 @@ const PASSKEY_BANNER_JS =
   `(function(){` +
   `if(document.getElementById('comfy-passkey-banner'))return;` +
   `const b=document.createElement('div');b.id='comfy-passkey-banner';` +
-  `b.textContent='\\u24d8 Passkeys are not supported in Comfy Desktop on macOS. Please use your password or verification code to sign in.';` +
+  `b.textContent='\\u24d8 Passkeys are not supported in Artify on macOS. Please use your password or verification code to sign in.';` +
   `document.body.prepend(b);` +
   `document.body.style.paddingTop=(b.offsetHeight)+'px';` +
   `new MutationObserver(function(){` +
@@ -454,14 +455,24 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     const activeComfyView = entry?.comfyView ?? comfyView
 
     const mode = entry ? computeBodyMode(entry) : 'comfy'
-    const isOverlayMode = mode === 'feedback'
+    const isOverlayMode = isOverlayPanel(mode)
     const showPanel = mode !== 'comfy' && !(isOverlayMode && entry?.pendingOverlayReveal)
     if (showPanel && entry?.panelView) {
       entry.panelView.setBounds(bodyRect)
       entry.panelView.setVisible(true)
       if (isOverlayMode) {
-        activeComfyView.setBounds(bodyRect)
-        activeComfyView.setVisible(true)
+        if (entry.overlayFromChooser) {
+          // Overlay opened on the A UI: the panelView was navigated to the
+          // native panel app (PanelApp renders the modal). Keep ComfyUI hidden
+          // so the modal doesn't read as an A→C switch — it floats where the
+          // A UI was, and closing restores 'chooser'. (The C canvas under an
+          // overlay opened from the C side stays visible, as before.)
+          activeComfyView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
+          activeComfyView.setVisible(false)
+        } else {
+          activeComfyView.setBounds(bodyRect)
+          activeComfyView.setVisible(true)
+        }
       } else {
         activeComfyView.setBounds({ x: 0, y: titleBarTotal, width: 0, height: 0 })
         activeComfyView.setVisible(false)
@@ -532,7 +543,17 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     if (titleBarView.webContents.isDestroyed()) return
     const entry = comfyWindows.get(windowKey)
     titleBarView.webContents.send('comfy-titlebar:panel-changed', entry?.activePanel ?? 'comfy')
+    // Authoritative body-mode push: gates the A-segment of the A/C switch
+    // (A UI only enterable once the ComfyUI canvas is live).
+    titleBarView.webContents.send(
+      'comfy-titlebar:body-mode-changed',
+      entry ? computeBodyMode(entry) : 'comfy'
+    )
     if (entry) {
+      // Authoritative surface push so the A/C segmented switch paints
+      // the right side on cold boot (URL `surface` param is only a
+      // seed; setPanelSurface flips it at runtime).
+      titleBarView.webContents.send('comfy-titlebar:surface-changed', entry.panelSurface)
       titleBarView.webContents.send('comfy-titlebar:theme-changed', entry.lastTheme)
       titleBarView.webContents.send('comfy-titlebar:title-changed', entry.titleBarText)
       titleBarView.webContents.send('comfy-titlebar:source-category-changed', entry.sourceCategory)
@@ -647,6 +668,11 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     coldStartPendingReveal: false,
     maximizeOnReveal: placement.maximizeOnReveal,
     _installCleanup: null,
+    // 默认进入 C 侧原生界面（chooser：安装选择/实例管理），A UI 由两侧
+    // 浮动按钮互切（C 侧 🎨 浮标 loadArtifyLab、A 侧 comfyui 浮标
+    // loadComfyUI）。此前单窗口模式开机直进 A UI，安装引导藏在按钮后面。
+    panelSurface: 'chooser',
+    surfaceBeforeOverlay: null,
     detachInstall: () => {}
   }
   entry.detachInstall = () => fx.detachInstallImpl(entry)
@@ -752,6 +778,12 @@ export function rebuildComfyViewIfNeeded(
     {
       nodeIntegration: false,
       contextIsolation: true,
+      // comfyPreload requires the shared chunks/*.js — a sandboxed preload
+      // can't require() relative chunks (see the sandbox: false notes on the
+      // title-bar preload). Without the preload, neither __comfyDesktop2 nor
+      // the legacy electronAPI bridge exist in the ComfyUI view, which disables
+      // the injected artifylab switch button.
+      sandbox: false,
       preload: path.join(__dirname, '../preload/comfyPreload.js'),
       partition: expectedPartition
     },
@@ -816,6 +848,12 @@ export function openChooserHostWindow(
     comfyWebPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      // comfyPreload requires the shared chunks/*.js (see the sandbox note on
+      // the title-bar preload) — a sandboxed preload can't require() relative
+      // chunks and the bridge dies with `module not found: ./chunks/...`,
+      // which disables `window.electronAPI` in the ComfyUI view and silently
+      // breaks comfy_inject.js (server_origin lookup / floating button).
+      sandbox: false,
       preload: path.join(__dirname, '../preload/comfyPreload.js'),
       partition: 'persist:shared'
     },

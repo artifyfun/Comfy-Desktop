@@ -338,6 +338,8 @@
   },
   "titleBar": {
     "panelComfy": "ComfyUI",
+    "surfaceArtify": "工坊",
+    "surfaceComfy": "画布",
     "panelInstallSettings": "构建设置",
     "panelLauncherSettings": "启动器设置",
     "installSettingsComingSoon": "构建专属设置将在未来更新中显示。",

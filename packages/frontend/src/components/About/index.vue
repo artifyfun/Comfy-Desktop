@@ -1,0 +1,468 @@
+<template>
+  <div class="about-modal">
+    <div class="modal-mask">
+      <div class="modal-container">
+        <div class="close-btn" @click="handleClickClose">
+          <i class="fas fa-times"></i>
+        </div>
+
+        <div class="modal-content">
+          <div class="info-section">
+            <h2>{{ t('aboutArtifyWorkshop') }}</h2>
+            <p class="intro-text">
+              {{ t('aboutIntro') }}
+            </p>
+
+            <div class="features">
+              <div class="feature">
+                <i class="fas fa-rocket"></i>
+                <div>{{ t('dailyUpdates') }}</div>
+              </div>
+              <div class="feature">
+                <i class="fas fa-cogs"></i>
+                <div>{{ t('workflowAnalysis') }}</div>
+              </div>
+              <div class="feature">
+                <i class="fas fa-palette"></i>
+                <div>{{ t('professionalEffects') }}</div>
+              </div>
+              <div class="feature">
+                <i class="fas fa-download"></i>
+                <div>{{ t('exclusiveTemplates') }}</div>
+              </div>
+            </div>
+
+            <div class="social-media">
+              <!-- <a
+                href="https://weibo.com/yourprofile"
+                target="_blank"
+                rel="noopener"
+                title="Weibo"
+                class="social-icon"
+              >
+                <i class="fab fa-weibo"></i>
+              </a>
+              <a
+                href="https://twitter.com/yourprofile"
+                target="_blank"
+                rel="noopener"
+                title="Twitter"
+                class="social-icon"
+              >
+                <i class="fab fa-twitter"></i>
+              </a> -->
+              <a
+                href="https://github.com/artifyfun"
+                target="_blank"
+                rel="noopener"
+                title="GitHub"
+                class="social-icon"
+              >
+                <i class="fab fa-github"></i>
+              </a>
+              <a
+                href="https://space.bilibili.com/1584901"
+                target="_blank"
+                rel="noopener"
+                title="Bilibili"
+                class="social-icon"
+              >
+                <i class="fab fa-bilibili"></i>
+              </a>
+            </div>
+          </div>
+
+          <div class="qrcode-section">
+            <div class="wechat-name">{{ t('artifyWorkshop') }}</div>
+            <div class="qrcode-box">
+              <div class="qrcode-inner">
+                <div class="qrcode-placeholder">
+                  <img
+                    src="./ArtifyLab.jpg"
+                    style="width: 140px; height: 140px"
+                    :alt="t('artifyWorkshop')"
+                  />
+                </div>
+                <div class="qrcode-label">{{ t('scanToFollow') }}</div>
+                <div class="qrcode-subtitle">{{ t('getAIWorkflowResources') }}</div>
+              </div>
+            </div>
+          </div>
+          <div v-if="appInfo && appInfo.version" class="version-update-row">
+            <div class="app-version">Version: {{ appInfo.version }}</div>
+            <!-- 检查更新按钮暂时隐藏（如需恢复，取消注释即可）
+            <button @click="showUpdateModal = true" class="check-update-btn">
+              <i class="fas fa-sync-alt"></i>
+              <span>{{ t('checkForUpdates') }}</span>
+            </button>
+            -->
+          </div>
+          <div
+            class="license-info"
+            style="
+              width: 100%;
+              color: var(--wb-accent-hover);
+              font-size: 0.95rem;
+              text-align: right;
+              margin-top: 10px;
+            "
+          >
+            <span v-html="copyrightText"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- 更新Modal组件 -->
+    <UpdateModal
+      v-if="appInfo && appInfo.version"
+      v-model:show="showUpdateModal"
+      :appInfo="appInfo"
+    />
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, computed } from 'vue'
+import { t } from '@/utils/i18n'
+import { getAppInfo } from '@/utils'
+import UpdateModal from './UpdateModal.vue'
+
+const appInfo = ref({ name: 'Artify' })
+
+const showUpdateModal = ref(false)
+
+const emit = defineEmits(['clickClose'])
+
+const handleClickClose = () => {
+  emit('clickClose')
+}
+
+onMounted(async () => {
+  appInfo.value = await getAppInfo()
+})
+
+const copyrightText = computed(() =>
+  t('copyright', {
+    license: `<a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" style="color: var(--wb-accent-hover); text-decoration: underline;">${t('gplv3')}</a>`,
+  }),
+)
+</script>
+
+<script>
+export default {
+  name: 'AboutModal',
+}
+</script>
+
+<style lang="less" scoped>
+.about-modal {
+  font-family: var(--wb-font);
+  /* fix(画布全隐): 根节点原为 in-flow 块(min-height:100vh 无 position)——挂载在
+     header 内会把 header 撑到 100vh+,flex 布局里画布容器高度被挤到 0,
+     Konva stage 尺寸归零(cull 全裁=节点全隐、hit 全废=点击无响应)。
+     关闭后多数环境靠 ResizeObserver 回补恢复,但 resize 回调竞态/软渲染
+     下可能不自愈,须切路由重挂载。改 fixed 脱离文档流,布局零影响。 */
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: var(--wb-text);
+  padding: 20px;
+
+  /* 弹窗样式 */
+  .modal-mask {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    overflow: hidden;
+  }
+
+  .modal-container {
+    width: 90%;
+    max-width: 800px;
+    background: var(--wb-surface-deep);
+    border-radius: var(--wb-r-modal);
+    border: 1px solid var(--wb-stroke);
+    position: relative;
+    overflow: auto;
+    padding: 40px;
+    max-height: 100%;
+  }
+
+  .close-btn {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    width: 32px;
+    height: 32px;
+    background: transparent;
+    border: none;
+    border-radius: var(--wb-r-ctrl);
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: var(--wb-text-3);
+    font-size: 1rem;
+    transition:
+      background 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .close-btn:hover {
+    background: var(--wb-surface-hover);
+    color: var(--wb-text);
+  }
+
+  .modal-content {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 40px;
+    margin-top: 20px;
+  }
+
+  .info-section {
+    flex: 1;
+    min-width: 300px;
+    text-align: left;
+    padding: 20px;
+  }
+
+  .qrcode-section {
+    flex: 0 0 280px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  h2 {
+    font-size: 2.2rem;
+    margin-bottom: 20px;
+    color: var(--wb-text);
+  }
+
+  .intro-text {
+    line-height: 1.8;
+    font-size: 1.1rem;
+    color: var(--wb-text-2);
+    margin-bottom: 24px;
+    position: relative;
+    padding-left: 20px;
+  }
+
+  .intro-text::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: 4px;
+    background: var(--wb-accent);
+    border-radius: 2px;
+  }
+
+  .highlight {
+    color: var(--wb-accent-hover);
+    font-weight: 600;
+  }
+
+  .wechat-name {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--wb-brand);
+    margin: 20px 0;
+    text-align: center;
+    letter-spacing: 1px;
+  }
+
+  .qrcode-box {
+    width: 280px;
+    height: 280px;
+    background: var(--wb-surface);
+    border: 1px solid var(--wb-stroke);
+    border-radius: var(--wb-r-card);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .qrcode-inner {
+    position: relative;
+    z-index: 2;
+    background: var(--wb-bg-base);
+    width: 260px;
+    height: 260px;
+    border-radius: 12px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    padding: 15px;
+  }
+
+  .qrcode-placeholder {
+    width: 150px;
+    height: 150px;
+    background:
+      linear-gradient(45deg, #1a1a1a 25%, transparent 25%, transparent 75%, #1a1a1a 75%),
+      linear-gradient(45deg, #1a1a1a 25%, #0a0a0a 25%, #0a0a0a 75%, #1a1a1a 75%);
+    background-size: 10px 10px;
+    background-position:
+      0 0,
+      5px 5px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: var(--wb-accent-hover);
+    font-size: 1.5rem;
+  }
+
+  .qrcode-label {
+    font-size: 1.3rem;
+    color: #fff;
+    text-align: center;
+    font-weight: 600;
+  }
+
+  .qrcode-subtitle {
+    color: var(--wb-text-2);
+    font-size: 1rem;
+  }
+
+  .features {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+    margin-top: 20px;
+  }
+
+  .feature {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .feature i {
+    color: var(--wb-accent-hover);
+    font-size: 1.2rem;
+    margin-top: 3px;
+  }
+
+  .pulse {
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+
+  .social-media {
+    display: flex;
+    gap: 20px;
+    margin: 30px 0 0 0;
+    justify-content: flex-start;
+
+    .social-icon {
+      color: var(--wb-text-2);
+      font-size: 2rem;
+      transition: color 0.15s;
+      text-decoration: none;
+
+      &:hover {
+        color: var(--wb-text);
+      }
+    }
+  }
+
+  .check-update-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 15px;
+    background: var(--wb-surface);
+    border: 1px solid var(--wb-stroke);
+    border-radius: var(--wb-r-ctrl);
+    color: var(--wb-text);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.15s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .check-update-btn:hover {
+    background: var(--wb-surface-hover);
+    border-color: var(--wb-stroke-strong);
+  }
+
+  .check-update-btn i {
+    font-size: 0.9rem;
+    transition: transform 0.3s ease;
+  }
+
+  .check-update-btn:hover i {
+    transform: rotate(180deg);
+  }
+
+  .check-update-btn span {
+    font-weight: 500;
+    letter-spacing: 0.5px;
+  }
+
+  .version-update-row {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    width: 100%;
+    margin: 15px 0;
+    gap: 15px;
+  }
+
+  .app-version {
+    color: var(--wb-accent-hover);
+    font-size: 1rem;
+    font-weight: 500;
+  }
+
+  @media (max-width: 768px) {
+    .modal-content {
+      flex-direction: column;
+    }
+
+    .info-section,
+    .qrcode-section {
+      width: 100%;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+    }
+
+    .features {
+      grid-template-columns: 1fr;
+    }
+  }
+}
+</style>

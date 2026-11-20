@@ -1,0 +1,76 @@
+---
+name: wb-orchestration
+description: Artify 工作台多步编排与工作流创作指南。当需求需要多步执行（先调研/生成，再基于结果继续生成或写文案）、模板无法表达（需自定义节点连线/组合）、或需要精细控制节点参数（node_overrides）时使用。
+---
+
+# Artify 工作台编排指南
+
+## 多步编排（wb_* 工具）
+
+**多步需求**（如「查XX主题→文生图→图生视频→写文案」）逐步自主执行：
+
+1. `wb_list_templates` 看可用模板（研究类需求可用你的 shell 联网检索，结论作为后续 prompt 输入）。
+2. `wb_execute_template(template_id, params, wait=true)` 逐步执行；链式步骤传 `use_previous_output=true` 自动引用上一步产物。
+3. 每步产物自动落会话（用户实时可见）；全部完成后，最终回复（agent_message）输出：完整编排总结 + 交付文案（若需要）+ 仍输出 PLAN JSON（intent 标记为最后一个生成步骤，系统会跳过重复执行）。
+4. 用户偏好/硬件等跨会话事实用 `wb_remember`/`wb_forget` 沉淀。
+5. 非阻塞查询某次执行：`wb_get_outputs`（立即返回最近/指定执行的产物清单）；等跑完用 `wait=true`。
+
+## 一致性资产（wb_assets）
+
+同一**角色/风格**要出多张图或多轮迭代时，先登记资产再复用（不要每轮让用户重新贴图）：
+
+1. `wb_assets(action="save", name="小美", kind="character", refs=["已上传文件名或 http(s) URL"], seed=123, params={"lora":"触发词"})` 登记；`action="list"` 先查已有资产（避免重复建同名）。
+2. 生成时传 `asset_ids=["小美"]`（可写资产名或 id；多个资产按序占参考图位）：参考图自动落素材槽、seed 自动填、资产 params 自动并入；**用户显式 params 优先**。返回体的 `assets` / `asset_issues` 说明实际挂载结果与问题（槽位不足、参数未被模板接受等），据此改道。
+3. 更新（换参考图/调 seed）：`action="save"` 带 `id`；删除：`action="remove"`。
+
+## 节点级控制（node_overrides）
+
+用户要求**更精细的参数**（改采样步数/CFG/尺寸/换模型/改任意节点参数，模板未暴露的）时：
+
+1. `wb_list_nodes(template_id)` 查模板节点图与可写 widget（含类型/枚举/范围，源自 ComfyUI /object_info）。
+2. 在 PLAN 里带 `node_overrides` 精确覆盖：`{"节点id": {"class_type": "KSampler", "widgetOverrides": {"steps": 40, "cfg": 7}}}`；`wb_execute_template` 同样接受 node_overrides。
+3. **链接型字段**（值是 `["nodeId", slot]` 引用）不能直接赋值——改它上游节点的输出参数，或用 `use_previous_output` 让系统把上一次产物写进首个媒体加载槽。
+4. 校验失败会打回原因（字段不存在/类型错/越界/是链接），按提示修正后重试。
+5. 模板参数够用时**优先用 params（省 token）**；确实要动模板未暴露的节点才用 node_overrides。
+
+## 工作流创作
+
+现有模板**不匹配需求**（不是"有点像"就硬套——能力/风格/模型不符直接自组）时：
+
+1. `wb_list_templates` 确认没有真正可用的；`wb_list_nodes()`（不传 template_id）看 ComfyUI 全量节点类型与输入 schema（object_info）。
+2. 从「环境快照」模型清单选底模：文生图用 checkpoints 或 UNETLoader 可加载的模型 + VAE；风格化需求叠加对应 LoRA（名字含风格的优先）。
+3. `wb_validate_workflow(workflow)` 先校验 API 格式 workflow JSON（节点类型/链接完整性，可迭代修正）。
+4. `wb_run_workflow(workflow, wait=true)` 直接运行；seed/node_overrides/use_previous_output 可传。产物自动落会话。
+5. 效果好的可 `wb_publish_workflow(name, workflow)` 固化为模板，供后续复用。**缺省自动推断输入参数**（提示词 / seed / steps / cfg / 尺寸 / 参考图槽）与输出节点，固化后直接能用 `wb_execute_template` 填参复跑；要精确控制参数面时用 `params_nodes` 显式覆盖。**用户在画布上手动搭好并跑通的工作流**无需重传本体——直接 `wb_publish_workflow(name, prompt_id=<该次执行的 promptId>)` 即可沉淀（服务端已存工作流快照，仅保留最近 30 次执行）。
+   - **新建还是迭代**：同名模板**恰好一个**时视为「迭代它」，写入新版本（旧版自动快照，用户可在模板的版本历史里恢复），结果回 `mode=versioned` 与新的 `version`；没有同名则新建（`mode=created`）。所以**对同一模板改一版再沉淀就直接传同一个 name**，别起新名字（否则会攒出一堆近似重复模板）。想做**变体**而非迭代时传 `force_new=true`；要明确迭代某个模板传 `app_id`（`wb_list_templates` 可查；id 无效会报错，不会静默新建）。
+   - 用户对某次画布结果满意、或某条操作链值得反复用时，主动提议沉淀。
+   - **模板 id 只有一种口径**：`app:<id>`。`wb_list_templates` / `wb_publish_workflow` / `wb_app_versions` 返回的 id 都可以**直接互喂**给任何接 id 的工具（`wb_execute_template` / `wb_list_nodes` / `wb_clone_template` / `wb_app_versions`），不需要自己加或去前缀。id 入参两种写法都接受，但**回传/记录时用工具给的原值**，不要手工拼 `app:`。
+   - **迭代改坏了就自己退回去**：每次迭代写入都会把上一版自动快照，用 `wb_app_versions` 查历史（`action=list` 定位模板传 app_id 或唯一同名）→ `action=get version=N` 看那版长什么样 → `action=restore version=N` 退回。恢复前的那一版也会被快照，所以误退可以再退回来；回滚只改本地模板库、不触发执行，标准审批档位下自动放行。发现自己刚沉淀的模板跑不通时，先回滚再改，不要留在坏版本上继续叠。
+
+API 格式：`{"节点id": {"class_type": "节点类名", "inputs": {"参数名": 值 或 ["上游id", 端口号]}}}`；链接字段值为 `["上游节点id", 输出端口下标]`。
+
+最小骨架（按需求删减/追加）：
+
+- **文生图**：`{"1":{"class_type":"CheckpointLoaderSimple","inputs":{"ckpt_name":"<底模>"}},"2":{"class_type":"CLIPTextEncode","inputs":{"text":"<正向提示词>","clip":["1",1]}},"3":{"class_type":"CLIPTextEncode","inputs":{"text":"<负向>","clip":["1",1]}},"4":{"class_type":"EmptyLatentImage","inputs":{"width":1024,"height":1024,"batch_size":1}},"5":{"class_type":"KSampler","inputs":{"seed":42,"steps":28,"cfg":7,"sampler_name":"euler","scheduler":"normal","denoise":1,"model":["1",0],"positive":["2",0],"negative":["3",0],"latent_image":["4",0]}},"6":{"class_type":"VAEDecode","inputs":{"samples":["5",0],"vae":["1",2]}},"7":{"class_type":"SaveImage","inputs":{"filename_prefix":"artify","images":["6",0]}}}`
+- **图生图**：文生图基础上把 EmptyLatentImage 换成 `{"class_type":"LoadImage","inputs":{"image":"<已上传文件名>"}}` → `{"class_type":"VAEEncode","inputs":{"pixels":["LoadImage",0],"vae":["1",2]}}` 接 KSampler（denoise 0.5~0.8）；或直接 `LoadImage → VAEEncode → KSampler`。
+- 节点类名不存在的先用 `wb_list_nodes()` 确认（如 CheckpointLoaderSimple 不在时用 UNETLoader + CLIPLoader + VAELoader 组合）。**本机 checkpoints 目录无标准底模**：文生图参考 Krea2/Anima 模板的加载器结构（UNETLoader 加载 unet/Qwen-Image-Flash 或 diffusion_models/Anima-2.9B + CLIPLoader 加载 text_encoders 的 Qwen3 编码器 + VAELoader 加载 vae 对应文件），模型名以「环境快照」模型清单为准。
+
+## 画布协同（C 界面 AI 侧边栏）
+
+主场景：感知画布当前 tab 工作流 → 修改 → 执行 → 批量。agent 决策时「画布当前状态」段已注入当前激活 tab 的节点清单/模型/关键参数，节点 id 以清单里 `#id` 为准：
+
+> ⚠️ 本段适用于 **C 界面画布**（画布状态段标注「C 界面当前激活 tab」）。若标注是「A 画布（无限画布）」，本段 1-4 不适用——A 画布没有 ComfyUI 节点图；铺节点用 `wb_build_workflow` / canvas-ops `add_app_node`，跑节点用 canvas-ops `run_node`（见 PLAN 规则 3.4）。
+
+1. **模板加载到画布**：用户说「把工作流同步到画布 / 打开某模板布局」→ PLAN `intent=workflow` + `templateId`（模板库 id）。系统开新 tab 加载该模板布局；当前 tab 已是同一工作流（同名 + 节点结构一致）时复用不重复开。
+2. **执行画布当前工作流**：用户说「执行画布上的 / 跑当前图 / 按画布参数生成」→ PLAN `intent=canvas-run`（不指定 templateId）。需要改参数再跑 → 加 `nodeOverrides`（键=节点 id，值=widgetOverrides，同「节点级控制」格式）。
+3. **画布批量执行**：对当前画布多变体 → `intent=canvas-run` + `batch`。行键用「节点id.widget名」格式（如 `"16.steps": 40`、`"9.text": "新提示词"`）；共有的固定变体放 `sharedParams`（同格式）。系统按行逐条执行画布当前工作流，产物逐个回卡。
+4. **模板执行自动加载画布**：intent=image/video/audio 执行模板时系统自动先把该模板工作流加载到画布（新 tab，已激活则复用）——你无需额外字段。
+5. 画布未就绪/图太小时（如空画布），用 chat 说明并建议先在画布打开工作流。**A 画布空画布**的正确引导不同：建议 `wb_build_workflow`（把模板铺成 App 节点链）或 canvas-ops `add_app_node`（单个应用节点），而不是「打开工作流」。
+
+## 画布整理（对齐 / 自动布局）
+
+画布结构修改（addNode/relink 等）后，输出布局 op 让画布整齐（参考 ComfyUI-AlignLayout 能力）：
+
+- **对齐**：`{"type":"align","nodes":[可选节点id列表],"mode":"left"}`——mode：left/right/top/bottom（靠边）、hcenter/vcenter（居中）、hdist/vdist（均匀分布）。不传 nodes 时作用于画布选中或全部节点。
+- **自动布局**：`{"type":"autoLayout","nodes":[可选],"direction":"forward|reverse"}`——按拓扑分层排布（source-aligned），列间距 80 行间距 60，防重叠。不传 nodes 时作用于全部节点。
+- 用法示例：新增节点后「把这些节点自动排整齐」→ `ops:[{"type":"autoLayout"}]`；「把选中节点左对齐」→ `ops:[{"type":"align","mode":"left"}]`。

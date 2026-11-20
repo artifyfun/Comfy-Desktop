@@ -2,3 +2,18 @@ pnpm-lock.yaml
 assets/starter-templates.json
 assets/benchmark-templates.json
 .claude/
+
+# ---- fork 资产：不参与上游 prettier --check . 全仓口径 ----
+docs/
+acceptance/
+scripts/wb-*.mjs
+scripts/wb-*.cjs
+scripts/generate-icons.py
+scripts/verify-exe-icon.py
+packages/
+src/main/artifylab/public/
+src/main/artifylab/vendor/
+out/
+dist/
+todesktop.json
+release-cache.json

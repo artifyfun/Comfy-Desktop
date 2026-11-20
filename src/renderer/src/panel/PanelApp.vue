@@ -20,6 +20,9 @@ import TrackModal from '../views/TrackModal.vue'
 import LoadSnapshotModal from '../views/LoadSnapshotModal.vue'
 import FirstUseTakeover from '../views/FirstUseTakeover.vue'
 import MigrateConfirmTakeover from '../views/MigrateConfirmTakeover.vue'
+import McpSetupModal from '../views/mcp/McpSetupModal.vue'
+import { useMediaPrefetch } from '../composables/useMediaPrefetch'
+import { MCP_LAUNCH_VIDEO_SRC } from '../views/mcp/McpVideoSources'
 import { useTheme } from '../composables/useTheme'
 import { provideLocalDeviceKind } from '../composables/useLocalDeviceKind'
 import { useSessionStore } from '../stores/sessionStore'
@@ -443,10 +446,28 @@ function handleProgressSuccessChoice(actionId: string, targetInstallationId: str
   }
 }
 
+/**
+ * Dismisses the MCP overlay and restores the main canvas.
+ * The 'mcp-setup' overlay leaves the underlying view active.
+ */
+function handleMcpClose(): void {
+  window.api.closeCurrentPanel()
+}
+
+// Warm the ~5 MB MCP film into cache once so it isn't black on first open. No
+// `runningTabCount` gate: the modal is only reachable while an instance runs.
+const { prefetch: prefetchMedia } = useMediaPrefetch()
+let mcpVideoWarmed = false
+function warmMcpVideo(): void {
+  if (mcpVideoWarmed) return
+  mcpVideoWarmed = true
+  prefetchMedia([MCP_LAUNCH_VIDEO_SRC])
+}
+
 watch(
   activePanel,
   (next) => {
-    const isOverlay = next === 'feedback'
+    const isOverlay = next === 'feedback' || next === 'mcp-setup'
     document.body.classList.toggle('panel-overlay-mode', isOverlay)
     if (!isOverlay) return
     void nextTick(() => window.api.signalOverlayReady())
@@ -553,6 +574,8 @@ onMounted(async () => {
   } finally {
     resolveBootstrap?.()
     resolveBootstrap = null
+    // After bootstrap so it never competes with init (idle-deferred internally).
+    warmMcpVideo()
   }
 })
 
@@ -710,6 +733,8 @@ onUnmounted(() => {
       @close="buildProgressId = null"
       @retry="retryLaunch(buildProgressId)"
     />
+    <McpSetupModal v-if="activePanel === 'mcp-setup'" @close="handleMcpClose" />
+
     <FeedbackModal
       :open="feedbackOpen"
       :hidden-fields="feedbackHiddenFields"

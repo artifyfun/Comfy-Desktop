@@ -338,6 +338,8 @@
   },
   "titleBar": {
     "panelComfy": "ComfyUI",
+    "surfaceArtify": "Workshop",
+    "surfaceComfy": "Canvas",
     "panelInstallSettings": "Build settings",
     "panelLauncherSettings": "Launcher settings",
     "installSettingsComingSoon": "Build-specific settings will appear here in a future update.",

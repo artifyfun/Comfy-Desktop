@@ -3,6 +3,10 @@ import { getAppVersion } from '../lib/ipc'
 import { attachSessionDownloadHandler } from '../lib/comfyDownloadManager'
 import { getModelDownloadContentScript } from '../lib/comfyContentScript'
 import { getComfyTerminalContentScript } from '../lib/comfyTerminalContentScript'
+import { getComfyInjectScriptSource } from './comfyInject'
+import { getMcpSidebarContentScript } from '../lib/mcpSidebarContentScript'
+import { refreshComfyTabBody } from './panelView'
+import { getFlagAsync, recordExposure } from '../lib/experiments'
 import { closeInstallPopouts } from '../lib/popoutWindows'
 import {
   _hasActiveLaunch,
@@ -39,6 +43,19 @@ import { navigatorFor } from './buildNavigator'
 const APP_VERSION = getAppVersion()
 
 const TERMINAL_INJECTION_SOURCE_IDS = new Set(['standalone', 'portable', 'git'])
+
+/** PostHog kill-switch for the Local MCP sidebar icon (Artify: default on;
+ *  an explicit `false` disables the injection). */
+const MCP_SIDEBAR_FLAG = 'mcp_sidebar_enabled'
+
+/** Allow MCP sidebar inject only if attach is active, flag is enabled, and view is not destroyed. */
+export function shouldInjectMcpSidebar(state: {
+  attachActive: boolean
+  enabled: boolean
+  destroyed: boolean
+}): boolean {
+  return state.attachActive && state.enabled && !state.destroyed
+}
 
 export type ZoomResetSource = 'titlebar' | 'menu' | 'shortcut'
 
@@ -110,11 +127,14 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
 
   let currentInstallName = installation.name
 
+  // Flags async tasks for this attach; cleared by `_installCleanup`.
+  // `isDestroyed()` isn't enough — `comfyContents` may outlive detachment.
+  let attachActive = true
   let currentPageTitle = ''
   const refreshOsWindowTitle = (): void => {
     if (comfyWindow.isDestroyed()) return
-    const suffix = currentPageTitle ? ` · ${currentPageTitle}` : ''
-    comfyWindow.setTitle(`${currentInstallName}${suffix} · Comfy Desktop v${APP_VERSION}`)
+    const suffix = currentPageTitle ? ` — ${currentPageTitle}` : ''
+    comfyWindow.setTitle(`${currentInstallName}${suffix} — Artify v${APP_VERSION}`)
   }
   refreshOsWindowTitle()
 
@@ -281,10 +301,45 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
     `})()`
 
   const onDomReady = (): void => {
+    // The ComfyUI page reached the canvas — re-evaluate the body mode now.
+    // Attach may have run while the process was still spawning (so the
+    // title-bar push said 'comfy-lifecycle' and prewarmAttachedPanel's
+    // early-return path left the A-segment gated); dom-ready is the exact
+    // "loaded into the canvas" moment the gate waits for.
+    refreshComfyTabBody(installationId)
     comfyContents.executeJavaScript(COMFY_THEME_OBSERVER_JS).catch(() => {})
     comfyContents.executeJavaScript(getModelDownloadContentScript()).catch(() => {})
+    // Inject the artifylab floating switch button so the user can flip
+    // back from the ComfyUI view to the ArtifyLab UI. Shared with the
+    // WorkflowModal iframe injection (panelView.ts); the script's own
+    // `__artifyInjectLoaded` guard makes re-injection a no-op.
+    const comfyInjectJs = getComfyInjectScriptSource()
+    if (comfyInjectJs) {
+      comfyContents
+        .executeJavaScript(comfyInjectJs)
+        .catch((e) => console.warn('[artify-inject] executeJavaScript failed:', e))
+    }
     if (isLocal && TERMINAL_INJECTION_SOURCE_IDS.has(installation.sourceId)) {
       comfyContents.executeJavaScript(getComfyTerminalContentScript()).catch(() => {})
+      // Local MCP sidebar icon. Same install gate as the terminal.
+      // Artify fork semantics merged with upstream's async-flag fix:
+      // default ON — the button opens Artify's embedded-MCP config
+      // panel; the PostHog flag remains a remote kill-switch (explicit
+      // `false` disables, absent/anything else enables). `getFlagAsync`
+      // awaits the in-flight boot fetch so a cold start (empty cache)
+      // still resolves the flag before the gate decides; re-check the
+      // view is alive after the await.
+      void (async () => {
+        const enabled = (await getFlagAsync(MCP_SIDEBAR_FLAG)) !== false
+        // The await can outlive the attach — see `shouldInjectMcpSidebar`.
+        if (
+          !shouldInjectMcpSidebar({ attachActive, enabled, destroyed: comfyContents.isDestroyed() })
+        ) {
+          return
+        }
+        recordExposure(MCP_SIDEBAR_FLAG, 'enabled', 'cache')
+        comfyContents.executeJavaScript(getMcpSidebarContentScript()).catch(() => {})
+      })()
     }
     void refreshStaffFlagTargeting(comfyContents)
 
@@ -406,6 +461,9 @@ export function attachInstall(entry: ComfyWindowEntry, opts: AttachInstallOpts):
   entry._installCleanup = (): void => {
     if (entry._installCleanup === null) return
     entry._installCleanup = null
+    // Retire async work still pending from this attach so a late resolution
+    // can't touch a detached or re-attached view.
+    attachActive = false
     deactivateFirebaseAuthReporter(comfyContents)
     installationEvents.off('updated', onInstallationUpdated)
     navigator.detach()

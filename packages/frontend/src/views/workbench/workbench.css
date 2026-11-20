@@ -1,0 +1,117 @@
+/*
+ * 工作台统一输入框样式（与 app 列表 AppSearch 的 tech-input 同源）：
+ * 炭黑表面底 + var(--wb-stroke) 描边 + azure 聚焦环（Comfy 令牌）。用于工作台内
+ * 所有小输入框（会话搜索/新建标题/预设表单/固化弹窗）；主输入框是 Composer 卡片。
+ * 全局挂载（modal 传送到 body 外，父级 scoped 命不中）。
+ */
+/* 单元素形态(原生 input / 无缀件 a-input):样式直接命中 */
+.wb-tech-input {
+  background: var(--wb-surface);
+  border: 1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-ctrl);
+  color: #fff;
+  transition:
+    background 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+/* affix-wrapper 形态(allow-clear / 前后缀):外层 wrapper 承载全部视觉,
+   内层 input 必须透明无边框,否则双重边框+antd 白底漏出,和搜索框不一致 */
+.wb-tech-input.ant-input-affix-wrapper {
+  background: var(--wb-surface);
+  border: 1px solid var(--wb-stroke);
+  border-radius: var(--wb-r-ctrl);
+  transition:
+    background 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+.wb-tech-input.ant-input-affix-wrapper .ant-input {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: #fff;
+  padding: 0;
+}
+
+.wb-tech-input.ant-input-affix-wrapper .ant-input-prefix,
+.wb-tech-input.ant-input-affix-wrapper .ant-input-suffix {
+  color: var(--wb-text-3);
+}
+
+/* 与搜索框一致的内边距/字号(antd 默认 padding 偏大,视觉发飘) */
+.wb-tech-input.ant-input-affix-wrapper {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.wb-tech-input:focus,
+.wb-tech-input:focus-within,
+.wb-tech-input.ant-input-affix-wrapper:focus-within,
+.wb-tech-input.ant-input-affix-wrapper-focused,
+.wb-tech-input .ant-input:focus,
+.wb-tech-input .ant-input-focused {
+  border-color: var(--wb-accent);
+  box-shadow: 0 0 0 2px var(--wb-accent-bg);
+}
+
+.wb-tech-input ::placeholder,
+.wb-tech-input .ant-input::placeholder,
+.wb-tech-input.ant-input-affix-wrapper .ant-input::placeholder {
+  color: var(--wb-text-3);
+}
+
+/* ---- 控件族扩展：工作台弹窗内所有原生控件统一为同一视觉语言 ---- */
+/* textarea（a-textarea / 原生） */
+textarea.wb-tech-input,
+.wb-tech-input textarea,
+.wb-tech-input.ant-input-affix-wrapper textarea {
+  background: transparent;
+  color: #fff;
+  resize: vertical;
+}
+
+/* select（原生下拉，Config 风格同源） */
+select.wb-tech-input {
+  appearance: none;
+  padding-right: 2rem;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 512' fill='%238a8a8a'%3E%3Cpath d='M137.4 374.6c12.5 12.5 32.8 12.5 45.3 0l128-128c9.2-9.2 11.9-22.9 6.9-34.9s-16.6-19.8-29.6-19.8L32 192c-12.9 0-24.6 7.8-29.6 19.8s-2.2 25.7 6.9 34.9l128 128z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 0.7rem;
+}
+
+select.wb-tech-input option {
+  background: var(--wb-surface-deep);
+  color: #fff;
+}
+
+/* checkbox / radio：accent 统一品牌 azure */
+input[type='checkbox'].wb-tech-check,
+input[type='radio'].wb-tech-check {
+  accent-color: var(--wb-accent);
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
+/* antd number / password 内层输入的继承兜底 */
+.wb-tech-input .ant-input-number-input,
+.wb-tech-input input {
+  background: transparent;
+  color: #fff;
+}
+
+.wb-tech-input .ant-input-number-input::placeholder,
+.wb-tech-input input::placeholder {
+  color: var(--wb-text-3);
+}
+
+/* 预设 chip 选中态:白描边（--node-stroke-selected 语义，规范 §2.4 active=白描边） */
+.preset-chip-on {
+  border-color: var(--wb-selected) !important;
+  background: transparent;
+}

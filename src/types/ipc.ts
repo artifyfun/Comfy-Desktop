@@ -646,6 +646,18 @@ export interface TerminalRestore {
   exited: boolean
 }
 
+/** Connection info for Artify's embedded MCP server (A UI apps exposed as
+ *  MCP tools) — shown by the mcp-setup panel and the A UI settings modal. */
+export interface McpConfigInfo {
+  url: string
+  token: string
+  /** Number of A UI apps currently exposed as `run__<id>` MCP tools. */
+  appCount: number
+  /** Address the artify server is bound to (default loopback). */
+  listenHost: string
+  loopback: boolean
+}
+
 export type CrashKind =
   | 'access-violation'
   | 'illegal-instruction'
@@ -1266,6 +1278,9 @@ export interface ElectronApi {
   terminalWrite(installationId: string, data: string): Promise<void>
   terminalResize(installationId: string, cols: number, rows: number): Promise<void>
   terminalRestart(installationId: string): Promise<TerminalRestore>
+  /** Connection info for the embedded MCP server (endpoint/token/tool count).
+   *  `null` when the artify server layer is unavailable. */
+  getMcpConfig(): Promise<McpConfigInfo | null>
   openInstallWindow(installationId: string): Promise<boolean>
   closeComfyWindow(installationId: string, opts?: CloseComfyWindowOptions): Promise<boolean>
   closeHostWindow(): Promise<boolean>
@@ -1560,6 +1575,37 @@ export interface ElectronApi {
       successChoice?: boolean
     }) => void
   ): Unsubscribe
+
+  // ArtifyLab (AI agent surface) — bridged from the legacy artifylab
+  // service layer via `artify-*` IPC channels (see registerArtifyHandlers).
+  artify: {
+    selectFile(data: Record<string, unknown>): Promise<string | undefined>
+    getConfig(data: Record<string, unknown>): Promise<Record<string, unknown>>
+    loadComfyUI(data: Record<string, unknown>): Promise<void>
+    loadArtifyLab(data: Record<string, unknown>): Promise<void>
+    getAppInfo(): Promise<{ version: string; name: string; repository: string }>
+    openOutputFolder(): Promise<{ success: boolean; path?: string; error?: string }>
+    getOutputPath(): Promise<{ success: boolean; path?: string; error?: string }>
+    scanFolder(folderPath: string): Promise<
+      {
+        fullPath: string
+        fileName: string
+        extension: string
+        size: number
+        isDirectory: boolean
+        lastModified: Date
+        relativePath: string
+      }[]
+    >
+    openRootFolder(folderName: string): Promise<{
+      success: boolean
+      path?: string
+      openedFolder?: string
+      message?: string
+      error?: string
+    }>
+    openCMD(type: string): Promise<{ success: boolean; cmd?: string; error?: string }>
+  }
 }
 
 export const LOCAL_ASSETS_SOURCE = 'local'

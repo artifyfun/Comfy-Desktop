@@ -1,0 +1,261 @@
+/* Ant Design Vue 自定义样式 */
+
+/* 全局样式覆盖 */
+.ant-app {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans',
+    sans-serif;
+}
+
+/* 按钮样式增强 */
+.ant-btn-primary {
+  background: var(--wb-accent);
+  border: none;
+  transition: background 0.15s ease;
+}
+
+.ant-btn-primary:hover {
+  background: var(--wb-accent-hover);
+}
+
+.ant-btn-primary:active {
+  background: var(--wb-accent-hover);
+}
+
+/* 输入框样式增强 */
+.ant-input:focus,
+.ant-input-focused {
+  border-color: var(--wb-accent);
+  box-shadow: 0 0 0 2px rgba(11, 140, 233, 0.2);
+}
+
+.ant-input:hover {
+  border-color: var(--wb-accent-hover);
+}
+
+/* 选择器样式增强 */
+.ant-select-focused .ant-select-selector {
+  border-color: var(--wb-accent) !important;
+}
+
+.ant-select:hover .ant-select-selector {
+  border-color: var(--wb-accent-hover) !important;
+}
+
+/* 模态框样式增强 */
+.ant-modal-content {
+  border-radius: var(--wb-r-modal);
+  overflow: hidden;
+  background: var(--wb-surface-deep);
+  border: 1px solid var(--wb-stroke);
+}
+
+.ant-modal-header {
+  background: var(--wb-surface-deep);
+  color: white;
+}
+
+.ant-modal-title {
+  color: white !important;
+  font-weight: 600;
+}
+
+.ant-modal-close {
+  color: var(--wb-text-2) !important;
+}
+
+.ant-modal-close:hover {
+  color: white !important;
+}
+
+/* 卡片样式增强 */
+.ant-card {
+  border-radius: var(--wb-r-card);
+  border: 1px solid var(--wb-stroke);
+}
+
+/* 通知样式增强 */
+.ant-notification-notice {
+  border-radius: var(--wb-r-card);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* 消息样式增强 */
+.ant-message-notice-content {
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* 表格样式增强 */
+.ant-table-thead > tr > th {
+  background: var(--wb-surface);
+  color: var(--wb-text);
+  font-weight: 600;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background-color: var(--wb-surface-hover);
+}
+
+/* 分页样式增强 */
+.ant-pagination-item-active {
+  background-color: var(--wb-accent);
+  border-color: var(--wb-accent);
+}
+
+.ant-pagination-item:hover {
+  border-color: var(--wb-accent-hover);
+}
+
+.ant-pagination-prev:hover,
+.ant-pagination-next:hover {
+  border-color: var(--wb-accent-hover);
+}
+
+/* 标签页样式增强 */
+.ant-tabs-tab-active {
+  color: var(--wb-accent) !important;
+}
+
+.ant-tabs-ink-bar {
+  background: var(--wb-accent);
+}
+
+/* 菜单样式增强 */
+.ant-menu-item-selected {
+  background: var(--wb-accent) !important;
+  color: white !important;
+}
+
+.ant-menu-item:hover {
+  color: var(--wb-accent) !important;
+}
+
+/* 下拉菜单样式增强 */
+.ant-dropdown-menu {
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.ant-dropdown-menu-item:hover {
+  background-color: var(--wb-surface-hover);
+}
+
+/* 工具提示样式增强 */
+.ant-tooltip-inner {
+  border-radius: 6px;
+  background-color: rgba(0, 0, 0, 0.85);
+}
+
+/* 进度条样式增强 */
+.ant-progress-bg {
+  background: var(--wb-accent);
+}
+
+/* 滑块样式增强 */
+.ant-slider-track {
+  background-color: var(--wb-accent);
+}
+
+.ant-slider-handle {
+  border-color: var(--wb-accent);
+}
+
+.ant-slider:hover .ant-slider-track {
+  background-color: var(--wb-accent-hover);
+}
+
+.ant-slider:hover .ant-slider-handle {
+  border-color: var(--wb-accent-hover);
+}
+
+/* 开关样式增强 */
+.ant-switch-checked {
+  background-color: var(--wb-accent);
+}
+
+.ant-switch:hover:not(.ant-switch-disabled).ant-switch-checked {
+  background-color: var(--wb-accent-hover);
+}
+
+/* 浮动按钮样式增强 */
+.ant-float-btn-primary {
+  background: var(--wb-accent);
+}
+
+.ant-float-btn-primary:hover {
+  background: var(--wb-accent-hover);
+}
+
+/* 暗色主题适配 */
+[data-theme='dark'] .ant-card {
+  background-color: var(--wb-surface-deep);
+  border-color: var(--wb-stroke);
+}
+
+[data-theme='dark'] .ant-modal-content {
+  background-color: var(--wb-surface-deep);
+  border-color: var(--wb-stroke);
+}
+
+[data-theme='dark'] .ant-modal-header {
+  background: var(--wb-surface-deep);
+  border-bottom-color: var(--wb-stroke);
+}
+
+[data-theme='dark'] .ant-table {
+  background-color: var(--wb-surface-deep);
+  color: var(--wb-text);
+}
+
+[data-theme='dark'] .ant-table-tbody > tr > td {
+  border-bottom-color: var(--wb-stroke);
+}
+
+[data-theme='dark'] .ant-dropdown-menu {
+  background-color: var(--wb-surface-hover);
+  border-color: var(--wb-stroke);
+}
+
+[data-theme='dark'] .ant-dropdown-menu-item {
+  color: #ffffff;
+}
+
+[data-theme='dark'] .ant-dropdown-menu-item:hover {
+  background-color: var(--wb-surface-active);
+}
+
+.ant-btn-primary.tech-glow {
+  /* 移除无限循环动画（持续 box-shadow 动画会触发持续重绘）*/
+  animation: none;
+}
+
+/* 响应式适配 */
+@media (max-width: 768px) {
+  .ant-modal-content {
+    margin: 16px;
+    border-radius: 8px;
+  }
+
+  .ant-card {
+    border-radius: 8px;
+  }
+
+  .ant-btn {
+    height: 36px;
+    font-size: 13px;
+  }
+
+  .ant-input {
+    height: 36px;
+    font-size: 13px;
+  }
+
+  /* 输入框 wrapper 与搜索按钮保持同一高度，避免窄屏下错位 */
+  .ant-input-affix-wrapper {
+    height: 36px;
+  }
+  .ant-input-affix-wrapper .ant-input {
+    height: 100%;
+  }
+}

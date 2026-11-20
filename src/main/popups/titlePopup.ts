@@ -2,7 +2,7 @@ import { ipcMain, shell, dialog, BrowserWindow } from 'electron'
 import type { WebContentsView } from 'electron'
 import { createWebContentsView } from '../lib/webContentsViewLifetime'
 import { PICKER_SETTINGS_CHANNELS, POPUP_KIND } from '../../types/ipc'
-import type { PopupTheme, TitlePopupKind, TitlePopupMenuItem } from '../../types/ipc'
+import type { McpConfigInfo, PopupTheme, TitlePopupKind, TitlePopupMenuItem } from '../../types/ipc'
 import { TITLEBAR_HEIGHT } from '../lib/titleBarOverlay'
 import {
   cancelModelDownload,
@@ -1455,6 +1455,28 @@ export function registerTitlePopupIpc(bindings: TitlePopupHostBindings): void {
       'console'
     )
     return true
+  })
+
+  ipcMain.handle('desktop2-open-mcp-setup', (event): boolean => {
+    const parentEntry = findEntryByComfySender(event.sender)
+    if (!parentEntry?.installationId || parentEntry.sourceCategory !== 'local') return false
+    // 'mcp-setup' overlays the live canvas like 'feedback' rather than hiding it.
+    const panelView = bindings.ensurePanelViewForEntry(parentEntry)
+    if (panelView.webContents.isDestroyed()) return false
+    bindings.setActivePanel(parentEntry.windowKey, 'mcp-setup')
+    return true
+  })
+
+  // Artify 内嵌 MCP 的连接信息（mcp-setup 面板展示；同进程直读，不走 HTTP）。
+  // 动态 import：避免顶层 import 把 artifylab 服务层（server 顶层有 express 初始化）
+  // 拽进 popup 模块图/测试环境；CJS 产物下由 rollup 拆 chunk 保证运行时可达。
+  ipcMain.handle('desktop2-get-mcp-config', async (): Promise<McpConfigInfo | null> => {
+    try {
+      const { buildMcpConfigInfo } = await import('../artifylab/mcp/configInfo')
+      return buildMcpConfigInfo()
+    } catch {
+      return null
+    }
   })
 
   ipcMain.on('comfy-titlepopup:ready', (event) => {

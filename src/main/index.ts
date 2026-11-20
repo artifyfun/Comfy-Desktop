@@ -8,12 +8,23 @@ import {
   crashReporter,
   nativeTheme,
   powerMonitor,
+  shell,
+  session,
   BrowserWindow
 } from 'electron'
 import type { MessageBoxOptions, Tray, WebContentsView } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { normaliseFirstUseMode } from '../shared/firstUseMode'
+
+// 开发调试：ARTIFY_DEV_DEBUG_PORT=9222 pnpm dev → 开 CDP 供浏览器自动化验收
+// （只在显式设置时生效，不影响正常 dev/打包）
+if (process.env.ARTIFY_DEV_DEBUG_PORT) {
+  app.commandLine.appendSwitch(
+    'remote-debugging-port',
+    String(parseInt(process.env.ARTIFY_DEV_DEBUG_PORT, 10) || 9222)
+  )
+}
 import { isNewWindowDashboardPage } from '../shared/dashboardPages'
 import { execFile } from 'child_process'
 import type { ChildProcess } from 'child_process'
@@ -123,6 +134,11 @@ import { recoverPendingIdentityRotation } from './lib/pendingIdentityMerge'
 import { initExperiments } from './lib/experiments'
 import { initCloudFreeRuns } from './lib/cloudFreeRuns'
 import { initCoreBetaFlags, refreshCoreBetaFlags } from './lib/coreBetaCampaignFlags'
+import { DesktopConfig } from './artifylab/store/desktopConfig'
+import { registerArtifyHandlers } from './artifylab/handlers'
+import { startServer } from './artifylab/server'
+import { setArtifyPanelMode, setArtifyPanelPort } from './artifylab/panelMode'
+import { setArtifyLabFocusHandler, setComfyUIFocusHandler } from './artifylab'
 import { initEmbeddedSessionFlag } from './lib/embeddedSessionFlag'
 import { initAppsFlag } from './apps/appsFlag'
 import { appsEnabledAtStart } from './apps/appsConfig'
@@ -160,7 +176,8 @@ import {
   raiseAllHostWindows,
   routeBuildOpen,
   setHostFactories,
-  shouldConfirmKillForEntry
+  shouldConfirmKillForEntry,
+  visibleSurface
 } from './host/registry'
 import type { BuildOpenRoute, ComfyWindowEntry } from './host/registry'
 import {
@@ -199,7 +216,8 @@ import {
   refreshComfyTabBody,
   registerPanelViewIpc,
   sendToPanelDeferred,
-  setActivePanel
+  setActivePanel,
+  setPanelSurface
 } from './host/panelView'
 
 export type { ComfyPanelKey } from './host/registry'
@@ -487,7 +505,7 @@ function onLaunch({
   const initialSourceCategory = sourceMap[installation.sourceId]?.category ?? null
 
   const { entry } = createHostWindow({
-    windowTitle: `${installation.name} · Comfy Desktop v${APP_VERSION}`,
+    windowTitle: `${installation.name} — Artify v${APP_VERSION}`,
     boundsKey: installationId,
     initialTheme: { bg: COMFY_BG, text: '#dddddd' },
     titleBarOverlay:
@@ -497,6 +515,11 @@ function onLaunch({
     comfyWebPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      // comfyPreload requires the shared chunks/*.js — sandboxed preloads
+      // can't require() relative chunks (issue #521), which kills
+      // `window.electronAPI` in the ComfyUI view and silently breaks
+      // comfy_inject.js (server_origin lookup / workflow loading).
+      sandbox: false,
       preload: path.join(__dirname, '../preload/comfyPreload.js'),
       partition: expectedPartitionFor(installation)
     },
@@ -585,6 +608,16 @@ ipcMain.on('comfy-window:click-refresh-instance', (event) => {
   if (!found) return
   const { entry } = found
   if (entry.window.isDestroyed()) return
+  // fix(A 界面刷新不生效): 按钮此前无条件 reload comfyView(C 侧 ComfyUI)——
+  // 用户正看 A 界面时点击"无反应"(A 的 panelView 没动)。按可见表面分流:
+  // artify 激活时 reload panelView(A UI),其余才走原 comfyView reload 路径。
+  if (visibleSurface(entry) === 'artify') {
+    const pv = entry.panelView
+    if (!pv || pv.webContents.isDestroyed()) return
+    pv.webContents.reload()
+    focusActiveBody(entry)
+    return
+  }
   if (entry.installationId === null) return
   navigatorFor(entry).refresh()
   focusActiveBody(entry)
@@ -1524,6 +1557,132 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
       console.warn('Model download startup pass failed at app startup:', err)
     })
     updater.register()
+    // ArtifyLab service bootstrap: load the desktop-config store (artify
+    // handlers read the install `basePath` from it), register the `artify-*`
+    // IPC handlers, and start the express server (AI agent + ComfyUI API
+    // proxy) backing the Artify surfaces. `DesktopConfig.load` returns
+    // `undefined` when the user chose to quit from the config-repair prompt,
+    // in which case we skip the service — the app is about to exit anyway.
+    const desktopConfig = await DesktopConfig.load(shell)
+    if (desktopConfig) {
+      // 单窗口模式：A UI 作为 host 窗口 panelView 的内容（与 ComfyUI
+      // comfyView 同窗口切换）。必须在任何 host 窗口创建前启用——
+      // openStartupSurface 在后面才打开窗口。
+      setArtifyPanelMode(true)
+      registerArtifyHandlers()
+      // ComfyUI 后端对带 `Origin` 头的跨源导航返回 403（CSRF 校验）。
+      // A UI 的 WorkflowModal iframe 从 http://localhost:5000 导航到
+      // ComfyUI（127.0.0.1:8188）时会带上 Origin → 403 空文档。剥掉
+      // 默认 session（panelView / A UI / iframe 所在）对 ComfyUI 请求
+      // 的 Origin/Referer/Sec-Fetch-Site，让 iframe 能加载 ComfyUI 前端
+      // 画布；comfyView 走独立 partition，不受影响。
+      session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+        if (
+          details.url.startsWith('http://127.0.0.1:8188') ||
+          details.url.startsWith('http://localhost:8188') ||
+          // ws 握手同样被 origin_only_middleware 校验（Host vs Origin 不匹配 → 403），
+          // 批量任务（3008 页面）连 ComfyUI ws 必须剥头；http:// 前缀不匹配 ws://。
+          details.url.startsWith('ws://127.0.0.1:8188') ||
+          details.url.startsWith('ws://localhost:8188')
+        ) {
+          const headers: Record<string, string> = {}
+          for (const [k, v] of Object.entries(details.requestHeaders ?? {})) {
+            // 剥离 Origin/Referer/Sec-Fetch-Site：ComfyUI v0.29 的 origin_only_middleware
+            // 对 Sec-Fetch-Site: cross-site 直接 403（不看 Origin），iframe 跨源导航
+            // 携带该头导致空文档；剥离后与直接 curl 等价，返回完整 index.html。
+            if (
+              k.toLowerCase() !== 'origin' &&
+              k.toLowerCase() !== 'referer' &&
+              k.toLowerCase() !== 'sec-fetch-site'
+            ) {
+              headers[k] = v
+            }
+          }
+          callback({ requestHeaders: headers })
+        } else {
+          callback({})
+        }
+      })
+      // 批量任务跨源 POST /prompt：ComfyUI 未启用 --enable-cors-header，
+      // 预检与实际响应都缺 Access-Control-Allow-* 头 → 浏览器抛
+      // "Failed to fetch"。给 8188 的全部响应注入允许头（non-simple
+      // 跨源请求的响应也必须带 ACAO 才通过 CORS 检查；请求侧的 Origin
+      // 已被上方的剥离逻辑去掉，安全边界不变）。
+      session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+        if (
+          details.url.startsWith('http://127.0.0.1:8188') ||
+          details.url.startsWith('http://localhost:8188')
+        ) {
+          const headers = details.responseHeaders ?? {}
+          headers['Access-Control-Allow-Origin'] = ['*']
+          headers['Access-Control-Allow-Methods'] = ['POST, GET, DELETE, PUT, OPTIONS, PATCH']
+          headers['Access-Control-Allow-Headers'] = ['Content-Type, Authorization']
+          callback({ responseHeaders: headers })
+        } else {
+          callback({})
+        }
+      })
+      // A→C 切换（单窗口）：有运行中的 install → 同窗口切到 comfy
+      // 视图；无运行实例 → 面板切到 install 选择器让用户启动/安装。
+      setComfyUIFocusHandler(async () => {
+        for (const installationId of Array.from(_runningSessions.keys())) {
+          const entry = getEntryByInstallationId(installationId)
+          if (entry && !entry.window.isDestroyed()) {
+            // 单窗口闭环：A UI 面板通常还停在启动时的 chooser 窗口
+            // （installationId=null），而 comfyView 在 install 窗口——
+            // 直接 focus install 窗口会让用户看到"另一个窗口弹出来"。
+            // 把 A UI 面板迁到 install 窗口（后续 C→A 在同窗口内切回），
+            // 再关闭承载 A UI 的 chooser 窗口，切换从此只发生在同一窗口。
+            setPanelSurface(entry, 'artify')
+            setActivePanel(entry.windowKey, 'comfy')
+            entry.window.show()
+            entry.window.focus()
+            for (const [, other] of comfyWindows) {
+              if (other !== entry && other.installationId === null && !other.window.isDestroyed()) {
+                other.window.close()
+              }
+            }
+            // 工作流重放：ComfyUI 页面可能早已加载（实例先启动），面板
+            // 切换不会重载页面——comfy_inject.js 的 loadWorkflow 只在
+            // 页面加载时跑过一次（当时 activeAppId 可能还不是本应用）。
+            // 重放 __artifyReloadWorkflow 让画布加载最新 activeAppId 的
+            // 工作流；页面未就绪时 executeJavaScript 会失败，但页面加载
+            // 完成后 loadWorkflow 自身会按当时的 activeAppId 执行一次。
+            if (!entry.comfyView.webContents.isDestroyed()) {
+              entry.comfyView.webContents
+                .executeJavaScript(
+                  'window.__artifyReloadWorkflow && window.__artifyReloadWorkflow()'
+                )
+                .catch(() => {})
+            }
+            return true
+          }
+        }
+        const host = openOrFocusAnyHostWindow()
+        const entry = findEntryByHostWindow(host)
+        if (entry && entry.panelSurface === 'artify') setPanelSurface(entry, 'chooser')
+        return false
+      })
+      // C→A 切换（单窗口）：面板切回 A UI 并显示 host 窗口。
+      setArtifyLabFocusHandler(async () => {
+        const host = openOrFocusAnyHostWindow()
+        const entry = findEntryByHostWindow(host)
+        if (!entry || entry.window.isDestroyed()) return false
+        setPanelSurface(entry, 'artify')
+        setActivePanel(entry.windowKey, 'chooser')
+        entry.window.show()
+        entry.window.focus()
+        return true
+      })
+      await startServer()
+        .then((server) => {
+          const address = server.address()
+          if (address && typeof address !== 'string') setArtifyPanelPort(address.port)
+        })
+        .catch((err) => {
+          console.error('ArtifyLab server failed to start:', err)
+        })
+    }
     updater.onUpdateStateChanged(_broadcastAppUpdateStateToTitleBars)
     downloadEvents.on('tray-state-changed', _broadcastDownloadsToTitleBars)
     const updateSplash = updater.hasPendingStartupUpdate() ? showUpdateInstallSplash() : undefined

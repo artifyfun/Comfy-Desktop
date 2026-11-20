@@ -8,13 +8,24 @@ import { useTitleBarIdentity } from './useTitleBarIdentity'
 import { useTitleBarHoverGate } from './useTitleBarHoverGate'
 import { useBetaActivationNotice } from './useBetaActivationNotice'
 import { useAppLocale, windowApiLocaleSource } from '../lib/useAppLocale'
+import { visibleSurfaceOf } from '../../../shared/visibleSurface'
 import ComfyCLogo from '../components/icons/ComfyCLogo.vue'
+import artifyLogoUrl from '../assets/artify-logo.png'
 
 const { t } = useI18n()
 const { syncLocale } = useAppLocale(windowApiLocaleSource())
 
 type ComfyPanelKey =
-  'comfy' | 'performance-test' | 'benchmarks' | 'new-install' | 'track' | 'load-snapshot'
+  | 'comfy'
+  | 'performance-test'
+  | 'benchmarks'
+  /** Single-window mode: the panel body hosts the A UI / install picker.
+   *  Pushed by main on C→A surface flips and used by the A/C switch to
+   *  re-wake the warm A panel after an A→C flip. */
+  | 'chooser'
+  | 'new-install'
+  | 'track'
+  | 'load-snapshot'
 
 type CoachmarkKind = 'beta-notice'
 
@@ -42,6 +53,10 @@ interface Bridge {
   isMac: () => boolean
   isLinux: () => boolean
   setPanel: (panel: ComfyPanelKey) => void
+  /** Title-bar A/C switch, C→A direction — see ComfyTitleBarBridge. */
+  setSurface: (surface: 'artify' | 'chooser') => void
+  /** Cold-boot surface seed from the `surface` query param. */
+  getSurface: () => 'artify' | 'chooser'
   openNewWindow: () => void
   openFileMenu: (anchor: MenuAnchor) => void
   dismissFileMenu: () => void
@@ -64,6 +79,8 @@ interface Bridge {
   onCoachmarkSettled: (cb: (payload: { kind: CoachmarkKind }) => void) => () => void
   onCoachmarkDisplaced: (cb: (payload: { kind: CoachmarkKind }) => void) => () => void
   onPanelChanged: (cb: (panel: ComfyPanelKey) => void) => () => void
+  onBodyModeChanged: (cb: (mode: string) => void) => () => void
+  onSurfaceChanged: (cb: (surface: 'artify' | 'chooser') => void) => () => void
   onTitleChanged: (cb: (title: string) => void) => () => void
   onSourceCategoryChanged: (cb: (category: string | null) => void) => () => void
   onZoomChanged: (cb: (level: number) => void) => () => void
@@ -118,6 +135,51 @@ const titleDownloadsBadgeClass =
 const isMac = ref(bridge?.isMac() ?? false)
 const isLinux = ref(bridge?.isLinux() ?? false)
 const activePanel = ref<ComfyPanelKey>('comfy')
+/**
+ * PanelView surface — `'artify'` when the panel body hosts the Artify
+ * A UI, `'chooser'` when it hosts the native panel app. Seeded from the
+ * URL `surface` query param (cold boot) and kept live via
+ * `onSurfaceChanged` pushes from main (float-button flips,
+ * attach/detach, and this switch's own C→A handler). Drives the A/C
+ * segmented switch next to the center pill.
+ */
+const surface = ref<'artify' | 'chooser'>(bridge?.getSurface() ?? 'chooser')
+/**
+ * 可见表面：A 段高亮要求 A UI 面板真正是当前面板体。A→C 切换后主进程
+ * 故意保留 panelSurface='artify'（A UI 暖面板继续驻留 panelView，仅隐藏），
+ * 所以裸 surface 标志在 C 画布可见时仍是 'artify'——直接拿它驱动高亮会
+ * 倒挂。可见性公式 = src/shared/visibleSurface.ts 单源。
+ */
+const artifyVisible = computed(
+  () =>
+    visibleSurfaceOf({ panelSurface: surface.value, activePanel: activePanel.value }) === 'artify'
+)
+/** Body mode pushed by main: 'comfy' = live ComfyUI canvas fills the body.
+ *  Anything else (chooser / comfy-lifecycle) means the canvas isn't up and
+ *  the A segment of the A/C switch must stay disabled. */
+const bodyMode = ref<string>('chooser')
+/** A segment may only be clicked once the ComfyUI canvas is live; when the
+ *  A UI is already showing the segment is (visibly) the active side. */
+const canSwitchToArtify = computed(() => artifyVisible.value || bodyMode.value === 'comfy')
+/** A→C: flip the body to the ComfyUI view. */
+const switchToComfy = (): void => {
+  if (!artifyVisible.value) return
+  bridge?.setPanel('comfy')
+}
+/** C→A: request the Artify surface. Two sub-cases:
+ *  - panelSurface 已是 'artify'（A→C 后暖面板驻留）：setPanel('chooser')
+ *    把活动面板从 comfy 画布切回 A UI 面板体，不触发任何重载；
+ *  - surface 仍是 'chooser'（从未进过 A）：走 setSurface 让主进程做
+ *    单窗口 surface 翻转。两条路都会经 panel-changed 推送回流高亮。 */
+const switchToArtify = (): void => {
+  if (artifyVisible.value) return
+  if (!canSwitchToArtify.value) return
+  if (surface.value === 'artify') {
+    bridge?.setPanel('chooser')
+    return
+  }
+  bridge?.setSurface('artify')
+}
 const installationId = ref(bridge?.getInstallationId() ?? '')
 const isInstallLess = ref((bridge?.getInstallationId() ?? '') === '')
 
@@ -277,6 +339,8 @@ watch(downloadsStartedAt, (next) => {
 })
 
 let unsubPanel: (() => void) | undefined
+let unsubBodyMode: (() => void) | undefined
+let unsubSurface: (() => void) | undefined
 let unsubInstallationId: (() => void) | undefined
 let unsubZoom: (() => void) | undefined
 let unsubCoachmarkDismissed: (() => void) | undefined
@@ -293,6 +357,15 @@ onMounted(() => {
   if (!bridge) return
   unsubPanel = bridge.onPanelChanged((panel) => {
     activePanel.value = panel
+  })
+  // Body mode ('comfy' = live canvas) gates the A-segment of the A/C
+  // switch. Start conservative ('chooser' → A disabled) until main's
+  // authoritative push lands on title-bar-ready.
+  unsubBodyMode = bridge.onBodyModeChanged((mode) => {
+    bodyMode.value = mode
+  })
+  unsubSurface = bridge.onSurfaceChanged((s) => {
+    surface.value = s
   })
   unsubZoom = bridge.onZoomChanged((level) => {
     zoomLevel.value = level
@@ -346,6 +419,8 @@ watch(
 onUnmounted(() => {
   unmounted = true
   unsubPanel?.()
+  unsubBodyMode?.()
+  unsubSurface?.()
   unsubInstallationId?.()
   unsubZoom?.()
   unsubCoachmarkDismissed?.()
@@ -418,7 +493,60 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="title-center"></div>
+    <div class="title-center">
+      <!-- A/C surface switch (segmented). Native title-bar replacement for
+           the page-embedded float buttons: left segment flips the panel body
+           to the Artify A UI, right segment to the ComfyUI view. Hidden on
+           first-use lockdown (chrome is locked down during bootstrap).
+           Active side = azure fill + white text; inactive = muted fill on a
+           transparent tray, matching the title bar's token language. -->
+      <div
+        v-if="!isFirstUseLockdown"
+        class="mr-2.5 inline-flex items-center gap-0.5 rounded-lg border border-solid border-[rgba(255,255,255,0.14)] p-0.5 [-webkit-app-region:no-drag] [.title-bar.is-light_&]:border-[rgba(0,0,0,0.14)]"
+        role="tablist"
+        aria-label="Artify / ComfyUI"
+      >
+        <button
+          type="button"
+          class="inline-flex h-[22px] cursor-pointer items-center justify-center gap-1 rounded-md border-0 px-2 font-[inherit] text-[var(--titlebar-icon,rgba(255,255,255,0.55))] transition-[background-color,color] duration-150 ease-[ease]"
+          :class="
+            artifyVisible
+              ? 'bg-[#0b8ce9] text-white'
+              : canSwitchToArtify
+                ? 'bg-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.12)] hover:text-[var(--titlebar-icon,#fff)] [.title-bar.is-light_&]:bg-[rgba(0,0,0,0.05)] [.title-bar.is-light_&]:hover:bg-[rgba(0,0,0,0.1)]'
+                : 'cursor-not-allowed opacity-30'
+          "
+          role="tab"
+          :aria-selected="artifyVisible"
+          :disabled="!canSwitchToArtify"
+          v-bind="tooltipAttrs('Artify 工坊')"
+          @click="switchToArtify"
+        >
+          <img :src="artifyLogoUrl" class="block size-3.5 shrink-0" alt="" aria-hidden="true" />
+          <span class="text-[11px] font-semibold leading-none whitespace-nowrap">{{
+            t('titleBar.surfaceArtify')
+          }}</span>
+        </button>
+        <button
+          type="button"
+          class="inline-flex h-[22px] cursor-pointer items-center justify-center gap-1 rounded-md border-0 px-2 font-[inherit] text-[var(--titlebar-icon,rgba(255,255,255,0.55))] transition-[background-color,color] duration-150 ease-[ease]"
+          :class="
+            !artifyVisible
+              ? 'bg-[#0b8ce9] text-white'
+              : 'bg-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.12)] hover:text-[var(--titlebar-icon,#fff)] [.title-bar.is-light_&]:bg-[rgba(0,0,0,0.05)] [.title-bar.is-light_&]:hover:bg-[rgba(0,0,0,0.1)]'
+          "
+          role="tab"
+          :aria-selected="!artifyVisible"
+          v-bind="tooltipAttrs('ComfyUI')"
+          @click="switchToComfy"
+        >
+          <ComfyCLogo :size="14" class="shrink-0" aria-hidden="true" />
+          <span class="text-[11px] font-semibold leading-none whitespace-nowrap">{{
+            t('titleBar.surfaceComfy')
+          }}</span>
+        </button>
+      </div>
+    </div>
 
     <div class="title-trailing flex items-center gap-2 [justify-self:end]">
       <Transition name="title-zoom-fade">

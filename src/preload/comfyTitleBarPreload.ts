@@ -4,7 +4,16 @@ import { buildElectronApi } from './api'
 import { normaliseFirstUseMode, type FirstUseMode } from '../shared/firstUseMode'
 
 export type ComfyPanelKey =
-  'comfy' | 'performance-test' | 'benchmarks' | 'new-install' | 'track' | 'load-snapshot'
+  | 'comfy'
+  | 'performance-test'
+  | 'benchmarks'
+  /** Single-window mode: the panel body hosts the A UI / install picker
+   *  (main pushes this key on C→A surface flips; the A/C switch sends
+   *  setPanel('chooser') to re-wake the warm A panel after an A→C flip). */
+  | 'chooser'
+  | 'new-install'
+  | 'track'
+  | 'load-snapshot'
 
 export type CoachmarkKind = 'beta-notice'
 
@@ -33,11 +42,31 @@ export interface ComfyTitleBarBridge {
   isMac(): boolean
   isLinux(): boolean
   setPanel(panel: ComfyPanelKey): void
+  /** Request the main process to swap the panelView surface
+   *  (`'artify'` = A UI frontend, `'chooser'` = native panel app).
+   *  The title-bar A/C segmented switch uses this for C→A; A→C
+   *  reuses `setPanel('comfy')`. */
+  setSurface(surface: 'artify' | 'chooser'): void
+  /** Cold-boot surface seed read from the `surface` query param.
+   *  `'chooser'` when absent. Runtime updates arrive via
+   *  `onSurfaceChanged`. */
+  getSurface(): 'artify' | 'chooser'
   openNewWindow(): void
   openFileMenu(anchor: TitleMenuAnchor): void
   dismissFileMenu(): void
 
   onPanelChanged(cb: (panel: ComfyPanelKey) => void): () => void
+  /** Subscribe to body-mode pushes from main. `'comfy'` means the live
+   *  ComfyUI canvas fills the body; `'chooser'` (install-less host) and
+   *  `'comfy-lifecycle'` (stopped / starting) mean the canvas is NOT up.
+   *  The A/C switch's A segment is gated on this: the A UI may only be
+   *  entered once the canvas is live. */
+  onBodyModeChanged(cb: (mode: string) => void): () => void
+  /** Subscribe to panelView surface flips (artify ↔ chooser) coming
+   *  from main. Fired by `setPanelSurface` so the title-bar A/C
+   *  segmented switch stays in sync with programmatic flips (the
+   *  float-button paths, attach/detach). */
+  onSurfaceChanged(cb: (surface: 'artify' | 'chooser') => void): () => void
   onTitleChanged(cb: (title: string) => void): () => void
   onSourceCategoryChanged(cb: (category: string | null) => void): () => void
   onZoomChanged(cb: (level: number) => void): () => void
@@ -104,6 +133,19 @@ function readInstallationId(): string | null {
   }
 }
 
+/** Cold-boot seed for the panelView surface. Main re-pushes the
+ *  authoritative value on `comfy-titlebar:surface-changed` after the
+ *  title-bar-ready handshake and on every flip. */
+function readSurface(): 'artify' | 'chooser' {
+  try {
+    const href = g.location?.href
+    if (!href) return 'chooser'
+    return new URL(href).searchParams.get('surface') === 'artify' ? 'artify' : 'chooser'
+  } catch {
+    return 'chooser'
+  }
+}
+
 const bridge: ComfyTitleBarBridge = {
   getInstallationId: () => readInstallationId(),
   isMac: () => (g.navigator?.userAgent ?? '').toLowerCase().includes('mac'),
@@ -111,6 +153,14 @@ const bridge: ComfyTitleBarBridge = {
   setPanel: (panel) => {
     ipcRenderer.send('comfy-window:set-panel', { panel })
   },
+  /** Request the main process to swap the panelView surface (A UI ↔
+   *  native chooser). Mirrors `setPanel` but targets the surface —
+   *  used by the title-bar A/C segmented switch for the C→A
+   *  direction; A→C goes through `setPanel('comfy')`. */
+  setSurface: (surface) => {
+    ipcRenderer.send('comfy-window:set-surface', { surface })
+  },
+  getSurface: () => readSurface(),
   openNewWindow: () => {
     ipcRenderer.send('comfy-window:new-chooser-window')
   },
@@ -127,6 +177,20 @@ const bridge: ComfyTitleBarBridge = {
     }
     ipcRenderer.on('comfy-titlebar:panel-changed', handler)
     return () => ipcRenderer.removeListener('comfy-titlebar:panel-changed', handler)
+  },
+  onBodyModeChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, mode: unknown): void => {
+      if (typeof mode === 'string') cb(mode)
+    }
+    ipcRenderer.on('comfy-titlebar:body-mode-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:body-mode-changed', handler)
+  },
+  onSurfaceChanged: (cb) => {
+    const handler = (_event: IpcRendererEvent, surface: unknown): void => {
+      if (surface === 'artify' || surface === 'chooser') cb(surface)
+    }
+    ipcRenderer.on('comfy-titlebar:surface-changed', handler)
+    return () => ipcRenderer.removeListener('comfy-titlebar:surface-changed', handler)
   },
   onTitleChanged: (cb) => {
     const handler = (_event: IpcRendererEvent, title: unknown): void => {

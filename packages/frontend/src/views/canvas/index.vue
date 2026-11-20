@@ -1,0 +1,5672 @@
+<template>
+  <!-- 顶导航由 AppLayout 统一挂载；本页自管交互区，layout wrapper 不滚（meta.scrollable=false），
+       根高度用 h-full 撑满 wrapper 而非 h-screen（header 已在外层占位） -->
+  <div class="page-container bg-tech-dark flex flex-col h-full overflow-hidden">
+    <!-- 工作台侧边栏（左侧，可收起） + 画布 布局（flex 撑满视口剩余高度） -->
+    <div class="flex flex-1 min-h-0 mx-4 mt-2 mb-2 gap-2">
+      <aside
+        v-if="wbOpen"
+        class="w-[400px] shrink-0 flex flex-col rounded-[10px] border border-[var(--wb-stroke)] overflow-hidden bg-[var(--wb-bg-base)]"
+      >
+        <Workbench class="flex-1 min-h-0" :canvas-embedded="true" />
+      </aside>
+      <div
+        ref="wrapEl"
+        class="relative flex-1 min-w-0 overflow-hidden rounded-[10px] border border-[var(--wb-stroke)] select-none"
+        :class="dragOver ? 'ring-2 ring-[var(--wb-accent)]' : ''"
+        @dragover.prevent="dragOver = true"
+        @dragleave.prevent="dragOver = false"
+        @drop.prevent="onDrop"
+        @contextmenu.prevent="onWrapContext"
+        @mouseleave="scheduleHoverHide(0)"
+      >
+        <!-- 网格背景（随视口平移/缩放，纯 CSS） -->
+        <div class="absolute inset-0 pointer-events-none" :style="gridStyle"></div>
+        <!-- 图层面板（P1：画布右侧，参考 side-panel Canvas tab；宽 232px 可浮层收起） -->
+        <div
+          v-if="layersOpen"
+          class="absolute right-3 top-3 z-20 w-[232px] max-h-[calc(100%-24px)] rounded-[10px] border border-[var(--wb-stroke)] shadow-lg overflow-hidden"
+        >
+          <CanvasSidePanel
+            :objects="objects"
+            :selection="selection"
+            :groups="groups"
+            :hover-node-id="hoverNodeId"
+            @focus="focusObject"
+            @hover="(id) => (hoverFromPanel = id)"
+            @close="layersOpen = false"
+          />
+        </div>
+        <!-- C-H13 多选浮动操作栏：选区上方跟随的快捷批量操作(Figma 式) -->
+        <div
+          v-if="selBar"
+          class="absolute z-30 flex items-center gap-1 rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] px-1.5 py-1 shadow-lg"
+          :style="{ left: selBar.x + 'px', top: selBar.y + 'px' }"
+          data-testid="selection-bar"
+          @mousedown.stop
+          @contextmenu.prevent.stop
+        >
+          <span class="px-1 text-[11px] text-[var(--wb-text-2)]">{{ selBar.count }}</span>
+          <button
+            v-if="selBar.apps >= 1"
+            class="rounded px-1.5 py-0.5 text-[11px] text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10"
+            :title="t('canvasRunAppNodes')"
+            data-testid="selbar-run"
+            @click="selBarRunApps"
+          >
+            <i class="fas fa-play"></i>
+          </button>
+          <button
+            class="rounded px-1.5 py-0.5 text-[11px] text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10"
+            :title="t('canvasAlignLeft')"
+            @click="alignSel('left')"
+          >
+            <i class="fas fa-align-left"></i>
+          </button>
+          <button
+            class="rounded px-1.5 py-0.5 text-[11px] text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10"
+            :title="t('canvasAlignHCenter')"
+            @click="alignSel('hcenter')"
+          >
+            <i class="fas fa-align-center"></i>
+          </button>
+          <button
+            class="rounded px-1.5 py-0.5 text-[11px] text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10"
+            :title="t('canvasFitAll')"
+            @click="fitAll"
+          >
+            <i class="fas fa-expand"></i>
+          </button>
+          <button
+            class="rounded px-1.5 py-0.5 text-[11px] text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10"
+            :title="t('canvasGroupSel')"
+            @click="groupSelected"
+          >
+            <i class="fas fa-object-group"></i>
+          </button>
+          <button
+            class="rounded px-1.5 py-0.5 text-[11px] text-[var(--wb-danger)] hover:bg-[var(--wb-danger)]/10"
+            :title="t('canvasDeleteSelected')"
+            data-testid="selbar-delete"
+            @click="selBarDelete"
+          >
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+        <!-- 素材库面板（P2）：左下浮动，点击/拖入画布 -->
+        <div
+          v-if="assetsOpen"
+          class="absolute bottom-3 left-3 z-20 w-[232px] max-h-[calc(100%-24px)] rounded-[10px] border border-[var(--wb-stroke)] shadow-lg overflow-hidden"
+        >
+          <CanvasAssetsPanel
+            ref="assetsPanelEl"
+            :assets="assets"
+            @insert="(a) => insertAsset(a, centerWorld().x, centerWorld().y)"
+            @added="assetAdded"
+            @remove="assetRemoved"
+            @close="assetsOpen = false"
+          />
+        </div>
+        <v-stage
+          ref="stageEl"
+          :config="stageConfig"
+          @mousedown="onMouseDown"
+          @mousemove="onMouseMove"
+          @mouseup="onMouseUp"
+          @wheel="onWheel"
+        >
+          <!-- 连线层（参考 infinite-canvas：SVG 层 zIndex 0，位于节点之下；
+               16px 命中层不可压住节点交互） -->
+          <v-layer>
+            <v-group v-for="seg in linkSegs" :key="'lk' + seg.id">
+              <v-path
+                :config="{
+                  id: seg.id,
+                  data: linkPath(seg.x1, seg.y1, seg.x2, seg.y2, [seg.from, seg.to]),
+                  stroke: 'transparent',
+                  strokeWidth: 16 / viewport.scale,
+                  hitStrokeWidth: 16 / viewport.scale,
+                  cursor: 'pointer',
+                }"
+                @mousedown="onLinkDown"
+                @contextmenu="onLinkContextMenu($event, seg.id)"
+              />
+              <v-path
+                :config="{
+                  data: linkPath(seg.x1, seg.y1, seg.x2, seg.y2),
+                  stroke: selectedLinkId === seg.id ? '#ffffff' : 'rgba(160,160,160,0.6)',
+                  strokeWidth: (selectedLinkId === seg.id ? 3 : 2) / viewport.scale,
+                  opacity: reconnectDrag.active && reconnectDrag.linkId === seg.id ? 0.25 : 1,
+                  listening: false,
+                }"
+              />
+            </v-group>
+            <!-- 拖拽建线预览（虚线贝塞尔，参考 ActiveConnectionPath） -->
+            <v-path
+              v-if="connectDrag.seg"
+              :config="{
+                data: linkPath(
+                  connectDrag.seg.x1,
+                  connectDrag.seg.y1,
+                  connectDrag.seg.x2,
+                  connectDrag.seg.y2,
+                ),
+                stroke: '#ffffff',
+                strokeWidth: 2 / viewport.scale,
+                dash: [5 / viewport.scale, 5 / viewport.scale],
+                listening: false,
+              }"
+            />
+            <!-- 重连预览（选中连线拖锚点时：原线淡显 + 动端虚线跟随） -->
+            <v-path
+              v-if="reconnectDrag.seg"
+              :config="{
+                data: linkPath(
+                  reconnectDrag.seg.x1,
+                  reconnectDrag.seg.y1,
+                  reconnectDrag.seg.x2,
+                  reconnectDrag.seg.y2,
+                ),
+                stroke: '#ffffff',
+                strokeWidth: 2.5 / viewport.scale,
+                dash: [5 / viewport.scale, 5 / viewport.scale],
+                listening: false,
+              }"
+            />
+          </v-layer>
+          <v-layer>
+            <!-- C-H16 agent 过程高亮: 当前操作节点描边 -->
+            <v-rect
+              v-if="spotlightRect"
+              :config="{
+                ...spotlightRect,
+                stroke: '#409eff',
+                strokeWidth: 3 / viewport.scale,
+                cornerRadius: 10,
+                listening: false,
+                dash: [8 / viewport.scale, 5 / viewport.scale],
+              }"
+            />
+            <!-- 对齐参考线 -->
+            <v-line v-for="(g, i) in guides.v" :key="'gv' + i" :config="guideConfig(g, 'v')" />
+            <v-line v-for="(g, i) in guides.h" :key="'gh' + i" :config="guideConfig(g, 'h')" />
+            <!-- Frame 分区（背景容器：可点选/拖拽/重命名/删除；成员物件自由进出） -->
+            <v-group
+              v-for="o in frameObjects"
+              :key="o.id"
+              :config="groupConfig(o)"
+              :draggable="true"
+              :listening="true"
+            >
+              <v-rect :config="frameConfig(o)" />
+              <v-text :config="frameLabelConfig(o)" />
+            </v-group>
+            <!-- 图片物件（事件统一由 bindNodeEvents 手动绑定，见 onMounted 后 watch） -->
+            <v-group
+              v-for="o in imageObjects"
+              :key="o.id"
+              :config="groupConfig(o)"
+              :draggable="true"
+            >
+              <v-image :config="imageConfig(o)" />
+              <v-text
+                v-if="o.name"
+                :config="{
+                  text: o.name,
+                  y: o.height + 4,
+                  width: o.width,
+                  align: 'center',
+                  fontSize: 12,
+                  fill: '#a0a0a0',
+                }"
+              />
+            </v-group>
+            <!-- 媒体物件（video/audio）：Konva 占位框（拖拽/选中/连线热区），播放器是 HTML overlay -->
+            <v-group
+              v-for="o in mediaObjects"
+              :key="o.id"
+              :config="groupConfig(o)"
+              :draggable="true"
+            >
+              <v-rect :config="mediaRectConfig(o)" />
+            </v-group>
+
+            <!-- 便签物件 -->
+            <v-group
+              v-for="o in noteObjects"
+              :key="o.id"
+              :config="groupConfig(o)"
+              :draggable="true"
+            >
+              <v-rect :config="noteRectConfig(o)" />
+              <v-text :config="noteTextConfig(o)" />
+            </v-group>
+            <!-- App 节点卡（A 画布应用实例：双击/按钮展开参数面板，▶ 随时运行） -->
+            <v-group
+              v-for="o in appNodeObjects"
+              :key="o.id"
+              :config="groupConfig(o)"
+              :draggable="true"
+              :listening="nodesListening"
+            >
+              <v-rect :config="appNodeRectConfig(o)" />
+              <v-text :config="appNodeTitleConfig(o)" />
+              <v-text :config="appNodeSubConfig(o)" />
+              <v-circle
+                :ref="(el) => statusCircleRefs.set(o.id, el)"
+                :config="appNodeStatusConfig(o)"
+              />
+              <v-text
+                :config="appNodeRunBtnConfig(o)"
+                @mousedown="runAppNodeFromKonva(o.id, $event)"
+              />
+              <v-text
+                :config="appNodeExpandBtnConfig(o)"
+                @mousedown="openAppNodePanelFromKonva(o.id, $event)"
+              />
+            </v-group>
+            <!-- 分镜帧卡（N5：镜号+画面+描述） -->
+            <v-group
+              v-for="o in shotObjects"
+              :key="o.id"
+              :config="groupConfig(o)"
+              :draggable="true"
+            >
+              <v-rect :config="shotRectConfig(o)" />
+              <v-text :config="shotSeqConfig(o)" />
+              <v-text :config="shotTextConfig(o)" />
+            </v-group>
+            <!-- 连接句柄（参考 infinite-canvas ConnectionHandleDot：悬停/选中/连线中显现，
+                 48px 热区 12px 圆点，hover 放大；左=target 右=source。
+                 Konva 约束：v-if/动态 listening 会导致 hit graph 不刷新，故常驻渲染 +
+                 opacity 控制可见 + hitFunc 动态开闭热区） -->
+            <v-group
+              v-for="o in culledObjects"
+              :key="'hd' + o.id"
+              :config="{ x: o.x, y: o.y, visible: lodHandlesVisible }"
+            >
+              <v-circle
+                :config="handleConfig(o, 'target')"
+                @mousedown="onConnectStart(o.id, 'target', $event)"
+              />
+              <v-circle
+                :config="handleConfig(o, 'source')"
+                @mousedown="onConnectStart(o.id, 'source', $event)"
+              />
+            </v-group>
+            <!-- 选中连线的重连锚点：两端圆点拖到其它物件即改接。
+                 常驻渲染 + hitFunc 动态热区（同句柄模式，避免 v-if 破坏 hit graph） -->
+            <v-group v-for="seg in linkSegs" :key="'la' + seg.id">
+              <v-circle
+                :config="linkAnchorConfig(seg, 'from')"
+                @mousedown="onAnchorDown(seg.id, 'from', $event)"
+              />
+              <v-circle
+                :config="linkAnchorConfig(seg, 'to')"
+                @mousedown="onAnchorDown(seg.id, 'to', $event)"
+              />
+            </v-group>
+            <!-- 选中对象四角缩放手柄（拖角实时改尺寸写回数据；同句柄常驻渲染 +
+                 hitFunc 动态热区，避免 v-if 破坏 hit graph） -->
+            <v-group v-for="o in resizeTargets" :key="'rz' + o.id" :config="{ x: o.x, y: o.y }">
+              <v-circle
+                :config="resizeAnchorConfig(o, 'nw')"
+                @mousedown="onResizeStart(o.id, 'nw', $event)"
+              />
+              <v-circle
+                :config="resizeAnchorConfig(o, 'ne')"
+                @mousedown="onResizeStart(o.id, 'ne', $event)"
+              />
+              <v-circle
+                :config="resizeAnchorConfig(o, 'sw')"
+                @mousedown="onResizeStart(o.id, 'sw', $event)"
+              />
+              <v-circle
+                :config="resizeAnchorConfig(o, 'se')"
+                @mousedown="onResizeStart(o.id, 'se', $event)"
+              />
+            </v-group>
+            <!-- 框选橡皮筋（fix: 此前绑定函数引用而非调用，config 里 width 等
+                 全是 undefined → rect 宽高 0，橡皮筋拖拽全程不可见） -->
+            <v-rect v-if="rubber" :config="rubberConfig()" />
+            <!-- 圈选裁剪橡皮筋（同上） -->
+            <v-rect v-if="cropRect" :config="cropRectConfig()" />
+          </v-layer>
+        </v-stage>
+
+        <!-- 项目栏（左上：标题编辑 + 画布列表下拉，参考 canvas-top-bar） -->
+        <div
+          data-project-bar
+          class="absolute top-3 left-3 z-10 flex items-center gap-1.5"
+          @mousedown.stop
+        >
+          <button
+            class="w-9 h-9 rounded-lg bg-[var(--wb-surface)] border border-[var(--wb-stroke)] text-[var(--wb-text-1)] hover:border-[var(--wb-accent)] transition flex items-center justify-center"
+            :title="t('canvasProjectsMenu')"
+            @click="projectMenuOpen = !projectMenuOpen"
+          >
+            <i class="fas fa-layer-group"></i>
+          </button>
+          <div
+            v-if="activeProject"
+            class="h-9 px-3 rounded-lg bg-[var(--wb-surface)] border border-[var(--wb-stroke)] flex items-center min-w-0 max-w-[260px]"
+            @dblclick="startProjectTitleEdit"
+            :title="t('canvasProjectRenameHint')"
+          >
+            <input
+              v-if="projectTitleEditing"
+              ref="projectTitleInput"
+              v-model="projectTitleDraft"
+              class="bg-transparent outline-none text-sm text-[var(--wb-text-1)] w-[180px]"
+              @blur="finishProjectTitleEdit"
+              @keydown.enter.prevent="finishProjectTitleEdit"
+              @keydown.esc.prevent="projectTitleEditing = false"
+            />
+            <span v-else class="text-sm font-medium text-[var(--wb-text-1)] truncate">{{
+              activeProject.title
+            }}</span>
+          </div>
+          <!-- E4 画布列表下拉：卡片网格（统计/hover 操作/内联重命名/批量删除） -->
+          <div
+            v-if="projectMenuOpen"
+            class="absolute top-12 left-0 w-[420px] rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg overflow-hidden z-20"
+            @mousedown.stop
+          >
+            <div
+              class="flex items-center justify-between px-3 py-2 border-b border-[var(--wb-stroke)]"
+            >
+              <span class="text-xs font-medium text-[var(--wb-text-2)]">{{
+                t('canvasPrjCards') + ' · ' + projectStore.projects.length
+              }}</span>
+              <div class="flex items-center gap-1">
+                <button
+                  v-if="!prjBatchMode"
+                  class="rounded px-2 py-1 text-[11px] text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)]"
+                  @click="prjBatchMode = true"
+                >
+                  <i class="fas fa-list-check mr-1"></i>{{ t('canvasPrjBatchMode') }}
+                </button>
+                <template v-else>
+                  <button
+                    class="rounded px-2 py-1 text-[11px] text-[var(--wb-danger)] hover:bg-[var(--wb-danger)]/10 disabled:opacity-40"
+                    :disabled="!prjChecked.size"
+                    @click="deleteCheckedProjects"
+                  >
+                    <i class="fas fa-trash mr-1"></i>{{ t('canvasPrjBatchDel') }}（{{
+                      prjChecked.size
+                    }}）
+                  </button>
+                  <button
+                    class="rounded px-2 py-1 text-[11px] text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)]"
+                    @click="exitPrjBatch"
+                  >
+                    {{ t('canvasPrjCancel') }}
+                  </button>
+                </template>
+              </div>
+            </div>
+            <div class="max-h-[360px] overflow-y-auto p-2 grid grid-cols-2 gap-2">
+              <div
+                v-for="pr in projectStore.projects"
+                :key="pr.id"
+                tabindex="0"
+                class="group relative rounded-lg border p-2 transition cursor-pointer focus:outline-none focus:border-[var(--wb-accent)]"
+                :class="
+                  pr.id === projectStore.activeId
+                    ? 'border-[var(--wb-accent)] bg-[var(--wb-accent)]/10'
+                    : 'border-[var(--wb-stroke)] hover:border-[var(--wb-accent)]/60'
+                "
+                @click="prjBatchMode ? togglePrjCheck(pr.id) : openProjectById(pr.id)"
+              >
+                <div v-if="prjBatchMode" class="absolute left-1.5 top-1.5 z-10">
+                  <input
+                    type="checkbox"
+                    class="size-3.5 accent-[var(--wb-accent)]"
+                    :checked="prjChecked.has(pr.id)"
+                    @click.stop="togglePrjCheck(pr.id)"
+                  />
+                </div>
+                <div class="flex items-center gap-1 min-w-0" :class="prjBatchMode ? 'pl-5' : ''">
+                  <i
+                    class="fas fa-layer-group text-[10px] shrink-0"
+                    :class="
+                      pr.id === projectStore.activeId
+                        ? 'text-[var(--wb-accent)]'
+                        : 'text-[var(--wb-text-3)]'
+                    "
+                  ></i>
+                  <input
+                    v-if="prjRenameId === pr.id"
+                    ref="prjRenameInput"
+                    :value="pr.title"
+                    class="bg-transparent outline-none text-xs font-medium text-[var(--wb-text-1)] w-full min-w-0 border-b border-[var(--wb-accent)]"
+                    @click.stop
+                    @mousedown.stop
+                    @blur="commitPrjRename"
+                    @keydown.enter.prevent="commitPrjRename"
+                    @keydown.esc.stop.prevent="prjRenameId = null"
+                  />
+                  <span v-else class="truncate text-xs font-medium text-[var(--wb-text-1)]">{{
+                    pr.title
+                  }}</span>
+                </div>
+                <div
+                  class="mt-1.5 flex items-center gap-2 text-[10px] text-[var(--wb-text-3)]"
+                  :class="prjBatchMode ? 'pl-5' : ''"
+                >
+                  <span
+                    ><i class="fas fa-shapes mr-0.5"></i
+                    >{{ t('canvasPrjObjects').replace('{n}', String(prjStats(pr).objects)) }}</span
+                  >
+                  <span
+                    ><i class="fas fa-link mr-0.5"></i
+                    >{{ t('canvasPrjLinks').replace('{n}', String(prjStats(pr).links)) }}</span
+                  >
+                </div>
+                <div
+                  class="mt-0.5 text-[10px] text-[var(--wb-text-3)]"
+                  :class="prjBatchMode ? 'pl-5' : ''"
+                >
+                  {{ prjRelTime(pr) }}
+                </div>
+                <div
+                  v-if="!prjBatchMode"
+                  class="absolute right-1 top-1 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                >
+                  <button
+                    class="grid size-5 place-items-center rounded text-[9px] text-[var(--wb-text-2)] hover:bg-[var(--wb-accent)]/20 hover:text-[var(--wb-accent)]"
+                    :title="t('canvasPrjRename')"
+                    @click.stop="startPrjRename(pr.id)"
+                  >
+                    <i class="fas fa-pen"></i>
+                  </button>
+                  <button
+                    class="grid size-5 place-items-center rounded text-[9px] text-[var(--wb-text-2)] hover:bg-[var(--wb-accent)]/20 hover:text-[var(--wb-accent)]"
+                    :title="t('canvasPrjExport')"
+                    @click.stop="exportProjectById(pr.id)"
+                  >
+                    <i class="fas fa-file-export"></i>
+                  </button>
+                  <button
+                    class="grid size-5 place-items-center rounded text-[9px] text-[var(--wb-text-2)] hover:bg-[var(--wb-danger)]/20 hover:text-[var(--wb-danger)]"
+                    :title="t('canvasProjectDelete')"
+                    @click.stop="deleteProjectById(pr.id)"
+                  >
+                    <i class="fas fa-trash"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="border-t border-[var(--wb-stroke)]">
+              <button
+                class="w-full text-left px-3 py-2 text-sm text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+                @click="createNewProject"
+              >
+                <i class="fas fa-plus w-4"></i>{{ t('canvasProjectNew') }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 悬浮工具条 -->
+        <div class="absolute top-3 right-3 flex gap-1.5">
+          <button
+            v-for="b in tools"
+            :key="b.icon"
+            :title="b.title"
+            :disabled="b.disabled"
+            class="w-9 h-9 rounded-lg bg-[var(--wb-surface)] border text-[var(--wb-text-1)] transition flex items-center justify-center disabled:opacity-40 disabled:pointer-events-none"
+            :class="
+              b.active
+                ? 'border-[var(--wb-accent)] text-[var(--wb-accent)] bg-[var(--wb-accent)]/10'
+                : 'border-[var(--wb-stroke)] hover:border-[var(--wb-accent)]'
+            "
+            @click="b.action"
+          >
+            <i :class="b.icon"></i>
+          </button>
+        </div>
+
+        <!-- 模式提示条（裁剪工具激活时） -->
+        <div
+          v-if="tool"
+          class="absolute top-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-lg bg-[var(--wb-surface-hover)] text-xs text-[var(--wb-text)] flex items-center gap-2 z-10 border border-[var(--wb-stroke)]"
+        >
+          <i class="fas fa-vector-square text-[var(--wb-accent)]"></i>
+          <span>{{ t('canvasCropHint') }}</span>
+          <button
+            class="text-[var(--wb-text-2)] hover:text-white"
+            :title="t('canvasToolCancel')"
+            @click.stop="setTool(null)"
+          >
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+
+        <!-- C：拖线落空 → 创建节点菜单（参考 ConnectionCreateMenu） -->
+        <div
+          v-if="connectCreate.open"
+          id="connect-create-menu"
+          class="absolute z-30 min-w-[170px] py-1 rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg text-xs"
+          :style="{ left: connectCreate.x + 'px', top: connectCreate.y + 'px' }"
+          @contextmenu.prevent
+          @mousedown.stop
+        >
+          <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-[var(--wb-text-2)]">
+            {{ t('canvasCreateMenuTitle') }}
+          </div>
+          <button
+            v-for="opt in [
+              { k: 'note', icon: 'fa-note-sticky', label: t('canvasCreateMenuNote') },
+              { k: 'image', icon: 'fa-image', label: t('canvasCreateMenuImage') },
+              { k: 'video', icon: 'fa-film', label: t('canvasCreateMenuVideo') },
+              { k: 'audio', icon: 'fa-volume-high', label: t('canvasCreateMenuAudio') },
+              { k: 'app', icon: 'fa-cube', label: t('canvasCreateMenuApp') },
+            ]"
+            :key="opt.k"
+            class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+            @click="createNodeFromConnect(opt.k)"
+          >
+            <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="opt.icon"></i
+            >{{ opt.label }}
+          </button>
+        </div>
+
+        <!-- 右键上下文菜单（物件/空地两态） -->
+        <div
+          v-if="ctxMenu"
+          id="canvas-ctx-menu"
+          class="absolute z-30 min-w-[170px] py-1 rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg text-xs"
+          :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+          @contextmenu.prevent
+          @mousedown.stop
+        >
+          <template v-if="ctxMenu.kind === 'link'">
+            <button
+              class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+              @click="
+                () => {
+                  ctxMenu = null
+                  deleteSelectedLink()
+                }
+              "
+            >
+              <i class="fas fa-link-slash w-4 text-center text-[var(--wb-text-2)]"></i
+              >{{ t('canvasMenuDeleteLink') }}
+            </button>
+          </template>
+          <template v-else-if="ctxMenu.targetIds.length">
+            <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-[var(--wb-text-2)]">
+              {{ ctxMenu.targetIds.length }} {{ t('canvasMenuItems') }}
+            </div>
+            <template v-for="m in ctxItems" :key="m.key">
+              <div v-if="m.sep" class="my-1 h-px bg-[var(--wb-stroke)]"></div>
+              <div v-else-if="m.children" class="group/ctx relative">
+                <button
+                  class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+                >
+                  <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="m.icon"></i
+                  >{{ m.label }}
+                  <i class="fas fa-chevron-right ml-auto text-[9px] text-[var(--wb-text-2)]"></i>
+                </button>
+                <div
+                  class="absolute left-full top-0 -ml-1 hidden min-w-[170px] rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] py-1 shadow-lg group-hover/ctx:block"
+                >
+                  <button
+                    v-for="c in m.children"
+                    :key="c.key"
+                    class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2 whitespace-nowrap"
+                    @click="c.run()"
+                  >
+                    <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="c.icon"></i
+                    >{{ c.label }}
+                  </button>
+                </div>
+              </div>
+              <button
+                v-else
+                class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+                @click="m.run()"
+              >
+                <i class="fas w-4 text-center text-[var(--wb-text-2)]" :class="m.icon"></i
+                >{{ m.label }}
+              </button>
+            </template>
+          </template>
+          <template v-else>
+            <button
+              class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+              @click="pasteAt(ctxMenu.wx, ctxMenu.wy)"
+            >
+              <i class="fas fa-paste w-4 text-center text-[var(--wb-text-2)]"></i
+              >{{ t('canvasMenuPaste') }}
+            </button>
+            <button
+              class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+              @click="addNoteAt(ctxMenu.wx, ctxMenu.wy)"
+            >
+              <i class="fas fa-sticky-note w-4 text-center text-[var(--wb-text-2)]"></i
+              >{{ t('canvasMenuNote') }}
+            </button>
+            <button
+              class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+              @click="addFrameAt(ctxMenu.wx, ctxMenu.wy)"
+            >
+              <i class="fas fa-object-ungroup w-4 text-center text-[var(--wb-text-2)]"></i
+              >{{ t('canvasMenuFrame') }}
+            </button>
+            <button
+              class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+              @click="openAppPickerAtCtx()"
+            >
+              <i class="fas fa-cube w-4 text-center text-[var(--wb-text-2)]"></i
+              >{{ t('canvasMenuAppNode') }}
+            </button>
+            <button
+              class="w-full text-left px-3 py-1.5 hover:bg-[var(--wb-accent)]/15 flex items-center gap-2"
+              @click="fitAll()"
+            >
+              <i class="fas fa-expand w-4 text-center text-[var(--wb-text-2)]"></i
+              >{{ t('canvasMenuFit') }}
+            </button>
+          </template>
+        </div>
+
+        <!-- 选区快捷指令条（A14：框选后浮出，回车/▶ 直接生成） -->
+        <div
+          v-if="selPrompt"
+          id="canvas-sel-prompt"
+          class="absolute z-20 flex items-center gap-2 px-2 py-1.5 rounded-[10px] border border-[var(--wb-accent)]/50 bg-[var(--wb-surface)] shadow-lg"
+          :style="{ left: selPrompt.x + 'px', top: selPrompt.y + 'px' }"
+          @mousedown.stop
+        >
+          <i class="fas fa-wand-magic-sparkles text-[var(--wb-accent)] text-xs"></i>
+          <input
+            v-model="selPrompt.text"
+            class="w-64 bg-transparent text-xs outline-none text-[var(--wb-text-1)]"
+            :placeholder="t('canvasSelPromptPh')"
+            @keydown.enter.stop="runSelPrompt()"
+            @keydown.esc.stop="selPrompt = null"
+          />
+          <button
+            class="w-7 h-7 rounded-lg bg-[var(--wb-accent)]/20 text-[var(--wb-accent)]"
+            :title="t('canvasSelPromptRun')"
+            @click="runSelPrompt()"
+          >
+            <i class="fas fa-paper-plane text-xs"></i>
+          </button>
+          <button
+            class="w-7 h-7 rounded-lg text-[var(--wb-text-2)] hover:text-white"
+            :title="t('canvasMenuCompose')"
+            @click="composeSelection()"
+          >
+            <i class="fas fa-layer-group text-xs"></i>
+          </button>
+        </div>
+
+        <!-- 生成节点参数弹窗（N3：prompt 卡 → 执行 → 产物落布） -->
+        <div
+          v-if="genNode"
+          class="absolute z-30 w-[320px] rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg p-3 text-xs"
+          :style="{ left: genNode.x + 'px', top: genNode.y + 'px' }"
+          @mousedown.stop
+        >
+          <div class="flex items-center justify-between mb-2">
+            <span class="font-medium text-[var(--wb-text-1)]"
+              ><i class="fas fa-wand-magic-sparkles text-[var(--wb-accent)] mr-1"></i
+              >{{ t('canvasGenNode') }}</span
+            >
+            <button class="text-[var(--wb-text-2)] hover:text-white" @click="genNode = null">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <textarea
+            v-model="genNode.prompt"
+            rows="3"
+            class="w-full rounded-lg bg-black/20 border border-[var(--wb-stroke)] px-2 py-1.5 outline-none text-[var(--wb-text-1)] resize-none"
+            :placeholder="t('canvasGenPromptPh')"
+          ></textarea>
+          <div class="flex items-center gap-2 mt-2">
+            <span class="text-[var(--wb-text-2)]"
+              >{{ t('canvasGenRefs') }}: {{ genNode.refs.length || '0' }}</span
+            >
+            <button
+              class="ml-auto px-3 py-1.5 rounded-lg bg-[var(--wb-accent)] text-white disabled:opacity-40"
+              :disabled="genNode.running || !genNode.prompt.trim()"
+              @click="runGenNode()"
+            >
+              <i class="fas" :class="genNode.running ? 'fa-spinner fa-spin' : 'fa-play'"></i>
+              {{ genNode.running ? t('canvasGenRunning') : t('canvasGenRun') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- App 节点展开参数面板（HTML overlay，锚定节点屏幕坐标） -->
+        <!-- 提示词库面板（S6b）：内置分词 + 自定义 + JSON 导入 -->
+        <div
+          v-if="promptLib.open"
+          class="absolute z-30 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[560px] max-h-[70vh] flex flex-col rounded-[14px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg"
+          @mousedown.stop
+          @pointerdown.stop
+        >
+          <div class="flex items-center gap-2 px-4 pt-3 pb-2">
+            <i class="fas fa-book-open text-[var(--wb-accent)]"></i>
+            <span class="text-sm font-medium text-[var(--wb-text-1)]">{{
+              t('canvasPromptLibTitle')
+            }}</span>
+            <span
+              v-if="promptTarget"
+              class="text-xs px-2 py-0.5 rounded-full bg-[var(--wb-accent)]/15 text-[var(--wb-accent)]"
+            >
+              {{
+                promptTarget.kind === 'rewrite'
+                  ? t('canvasPromptTargetRewrite')
+                  : promptTarget.kind === 'gen'
+                    ? t('canvasPromptTargetGen')
+                    : t('canvasPromptTargetNote')
+              }}
+            </span>
+            <span
+              v-else
+              class="text-xs px-2 py-0.5 rounded-full bg-[var(--wb-stroke)] text-[var(--wb-text-2)]"
+              :title="t('canvasPromptNoTargetHint')"
+            >
+              {{ t('canvasPromptNoTargetHint') }}
+            </span>
+            <div class="flex-1"></div>
+            <button
+              class="w-7 h-7 rounded-lg text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] transition"
+              @click="promptLib.open = false"
+            >
+              <i class="fas fa-xmark"></i>
+            </button>
+          </div>
+          <div class="flex items-center gap-2 px-4 pb-2">
+            <button
+              v-for="tb in ['builtin', 'custom']"
+              :key="tb"
+              class="h-7 px-3 rounded-lg text-xs transition"
+              :class="
+                promptLib.tab === tb
+                  ? 'text-white bg-[var(--wb-accent)]'
+                  : 'text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] border border-[var(--wb-stroke)]'
+              "
+              @click="promptLib.tab = tb"
+            >
+              {{ tb === 'builtin' ? t('canvasPromptBuiltinTab') : t('canvasPromptCustomTab') }}
+            </button>
+            <div class="flex-1"></div>
+            <input
+              v-model="promptLib.q"
+              class="w-44 bg-transparent outline-none text-sm text-[var(--wb-text-1)] border border-[var(--wb-stroke)] rounded-lg px-2 py-1"
+              :placeholder="t('canvasPromptSearch')"
+            />
+            <button
+              v-if="promptLib.tab === 'custom'"
+              class="h-7 px-2.5 rounded-lg text-xs text-[var(--wb-accent)] border border-[var(--wb-accent)]/40 hover:bg-[var(--wb-accent)]/10 transition"
+              @click="importPromptsFile"
+            >
+              <i class="fas fa-file-import mr-1"></i>{{ t('canvasPromptImport') }}
+            </button>
+          </div>
+          <div class="flex-1 overflow-y-auto px-4 pb-4 space-y-3">
+            <div v-for="cat in promptLibView" :key="cat.category">
+              <div
+                class="text-xs text-[var(--wb-text-2)] mb-1.5 sticky top-0 bg-[var(--wb-surface)] py-1"
+              >
+                {{ cat.category }}
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="it in cat.items"
+                  :key="it.text"
+                  class="group max-w-full flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-[var(--wb-stroke)] hover:border-[var(--wb-accent)] text-xs text-[var(--wb-text-1)] transition"
+                  :title="it.hint || it.text"
+                  @click="applyPrompt(it.text)"
+                >
+                  <span class="truncate max-w-[280px]">{{ it.text }}</span>
+                  <i
+                    v-if="promptLib.tab === 'custom'"
+                    class="fas fa-xmark opacity-0 group-hover:opacity-60 hover:!opacity-100 text-[var(--wb-text-2)]"
+                    @click.stop="removeCustomPrompt(it.text)"
+                  ></i>
+                </button>
+              </div>
+            </div>
+            <div
+              v-if="promptLib.tab === 'custom' && !customPrompts.length"
+              class="text-xs text-[var(--wb-text-2)] py-6 text-center"
+            >
+              {{ t('canvasPromptEmptyHint') }}
+            </div>
+          </div>
+        </div>
+
+        <!-- 角度/翻转对话框（A2）：滑杆 + 翻转开关 -->
+        <div
+          v-if="angleDlg.open"
+          class="absolute z-30 flex flex-col gap-3 w-[300px] p-4 rounded-[14px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg"
+          :style="{ left: '50%', top: '50%', transform: 'translate(-50%,-50%)' }"
+          @mousedown.stop
+          @pointerdown.stop
+        >
+          <div class="text-sm font-medium text-[var(--wb-text-1)]">{{ t('canvasAngleTitle') }}</div>
+          <div class="flex items-center gap-2">
+            <input
+              :value="angleDlg.deg"
+              type="range"
+              min="-45"
+              max="45"
+              step="1"
+              class="flex-1"
+              @input="angleDlg.deg = Number($event.target.value)"
+            />
+            <span class="w-12 text-right text-xs text-[var(--wb-text-2)]">{{ angleDlg.deg }}°</span>
+          </div>
+          <div class="flex gap-2">
+            <button
+              v-for="fl in [
+                { k: 'flipH', label: t('canvasAngleFlipH') },
+                { k: 'flipV', label: t('canvasAngleFlipV') },
+              ]"
+              :key="fl.k"
+              class="flex-1 h-8 rounded-lg text-xs border transition"
+              :class="
+                angleDlg[fl.k]
+                  ? 'text-white bg-[var(--wb-accent)] border-transparent'
+                  : 'text-[var(--wb-text-2)] border-[var(--wb-stroke)] hover:text-[var(--wb-text-1)]'
+              "
+              @click="angleDlg[fl.k] = !angleDlg[fl.k]"
+            >
+              {{ fl.label }}
+            </button>
+          </div>
+          <div class="flex gap-2 justify-end">
+            <button
+              class="h-8 px-3 rounded-lg text-xs text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] border border-[var(--wb-stroke)] transition"
+              @click="angleDlg.open = false"
+            >
+              {{ t('canvasDlgCancel') }}
+            </button>
+            <button
+              class="h-8 px-3 rounded-lg text-xs text-white bg-[var(--wb-accent)] transition"
+              @click="applyAngle"
+            >
+              {{ t('canvasAngleApply') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 放大对话框（A3）：目标长边 + 算法 -->
+        <div
+          v-if="upscaleDlg.open"
+          class="absolute z-30 flex flex-col gap-3 w-[300px] p-4 rounded-[14px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg"
+          :style="{ left: '50%', top: '50%', transform: 'translate(-50%,-50%)' }"
+          @mousedown.stop
+          @pointerdown.stop
+        >
+          <div class="text-sm font-medium text-[var(--wb-text-1)]">
+            {{ t('canvasUpscaleTitle') }}
+          </div>
+          <div class="flex gap-1.5">
+            <button
+              v-for="tp in [1024, 2048, 4096]"
+              :key="tp"
+              class="flex-1 h-8 rounded-lg text-xs border transition"
+              :class="
+                upscaleDlg.target === tp
+                  ? 'text-white bg-[var(--wb-accent)] border-transparent'
+                  : 'text-[var(--wb-text-2)] border-[var(--wb-stroke)] hover:text-[var(--wb-text-1)]'
+              "
+              @click="upscaleDlg.target = tp"
+            >
+              {{ tp }}px
+            </button>
+          </div>
+          <div class="flex gap-2 justify-end">
+            <button
+              class="h-8 px-3 rounded-lg text-xs text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] border border-[var(--wb-stroke)] transition"
+              @click="upscaleDlg.open = false"
+            >
+              {{ t('canvasDlgCancel') }}
+            </button>
+            <button
+              class="h-8 px-3 rounded-lg text-xs text-white bg-[var(--wb-accent)] transition"
+              @click="applyUpscale"
+            >
+              {{ t('canvasUpscaleApply') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- D1a 蒙版编辑对话框：笔刷涂抹局部重绘区（对齐参考 mask-edit-dialog） -->
+        <div
+          v-if="maskDlg.open"
+          class="fixed inset-0 z-[80] flex items-center justify-center bg-black/60"
+          @mousedown.self="maskDlg.open = false"
+        >
+          <div
+            class="flex max-h-[92vh] w-[min(1080px,94vw)] gap-5 rounded-[14px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] p-5 shadow-lg"
+            @keydown="onMaskKeydown"
+            @keyup="onMaskKeyup"
+          >
+            <!-- 左：图 + 蒙版叠加（E1 视口：滚轮缩放/空格中键平移/适配） -->
+            <div class="relative flex-1">
+              <div
+                ref="maskViewportEl"
+                class="relative h-full overflow-auto rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-bg)]"
+                :class="maskDlg.panning ? 'cursor-grabbing' : ''"
+                @wheel.prevent="onMaskWheel"
+                @pointerdown.capture="onMaskPanDown"
+                @pointermove.capture="onMaskPanMove"
+                @pointerup.capture="onMaskPanUp"
+                @pointercancel.capture="onMaskPanUp"
+                @auxclick.prevent
+              >
+                <div
+                  class="relative flex min-h-full min-w-full items-center justify-center p-6"
+                  style="transform: translateZ(0)"
+                >
+                  <div
+                    class="relative"
+                    :style="{ width: maskStageSize.w + 'px', height: maskStageSize.h + 'px' }"
+                  >
+                    <img
+                      :src="(objects.find((o) => o.id === maskDlg.id) || {}).src"
+                      class="absolute inset-0 h-full w-full object-contain"
+                      draggable="false"
+                    />
+                    <canvas ref="maskCanvasEl" class="hidden"></canvas>
+                    <canvas
+                      ref="maskPreviewEl"
+                      class="absolute inset-0 h-full w-full cursor-none touch-none"
+                      @pointerdown.prevent="onMaskPointerDown"
+                      @pointermove.prevent="onMaskPointerMove"
+                      @pointerup="onMaskPointerUp"
+                      @pointercancel="onMaskPointerUp"
+                      @pointerleave="maskDlg.cursor = null"
+                      @contextmenu.prevent
+                    ></canvas>
+                    <!-- 笔刷预览圆 -->
+                    <div
+                      v-if="maskDlg.cursor && !maskDlg.brushAdjust"
+                      class="pointer-events-none absolute rounded-full border-2 border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,.8)]"
+                      :style="{
+                        left: maskDlg.cursor.x + 'px',
+                        top: maskDlg.cursor.y + 'px',
+                        width: maskDlg.brush * maskImageScale + 'px',
+                        aspectRatio: '1',
+                        transform: 'translate(-50%, -50%)',
+                      }"
+                    ></div>
+                    <div
+                      v-if="maskDlg.cursor && maskDlg.brushAdjust"
+                      class="pointer-events-none absolute rounded-full border-2 border-amber-400 bg-black/10 shadow-[0_0_0_1px_rgba(0,0,0,.8)]"
+                      :style="{
+                        left: maskDlg.cursor.x + 'px',
+                        top: maskDlg.cursor.y + 'px',
+                        width: maskDlg.brush * maskImageScale + 'px',
+                        aspectRatio: '1',
+                        transform: 'translate(-50%, -50%)',
+                      }"
+                    >
+                      <span
+                        class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded bg-black/75 px-1.5 py-0.5 text-xs font-semibold text-white"
+                        >{{ maskDlg.brush }}px</span
+                      >
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <!-- 右：工具面板 -->
+            <div class="flex w-[300px] flex-col gap-4">
+              <div>
+                <div class="text-lg font-semibold text-[var(--wb-text-1)]">
+                  {{ t('canvasMaskTitle') }}
+                </div>
+                <div class="mt-1 text-xs text-[var(--wb-text-2)]">
+                  {{ maskDlg.imgW }} × {{ maskDlg.imgH }}px · {{ t('canvasMaskHint') }}
+                </div>
+                <!-- E1 视口缩放控件：缩小/放大/适配/百分比（滚轮+空格平移提示） -->
+                <div class="mt-2 flex items-center gap-1">
+                  <button
+                    class="h-7 w-7 rounded-lg border border-[var(--wb-stroke)] text-xs text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] disabled:opacity-30"
+                    :disabled="maskDlg.view <= 1.001"
+                    @click="maskZoom(-1)"
+                  >
+                    <i class="fas fa-magnifying-glass-minus"></i>
+                  </button>
+                  <button
+                    class="h-7 w-7 rounded-lg border border-[var(--wb-stroke)] text-xs text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] disabled:opacity-30"
+                    :disabled="maskDlg.view >= 3.999"
+                    @click="maskZoom(1)"
+                  >
+                    <i class="fas fa-magnifying-glass-plus"></i>
+                  </button>
+                  <button
+                    class="h-7 rounded-lg border border-[var(--wb-stroke)] px-2 text-xs text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)]"
+                    @click="maskFitViewport"
+                  >
+                    <i class="fas fa-expand mr-1"></i>{{ t('canvasMaskFit') }}
+                  </button>
+                  <span class="ml-1 text-xs font-medium text-[var(--wb-text-2)]">{{
+                    Math.round(maskDlg.view * maskDlg.fitScale * 100) + '%'
+                  }}</span>
+                </div>
+                <div class="mt-1 text-[11px] leading-relaxed text-[var(--wb-text-3)]">
+                  {{ t('canvasMaskViewportHint') }}
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <button
+                  class="rounded-lg border px-3 py-1.5 text-xs"
+                  :class="
+                    maskDlg.mode === 'paint'
+                      ? 'border-[var(--wb-accent)] bg-[var(--wb-accent)]/15 text-[var(--wb-text-1)]'
+                      : 'border-[var(--wb-stroke)] text-[var(--wb-text-2)]'
+                  "
+                  @click="maskDlg.mode = 'paint'"
+                >
+                  <i class="fas fa-brush mr-1"></i>{{ t('canvasMaskBrush') }}
+                </button>
+                <button
+                  class="rounded-lg border px-3 py-1.5 text-xs"
+                  :class="
+                    maskDlg.mode === 'erase'
+                      ? 'border-[var(--wb-accent)] bg-[var(--wb-accent)]/15 text-[var(--wb-text-1)]'
+                      : 'border-[var(--wb-stroke)] text-[var(--wb-text-2)]'
+                  "
+                  @click="maskDlg.mode = 'erase'"
+                >
+                  <i class="fas fa-eraser mr-1"></i>{{ t('canvasMaskErase') }}
+                </button>
+              </div>
+              <div
+                class="flex items-center justify-between rounded-lg border border-[var(--wb-stroke)] px-2 py-1 text-xs"
+              >
+                <button
+                  class="rounded px-2 py-1 text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] disabled:opacity-30"
+                  :disabled="!maskDlg.strokes.length"
+                  @click="undoMaskStroke"
+                >
+                  <i class="fas fa-rotate-left"></i>
+                </button>
+                <button
+                  class="rounded px-2 py-1 text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] disabled:opacity-30"
+                  :disabled="!maskDlg.redoStack.length"
+                  @click="redoMaskStroke"
+                >
+                  <i class="fas fa-rotate-right"></i>
+                </button>
+                <span class="text-[var(--wb-text-2)]">{{ t('canvasMaskBrushSize') }}</span>
+                <span class="font-semibold text-[var(--wb-text-1)]">{{ maskDlg.brush }}px</span>
+              </div>
+              <input
+                :value="maskDlg.brush"
+                type="range"
+                min="8"
+                max="160"
+                step="2"
+                class="w-full"
+                @input="maskDlg.brush = clampBrushSize(Number($event.target.value))"
+              />
+              <div class="flex flex-col gap-1">
+                <span class="text-xs font-medium text-[var(--wb-text-2)]">{{
+                  t('canvasMaskPromptLabel')
+                }}</span>
+                <textarea
+                  v-model="maskDlg.prompt"
+                  rows="5"
+                  class="w-full resize-none rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-bg)] px-2 py-1.5 text-xs text-[var(--wb-text-1)]"
+                  :placeholder="t('canvasMaskPromptPlaceholder')"
+                ></textarea>
+              </div>
+              <div v-if="maskDlg.error" class="text-xs font-medium text-[var(--wb-danger)]">
+                {{ maskDlg.error }}
+              </div>
+              <div class="mt-auto flex items-center justify-between gap-2">
+                <button
+                  class="rounded-lg border border-[var(--wb-stroke)] px-3 py-1.5 text-xs text-[var(--wb-text-2)]"
+                  @click="resetMaskDialog"
+                >
+                  <i class="fas fa-arrows-rotate mr-1"></i>{{ t('canvasMaskReset') }}
+                </button>
+                <div class="flex gap-2">
+                  <button
+                    class="rounded-lg border border-[var(--wb-stroke)] px-3 py-1.5 text-xs text-[var(--wb-text-2)]"
+                    @click="maskDlg.open = false"
+                  >
+                    {{ t('canvasDlgCancel') }}
+                  </button>
+                  <button
+                    class="rounded-lg bg-[var(--wb-accent)] px-3 py-1.5 text-xs font-medium text-white"
+                    @click="submitMaskDialog"
+                  >
+                    <i class="fas fa-wand-magic-sparkles mr-1"></i>{{ t('canvasMaskSubmit') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 切分对话框（S6a）：横/竖切 N 片 -->
+        <div
+          v-if="splitDlg.open"
+          class="absolute z-30 flex items-center gap-2 h-11 px-3 rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg"
+          :style="{ left: '50%', top: '50%', transform: 'translate(-50%,-50%)' }"
+          @mousedown.stop
+          @pointerdown.stop
+        >
+          <span class="text-sm text-[var(--wb-text-1)]">{{ t('canvasSplitDlgTitle') }}</span>
+          <select
+            v-model="splitDlg.dir"
+            class="bg-[var(--wb-bg-base)] text-sm text-[var(--wb-text-1)] rounded-lg px-2 py-1 border border-[var(--wb-stroke)]"
+          >
+            <option value="h">{{ t('canvasSplitDirH') }}</option>
+            <option value="v">{{ t('canvasSplitDirV') }}</option>
+          </select>
+          <input
+            :value="splitDlg.n"
+            type="number"
+            min="2"
+            max="6"
+            class="w-16 bg-transparent outline-none text-sm text-[var(--wb-text-1)] border border-[var(--wb-stroke)] rounded-lg px-2 py-1"
+            @input="splitDlg.n = Math.min(6, Math.max(2, Number($event.target.value) || 2))"
+          />
+          <button
+            class="h-7 px-3 rounded-lg text-xs text-white bg-[var(--wb-accent)] transition"
+            @click="applySplit"
+          >
+            {{ t('canvasSplitGo') }}
+          </button>
+          <button
+            class="w-7 h-7 rounded-lg text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] transition"
+            @click="splitDlg.open = false"
+          >
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
+
+        <!-- note AI 改写输入条（S5b）：note 下方，指令 + 发送 -->
+        <div
+          v-if="noteRewrite.noteId"
+          class="absolute z-20 w-[360px] rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg p-2.5 flex items-center gap-2"
+          :style="{ left: noteRewritePos.x + 'px', top: noteRewritePos.y + 'px' }"
+          @mousedown.stop
+          @pointerdown.stop
+        >
+          <input
+            ref="noteRewriteInput"
+            v-model="noteRewrite.instruction"
+            class="flex-1 bg-transparent outline-none text-sm text-[var(--wb-text-1)] placeholder:text-[var(--wb-text-2)]"
+            :placeholder="t('canvasRewritePlaceholder')"
+            :disabled="noteRewrite.running"
+            @keydown.enter.prevent="runNoteRewrite"
+            @keydown.esc.prevent="noteRewrite.noteId = null"
+          />
+          <button
+            class="h-7 px-2.5 rounded-lg text-xs text-white bg-[var(--wb-accent)] disabled:opacity-50 transition"
+            :disabled="noteRewrite.running || !noteRewrite.instruction.trim()"
+            @click="runNoteRewrite"
+          >
+            <i v-if="noteRewrite.running" class="fas fa-spinner fa-spin mr-1"></i
+            >{{ noteRewrite.running ? t('canvasRewriteRunning') : t('canvasRewriteSend') }}
+          </button>
+          <button
+            class="w-7 h-7 rounded-lg text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] transition"
+            @click="noteRewrite.noteId = null"
+          >
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
+
+        <!-- 媒体节点播放器 overlay（S4b）：跟随视口变换定位 -->
+        <template v-for="o in mediaObjects" :key="'media-' + o.id">
+          <div
+            class="absolute z-[15]"
+            :data-media-overlay="o.id"
+            :style="{
+              left: mediaPosOf(o).x + 'px',
+              top: mediaPosOf(o).y + 'px',
+              width: mediaPosOf(o).w + 'px',
+              height: mediaPosOf(o).h + 'px',
+            }"
+          >
+            <MediaNodeCard :node="o" :pos="mediaPosOf(o)" @upload="uploadMediaFor" />
+          </div>
+        </template>
+
+        <AppNodeCard
+          v-if="appPanel.node"
+          :node="appPanel.node"
+          :app="appPanelApp"
+          :pos="appPanelPos"
+          :fed-lines="appPanelFed"
+          @close="appPanel.id = null"
+          @run="runAppNode(appPanel.node.id)"
+          @pick-canvas="pickCanvasImageFor"
+          @open-full="openFullApp(appPanel.node)"
+          @update-param="onPanelParamUpdate"
+        />
+
+        <!-- 应用拾取器（新建 App 节点） -->
+        <AppPickerModal v-if="appPicker.open" @close="appPicker.open = false" @pick="onAppPicked" />
+
+        <!-- AI 节点指令确认卡（P3：侧栏工作台 wb_canvas_ops → 人审 → 执行） -->
+        <div
+          v-if="pendingAgentOps"
+          class="agent-ops-card"
+          :class="{ 'ops-expired': opsExpired }"
+          @mousedown.stop
+        >
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-medium text-[var(--wb-text-1)]">
+              <i class="fas fa-robot text-[var(--wb-accent)] mr-1"></i
+              >{{ t('canvasAgentOpsTitle') }}
+            </span>
+            <button
+              class="text-[var(--wb-text-2)] hover:text-white"
+              @click="pendingAgentOps = null"
+            >
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <div class="ops-lines">
+            <div v-for="(line, i) in agentOpsDiffLines" :key="i" class="ops-line">{{ line }}</div>
+          </div>
+          <div class="flex gap-2 mt-2">
+            <button
+              class="flex-1 py-1.5 rounded-lg text-xs"
+              :class="
+                opsExpired
+                  ? 'bg-[var(--wb-surface-hover)] text-[var(--wb-text-3)] cursor-not-allowed'
+                  : 'bg-[var(--wb-accent)] text-white'
+              "
+              :disabled="opsExpired"
+              :title="opsExpired ? '该确认卡已超时(10 分钟),请重新发起请求' : ''"
+              @click="opsExpired || confirmAgentOps()"
+            >
+              {{ opsExpired ? '已过期,请重新发起' : t('canvasAgentOpsConfirm') }}
+            </button>
+            <button
+              class="flex-1 py-1.5 rounded-lg border border-[var(--wb-stroke)] text-[var(--wb-text-2)] text-xs"
+              @click="pendingAgentOps = null"
+            >
+              {{ opsExpired ? '关闭' : t('canvasAgentOpsReject') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- C-H3 AI 快照面板（AI 改画布前自动打的检查点，一键回滚） -->
+        <div v-if="aiSnapshots.length" class="agent-ops-card" @mousedown.stop>
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-xs font-medium text-[var(--wb-text-1)]">
+              <i class="fas fa-camera text-[var(--wb-text-2)] mr-1"></i
+              >{{ t('canvasAiSnapshotsTitle') }}
+            </span>
+          </div>
+          <div class="ops-lines" style="max-height: 120px; overflow-y: auto">
+            <div
+              v-for="snap in aiSnapshots"
+              :key="snap.id"
+              class="flex items-center justify-between py-0.5"
+            >
+              <span class="text-xs text-[var(--wb-text-2)] truncate">
+                {{ snap.label }} · {{ new Date(snap.at).toLocaleTimeString() }}
+              </span>
+              <span class="flex gap-1 shrink-0 ml-2">
+                <button
+                  class="px-1.5 py-0.5 rounded bg-[var(--wb-accent)]/20 text-[var(--wb-accent-hover)] text-xs"
+                  @click="restoreAiSnapshot(snap.id)"
+                >
+                  {{ t('canvasAiSnapshotsRestore') }}
+                </button>
+                <button
+                  class="px-1 py-0.5 rounded text-[var(--wb-text-3)] hover:text-red-400 text-xs"
+                  @click="removeAiSnapshot(snap.id)"
+                >
+                  <i class="fas fa-trash text-[10px]"></i>
+                </button>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 缩放指示 -->
+        <div
+          class="absolute bottom-3 left-3 px-2 py-1 rounded bg-black/40 text-xs text-[var(--wb-text-2)] font-mono"
+        >
+          {{ Math.round(viewport.scale * 100) }}%
+        </div>
+
+        <!-- 软件渲染降级提示（Win11 GPU黑名单机）：一次性告知。
+             ⚠️ 两条布局约束（C-H10.0b / C-H14 实测）：
+             ① 必须避开右上角悬浮工具条（`top-3 right-3` 的 flex 行，约 700px 宽、20 个按钮）——
+                原先两处都在 top-3：居中横幅与工具条在 1600px 视口下重叠 2 万 px²，14/20 个按钮被拦截；
+             ② 横幅是**提示**不是交互层，本体一律 `pointer-events-none`（只留关闭按钮可点）——
+                否则任何落在它下面的控件（工具条、项目下拉的「批量管理」等）都点不到。 -->
+        <div
+          v-if="softRenderTip"
+          class="pointer-events-none absolute z-20 left-1/2 top-16 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs text-amber-300"
+        >
+          <i class="fas fa-triangle-exclamation"></i>{{ t('canvasSoftRenderTip') }}
+          <button
+            class="pointer-events-auto ml-1 text-amber-300/70 hover:text-amber-300"
+            @click="dismissSoftRenderTip"
+          >
+            <i class="fas fa-xmark"></i>
+          </button>
+        </div>
+        <!-- E2 节点参考条（参考 canvas-node-reference-bar）：上游引用缩略图横排 -->
+        <div
+          v-if="nodeRefBar"
+          class="node-ref-bar absolute z-20 flex h-[54px] items-center gap-1.5 rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] px-1.5 shadow-lg"
+          :style="{ left: nodeRefBar.x + 'px', top: nodeRefBar.y + 'px' }"
+          @pointerenter.stop
+          @pointerleave="refBarLeave"
+          @mousedown.stop
+          @wheel.stop
+        >
+          <div
+            v-for="r in nodeRefBar.refs"
+            :key="r.linkId"
+            class="group relative grid size-11 shrink-0 cursor-pointer place-items-center overflow-hidden rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-bg)]"
+            :title="r.label"
+            @pointerenter="refBarEnter(r, $event)"
+            @pointerleave="refBarPreview.id = null"
+            @click.stop="selection = [r.fromId]"
+          >
+            <img v-if="r.kind === 'image'" :src="r.src" class="size-full object-cover" alt="" />
+            <video
+              v-else-if="r.kind === 'video'"
+              :src="r.src"
+              class="size-full object-cover"
+              muted
+            ></video>
+            <i
+              v-else
+              class="fas text-sm text-[var(--wb-text-2)]"
+              :class="
+                r.kind === 'note'
+                  ? 'fa-file-lines'
+                  : r.kind === 'app'
+                    ? 'fa-cube'
+                    : 'fa-puzzle-piece'
+              "
+            ></i>
+            <button
+              class="absolute right-0 top-0 grid size-4 place-items-center rounded-full border border-[var(--wb-stroke)] bg-[var(--wb-surface)] text-[9px] text-[var(--wb-text-2)] opacity-0 shadow transition-opacity group-hover:opacity-100"
+              :title="t('canvasRefBarDisconnect')"
+              @mousedown.stop
+              @click.stop="refBarDisconnect(r.linkId)"
+            >
+              <i class="fas fa-xmark"></i>
+            </button>
+          </div>
+          <button
+            class="grid size-11 shrink-0 place-items-center rounded-lg border border-dashed border-[var(--wb-stroke)] text-[var(--wb-text-2)] transition hover:border-[var(--wb-accent)] hover:text-[var(--wb-accent)]"
+            :title="t('canvasRefBarAdd')"
+            @mousedown.stop
+            @click.stop="refBarStartLink(nodeRefBar.id, $event)"
+          >
+            <i class="fas fa-plus text-xs"></i>
+          </button>
+        </div>
+        <!-- E2 引用大图预览浮层 -->
+        <div
+          v-if="refBarPreview.id && refBarPreviewObj"
+          class="pointer-events-none absolute z-30 w-72 rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] p-1.5 shadow-lg"
+          :style="{ left: refBarPreview.x + 'px', top: refBarPreview.y + 'px' }"
+        >
+          <img
+            v-if="refBarPreviewObj.kind === 'image'"
+            :src="refBarPreviewObj.src"
+            class="max-h-52 w-full rounded-lg object-contain"
+            alt=""
+          />
+          <video
+            v-else-if="refBarPreviewObj.kind === 'video'"
+            :src="refBarPreviewObj.src"
+            class="max-h-52 w-full rounded-lg"
+            muted
+            controls
+          ></video>
+          <div
+            v-else
+            class="max-h-52 w-full overflow-auto whitespace-pre-wrap rounded-lg p-2 text-xs text-[var(--wb-text-2)]"
+          >
+            {{ refBarPreviewObj.text || refBarPreviewObj.label }}
+          </div>
+        </div>
+
+        <!-- 节点悬浮工具栏（参考 canvas-node-hover-toolbar）：悬停物件上方 HTML overlay -->
+        <div
+          v-if="hoverToolbar.items.length"
+          class="node-hover-toolbar absolute z-20 flex h-9 -translate-x-1/2 items-center rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg"
+          :class="hoverToolbar.below ? 'is-below' : '-translate-y-full'"
+          :style="{ left: hoverToolbar.x + 'px', top: hoverToolbar.y + 'px' }"
+          @mousedown.stop
+          @pointerdown.stop
+          @dblclick.stop
+          @mouseenter="keepToolbar(true)"
+          @mouseleave="keepToolbar(false)"
+        >
+          <template v-for="b in hoverToolbar.items" :key="b.icon + (b.title || '')">
+            <span
+              v-if="b.sep"
+              class="mx-0.5 h-5 w-px self-center bg-[var(--wb-stroke)]"
+              aria-hidden="true"
+            ></span>
+            <button
+              v-else
+              :title="b.title"
+              class="h-9 px-2 rounded-lg text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/15 transition flex items-center justify-center"
+              :class="b.danger ? 'text-[var(--wb-danger)]' : ''"
+              @click="b.action"
+            >
+              <i :class="b.icon" class="text-sm pointer-events-none"></i>
+            </button>
+          </template>
+          <!-- 桥接热区：填住工具栏底边与节点顶边之间的 10px 间隙 -->
+          <span class="tb-bridge" aria-hidden="true"></span>
+        </div>
+
+        <!-- 工具栏显隐设置浮层（P1：「…」按钮展开，勾选即时生效） -->
+        <div
+          v-if="tbSettings.open"
+          data-tb-settings
+          class="absolute z-30 w-52 rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] p-2 shadow-lg"
+          :style="{ left: tbSettings.x + 'px', top: tbSettings.y + 'px' }"
+          @mousedown.stop
+          @pointerdown.stop
+          @mouseenter="keepToolbar(true)"
+          @mouseleave="keepToolbar(false)"
+        >
+          <div class="mb-1 px-1 text-[10px] font-medium text-[var(--wb-text-2)]">
+            {{ t('canvasTbSettingsTitle') }}
+          </div>
+          <div class="max-h-56 overflow-y-auto">
+            <label
+              v-for="c in tbSettings.items"
+              :key="c.title"
+              class="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-xs text-[var(--wb-text-1)] hover:bg-black/15"
+            >
+              <input
+                type="checkbox"
+                class="accent-[var(--wb-accent)]"
+                :checked="!tbHidden.has(c.title)"
+                @change="tbToggleHidden(c.title)"
+              />
+              <i :class="c.icon" class="w-3.5 text-center text-[10px] text-[var(--wb-text-2)]"></i>
+              <span class="truncate">{{ c.title }}</span>
+            </label>
+          </div>
+          <button
+            class="mt-1 w-full rounded-md px-2 py-1 text-[10px] text-[var(--wb-text-2)] hover:bg-black/15 hover:text-[var(--wb-text-1)]"
+            @click="tbResetHidden"
+          >
+            {{ t('canvasTbReset') }}
+          </button>
+        </div>
+
+        <!-- note 调色板（悬浮工具栏的调色按钮展开，位于工具栏下方） -->
+        <div
+          v-if="notePalette.open"
+          class="absolute z-30 flex h-10 -translate-x-1/2 items-center gap-1.5 rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] px-2 shadow-lg"
+          :style="{ left: notePalette.x + 'px', top: notePalette.y + 'px' }"
+          @mousedown.stop
+          @pointerdown.stop
+          @dblclick.stop
+          @mouseenter="keepToolbar(true)"
+          @mouseleave="keepToolbar(false)"
+        >
+          <button
+            v-for="c in NOTE_COLORS"
+            :key="c"
+            class="w-6 h-6 rounded-full transition hover:scale-110"
+            :class="
+              notePaletteColor === c
+                ? 'border border-[var(--wb-accent)] ring-2 ring-[var(--wb-accent)]/40'
+                : 'border border-black/20'
+            "
+            :style="{ background: c }"
+            :title="c"
+            @click="setNoteColor(c)"
+          ></button>
+        </div>
+
+        <!-- E3 编辑态提及高亮：textarea 底下的 mirror 层（@[名]{id} 染 chip 色） -->
+        <div
+          v-if="noteEditPos"
+          class="note-editor note-editor-mirror absolute z-[19] overflow-hidden rounded-lg border-2 border-transparent pointer-events-none whitespace-pre-wrap break-words"
+          :style="noteEditPos"
+          aria-hidden="true"
+        >
+          <template v-for="(seg, i) in noteMentionSegments" :key="i">
+            <span
+              v-if="seg.mark"
+              class="rounded bg-[var(--wb-accent)]/25 text-[var(--wb-accent)]"
+              >{{ seg.raw }}</span
+            >
+            <span v-else>{{ seg.text }}</span>
+          </template>
+        </div>
+        <!-- note 就地编辑：同位置 HTML textarea 接管（Konva v-text 不可编辑） -->
+        <textarea
+          v-if="noteEditPos"
+          ref="noteEditArea"
+          v-model="noteEdit.text"
+          class="note-editor absolute z-20 resize-none rounded-lg border-2 border-[var(--wb-accent)] bg-transparent outline-none"
+          :style="noteEditPos"
+          :placeholder="t('canvasNoteEditPh')"
+          @mousedown.stop
+          @pointerdown.stop
+          @dblclick.stop
+          @wheel.stop
+          @input="onNoteInput"
+          @keydown.exact="onNoteKeydown"
+          @keydown.esc.stop.prevent="onNoteEsc"
+          @keydown.enter.ctrl.prevent="commitNoteEdit"
+          @blur="onNoteBlur"
+        ></textarea>
+
+        <!-- D1d @ 提及候选浮层 -->
+        <div
+          v-if="noteMention.open && mentionCandidates.length"
+          class="absolute z-40 max-h-[200px] w-[230px] overflow-auto rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] py-1 text-xs shadow-lg"
+          :style="{ left: noteMention.x + 'px', top: noteMention.y + 'px' }"
+          @mousedown.stop
+          @pointerdown.stop
+        >
+          <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-[var(--wb-text-2)]">
+            {{ t('canvasMentionTitle') }}
+          </div>
+          <button
+            v-for="(c, i) in mentionCandidates"
+            :key="c.id"
+            class="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-[var(--wb-accent)]/15"
+            :class="i === noteMention.pick ? 'bg-[var(--wb-accent)]/15' : ''"
+            @click="pickMention(c)"
+          >
+            <i
+              class="fas w-4 text-center text-[var(--wb-text-2)]"
+              :class="
+                c.kind === 'img' ? 'fa-image' : c.kind === 'app' ? 'fa-cube' : 'fa-note-sticky'
+              "
+            ></i>
+            <span class="truncate text-[var(--wb-text-1)]">{{ c.label }}</span>
+          </button>
+        </div>
+
+        <!-- frame 名称就地重命名：单行 input 覆盖在分区标签（分区顶上方）位置 -->
+        <input
+          v-if="frameEditPos"
+          ref="frameEditArea"
+          v-model="frameEdit.text"
+          class="frame-editor absolute z-20 rounded-lg border-2 border-[var(--wb-accent)] outline-none px-1.5"
+          :style="frameEditPos"
+          :placeholder="t('canvasFrameNamePh')"
+          @mousedown.stop
+          @pointerdown.stop
+          @dblclick.stop
+          @wheel.stop
+          @keydown.esc.stop.prevent="cancelFrameRename"
+          @keydown.enter.prevent="commitFrameRename"
+          @blur="commitFrameRename"
+        />
+
+        <!-- 缩放控件条（左下，参考 canvas-zoom-controls）：小地图开关/复位/滑杆/百分比/适应/快捷键 -->
+        <div
+          class="absolute bottom-3 left-3 z-10 flex items-center gap-1 h-11 px-2 rounded-[10px] bg-[var(--wb-surface)] border border-[var(--wb-stroke)] shadow-lg"
+          @pointerdown.stop
+          @mousedown.stop
+          @dblclick.stop
+        >
+          <button
+            class="w-8 h-8 rounded-lg text-sm transition flex items-center justify-center"
+            :class="
+              miniOpen
+                ? 'text-[var(--wb-accent)] bg-[var(--wb-accent)]/10'
+                : 'text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10'
+            "
+            :title="t('canvasMiniMapToggle')"
+            @click="miniOpen = !miniOpen"
+          >
+            <i class="fas fa-compass"></i>
+          </button>
+          <button
+            class="w-8 h-8 rounded-lg text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10 transition flex items-center justify-center"
+            :title="t('canvasResetView')"
+            @click="resetView"
+          >
+            <i class="fas fa-expand"></i>
+          </button>
+          <button
+            class="w-8 h-8 rounded-lg text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10 transition flex items-center justify-center"
+            :title="t('canvasFitAll')"
+            @click="fitAll"
+          >
+            <i class="fas fa-crosshairs"></i>
+          </button>
+          <!-- C-H9 连线风格切换：正交直角线 / 贝塞尔曲线 -->
+          <button
+            class="w-8 h-8 rounded-lg transition flex items-center justify-center"
+            :class="
+              linkOrtho
+                ? 'bg-[var(--wb-accent)]/15 text-[var(--wb-accent)]'
+                : 'text-[var(--wb-text-2)] hover:bg-[var(--wb-accent)]/10'
+            "
+            :title="linkOrtho ? t('canvasLinkStyleOrtho') : t('canvasLinkStyleBezier')"
+            data-testid="link-style-toggle"
+            @click="setLinkStyle(!linkOrtho)"
+          >
+            <i class="fas fa-bezier-curve"></i>
+          </button>
+          <input
+            type="range"
+            min="10"
+            max="400"
+            step="5"
+            :value="Math.round(viewport.scale * 100)"
+            class="w-24 accent-[var(--wb-accent)]"
+            :title="t('canvasZoomSlider')"
+            @input="onZoomSlider"
+          />
+          <span class="w-11 text-right text-xs tabular-nums text-[var(--wb-text-2)] select-none"
+            >{{ Math.round(viewport.scale * 100) }}%</span
+          >
+          <button
+            class="w-8 h-8 rounded-lg text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10 transition flex items-center justify-center"
+            :title="t('canvasGuideBtn')"
+            data-testid="canvas-guide-btn"
+            @click="guideOpen = true"
+          >
+            <i class="fas fa-compass"></i>
+          </button>
+          <button
+            class="w-8 h-8 rounded-lg text-[var(--wb-text-1)] hover:bg-[var(--wb-accent)]/10 transition flex items-center justify-center"
+            :title="t('canvasShortcuts')"
+            @click="shortcutsOpen = true"
+          >
+            <i class="fas fa-circle-question"></i>
+          </button>
+        </div>
+
+        <!-- 用法指南弹窗（节点类型 × 场景玩法） -->
+        <CanvasGuideModal v-if="guideOpen" @close="guideOpen = false" />
+
+        <!-- 快捷键面板 -->
+        <div
+          v-if="shortcutsOpen"
+          class="absolute inset-0 z-30 flex items-center justify-center bg-black/40"
+          @mousedown.self="shortcutsOpen = false"
+        >
+          <div
+            class="w-[420px] max-w-[90vw] rounded-[10px] border border-[var(--wb-stroke)] bg-[var(--wb-surface)] shadow-lg p-5"
+          >
+            <div class="flex items-center justify-between mb-4">
+              <span class="text-base font-semibold text-[var(--wb-text-1)]">{{
+                t('canvasShortcuts')
+              }}</span>
+              <button
+                class="text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)]"
+                @click="shortcutsOpen = false"
+              >
+                <i class="fas fa-xmark"></i>
+              </button>
+            </div>
+            <div class="space-y-2.5 text-sm">
+              <div
+                v-for="sc in shortcutList"
+                :key="sc.label"
+                class="flex items-center justify-between gap-4"
+              >
+                <span class="font-medium text-[var(--wb-text-1)]">{{ sc.label }}</span>
+                <span class="text-[var(--wb-text-2)]">{{ sc.desc }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- minimap：全景小窗（点击/拖动跳转视口） -->
+        <div
+          v-if="miniOpen && objects.length"
+          class="absolute bottom-3 right-3 w-[160px] h-[110px] rounded-lg bg-black/50 border border-[var(--wb-stroke)] overflow-hidden cursor-pointer"
+          @pointerdown="miniJump"
+        >
+          <div
+            v-for="m in miniItems"
+            :key="m.id"
+            class="absolute rounded-sm"
+            :class="
+              m.type === 'image'
+                ? 'bg-[var(--wb-text-2)]/60'
+                : m.type === 'app'
+                  ? m.status === 'running'
+                    ? 'bg-[var(--wb-accent)] animate-pulse'
+                    : 'bg-[var(--wb-text)]/70'
+                  : 'bg-[var(--wb-text-3)]/60'
+            "
+            :style="{ left: m.x + 'px', top: m.y + 'px', width: m.w + 'px', height: m.h + 'px' }"
+          ></div>
+          <!-- 当前视口框 -->
+          <div
+            class="absolute border border-[var(--wb-accent)] pointer-events-none"
+            :style="{
+              left: miniView.x + 'px',
+              top: miniView.y + 'px',
+              width: miniView.w + 'px',
+              height: miniView.h + 'px',
+            }"
+          ></div>
+        </div>
+
+        <!-- 空状态 -->
+        <div
+          v-if="!objects.length && !dragOver"
+          class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-2"
+        >
+          <i class="fas fa-shapes text-4xl opacity-30"></i>
+          <p class="text-sm opacity-50">{{ t('canvasEmptyHint') }}</p>
+          <button
+            class="pointer-events-auto mt-2 rounded-lg border border-[var(--wb-accent)]/60 px-3.5 py-1.5 text-xs text-[var(--wb-accent)] transition hover:bg-[var(--wb-accent)]/10"
+            data-testid="canvas-empty-guide-btn"
+            @click="guideOpen = true"
+          >
+            <i class="fas fa-compass mr-1"></i>{{ t('canvasEmptyGuideBtn') }}
+          </button>
+        </div>
+        <!-- 拖放提示 -->
+        <div
+          v-if="dragOver"
+          class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none gap-2 bg-[var(--wb-accent)]/5"
+        >
+          <i class="fas fa-image text-4xl text-[var(--wb-accent)] opacity-70"></i>
+          <p class="text-sm text-[var(--wb-accent)]">{{ t('canvasDropImage') }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 工作台开合按钮（画布区左上角外沿，随侧栏在左） -->
+    <button
+      class="fixed z-40 top-[76px] w-7 h-9 rounded-r-md bg-[var(--wb-surface)] border border-[var(--wb-stroke)] border-l-0 text-[var(--wb-text-2)] hover:text-[var(--wb-text-1)] transition flex items-center justify-center"
+      :style="wbOpen ? 'left: 416px' : 'left: 16px'"
+      :title="wbOpen ? t('canvasCloseWb') : t('canvasOpenWb')"
+      @click="wbOpen = !wbOpen"
+    >
+      <i class="fas text-xs" :class="wbOpen ? 'fa-chevron-left' : 'fa-chevron-right'"></i>
+    </button>
+  </div>
+</template>
+
+<script setup>
+/**
+ * A 界面无限画布（Konva 渲染层）
+ * 引擎逻辑在 engine.js（纯函数）；这里只做事件转发、渲染配置、持久化调度。
+ */
+import { ref, computed, reactive, nextTick, onMounted, onBeforeUnmount, watch, h } from 'vue'
+import { useRouter } from 'vue-router'
+import { useI18n } from '@/utils/i18n'
+import { useAppStore } from '@/stores/appStore'
+import { drainFiles, pushAttachments } from '@/utils/canvasBridge'
+import { useCanvasMode } from '@/utils/canvasMode'
+import { message, Modal } from 'ant-design-vue'
+import Workbench from '../workbench/index.vue'
+import AppNodeCard from './AppNodeCard.vue'
+import CanvasSidePanel from './CanvasSidePanel.vue'
+import CanvasAssetsPanel from './CanvasAssetsPanel.vue'
+import MediaNodeCard from './MediaNodeCard.vue'
+import AppPickerModal from './AppPickerModal.vue'
+import CanvasGuideModal from './CanvasGuideModal.vue'
+import { useLinkGestures } from './useLinkGestures'
+import { useCanvasAiActions } from './useCanvasAiActions'
+import {
+  makeViewCtx as cfgMakeViewCtx,
+  highlightStroke as cfgHighlightStroke,
+  handleConfig as cfgHandleConfig,
+  linkAnchorConfig as cfgLinkAnchorConfig,
+  resizeAnchorConfig as cfgResizeAnchorConfig,
+  mediaRectConfig as cfgMediaRectConfig,
+  noteRectConfig as cfgNoteRectConfig,
+  noteTextConfig as cfgNoteTextConfig,
+  frameConfig as cfgFrameConfig,
+  frameLabelConfig as cfgFrameLabelConfig,
+  shotRectConfig as cfgShotRectConfig,
+  shotSeqConfig as cfgShotSeqConfig,
+  shotTextConfig as cfgShotTextConfig,
+  NOTE_COLORS,
+  NOTE_DEFAULT_COLOR,
+  noteTextColor,
+} from './nodeConfigs'
+import {
+  makeAppNode,
+  collectUpstream,
+  buildNodeOverrides,
+  paramFieldsFromTemplate,
+  artifactLayout,
+  appNodesDigest,
+  imageObjectRef,
+  submitCanvasExecute,
+  pollCanvasExecuteStatus,
+} from './appNode'
+import {
+  makeViewport,
+  screenToWorld,
+  worldToScreen,
+  zoomAtPoint,
+  orthogonalLinkPath,
+  orthogonalLinkPathAvoid,
+  hitTest,
+  hitTestRect,
+  snapDelta,
+  snapGuides,
+  bboxOf,
+  serializeDoc,
+  parseDoc,
+  linkEndpoints,
+  bezierLinkPath,
+  distToSegment,
+  cropRectFor,
+  splitRects,
+  rotatedSize,
+  videoFrameTime,
+  upscaleSize,
+  clampBrushSize,
+  maskCanvasPoint,
+  maskHasPaint,
+  buildInpaintMask,
+  createHistory,
+  pushHistory,
+  undo as engineUndo,
+  redo as engineRedo,
+  canUndo as engineCanUndo,
+  canRedo as engineCanRedo,
+  objectInFrame,
+  objectsInFrame,
+  gridLayout,
+  subtreeOf,
+  stripMentionMarks,
+  alignObjects,
+  distributeObjects,
+  zShiftObjects,
+  gridArrangeImages,
+  visibleIds,
+  lodTextVisible,
+  lodNoteRectStyle,
+  lodImageVisible,
+  freeResizeRect,
+  ratioResizeRect,
+  centerViewport,
+} from './engine'
+
+const { t } = useI18n()
+const appStore = useAppStore()
+const router = useRouter()
+import {
+  normalizeStore,
+  addProject as psAddProject,
+  renameProject as psRenameProject,
+  deleteProject as psDeleteProject,
+  switchProject as psSwitchProject,
+  updateProjectDoc as psUpdateProjectDoc,
+  projectCardStats,
+  bootProjectStore,
+  persistProjectStore,
+} from './projectStore'
+import { buildCtxItems } from './canvasActions'
+import {
+  builtinLibrary,
+  loadCustomPrompts,
+  saveCustomPrompts,
+  parseImportedPrompts,
+  mergePrompts,
+  searchPrompts,
+} from './promptLibrary'
+import {
+  buildExportPayload,
+  packExportZip,
+  parseImportZip,
+  parseImportJson,
+  buildSelectionZip,
+} from './canvasExport'
+import { importProject as psImportProject, cloneProject as psCloneProject } from './projectStore'
+// —— 画布 composables（拆分出仓；漏 import 会导致 setup 抛 ReferenceError 整页白屏）——
+import { useCanvasProjects } from './useCanvasProjects'
+import { useAppNodes } from './useAppNodes'
+import { useMediaNodes } from './useMediaNodes'
+import { useImageEdit } from './useImageEdit'
+import { useMaskDialog } from './useMaskDialog'
+import { usePromptLibrary } from './usePromptLibrary'
+import { useCanvasAssets } from './useCanvasAssets'
+import { useCanvasMinimap } from './useCanvasMinimap'
+const { onResult, emitAttachments, emitCanvasState, emitPrompt, onOps } = useCanvasMode()
+const wbOpen = ref(true) // 工作台侧边栏开合
+const layersOpen = ref(false)
+const STORAGE_KEY = 'artify.canvas.doc.v1'
+// 多画布项目集（useCanvasProjects）依赖 viewport/objects/.../appPanel（后者由
+// useAppNodes 返回），必须在这些声明之后调用 —— 见文件末尾「多画布项目集」块。
+
+// —— 导入导出（S2）：当前项目导出 ZIP（projects.json + 图片文件），导入支持 zip/json ——
+
+/** 节点级导出：选中图片节点 → 纯图片 ZIP 下载。
+ *  实现随三巨石拆分下沉到 canvasExport.buildSelectionZip（纯函数），这里只保留
+ *  DOM/fetch 副作用。原函数被拆分提交删除后右键菜单仍引用了它 → 恢复。 */
+function exportSelectionZip() {
+  const picked = objects.value.filter((o) => selection.value.includes(o.id))
+  buildSelectionZip(picked, {
+    fetcher: async (url) => {
+      const r = await fetch(url)
+      return new Uint8Array(await r.arrayBuffer())
+    },
+  }).then((blob) => {
+    if (!blob) {
+      message.warning(t('canvasExportSelEmpty'))
+      return
+    }
+    const u = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = u
+    a.download = `canvas-selection-${new Date().toISOString().slice(0, 10)}.zip`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(u), 5000)
+  })
+}
+function pickImportFile() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.zip,.json,application/zip,application/json'
+  input.onchange = () => {
+    const f = input.files?.[0]
+    if (f) importCanvasFile(f)
+  }
+  input.click()
+}
+async function importCanvasFile(f) {
+  try {
+    let projects = null
+    if (f.name.endsWith('.json') || f.type === 'application/json') {
+      projects = parseImportJson(await f.text()).projects
+    } else {
+      projects = (await parseImportZip(f)).projects
+    }
+    if (!projects?.length) {
+      message.warning(t('canvasImportEmpty'))
+      return
+    }
+    let lastId = null
+    for (const prj of projects) {
+      const { store, id } = psImportProject({ ...projectStore }, prj)
+      Object.assign(projectStore, store)
+      lastId = id
+    }
+    persistProjects()
+    if (lastId) {
+      openProjectById(lastId)
+      message.success(t('canvasImported').replace('{n}', String(projects.length)))
+    }
+  } catch (e) {
+    message.error(t('canvasImportFailed') + ': ' + (e?.message || 'format'))
+  }
+}
+
+/** 项目集当前激活项目 → 画布状态（新建/删除后回落） */
+function loadProjectIntoCanvas() {
+  const p = activeProject.value
+  if (!p) return
+  let washed = false
+  objects.value = p.doc.objects.map((o) => {
+    // fix(重启后媒体死链): blob: URL 仅当前文档生命周期有效,刷新/重启必死;
+    // persist 快照(dataURL)在则回退——image 节点此前无回退(直接透明),
+    // video/audio 的 watch 只判空 src(死链非空不触发),一并在此统一洗。
+    if (typeof o.src === 'string' && o.src.startsWith('blob:') && o.persist) {
+      washed = true
+      return { ...o, src: o.persist }
+    }
+    return { ...o }
+  })
+  if (washed) saveSoon() // 洗过就写回 store,死链不再反复落盘（否则每次 boot 重洗）
+  links.value = p.doc.links.map((l) => ({ ...l }))
+  groups.value = p.doc.groups.map((g) => ({ ...g }))
+  viewport.value = makeViewport(p.doc.viewport.scale, p.doc.viewport.x, p.doc.viewport.y)
+  selection.value = []
+  selectedLinkId.value = null
+  appPanel.id = null
+  history.value = createHistory(60)
+  nextTick(() => syncDraggables())
+}
+/** 项目标题双击编辑（inline） */
+const projectTitleInput = ref(null)
+const projectTitleEditing = ref(false)
+const projectTitleDraft = ref('')
+function startProjectTitleEdit() {
+  projectTitleDraft.value = activeProject.value?.title || ''
+  projectTitleEditing.value = true
+}
+watch(projectTitleEditing, (v) => {
+  if (v) nextTick(() => projectTitleInput.value?.focus?.())
+})
+
+function finishProjectTitleEdit() {
+  if (projectTitleEditing.value) {
+    renameActiveProject(projectTitleDraft.value)
+    projectTitleEditing.value = false
+  }
+}
+const MIN_SCALE = 0.1
+const MAX_SCALE = 4
+const SNAP_THRESHOLD = 8
+
+const wrapEl = ref(null)
+const stageEl = ref(null)
+const size = reactive({ w: 800, h: 600 })
+const viewport = ref(makeViewport())
+// C-H15: running 节点状态圆点呼吸动画——单 rAF 循环只改 opacity,随节点卸载自动出列
+const statusCircleRefs = reactive(new Map())
+let breathRaf = 0
+function breathLoop(t) {
+  const op = 0.35 + 0.35 * Math.sin(t / 240)
+  let dirty = false
+  for (const el of statusCircleRefs.values()) {
+    const node = el?.getNode?.()
+    if (node && node.getAttrs().stroke) {
+      node.opacity(op)
+      dirty = true
+    }
+  }
+  if (dirty) {
+    for (const el of statusCircleRefs.values()) {
+      el?.getNode?.()?.getLayer()?.batchDraw()
+    }
+  }
+  breathRaf = requestAnimationFrame(breathLoop)
+}
+onMounted(() => {
+  breathRaf = requestAnimationFrame(breathLoop)
+})
+onBeforeUnmount(() => cancelAnimationFrame(breathRaf))
+
+// C-H9 连线风格：'bezier'(默认) | 'ortho'(横平竖直直角线)——持久化到 localStorage
+const linkOrtho = ref(localStorage.getItem('artify.canvas.linkStyle') === 'ortho')
+function setLinkStyle(ortho) {
+  linkOrtho.value = ortho
+  localStorage.setItem('artify.canvas.linkStyle', ortho ? 'ortho' : 'bezier')
+}
+const linkPath = (x1, y1, x2, y2, excludeIds = []) => {
+  if (!linkOrtho.value) return bezierLinkPath(x1, y1, x2, y2)
+  const obstacles = objects.value
+    .filter((o) => (o.type === 'app' || o.type === 'image') && !excludeIds.includes(o.id))
+    .map((o) => ({ x: o.x, y: o.y, width: o.width, height: o.height }))
+  return orthogonalLinkPathAvoid(x1, y1, x2, y2, obstacles)
+}
+const objects = ref([])
+
+const links = ref([]) // {id, from, to} 物件 id；渲染为箭头，级联删除
+const groups = ref([]) // {id, members:[objectId]} 组合；成员联动拖动/选择/删除
+const selection = ref([]) // 选中的 object id 列表
+const guides = reactive({ v: [], h: [] })
+const rubber = ref(null) // {x,y,w,h} 世界坐标
+const drag = reactive({ mode: null, item: -1, last: null, moved: false })
+// 交互工具模式：null=选择 | 'crop'=圈图裁剪（连线走句柄拖拽）
+const tool = ref(null)
+const spaceDown = ref(false) // 空格按住 = 强制平移
+// D1c：Shift/Ctrl 全局键态（Konva 事件链不透传修饰键，resize 用实时键态判定）
+const shiftDown = ref(false)
+const ctrlDown = ref(false)
+const cropRect = ref(null) // 'crop' 模式拖出的世界矩形
+// —— 连线（参考 infinite-canvas）：句柄拖拽建线 + 连线点选 ——
+// connectDrag/reconnectDrag 状态与手势（onConnect*/onAnchor*/onReconnect*）
+// 已抽 useLinkGestures（A2）；此处仅保留本页所需的状态挂载（下方 useLinkGestures 调用）
+// —— C 拖线落空 → 创建节点菜单（参考 ConnectionCreateMenu）——
+// 松手在空白处时弹小菜单：便签/图片/视频/音频/App，创建后与拖线起点自动连线
+const connectCreate = reactive({
+  open: false,
+  x: 0,
+  y: 0,
+  wx: 0,
+  wy: 0,
+  from: null, // 拖线源侧物件 id（source 句柄拖出）
+  to: null, // 拖线目标侧物件 id（target 句柄拖出）
+  pickLink: null, // app 分支等 picker 选完后连线
+})
+function closeConnectCreate() {
+  connectCreate.open = false
+  connectCreate.from = null
+  connectCreate.to = null
+  connectCreate.pickLink = null
+}
+
+// —— 选中连线的重连拖拽（useLinkGestures 持有状态；cancelReconnectDrag 供 Esc 用）——
+function cancelReconnectDrag() {
+  reconnectDrag.active = false
+  reconnectDrag.linkId = null
+  reconnectDrag.side = null
+  reconnectDrag.fixedId = null
+  reconnectDrag.targetId = null
+  reconnectDrag.seg = null
+}
+/** 按 connect 拖线方向连接新节点（from=源侧 to=目标侧，只补缺失侧） */
+function linkFromConnect(nodeId, from, to) {
+  const fromId = from && from !== nodeId ? from : null
+  const toId = to && to !== nodeId ? to : null
+  const linksToAdd = []
+  if (fromId) linksToAdd.push({ from: fromId, to: nodeId })
+  if (toId) linksToAdd.push({ from: nodeId, to: toId })
+  for (const l of linksToAdd) {
+    if (!links.value.some((x) => x.from === l.from && x.to === l.to)) {
+      links.value.push({
+        id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5),
+        ...l,
+      })
+    }
+  }
+}
+/** 在 connectCreate.wx/wy 创建 kind 节点并按拖线方向连线 */
+function createNodeFromConnect(kind) {
+  const { wx, wy, from, to } = connectCreate
+  closeConnectCreate()
+  beforeChange()
+  if (kind === 'note') {
+    const o = {
+      id: 'n' + Date.now() + Math.random().toString(36).slice(2, 5),
+      type: 'note',
+      x: wx - 90,
+      y: wy - 60,
+      width: 180,
+      height: 120,
+      text: '',
+    }
+    objects.value.push(o)
+    linkFromConnect(o.id, from, to)
+    selection.value = [o.id]
+    saveSoon()
+    return o.id
+  }
+  if (kind === 'app') {
+    openAppPicker(wx, wy)
+    connectCreate.pickLink = { from, to }
+    return null
+  }
+  // 图片/视频/音频：文件选择器（创建后连线）
+  const accept = kind === 'image' ? 'image/*' : kind === 'video' ? 'video/*' : 'audio/*'
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = accept
+  input.onchange = () => {
+    const f = input.files?.[0]
+    if (!f) return
+    beforeChange()
+    if (kind === 'image') {
+      const url = URL.createObjectURL(f)
+      const probe = new Image()
+      probe.onload = () => {
+        const scale = Math.min(1, 260 / probe.naturalWidth)
+        const w = Math.round(probe.naturalWidth * scale)
+        const h = Math.round(probe.naturalHeight * scale)
+        const o = {
+          id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+          type: 'image',
+          x: wx - Math.round(w / 2),
+          y: wy - Math.round(h / 2),
+          width: w,
+          height: h,
+          src: url,
+          persist: null,
+        }
+        objects.value.push(o)
+        persistImage(o)
+        linkFromConnect(o.id, from, to)
+        selection.value = [o.id]
+        saveSoon()
+      }
+      probe.src = url
+    } else {
+      const isVideo = kind === 'video'
+      const o = {
+        id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+        type: kind,
+        x: wx - (isVideo ? 160 : 140),
+        y: wy - (isVideo ? 90 : 48),
+        width: isVideo ? 320 : 280,
+        height: isVideo ? 180 : 96,
+        src: URL.createObjectURL(f),
+        persist: null,
+        name: f.name,
+      }
+      objects.value.push(o)
+      if (isVideo) {
+        const probe = document.createElement('video')
+        probe.preload = 'metadata'
+        probe.onloadedmetadata = () => {
+          const ratio = probe.videoHeight / probe.videoWidth || 0.5625
+          o.height = Math.round(o.width * ratio)
+          saveSoon()
+        }
+        probe.src = o.src
+      }
+      linkFromConnect(o.id, from, to)
+      selection.value = [o.id]
+      saveSoon()
+    }
+  }
+  input.click()
+  return null
+}
+
+const selectedLinkId = ref(null) // 选中的连线 id（参考 selectedConnectionId）
+const hoverNodeId = ref(null) // 悬停物件 id（句柄显现条件，参考 hovered || isSelected || isConnecting）
+
+// ── C-H21 千级画布静态缓存(对标 tldraw 分层渲染) ──
+// idle 且非选中/悬停的 app 节点 Group 栅格化: Konva 绘制从解析 N 个 Group
+// 树变为贴位图。失效时机: 缩放跨 LOD 界(±15%)、对象数变化、选中/悬停变化。
+const staticCacheIds = ref(new Set())
+let lastCacheScale = 1
+let lastCacheCount = 0
+let cacheTimer = 0
+/** 判定: 该节点当前是否可安全栅格化 */
+function cacheable(id) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || o.type !== 'app' || o.status !== 'idle') return false
+  if (selection.value.includes(id) || hoverNodeId.value === id) return false
+  return true
+}
+/** 周期对账: 应用缓存到新进入静态集的节点,从已变化节点摘除缓存 */
+function reconcileStaticCache() {
+  const stage = stageEl.value?.getStage?.()
+  if (!stage) return
+  // LOD 界跨越或对象增删 → 全量失效重建
+  const scaleJump = Math.abs(viewport.value.scale - lastCacheScale) / lastCacheScale > 0.15
+  const countChanged = objects.value.length !== lastCacheCount
+  if (scaleJump || countChanged) {
+    for (const id of staticCacheIds.value) {
+      stage.find('#' + id).forEach((n) => n.clearCache())
+    }
+    staticCacheIds.value = new Set()
+    lastCacheScale = viewport.value.scale
+    lastCacheCount = objects.value.length
+  }
+  // 选中/悬停的节点摘缓存(要动态描边)
+  for (const id of [...staticCacheIds.value]) {
+    if (!cacheable(id)) {
+      stage.find('#' + id).forEach((n) => n.clearCache())
+      staticCacheIds.value.delete(id)
+    }
+  }
+  // 新的 idle 节点上缓存
+  for (const o of objects.value) {
+    if (o.type !== 'app' || staticCacheIds.value.has(o.id) || !cacheable(o.id)) continue
+    const g = stage.find('#' + o.id)[0]
+    if (!g) continue
+    try {
+      // offscreen 参数避免绘制到主画布;pixelRatio 按当前缩放限 1(全览态分辨率足够)
+      g.cache({ pixelRatio: Math.min(1, viewport.value.scale + 0.25), drawBorder: false })
+      staticCacheIds.value.add(o.id)
+    } catch {
+      /* 空节点缓存失败无碍 */
+    }
+  }
+}
+function scheduleCacheReconcile() {
+  clearTimeout(cacheTimer)
+  cacheTimer = setTimeout(reconcileStaticCache, 500)
+}
+watch([objects.value.length, selection.value, hoverNodeId], scheduleCacheReconcile)
+watch(viewport, scheduleCacheReconcile, { deep: false })
+/** 高亮判定（含图层面板行悬停联动）：画布悬停或面板行悬停都算 */
+function isHighlightedOf(o) {
+  return hoverNodeId.value === o.id || hoverFromPanel.value === o.id
+}
+/** 高亮描边（选中 > 高亮 > 默认）：面板行悬停时节点亮 accent 描边 */
+/** CSS 变量在 canvas 2D 无效（var(--wb-accent) 会被画成黑色）——解析成实际色值 */
+let accentColorCache = ''
+function accentColor() {
+  if (!accentColorCache) {
+    accentColorCache =
+      getComputedStyle(document.documentElement).getPropertyValue('--wb-accent').trim() || '#0b8ce9'
+  }
+  return accentColorCache
+}
+function highlightStroke(o, defStroke = 'rgba(160,160,160,0.45)') {
+  return cfgHighlightStroke(cfgCtx.value, o, defStroke)
+}
+/** 物件是否显示连接句柄：悬停/选中/连线拖拽中（起点与悬停目标，参考 isConnecting 全显） */
+function showHandles(o) {
+  // fix(拖动中桩消失): 被拖节点的句柄保持显现——此前仅 hover/选中/连线三态,
+  // 拖动路径上 hover 判定不更新(220ms 后被 scheduleHoverHide 清空),若点击
+  // 未建立选中(句柄热区拦截 mousedown 的时序窗口)句柄立即隐没,用户感知
+  // "连线桩不跟随拖动"。
+  if (drag.mode === 'item' && objects.value[drag.item]?.id === o.id) return true
+  return (
+    isHighlightedOf(o) ||
+    selection.value.includes(o.id) ||
+    (connectDrag.active && (connectDrag.nodeId === o.id || connectDrag.targetId === o.id)) ||
+    (reconnectDrag.active && reconnectDrag.targetId === o.id)
+  )
+}
+/** 句柄显隐切换后 Konva 不会自动重绘 hit graph（hitFunc 结果变化），手动补绘 */
+function redrawHandleHits() {
+  nextTick(() => {
+    const st = stageEl.value?.getStage?.()
+    st?.getLayers().forEach((l) => l.drawHit())
+  })
+}
+// 句柄 hit graph 重绘 watch 依赖 hoverFromPanel（useCanvasAssets 返回），
+// 已下移至该 composable 之后注册 —— 见「素材库 + 图层面板」块下方。
+watch(
+  () => selection.value.length,
+  () => redrawHandleHits(),
+)
+/**
+ * 句柄 circle 配置（参考 ConnectionHandleDot：12px 圆点 / 48px 热区 / hover 放大）。
+ * 常驻渲染（opacity 控制可见）避免 Konva v-if 的 hit graph 不刷新问题；
+ * hitFunc 仅在 showHandles 时提供热区，平时不拦截物件交互。
+ */
+function handleConfig(o, side) {
+  // hover 判定用画布悬停（hoverNodeId），与 showHandles 的多源判定解耦：
+  // 模块版 handleConfig 接收 isHovered + 显隐布尔（hitFunc 读实时状态）
+  return cfgHandleConfig(cfgCtx.value, o, side, showHandles(o))
+}
+/** 连线重连锚点配置（选中连线才显现）：from 端=源侧(右端 x1,y1)、to 端=目标侧(左端 x2,y2)。
+ *  常驻渲染 + hitFunc 动态热区 —— 平时 opacity 0 且无热区，不拦截连线/物件交互；
+ *  选中后热区开启，可拖到其它物件重连。颜色区分两端便于识别方向。 */
+function linkAnchorConfig(seg, side) {
+  const active = selectedLinkId.value === seg.id && !reconnectDrag.active
+  return cfgLinkAnchorConfig(cfgCtx.value, seg, side, active)
+}
+
+// —— 选中对象四角缩放手柄（第 3 批 + 媒体扩展，参考 infinite-canvas resize handles）——
+// 支持类型：图片/视频（默认锁宽高比，Ctrl/⌘ 按住自由）/ 便签 / Frame / 音频（恒自由）。
+// 角柄画在节点四角外侧（RESIZE_ANCHOR_OFF）——媒体节点的 HTML overlay 播放器占满节点
+// 矩形，角柄外置才不被遮挡；App/分镜卡（固定布局）不支持；组内成员禁止
+// （组合语义由组拖动承载，防破坏成员相对位置）。
+const RESIZE_TYPES = ['image', 'note', 'frame', 'video', 'audio', 'shot']
+const RESIZE_MIN = 24 // 最小宽高（世界坐标）
+const resizeDrag = reactive({
+  active: false,
+  id: null, // 被拖对象 id
+  corner: null, // 'nw' | 'ne' | 'sw' | 'se'
+  fixed: null, // 对角不动点 {x,y}（拖 nw → 固定 se）
+  orig: null, // 起拖时 {x,y,w,h}
+  ratio: 0, // >0 锁宽高比（图片原图比例）；0 = 自由拉伸
+  startRatio: 0, // D1c：起拖时比例快照（拖拽中 Shift 临时锁定用，防漂移）
+  pushed: false, // 首次实际位移才压 undo 快照（点住不拖不产生历史）
+})
+/** 单选且可缩放的对象（唯一显示角柄的目标；多选/不可缩放/crop 工具返回空） */
+const resizeTargets = computed(() => {
+  if (tool.value === 'crop') return [] // crop 需从图片角落起圈，角柄热区会抢命中
+  if (selection.value.length !== 1) return []
+  const o = objects.value.find((x) => x.id === selection.value[0])
+  if (!o || !RESIZE_TYPES.includes(o.type)) return []
+  if (groupOf(o.id)) return []
+  return [o]
+})
+/** 角柄显隐/命中判定（实时状态：拖动中仅目标对象自身保留角柄并跟随其角移动） */
+function resizeVisible(o) {
+  const t = resizeTargets.value[0]
+  if (t !== o) return false
+  return !resizeDrag.active || resizeDrag.id === o.id
+}
+/** 角柄 circle 配置（同 linkAnchorConfig 模式：常驻渲染 + hitFunc 动态热区）。
+ *  圆心外偏 10px（屏幕恒定）：媒体节点 overlay 播放器占满矩形，角柄外置才可命中；
+ *  普通节点上也让角柄悬于边框外，避免盖住节点像素。 */
+function resizeAnchorConfig(o, corner) {
+  return cfgResizeAnchorConfig(cfgCtx.value, o, corner, resizeVisible(o))
+}
+
+// —— 撤销/重做（有界快照栈；快照 = objects+links+groups 序列化） ——
+const history = ref(createHistory(60))
+let historyPaused = false // 拖拽等连续操作期间暂停记录
+function docSnapshot() {
+  return serializeDoc(objects.value, viewport.value, 'canvas', links.value, groups.value)
+}
+/** 变更前调用：把当前状态压栈，使 undo 能回到此刻（historyPaused 期间跳过） */
+function beforeChange() {
+  if (historyPaused) return
+  history.value = pushHistory(history.value, docSnapshot())
+}
+function undoLast() {
+  const r = engineUndo(history.value, docSnapshot())
+  if (!r.snapshot) return
+  historyPaused = true
+  applyDoc(r.snapshot)
+  history.value = r.history
+  nextTick(() => (historyPaused = false))
+}
+function redoLast() {
+  const r = engineRedo(history.value, docSnapshot())
+  if (!r.snapshot) return
+  historyPaused = true
+  applyDoc(r.snapshot)
+  history.value = r.history
+  nextTick(() => (historyPaused = false))
+}
+/** 应用文档快照（undo/redo/load 共用） */
+function applyDoc(snapshot) {
+  const d = parseDoc(snapshot)
+  objects.value = d.objects
+  links.value = d.links
+  groups.value = d.groups
+  selection.value = selection.value.filter((id) => objects.value.some((o) => o.id === id))
+  layerRefresh()
+  saveSoon()
+}
+
+// stage 不整体 draggable——空地平移由容器级 mousedown 自实现（bg 矩形会抢物件命中）
+// 视口直接绑定 stage config（vue-konva 自动同步，避免 rAF 时机竞态导致 reload 视口丢失）
+const stageConfig = computed(() => ({
+  width: size.w,
+  height: size.h,
+  scaleX: viewport.value.scale,
+  scaleY: viewport.value.scale,
+  x: viewport.value.x,
+  y: viewport.value.y,
+}))
+// 网格背景（纯 CSS，绘制在 stage 容器下面，随视口平移）
+const gridStyle = computed(() => {
+  const s = 40 * viewport.value.scale
+  const x = viewport.value.x % s
+  const y = viewport.value.y % s
+  return {
+    backgroundImage:
+      'linear-gradient(to right, rgba(49,50,53,0.5) 1px, transparent 1px), linear-gradient(to bottom, rgba(49,50,53,0.5) 1px, transparent 1px)',
+    backgroundSize: `${s}px ${s}px`,
+    backgroundPosition: `${x}px ${y}px`,
+  }
+})
+
+// —— 视口裁剪（P2 性能）：可见集 + 例外（选中/悬停/连线端点/拖拽中）
+// 例外保证交互不因裁剪丢失：选中的仍要渲染（框选/对齐线）、悬停的
+// 工具栏不消失、连线端点物件在场、拖拽中的物件及其组友保持
+const cullIds = computed(() => {
+  const ids = visibleIds(objects.value, viewport.value, size, 240)
+  for (const id of selection.value) ids.add(id)
+  if (hoverNodeId.value) ids.add(hoverNodeId.value)
+  if (hoverFromPanel.value) ids.add(hoverFromPanel.value)
+  for (const l of links.value) {
+    if (ids.has(l.from)) ids.add(l.to)
+    if (ids.has(l.to)) ids.add(l.from)
+  }
+  return ids
+})
+/** 类型过滤 + 裁剪（所有物件渲染 computed 统一入口） */
+function withCull(typePred) {
+  return objects.value.filter((o) => typePred(o) && cullIds.value.has(o.id))
+}
+
+const imageObjects = computed(() => withCull((o) => o.type === 'image'))
+/** 全类型裁剪集（连接句柄层用） */
+/** 句柄层 LOD：低缩放整组隐藏（全览 875 物件 1752 圆点无意义且是大头）；命中检测不受影响（hitFunc 本就仅悬停时开） */
+const lodHandlesVisible = computed(() => lodTextVisible(viewport.value.scale))
+// C-H21 全览态命中降级: scale<0.3 时 app 节点层 listening=false,
+// 省 hit graph 维护;用户需要操作时滚轮放大即恢复(LOD 界与文本可见一致)
+const nodesListening = computed(() => lodTextVisible(viewport.value.scale))
+const culledObjects = computed(() => withCull(() => true))
+const noteObjects = computed(() => withCull((o) => o.type === 'note'))
+
+// Konva 图片缓存（记 naturalWidth/Height 供裁剪换算）
+const imgCache = new Map()
+function loadImage(src) {
+  if (imgCache.has(src)) return imgCache.get(src)
+  const img = new Image()
+  img.onload = () => layerRefresh()
+  img.src = src
+  imgCache.set(src, img)
+  return img
+}
+function naturalOf(o) {
+  if (o.naturalWidth && o.naturalHeight) return o
+  const img = imgCache.get(o.src)
+  const nw = o.naturalWidth || img?.naturalWidth || o.width
+  const nh = o.naturalHeight || img?.naturalHeight || o.height
+  return { ...o, naturalWidth: nw, naturalHeight: nh }
+}
+function layerRefresh() {
+  // 全层重绘：图片 onload 在节点层（第二层），只刷第一层会导致图片加载后不显示
+  stageEl.value?.getStage?.()?.batchDraw()
+}
+
+function groupConfig(o) {
+  return { id: o.id, x: o.x, y: o.y, width: o.width, height: o.height, draggable: true }
+}
+function imageConfig(o) {
+  // LOD：极低缩放隐藏位图绘制（保留 rect 示意）
+  if (!lodImageVisible(viewport.value.scale)) {
+    return { width: o.width, height: o.height, cornerRadius: 6, fill: '#1f2937' }
+  }
+  return {
+    image: loadImage(o.src),
+    width: o.width,
+    height: o.height,
+    ...highlightStroke(o, 'rgba(160,160,160,0.3)'),
+    cornerRadius: 6,
+  }
+}
+/** 媒体节点占位框（overlay 播放器下的 Konva 热区/选中框） */
+function mediaRectConfig(o) {
+  // fix(视频双影) 注释见 nodeConfigs.mediaRectConfig：rect 位于 group 内须用相对坐标
+  return cfgMediaRectConfig(cfgCtx.value, o)
+}
+
+// note 调色板/文字色/矩形与文本配置：纯函数版见 nodeConfigs.js（A2 抽取）
+function noteRectConfig(o) {
+  return cfgNoteRectConfig(cfgCtx.value, o)
+}
+function noteTextConfig(o) {
+  return cfgNoteTextConfig(cfgCtx.value, o)
+}
+
+// —— note 文本就地编辑：双击便签 / 悬浮工具栏「编辑」/ 右键菜单 ——
+// Konva 的 v-text 不可编辑，故用同位置的 HTML textarea 覆盖接管（视口变化自动跟随）
+const noteEdit = reactive({ id: null, text: '', skipCommit: false })
+const noteEditArea = ref(null)
+/** E3：编辑态文本按 @ 标记分段（mark 段渲染为 chip 样式） */
+const noteMentionSegments = computed(() => {
+  const text = noteEdit.text || ''
+  const segs = []
+  const re = /@\[([^\]]*)\]\{([^}]+)\}/g
+  let last = 0
+  let m
+  while ((m = re.exec(text))) {
+    if (m.index > last) segs.push({ text: text.slice(last, m.index) })
+    segs.push({ mark: true, label: m[1] || m[2], raw: m[0] })
+    last = m.index + m[0].length
+  }
+  if (last < text.length) segs.push({ text: text.slice(last) })
+  return segs
+})
+const noteEditPos = computed(() => {
+  const o = objects.value.find((x) => x.id === noteEdit.id && x.type === 'note')
+  if (!o) return null
+  const tl = worldToScreen(viewport.value, o.x, o.y)
+  const s = viewport.value.scale
+  return {
+    left: tl.x + 'px',
+    top: tl.y + 'px',
+    width: o.width * s + 'px',
+    height: o.height * s + 'px',
+    fontSize: Math.max(10, (o.fontSize || 13) * s) + 'px',
+    background: o.color || NOTE_DEFAULT_COLOR,
+    color: noteTextColor(o.color),
+  }
+})
+function startNoteEdit(id) {
+  closeNotePalette() // 进入文本编辑：收起色板浮层，避免与 textarea 叠层
+  const o = objects.value.find((x) => x.id === id && x.type === 'note')
+  if (!o) return
+  if (noteEdit.id && noteEdit.id !== id) commitNoteEdit()
+  noteEdit.id = id
+  noteEdit.text = o.text || ''
+  noteEdit.skipCommit = false
+  selection.value = [id]
+  nextTick(() => {
+    const el = noteEditArea.value
+    if (!el) return
+    el.focus()
+    const end = el.value.length
+    el.setSelectionRange(end, end)
+  })
+}
+/** 提交：内容有变才记撤销点（避免空编辑污染历史） */
+function commitNoteEdit() {
+  const id = noteEdit.id
+  if (!id) return
+  if (noteEdit.skipCommit) return
+  const o = objects.value.find((x) => x.id === id)
+  const next = noteEdit.text
+  noteEdit.id = null
+  noteEdit.text = ''
+  if (!o || o.type !== 'note') return
+  if (next !== (o.text || '')) {
+    beforeChange()
+    o.text = next
+    saveSoon()
+  }
+}
+/** 取消：丢弃改动。置 skipCommit —— 元素被摘除时部分浏览器仍会补发 blur */
+function cancelNoteEdit() {
+  noteEdit.id = null
+  noteEdit.text = ''
+  noteEdit.skipCommit = true
+  setTimeout(() => {
+    noteEdit.skipCommit = false
+  }, 0)
+}
+
+// —— note 底色（调色板挂悬浮工具栏，点色即换；参考项目 note color）——
+// —— D1d 便签 @ 资源提及：textarea 内输入 @ 弹资源清单，选中插入标记 ——
+// 标记语法 `@[显示名]{id}`：collectUpstream 解析为图片喂养（见 appNode.js）
+const noteMention = reactive({ open: false, query: '', x: 0, y: 0, start: -1, pick: 0 })
+/** 候选：画布图片（/view 引用或 blob 均可，名称可读）+ app 节点 + 其他便签（排除自身） */
+const mentionCandidates = computed(() => {
+  if (!noteMention.open) return []
+  const q = noteMention.query.toLowerCase()
+  const out = []
+  for (const o of objects.value) {
+    if (o.id === noteEdit.id) continue
+    let label = ''
+    let kind = ''
+    if (o.type === 'image') {
+      if (o.name) label = o.name
+      else if (o.src && o.src.startsWith('http')) {
+        try {
+          label = new URL(o.src).searchParams.get('filename') || '图片 ' + o.id.slice(-4)
+        } catch {
+          label = t('canvasKindImage') + ' ' + o.id.slice(-4)
+        }
+      } else label = t('canvasKindImage') + ' ' + o.id.slice(-4)
+      kind = 'img'
+    } else if (o.type === 'app') {
+      label = o.name || o.appId || 'App'
+      kind = 'app'
+    } else if (o.type === 'note') {
+      label = (o.text || '').replace(/\s+/g, ' ').slice(0, 20) || t('canvasKindNote')
+      kind = 'note'
+    } else continue
+    if (q && !label.toLowerCase().includes(q)) continue
+    out.push({ id: o.id, label, kind })
+  }
+  return out.slice(0, 8)
+})
+function onNoteInput(e) {
+  const el = e.target
+  const pos = el.selectionStart ?? el.value.length
+  const before = el.value.slice(0, pos)
+  // 光标前最近一个未闭合的 @（其后只允许查询字符）
+  const m = /(?:^|\s)@([^@\s]{0,24})$/.exec(before)
+  if (m) {
+    noteMention.open = true
+    noteMention.query = m[1]
+    noteMention.start = pos - m[1].length - 1
+    noteMention.pick = 0
+    const ta = noteEditArea.value
+    if (ta) {
+      const mirror = document.createElement('div')
+      const cs = getComputedStyle(ta)
+      mirror.style.cssText = `position:absolute;visibility:hidden;white-space:pre-wrap;word-wrap:break-word;width:${cs.width};font:${cs.font};line-height:${cs.lineHeight};letter-spacing:${cs.letterSpacing}`
+      mirror.textContent = before
+      document.body.appendChild(mirror)
+      const range = document.createRange()
+      const lastNode = mirror.lastChild
+      if (lastNode) {
+        range.selectNodeContents(lastNode)
+        range.collapse(false)
+      }
+      const rects = range.getClientRects()
+      const rect = rects.length ? rects[rects.length - 1] : mirror.getBoundingClientRect()
+      const host = wrapEl.value?.getBoundingClientRect() || { left: 0, top: 0 }
+      noteMention.x = clamp(rect.left - host.left, 8, Math.max(8, size.w - 240))
+      noteMention.y = clamp(rect.bottom - host.top + 4, 8, Math.max(8, size.h - 220))
+      mirror.remove()
+    }
+  } else {
+    noteMention.open = false
+  }
+}
+function pickMention(opt) {
+  const el = noteEditArea.value
+  if (!el || noteMention.start < 0) return closeMention()
+  const pos = el.selectionStart ?? el.value.length
+  const text = el.value
+  const insert = `@[${opt.label}]{${opt.id}} `
+  const next = text.slice(0, noteMention.start) + insert + text.slice(pos)
+  noteEdit.text = next
+  closeMention()
+  nextTick(() => {
+    const p = noteMention.start + insert.length
+    el.focus()
+    el.setSelectionRange(p, p)
+  })
+}
+function onNoteEsc() {
+  closeMention()
+  cancelNoteEdit()
+}
+function onNoteBlur() {
+  commitNoteEdit()
+  closeMention()
+}
+function closeMention() {
+  noteMention.open = false
+  noteMention.query = ''
+  noteMention.start = -1
+  noteMention.pick = 0
+}
+function onNoteKeydown(e) {
+  if (!noteMention.open || !mentionCandidates.value.length) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    noteMention.pick = (noteMention.pick + 1) % mentionCandidates.value.length
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    noteMention.pick =
+      (noteMention.pick - 1 + mentionCandidates.value.length) % mentionCandidates.value.length
+  } else if (e.key === 'Enter' || e.key === 'Tab') {
+    e.preventDefault()
+    pickMention(mentionCandidates.value[noteMention.pick])
+  } else if (e.key === 'Escape') {
+    closeMention()
+  }
+}
+
+const notePalette = reactive({ id: null, x: 0, y: 0, open: false })
+/** 当前色板对应便签（选中色高亮用） */
+const notePaletteColor = computed(() => {
+  const o = objects.value.find((x) => x.id === notePalette.id && x.type === 'note')
+  return o ? o.color || NOTE_DEFAULT_COLOR : ''
+})
+/** 打开：以悬浮工具栏几何定位（工具栏视觉下沿，色板居中于节点中线） */
+function openNotePalette(id) {
+  const o = objects.value.find((x) => x.id === id && x.type === 'note')
+  if (!o) return
+  notePalette.id = id
+  const tb = hoverToolbar.value
+  // 工具栏：below=false 时整体在 y 之上（占 [y-36, y]）；below=true 时在 y 之下（占 [y, y+36]）
+  notePalette.x = clamp(tb.below ? tb.x : tb.x, 132, Math.max(132, size.w - 132))
+  notePalette.y = clamp(tb.y + (tb.below ? 38 : 2), 8, Math.max(8, size.h - 48))
+  notePalette.open = true
+}
+function closeNotePalette() {
+  notePalette.open = false
+  notePalette.id = null
+}
+/** 设底色：变更前压 undo 快照，改后即时保存（对象已选/悬停态保持） */
+function setNoteColor(c) {
+  const o = objects.value.find((x) => x.id === notePalette.id && x.type === 'note')
+  if (!o) return
+  if ((o.color || NOTE_DEFAULT_COLOR) !== c) {
+    beforeChange()
+    o.color = c
+    layerRefresh()
+    saveSoon()
+  }
+  closeNotePalette()
+}
+
+// —— frame 名称就地重命名：单行 HTML input 覆盖在分区标签（frame.y - 20 上方）位置 ——
+const frameEdit = reactive({ id: null, text: '', skipCommit: false })
+const frameEditArea = ref(null)
+const frameEditPos = computed(() => {
+  const o = objects.value.find((x) => x.id === frameEdit.id && x.type === 'frame')
+  if (!o) return null
+  const tl = worldToScreen(viewport.value, o.x, o.y)
+  const s = viewport.value.scale
+  return {
+    left: tl.x + 'px',
+    top: tl.y - Math.max(22, 24 * s) + 'px',
+    width: Math.max(80, o.width * s) + 'px',
+    fontSize: Math.max(11, 13 * s) + 'px',
+  }
+})
+function startFrameRename(id) {
+  const o = objects.value.find((x) => x.id === id && x.type === 'frame')
+  if (!o) return
+  if (noteEdit.id && noteEdit.id !== id) commitNoteEdit()
+  if (frameEdit.id && frameEdit.id !== id) commitFrameRename()
+  frameEdit.id = id
+  frameEdit.text = o.name || ''
+  frameEdit.skipCommit = false
+  selection.value = [id]
+  nextTick(() => {
+    const el = frameEditArea.value
+    if (!el) return
+    el.focus()
+    el.select()
+  })
+}
+function commitFrameRename() {
+  const id = frameEdit.id
+  if (!id) return
+  if (frameEdit.skipCommit) return
+  const o = objects.value.find((x) => x.id === id)
+  const next = frameEdit.text.trim()
+  frameEdit.id = null
+  frameEdit.text = ''
+  if (!o || o.type !== 'frame') return
+  if (next && next !== (o.name || '')) {
+    beforeChange()
+    o.name = next
+    saveSoon()
+  }
+}
+function cancelFrameRename() {
+  frameEdit.id = null
+  frameEdit.text = ''
+  frameEdit.skipCommit = true
+  setTimeout(() => {
+    frameEdit.skipCommit = false
+  }, 0)
+}
+function rubberConfig() {
+  return {
+    x: Math.min(rubber.value.x, rubber.value.x + rubber.value.w),
+    y: Math.min(rubber.value.y, rubber.value.y + rubber.value.h),
+    width: Math.abs(rubber.value.w),
+    height: Math.abs(rubber.value.h),
+    fill: 'rgba(56,189,248,0.12)',
+    stroke: 'rgba(56,189,248,0.5)',
+    strokeWidth: 1,
+  }
+}
+// 连线几何（物件移动后端点跟随——由 computed 每帧重算）
+const linkSegs = computed(() => linkEndpoints(links.value, objects.value).filter(Boolean))
+
+// A2 config 层：纯函数 nodeConfigs 的视图上下文（选中/高亮/accent/缩放参数化）
+const cfgCtx = computed(() =>
+  cfgMakeViewCtx({
+    isSelected: (id) => selection.value.includes(id),
+    isHighlighted: (id) => {
+      const o = objects.value.find((x) => x.id === id)
+      return o ? isHighlightedOf(o) : false
+    },
+    isHovered: (id) => hoverNodeId.value === id,
+    accent: accentColor(),
+    scale: viewport.value.scale,
+  }),
+)
+
+// —— 连线手势（A2 抽取）：句柄建线 + 锚点重连，状态机见 useLinkGestures ——
+const {
+  connectDrag,
+  reconnectDrag,
+  stopKonvaEvent,
+  onConnectStart,
+  onConnectMove,
+  onConnectEnd,
+  onAnchorDown,
+  onReconnectMove,
+  onReconnectEnd,
+} = useLinkGestures({
+  objects,
+  links,
+  viewport,
+  size,
+  drag,
+  stageEl,
+  linkSegs,
+  selectedLinkId,
+  beforeChange,
+  saveSoon,
+  openConnectCreate: ({ screenX, screenY, wx, wy, from, to }) => {
+    connectCreate.open = true
+    connectCreate.x = clamp(screenX, 8, Math.max(8, size.w - 180))
+    connectCreate.y = clamp(screenY, 8, Math.max(8, size.h - 210))
+    connectCreate.wx = wx
+    connectCreate.wy = wy
+    connectCreate.from = from
+    connectCreate.to = to
+  },
+})
+
+function cropRectConfig() {
+  return {
+    x: Math.min(cropRect.value.x, cropRect.value.x + cropRect.value.w),
+    y: Math.min(cropRect.value.y, cropRect.value.y + cropRect.value.h),
+    width: Math.abs(cropRect.value.w),
+    height: Math.abs(cropRect.value.h),
+    fill: 'rgba(11,140,233,0.10)',
+    stroke: accentColor(),
+    strokeWidth: 1,
+    dash: [6, 4],
+  }
+}
+function guideConfig(v, axis) {
+  const s = 4000
+  return axis === 'v'
+    ? {
+        points: [v, -s / 2, v, s / 2],
+        stroke: accentColor(),
+        strokeWidth: 1 / viewport.value.scale,
+        dash: [4, 4],
+        listening: false,
+      }
+    : {
+        points: [-s / 2, v, s / 2, v],
+        stroke: accentColor(),
+        strokeWidth: 1 / viewport.value.scale,
+        dash: [4, 4],
+        listening: false,
+      }
+}
+
+function onWheel(e) {
+  e.evt.preventDefault()
+  // 缩放改变屏幕坐标，浮层锚点会漂移 —— 直接收起
+  if (ctxMenu.value) ctxMenu.value = null
+  const st = stageEl.value.getStage()
+  const pointer = st.getPointerPosition()
+  const factor = e.evt.deltaY < 0 ? 1.1 : 1 / 1.1
+  viewport.value = zoomAtPoint(viewport.value, factor, pointer.x, pointer.y, MIN_SCALE, MAX_SCALE)
+  st.scale({ x: viewport.value.scale, y: viewport.value.scale })
+  st.position({ x: viewport.value.x, y: viewport.value.y })
+  st.batchDraw()
+  // C-H8 回归修复：缩放结果持久化（此前只改响应式值，刷新后视口位置丢失回 100%）。
+  // 连续滚轮经 saveSoon 防抖合并为一次写。
+  saveSoon()
+}
+
+function onItemDown(i, e) {
+  // 物件按下：记录待拖，交给 Konva 的节点拖拽；框选模式空地按下走 onMouseDown
+  // 防御：全局 `st.find('Group').on('mousedown.wb')` 对**每个** Group 都绑了本函数，
+  // 用 `g.id()` 反查索引；无 id 的 Group（句柄组/连线锚点组等）会传 -1 进来。
+  // 修 stopKonvaEvent 后这些手势已在源头阻断冒泡，此处再兜一层，避免任何新 Group 复现同类崩溃。
+  const obj = objects.value[i]
+  if (!obj) return
+  hoverNodeId.value = obj.id
+  // 右键菜单/连线创建菜单：点任何物件即收起（此前只有点空地才关，点物件关不掉）
+  if (ctxMenu.value) ctxMenu.value = null
+  if (connectCreate.open) closeConnectCreate()
+  // 平移意图（空格/中键）：即使落在物件/大 Frame 上也要平移 —— 临时关掉该节点
+  // 的 Konva 拖拽防止它抢走指针，抬手后再恢复（drag.panNode 见 onMouseUp）
+  if (spaceDown.value || e.evt?.button === 1) {
+    if (e.target?.draggable) e.target.draggable(false)
+    drag.panNode = e.target || null
+    drag.mode = 'pan'
+    const st = stageEl.value?.getStage?.()
+    const p = st?.getPointerPosition?.()
+    if (p) drag.last = { x: p.x, y: p.y }
+    if (!spaceDown.value) selection.value = []
+    return
+  }
+  if (tool.value === 'crop') {
+    // 圈选裁剪：允许从图片上起圈（拖拽交给 stage 级 mousemove/mouseup 完成）
+    const st = stageEl.value.getStage()
+    const p = st.getPointerPosition()
+    const w = screenToWorld(viewport.value, p.x, p.y)
+    drag.mode = 'crop'
+    drag.last = { x: p.x, y: p.y }
+    cropRect.value = { x: w.x, y: w.y, w: 0, h: 0 }
+    return
+  }
+  drag.mode = 'item'
+  drag.item = i
+  drag.moved = false
+  const id = objects.value[i].id
+  if (!selection.value.includes(id)) {
+    selection.value = e.evt.shiftKey ? [...selection.value, id] : [id]
+  }
+  // 组：整组选中高亮（成员各自渲染 stroke）
+}
+
+// —— 角柄缩放拖拽（stage mousemove/up 驱动；数据实时写回 → 连线/句柄/文本/overlay 同步跟随）——
+function onResizeStart(id, corner, kev) {
+  stopKonvaEvent(kev)
+  if (tool.value === 'crop') return // 裁剪工具态不抢手势
+  if (spaceDown.value || kev.evt?.button === 1) return // 平移意图交还
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || groupOf(id)) return
+  const st = stageEl.value.getStage()
+  const p = st.getPointerPosition()
+  if (!p) return
+  resizeDrag.active = true
+  resizeDrag.id = id
+  resizeDrag.corner = corner
+  // 对角不动点（拖 nw → 固定右下角；拖 se → 固定左上角）
+  resizeDrag.fixed = {
+    x: o.x + (corner.endsWith('w') ? o.width : 0),
+    y: o.y + (corner.startsWith('n') ? o.height : 0),
+  }
+  resizeDrag.orig = { x: o.x, y: o.y, w: o.width, h: o.height }
+  resizeDrag.pushed = false
+  // 图片/视频默认锁宽高比（Ctrl/⌘ 按住自由）；note/frame/audio 平时自由，
+  // Shift 按住临时锁定当前比例（D1c：所有类型都可通过修饰键切换锁/自由）。
+  // 视频无 naturalWidth → naturalOf 回落当前 o.width/o.height，即保持起拖前比例
+  const baseRatioLocked = o.type === 'image' || o.type === 'video'
+  const modifierFree = kev.evt?.ctrlKey || kev.evt?.metaKey
+  const modifierLock = kev.evt?.shiftKey
+  const lockRatio = modifierFree ? false : baseRatioLocked || modifierLock
+  const nat = naturalOf(o)
+  const ar = nat.naturalWidth / nat.naturalHeight
+  resizeDrag.ratio = lockRatio && isFinite(ar) && ar > 0 ? ar : 0
+  // D1c：起始比例快照 —— 拖拽中 Shift 临时锁定用（note/frame 无 natural 尺寸，
+  // 不能用 naturalOf 实时算：拖拽中 o.width/height 已变，比例会漂移失控）
+  const startAr = isFinite(ar) && ar > 0 ? ar : o.width / o.height
+  resizeDrag.startRatio = isFinite(startAr) && startAr > 0 ? startAr : 0
+  drag.mode = 'resize' // 占住拖拽态：阻止平移/物件拖动（onMouseDown 同 connect 跳过）
+  drag.last = null
+}
+/** 缩放拖拽中：以固定角为锚 + 指针位置算新矩形，实时写回对象（首次位移才压 undo） */
+function onResizeMove() {
+  if (!resizeDrag.active) return
+  const o = objects.value.find((x) => x.id === resizeDrag.id)
+  if (!o) return
+  const st = stageEl.value.getStage()
+  const p = st.getPointerPosition()
+  if (!p) return
+  const ptr = screenToWorld(viewport.value, p.x, p.y)
+  // D1c：拖拽中实时跟随修饰键（Konva move 事件不透传修饰键，读全局键态）。
+  // 比例一律用起拖快照（startRatio），杜绝拖拽中比例漂移
+  const baseRatioLocked = o.type === 'image' || o.type === 'video'
+  const liveRatio = ctrlDown.value
+    ? 0
+    : baseRatioLocked || shiftDown.value
+      ? resizeDrag.ratio || resizeDrag.startRatio
+      : 0
+  const { fixed, corner } = resizeDrag
+  const ratio = liveRatio
+  const rect = ratio ? ratioRect(fixed, ptr, corner, ratio) : freeRect(fixed, ptr, corner)
+  if (
+    !resizeDrag.pushed &&
+    (rect.x !== resizeDrag.orig.x ||
+      rect.y !== resizeDrag.orig.y ||
+      rect.w !== resizeDrag.orig.w ||
+      rect.h !== resizeDrag.orig.h)
+  ) {
+    beforeChange() // 压栈 = 缩放前状态（仅首次真实位移）
+    resizeDrag.pushed = true
+  }
+  if (!resizeDrag.pushed) return // 点住未拖：数据零改动
+  o.x = Math.round(rect.x)
+  o.y = Math.round(rect.y)
+  o.width = Math.round(rect.w)
+  o.height = Math.round(rect.h)
+  layerRefresh()
+}
+/** 自由拉伸矩形（纯函数在 engine.js：南北看首字母，E5fix 修南向坍塌） */
+function freeRect(fixed, ptr, corner) {
+  return freeResizeRect(fixed, ptr, corner, RESIZE_MIN)
+}
+/** 等比矩形 / 固定角反推（纯函数在 engine.js，E5fix 南向判定修正） */
+function ratioRect(fixed, ptr, corner, ratio) {
+  return ratioResizeRect(fixed, ptr, corner, ratio, RESIZE_MIN)
+}
+/** 缩放松手：收尾（数据已实时写回；窗口外松手由 onWindowMouseUp 兜底） */
+function onResizeEnd() {
+  if (!resizeDrag.active) return
+  resizeDrag.active = false
+  resizeDrag.id = null
+  resizeDrag.corner = null
+  resizeDrag.fixed = null
+  resizeDrag.orig = null
+  resizeDrag.ratio = 0
+  resizeDrag.pushed = false
+  drag.mode = null
+  drag.last = null
+  saveSoon()
+}
+
+function onMouseDown(e) {
+  if (e.evt?.preventDefault) e.evt.preventDefault() // 平移/框选起手禁文本选择
+  // 空地（没点到任何 shape）按下：
+  //   普通拖 = 平移画布；Shift/中键 拖 = 框选；crop 工具 = 圈选裁剪
+  // 物件按下（onItemDown 先触发，drag.mode='item'）时 stage 级事件直接跳过
+  if (
+    drag.mode === 'item' ||
+    drag.mode === 'connect' ||
+    drag.mode === 'reconnect' ||
+    drag.mode === 'resize'
+  )
+    return
+  // 兜底：重连拖拽异常残留（未松手/未 Esc）时，点空白即取消
+  if (reconnectDrag.active) cancelReconnectDrag()
+  const st = stageEl.value.getStage()
+  // fix(圈选裁剪无反馈): crop 工具语义是"在图片上圈一块"，但下方
+  // `e.target !== st` 会把落在物件上的按下全部 return——图片上起圈
+  // 永远走不到 crop 分支，橡皮筋建不起来，用户看不到任何交互效果。
+  // crop 态判定提前：空地/物件上一律起圈（物件 Konva 拖拽已被
+  // syncDraggables 关闭，不会抢手势）。
+  const cropTool = tool.value === 'crop'
+  if (e.target !== st && !cropTool) return // 物件由节点拖拽处理
+  const p = st.getPointerPosition()
+  const w = screenToWorld(viewport.value, p.x, p.y)
+  if (cropTool) {
+    drag.mode = 'crop'
+    drag.last = { x: p.x, y: p.y }
+    cropRect.value = { x: w.x, y: w.y, w: 0, h: 0 }
+    return
+  }
+  // 中键 / Shift / Ctrl(⌘) + 拖拽 = 框选（Ctrl 对齐快捷键面板「框选 / 复制节点」文案）
+  if (e.evt.button === 1 || e.evt.shiftKey || e.evt.ctrlKey || e.evt.metaKey) {
+    drag.mode = 'rubber'
+    drag.last = { x: p.x, y: p.y }
+    rubber.value = { x: w.x, y: w.y, w: 0, h: 0 }
+  } else {
+    drag.mode = 'pan'
+    drag.last = { x: p.x, y: p.y }
+    if (!spaceDown.value) selection.value = []
+    selectedLinkId.value = null // 空地点击清除连线选中（参考选中互斥）
+  }
+  if (ctxMenu.value) ctxMenu.value = null
+  if (connectCreate.open) closeConnectCreate()
+}
+
+function onMouseMove(e) {
+  const st = stageEl.value.getStage()
+  const p = st.getPointerPosition()
+  if (!p) return
+  // 悬停追踪（参考 onHoverStart/End）：句柄显现 + 圆点放大
+  if (!drag.mode || drag.mode === 'pan') {
+    const w = screenToWorld(viewport.value, p.x, p.y)
+    const hit = hitTest(objects.value, w.x, w.y)
+    const id = hit >= 0 ? objects.value[hit].id : null
+    if (id) {
+      // 命中物件：立即切换（节点间移动无延迟），撤销待收起
+      cancelHoverHide()
+      if (id !== hoverNodeId.value) hoverNodeId.value = id
+    } else {
+      // 空白：延时收起，给鼠标移入工具栏的时间（间隙已由桥接热区兜住）。
+      // 不看 toolbarKeep：能走到这里说明事件落在画布内容上，指针必然已不在
+      // 工具栏/弹层（它们是盖在 content 之上的 HTML，会截获命中）——keep
+      // 仍为 true 只能是 mouseleave 丢失（元素被重建/移位不触发边界事件），
+      // 视为过期直接排收起，否则工具栏常驻不消失。
+      toolbarKeep.value = false
+      scheduleHoverHide()
+    }
+  }
+  if (drag.mode === 'connect') {
+    onConnectMove()
+    return
+  }
+  if (drag.mode === 'reconnect') {
+    onReconnectMove()
+    return
+  }
+  if (drag.mode === 'resize') {
+    onResizeMove()
+    return
+  }
+  if (drag.mode === 'pan' && drag.last) {
+    viewport.value = {
+      scale: viewport.value.scale,
+      x: viewport.value.x + (p.x - drag.last.x),
+      y: viewport.value.y + (p.y - drag.last.y),
+    }
+    drag.last = { x: p.x, y: p.y }
+    applyViewport()
+  } else if (drag.mode === 'rubber' && rubber.value) {
+    const w = screenToWorld(viewport.value, p.x, p.y)
+    rubber.value = { ...rubber.value, w: w.x - rubber.value.x, h: w.y - rubber.value.y }
+  } else if (drag.mode === 'crop' && cropRect.value) {
+    const w = screenToWorld(viewport.value, p.x, p.y)
+    cropRect.value = { ...cropRect.value, w: w.x - cropRect.value.x, h: w.y - cropRect.value.y }
+  }
+}
+
+function onMouseUp() {
+  // 空格/中键平移时临时禁用了落点物件的 Konva 拖拽，抬手恢复
+  if (drag.panNode) {
+    drag.panNode.draggable(true)
+    drag.panNode = null
+  }
+  if (drag.mode === 'connect') {
+    onConnectEnd()
+    drag.mode = null
+    drag.last = null
+    return
+  }
+  if (drag.mode === 'reconnect') {
+    onReconnectEnd()
+    drag.mode = null
+    drag.last = null
+    return
+  }
+  if (drag.mode === 'resize') {
+    onResizeEnd()
+    drag.mode = null
+    drag.last = null
+    return
+  }
+  if (drag.mode === 'rubber' && rubber.value) {
+    const r = rubber.value
+    if (Math.abs(r.w) > 4 || Math.abs(r.h) > 4) {
+      const hits = hitTestRect(objects.value, r.x, r.y, r.w, r.h)
+      selection.value = hits.map((i) => objects.value[i].id)
+      if (selection.value.length) openSelPrompt()
+    } else {
+      selPrompt.value = null
+    }
+    rubber.value = null
+  } else if (drag.mode === 'crop' && cropRect.value) {
+    const r = cropRect.value
+    if (Math.abs(r.w) > 8 && Math.abs(r.h) > 8) cropAndSend(r)
+    cropRect.value = null
+    tool.value = null
+    syncDraggables()
+  }
+  drag.mode = null
+  drag.last = null
+  saveSoon()
+}
+
+let dragRecorded = false // 本次拖拽是否已压历史栈
+let dragStartPos = null // 起拖快照（dragend 组联动增量基准；数据已实时写回，不能用拖后值）
+/** 多选拖动联动表：dragstart 时若被拖节点在多选里，记录 selection 全员起拖位置。
+ *  dragmove 每帧按「锚点相对起拖的增量」同步其它成员（Figma 式整体走）；
+ *  有它时 dragend 的组联动跳过（多选优先于组合——用户显式选了谁就动谁）。 */
+let multiDragStart = null
+/** Ctrl/⌘/Alt+拖拽克隆手势：dragstart 时置位。记录被拖原件的 id、起拖坐标与克隆 id。
+ *  视觉策略：克隆体先以同坐标落布（留在原地=原版），原 Konva 节点继续被拖走
+ *  （=克隆体），dragend 时把数据身份与位置对齐（原版留起点、克隆归终点）。 */
+const dragClone = reactive({ armed: false, origId: null, cloneId: null, start: { x: 0, y: 0 } })
+/** dragstart 快照：记录起拖原位（Konva dragmove 首帧节点可能已大幅位移，
+ *  组联动增量必须以 dragstart 位置为基准） */
+function onNodeDragStartSnap(e) {
+  dragStartPos = { id: e.target.id(), x: e.target.x(), y: e.target.y() }
+  multiDragStart = null
+  // 多选拖动整体走：记录 selection 全员起拖位置（Ctrl+拖拽克隆手势除外）
+  const sel = selection.value
+  if (!dragClone.armed && sel.length > 1 && sel.includes(e.target.id())) {
+    multiDragStart = new Map()
+    for (const id of sel) {
+      const mo = objects.value.find((x) => x.id === id)
+      if (mo) multiDragStart.set(id, { x: mo.x, y: mo.y })
+    }
+  }
+}
+
+function onNodeDrag(e) {
+  // 物件拖拽中的吸附（e 为 Konva 原生事件对象）
+  e.evt?.preventDefault?.() // 抑制拖拽中浏览器原生文本选择
+  const node = e.target
+  if (!dragRecorded && !dragClone.armed) {
+    beforeChange()
+    dragRecorded = true
+  }
+  const idx = objects.value.findIndex((o) => o.id === node.id())
+  if (idx < 0) return
+  const o = objects.value[idx]
+  // 实时写回数据坐标：连线端点/句柄/锚点/HTML 浮层（工具栏、参考条）随拖
+  // 拽实时跟随，而非 dragend 才更新（原实现数据 lag 一拍）
+  o.x = node.x()
+  o.y = node.y()
+  // fix(媒体双影): video/audio 的 HTML overlay 走 Vue 调度（晚 Konva 同步
+  // transform 一拍），拖动中 Konva 占位框与播放器卡错位成"两个区块"。
+  // 拖动帧内直写 overlay 的 left/top，与 Konva 同帧对齐；dragend 后 Vue
+  // 重渲染接管（style 绑定重算，数值一致无跳变）。
+  if (o.type === 'video' || o.type === 'audio') {
+    const el = wrapEl.value?.querySelector?.('[data-media-overlay="' + o.id + '"]')
+    if (el) {
+      const tl = worldToScreen(viewport.value, o.x, o.y)
+      el.style.left = tl.x + 'px'
+      el.style.top = tl.y + 'px'
+    }
+  }
+  const others = objects.value.filter((_, i) => i !== idx)
+  if (!others.length) return
+  const moving = { x: node.x(), y: node.y(), width: o.width, height: o.height }
+  const delta = snapDelta(moving, others, SNAP_THRESHOLD)
+  guides.v = snapGuides(moving, others, SNAP_THRESHOLD).v
+  guides.h = snapGuides(moving, others, SNAP_THRESHOLD).h
+  if (delta.dx || delta.dy) {
+    node.x(node.x() + delta.dx)
+    node.y(node.y() + delta.dy)
+    o.x = node.x()
+    o.y = node.y()
+  }
+  // 多选拖动整体走：其它成员按锚点相对起拖的增量实时跟随（吸附调整之后的最终位置）。
+  // 数据与 Konva 同帧写回，dragend 无需再补（组联动只在非多选时生效）。
+  // 克隆手势（armed）不做联动 —— armed 在 dragstart 的 clone 钩子里才置位，这里必须再判。
+  if (multiDragStart && multiDragStart.has(o.id) && !dragClone.armed) {
+    const ddx = node.x() - dragStartPos.x
+    const ddy = node.y() - dragStartPos.y
+    if (ddx || ddy) {
+      for (const [id, s] of multiDragStart) {
+        if (id === o.id) continue
+        const mo = objects.value.find((x) => x.id === id)
+        if (!mo) continue
+        mo.x = s.x + ddx
+        mo.y = s.y + ddy
+        const kn = stageEl.value?.getStage?.()?.findOne('#' + CSS.escape(id))
+        if (kn) {
+          kn.x(mo.x)
+          kn.y(mo.y)
+        }
+      }
+    }
+  }
+}
+
+function onNodeDragEnd(e) {
+  dragRecorded = false
+  const startPos = dragStartPos
+  dragStartPos = null
+  multiDragStart = null
+  guides.v = []
+  guides.h = []
+  const o = objects.value.find((x) => x.id === e.target.id())
+  if (o) {
+    // 组联动：数据已实时写回，以起拖快照为基准算增量（否则恒 0，组联动失效）。
+    // 多选拖动时跳过 —— 多选优先于组合（成员已在 dragmove 按 selection 实时联动），
+    // 否则拖多选会意外带走组内未选中成员。
+    const g =
+      multiDragStart && multiDragStart.has(o.id)
+        ? null
+        : groups.value.find((gr) => gr.members.includes(o.id))
+    const oldX = startPos?.id === o.id ? startPos.x : o.x
+    const oldY = startPos?.id === o.id ? startPos.y : o.y
+    o.x = e.target.x()
+    o.y = e.target.y()
+    if (g) {
+      const ddx = o.x - oldX
+      const ddy = o.y - oldY
+      if (ddx || ddy) {
+        for (const m of g.members) {
+          if (m === o.id) continue
+          const mo = objects.value.find((x) => x.id === m)
+          if (!mo) continue
+          mo.x += ddx
+          mo.y += ddy
+          const node = stageEl.value?.getStage?.()?.findOne('#' + CSS.escape(m))
+          if (node) {
+            node.x(mo.x)
+            node.y(mo.y)
+          }
+        }
+      }
+    }
+  }
+  saveSoon()
+}
+
+// —— Ctrl/⌘/Alt+拖拽克隆（dragstart 建副本，dragend 对齐身份与坐标；组合成员不支持，走普通拖拽）——
+function onNodeCloneStart(e) {
+  const key = e.evt?.ctrlKey || e.evt?.metaKey || e.evt?.altKey
+  if (!key || dragClone.armed) return
+  const i = objects.value.findIndex((o) => o.id === e.target.id())
+  if (i < 0) return
+  const o = objects.value[i]
+  if (!o || groupOf(o.id)) return // 组拖动会整体迁移成员，克隆语义复杂，退回普通拖拽
+  beforeChange() // 快照 = 克隆前状态（dragmove 因 armed 不再重复压栈）
+  const nid = 'n' + Date.now() + Math.random().toString(36).slice(2, 6)
+  objects.value.push({ ...JSON.parse(JSON.stringify(o)), id: nid })
+  dragClone.armed = true
+  dragClone.origId = o.id
+  dragClone.cloneId = nid
+  dragClone.start = { x: o.x, y: o.y }
+  multiDragStart = null // 克隆手势不做多选联动（onNodeDragStartSnap 先于本函数跑，armed 还没置位）
+}
+function commitCloneDrag(e) {
+  if (!dragClone.armed) return
+  const { armed, origId, cloneId, start } = dragClone
+  dragClone.armed = false
+  dragClone.origId = null
+  dragClone.cloneId = null
+  const end = { x: e.target.x(), y: e.target.y() }
+  const st = stageEl.value?.getStage?.()
+  const orig = objects.value.find((x) => x.id === origId)
+  const clone = objects.value.find((x) => x.id === cloneId)
+  if (orig) {
+    // 原版留在起点（onNodeDragEnd 已把数据写成终点，这里纠正回起点 + 复位 Konva 节点）
+    orig.x = start.x
+    orig.y = start.y
+  }
+  const origNode = st?.findOne('#' + CSS.escape(origId))
+  if (origNode && orig) {
+    origNode.position({ x: orig.x, y: orig.y })
+  }
+  if (clone) {
+    clone.x = end.x
+    clone.y = end.y
+  }
+  if (orig && clone) {
+    selection.value = [clone.id]
+    // 组联动数据可能已按拖拽增量移动过成员；克隆场景不回滚（克隆前已阻止组内触发），此处无需处理
+  } else if (clone) {
+    // 原版数据异常（不应发生）：克隆体落终点并选中
+    selection.value = [clone.id]
+  }
+  saveSoon()
+}
+
+// —— 工具条 ——
+const tools = computed(() => [
+  {
+    icon: 'fas fa-rotate-left',
+    title: t('canvasUndo'),
+    action: undoLast,
+    disabled: !engineCanUndo(history.value),
+  },
+  {
+    icon: 'fas fa-rotate-right',
+    title: t('canvasRedo'),
+    action: redoLast,
+    disabled: !engineCanRedo(history.value),
+  },
+  { icon: 'fas fa-plus', title: t('canvasAddNote'), action: addNote },
+  {
+    icon: 'fas fa-cube',
+    title: t('canvasAddAppNode'),
+    action: () => {
+      const c = screenToWorld(viewport.value, size.w / 2, size.h / 2)
+      openAppPicker(c.x, c.y)
+    },
+  },
+  {
+    icon: 'fas fa-play',
+    title: t('canvasRunAppNodes'),
+    action: () => runAppNodes(selection.value),
+    disabled: !selection.value.some((id) => objects.value.find((o) => o.id === id)?.type === 'app'),
+  },
+  {
+    icon: 'fas fa-border-none',
+    title: t('canvasFrameBtn'),
+    action: () => {
+      const c = screenToWorld(viewport.value, size.w / 2, size.h / 2)
+      addFrameAt(c.x, c.y)
+    },
+  },
+  {
+    icon: 'fas fa-film',
+    title: t('canvasShotsBtn'),
+    action: () => {
+      const c = screenToWorld(viewport.value, size.w / 2, size.h / 2)
+      addShotAt(c.x, c.y)
+    },
+  },
+  {
+    icon: 'fas fa-table-cells-large',
+    title: t('canvasLayersBtn'),
+    action: () => (layersOpen.value = !layersOpen.value),
+    active: layersOpen.value,
+  },
+  {
+    icon: 'fas fa-photo-film',
+    title: t('canvasAssetsBtn'),
+    action: () => (assetsOpen.value = !assetsOpen.value),
+    active: assetsOpen.value,
+  },
+  {
+    icon: 'fas fa-wand-magic-sparkles',
+    title: t('canvasGenNode'),
+    action: () => openGenNode(selection.value),
+  },
+  {
+    icon: 'fas fa-vector-square',
+    title: t('canvasCropToolTip'),
+    action: () => setTool('crop'),
+    active: tool.value === 'crop',
+  },
+  {
+    icon: 'fas fa-object-group',
+    title: t('canvasGroupSel'),
+    action: groupSelected,
+    disabled: selection.value.length < 2,
+  },
+  {
+    icon: 'fas fa-object-ungroup',
+    title: t('canvasUngroupSel'),
+    action: ungroupSelection,
+    disabled: !selection.value.some((id) => groupOf(id)),
+  },
+  { icon: 'fas fa-crosshairs', title: t('canvasFitAll'), action: fitAll },
+  { icon: 'fas fa-expand', title: t('canvasResetView'), action: resetView },
+  {
+    icon: 'fas fa-paper-plane',
+    title: t('canvasSendToWorkbench'),
+    action: sendSelectionToWorkbench,
+    disabled: !selection.value.some((id) => refOf(id)),
+  },
+  {
+    icon: 'fas fa-book-open',
+    title: t('canvasPromptLibBtn'),
+    action: () => (promptLib.open = !promptLib.open),
+  },
+  { icon: 'fas fa-file-export', title: t('canvasExportBtn'), action: exportCurrentProject },
+  { icon: 'fas fa-file-import', title: t('canvasImportBtn'), action: pickImportFile },
+  { icon: 'fas fa-trash', title: t('canvasDeleteSelected'), action: deleteSelected },
+])
+// 工具模式下禁用物件拖拽（否则 Konva dragstart 会吞掉 crop/link 的 mousedown 语义）
+function syncDraggables() {
+  const st = stageEl.value?.getStage?.()
+  if (st) st.find('Group').forEach((g) => g.draggable(tool.value === null))
+}
+function setTool(m) {
+  tool.value = tool.value === m ? null : m
+  if (m) selection.value = []
+  syncDraggables()
+}
+
+// 选中物件 → 工作台参考图附件（仅 image 物件可反解出 /view 引用）
+function refOf(id) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || o.type !== 'image' || !o.src) return null
+  try {
+    const u = new URL(o.src)
+    if (!u.pathname.endsWith('/view')) return null
+    const filename = u.searchParams.get('filename') || ''
+    return {
+      filename,
+      subfolder: u.searchParams.get('subfolder') || '',
+      type: u.searchParams.get('type') || 'output',
+      // A1(吸收参考项目引用注入):附件携带画布卡片身份,工作台发送时拼引用清单
+      // 注入 prompt——LLM 看图即知"这是画布上哪张卡片",对话可 @cardId 指代
+      cardId: id,
+      cardTitle: o.name || filename || 'image',
+    }
+  } catch {
+    return null // blob:/data: 等（拖入/粘贴图），无 /view 引用
+  }
+}
+function sendSelectionToWorkbench() {
+  const refs = selection.value.map(refOf).filter(Boolean)
+  if (!refs.length) return
+  lastSourceIds = [...selection.value] // 溯源：产物落布时自动连线
+  if (wbOpen.value) {
+    // 侧边栏工作台常驻：走活通道，附件立即可见
+    emitAttachments(refs)
+    message.success(t('workbenchCardAttached').replace('{n}', String(refs.length)))
+  } else {
+    // 侧栏收起：入跨路由队列，下次工作台挂载时取走
+    pushAttachments(refs)
+    message.success(t('workbenchCardAttached').replace('{n}', String(refs.length)))
+  }
+  selection.value = []
+}
+
+function addNote() {
+  const c = screenToWorld(viewport.value, size.w / 2, size.h / 2)
+  beforeChange()
+  const id = 'n' + Date.now()
+  objects.value.push({
+    id,
+    type: 'note',
+    x: c.x - 90,
+    y: c.y - 60,
+    width: 180,
+    height: 120,
+    text: '',
+  })
+  saveSoon()
+  startNoteEdit(id) // 新建即进入编辑，免去「不知道怎么输入」的困惑
+}
+
+// —— I2 右键上下文菜单 ——
+const ctxMenu = ref(null) // {x,y(屏幕), wx,wy(世界), targetIds:[]}
+function closeCtxMenu() {
+  ctxMenu.value = null
+}
+const ctxItems = computed(() => {
+  if (!ctxMenu.value) return []
+  const ids = ctxMenu.value.targetIds
+  // 动作声明（icon/谓词/子菜单）在 canvasActions 注册表；这里只注入
+  // run 实现（key → 组件函数），谓词过滤可脱离组件单测
+  const runners = {
+    copy: copySelection,
+    'note-edit': () => startNoteEdit(ids[0]),
+    'frame-rename': () => startFrameRename(ids[0]),
+    'gen-info': () => showImageGenInfo(ids[0]),
+    'app-run': () =>
+      runAppNodes(
+        ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app'),
+      ),
+    'app-rerun': () => {
+      const firstApp = ids.find(
+        (id) => (objects.value.find((o) => o.id === id) || {}).type === 'app',
+      )
+      if (firstApp) rerunFrom(firstApp)
+    },
+    'app-panel': () =>
+      openAppNodePanel(
+        ids.find((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app'),
+      ),
+    'app-full': () =>
+      openFullApp(
+        objects.value.find(
+          (o) =>
+            o.id ===
+            ids.find((id) => (objects.value.find((o) => o.id === id) || {}).type === 'app'),
+        ),
+      ),
+    ref: sendSelectionToWorkbench,
+    gen: () => openGenNode(ids),
+    crop: () => setTool('crop'),
+    inpaint: () => openMaskDialog(ids[0]),
+    reverse: () => reversePrompt(ids[0]),
+    enhance: () => enhanceImage(ids[0]),
+    outpaint: () => startOutpaint(ids[0]),
+    video: () => imageToVideo(ids[0]),
+    char: () => setConsistencyAsset(ids[0], 'character'),
+    style: () => setConsistencyAsset(ids[0], 'style'),
+    compose: composeSelection,
+    group: groupSelected,
+    exportSel: exportSelectionZip,
+    gridImg: gridArrangeSelected,
+    alignL: () => alignSel('left'),
+    alignH: () => alignSel('hcenter'),
+    alignR: () => alignSel('right'),
+    alignT: () => alignSel('top'),
+    alignV: () => alignSel('vcenter'),
+    alignB: () => alignSel('bottom'),
+    distH: () => distributeSel('x'),
+    distV: () => distributeSel('y'),
+    front: () => zShift(ids, 'front'),
+    forward: () => zShift(ids, 'forward'),
+    backward: () => zShift(ids, 'backward'),
+    back: () => zShift(ids, 'back'),
+    del: deleteSelected,
+  }
+  return buildCtxItems(objects.value, ids, undefined, (key) => () => {
+    runners[key]?.()
+    closeCtxMenu()
+  }).map((it) => ({
+    ...it,
+    label: it.labelKey ? t(it.labelKey) : undefined,
+    children: it.children?.map((c) => ({ ...c, label: t(c.labelKey) })),
+  }))
+})
+/**
+ * z 层级四向（front/forward/backward/back），选中块整体移动保持内部顺序。
+ * P3 undo 合并：同选中集连续同向 shift 在 800ms 窗口内合并一条历史。
+ */
+let zCoalesce = null // { key, dir, until }
+function zShift(ids, dir) {
+  const now = Date.now()
+  const key = [...ids].sort().join(',')
+  const canMerge =
+    zCoalesce && zCoalesce.key === key && zCoalesce.dir === dir && now < zCoalesce.until
+  if (!canMerge) {
+    beforeChange()
+    zCoalesce = { key, dir, until: now + 800 }
+  } else {
+    zCoalesce.until = now + 800
+  }
+  objects.value = zShiftObjects(objects.value, ids, dir)
+  saveSoon()
+}
+/** 批量图片分组（P2）：选中 image 统一格宽网格重排 + 自动成组 */
+function gridArrangeSelected() {
+  const imgs = objects.value.filter((o) => selection.value.includes(o.id) && o.type === 'image')
+  if (imgs.length < 2) {
+    message.warning(t('canvasGridNeedImages'))
+    return
+  }
+  // 落点：当前选中包围盒左上角
+  const b = bboxOf(imgs)
+  const moves = gridArrangeImages(
+    objects.value,
+    imgs.map((o) => o.id),
+    {
+      originX: Math.round(b.x),
+      originY: Math.round(b.y),
+      cellW: 260,
+      cols: Math.min(3, Math.ceil(Math.sqrt(imgs.length)) || 1),
+    },
+  )
+  if (!moves.size) return
+  beforeChange()
+  for (const [id, pos] of moves) {
+    const o = objects.value.find((x) => x.id === id)
+    if (o) Object.assign(o, pos)
+  }
+  // 自动成组（已在组里的先移除，再统一入新组）
+  const members = imgs.map((o) => o.id)
+  groups.value = groups.value
+    .map((g) => ({ ...g, members: g.members.filter((m) => !members.includes(m)) }))
+    .filter((g) => g.members.length > 1)
+  groups.value.push({ id: 'g' + Date.now(), members })
+  message.success(t('canvasGridArranged').replace('{n}', String(members.length)))
+  saveSoon()
+}
+
+/** 多选对齐（左/右/上/下/水平居中/垂直居中）：应用坐标映射 */
+// C-H18 确认卡 TTL:10 分钟未确认自动过期(陈旧卡不再悬挂误导)
+const nowTick = ref(Date.now())
+setInterval(() => (nowTick.value = Date.now()), 30_000)
+const PENDING_OPS_TTL = 10 * 60 * 1000
+const opsExpired = computed(() => {
+  if (!pendingAgentOps.value || !pendingAgentOpsAt.value) return false
+  return nowTick.value - pendingAgentOpsAt.value > PENDING_OPS_TTL
+})
+
+// C-H13 多选浮动操作栏: 选区上方跟随的快捷批量操作(Figma 式)
+const selBar = computed(() => {
+  const ids = selection.value
+  if (ids.length < 2) return null
+  const picked = objects.value.filter((o) => ids.includes(o.id))
+  if (!picked.length) return null
+  const b = bboxOf(picked)
+  const tl = worldToScreen(viewport.value, b.x, b.y)
+  return {
+    x: Math.max(12, tl.x),
+    y: Math.max(TOOLBAR_H + 12, tl.y - 44),
+    count: ids.length,
+    apps: picked.filter((o) => o.type === 'app').length,
+  }
+})
+/** 框选命中后浮出选区指令条（A14）。随 selection 数量变化由 onMouseUp 调用。
+ *  注：本函数在 01e637e0「AI 指令编排抽 useCanvasAiActions」时被一并删除，但 onMouseUp
+ *  的调用点留着 —— 框选命中即抛 ReferenceError，还会连带跳过紧随其后的
+ *  `drag.mode = null` / `saveSoon()`，连带表现为「框选之后空格+拖 平移失灵」。 */
+function openSelPrompt() {
+  if (!selection.value.length) return
+  const b = bboxOf(objects.value.filter((o) => selection.value.includes(o.id)))
+  const tl = worldToScreen(viewport.value, b.x, b.y)
+  selPrompt.value = {
+    x: clamp(tl.x, 8, size.w - 380),
+    y: clamp(tl.y - 52, 8, size.h - 60),
+    text: '',
+  }
+}
+const spotlightRect = computed(() => {
+  const o = objects.value.find((x) => x.id === spotlightId.value)
+  if (!o) return null
+  return { x: o.x - 6, y: o.y - 6, width: o.width + 12, height: o.height + 12 }
+})
+function selBarRunApps() {
+  runAppNodes(
+    objects.value
+      .filter((o) => selBar.value && selection.value.includes(o.id) && o.type === 'app')
+      .map((o) => o.id),
+  )
+}
+function selBarDelete() {
+  deleteSelected()
+}
+
+function alignSel(mode) {
+  if (selection.value.length < 2) return
+  const moves = alignObjects(objects.value, selection.value, mode)
+  if (!moves.size) return
+  beforeChange()
+  for (const [id, pos] of moves) {
+    const o = objects.value.find((x) => x.id === id)
+    if (o) Object.assign(o, pos)
+  }
+  saveSoon()
+}
+/** 多选等距分布（水平/垂直），≥3 个物件生效 */
+function distributeSel(axis) {
+  if (selection.value.length < 3) return
+  const moves = distributeObjects(objects.value, selection.value, axis)
+  if (!moves.size) return
+  beforeChange()
+  for (const [id, pos] of moves) {
+    const o = objects.value.find((x) => x.id === id)
+    if (o) Object.assign(o, pos)
+  }
+  saveSoon()
+}
+function pasteAt(wx, wy) {
+  if (!clipboard.value.length) return
+  const cur = clipboard.value
+  const b = bboxOf(cur)
+  const dx = wx - (b.x + b.width / 2)
+  const dy = wy - (b.y + b.height / 2)
+  const idMap = new Map()
+  const fresh = cur.map((o) => {
+    const nid = 'n' + Date.now() + Math.random().toString(36).slice(2, 6)
+    idMap.set(o.id, nid)
+    return { ...JSON.parse(JSON.stringify(o)), id: nid, x: o.x + dx, y: o.y + dy }
+  })
+  beforeChange()
+  objects.value.push(...fresh)
+  selection.value = fresh.map((o) => o.id)
+  for (const l of links.value) {
+    if (idMap.has(l.from) && idMap.has(l.to)) {
+      links.value.push({
+        id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5),
+        from: idMap.get(l.from),
+        to: idMap.get(l.to),
+      })
+    }
+  }
+  closeCtxMenu()
+  saveSoon()
+}
+function addNoteAt(wx, wy) {
+  beforeChange()
+  const id = 'n' + Date.now()
+  objects.value.push({
+    id,
+    type: 'note',
+    x: wx - 90,
+    y: wy - 60,
+    width: 180,
+    height: 120,
+    text: '',
+  })
+  closeCtxMenu()
+  saveSoon()
+  startNoteEdit(id) // 新建即进入编辑
+}
+
+// —— A14 选区快捷指令条 ——
+
+function openGenNode(ids = []) {
+  const imgs = ids.filter((id) => (objects.value.find((o) => o.id === id) || {}).type === 'image')
+  const refs = imgs.map(refOf).filter(Boolean)
+  const c = screenToWorld(viewport.value, size.w / 2, size.h / 2)
+  const s = worldToScreen(viewport.value, c.x, c.y)
+  genNode.value = {
+    x: clamp(s.x - 160, 8, size.w - 330),
+    y: clamp(s.y - 90, 8, size.h - 200),
+    prompt: '',
+    refs,
+    running: false,
+  }
+}
+async function runGenNode() {
+  const g = genNode.value
+  if (!g || g.running || !g.prompt.trim()) return
+  g.running = true
+  lastSourceIds = g.refs.map((r) => r.__id || '').filter(Boolean)
+  // refs 是附件形态 {filename,...}；按物件 id 反查溯源
+  emitPrompt(g.prompt, { autoSend: true, attachments: g.refs })
+  genNode.value = null
+  message.success(t('canvasSelPromptSent'))
+}
+
+// —— A1 画布内 inpaint / A2 扩图 / A9 增强 / A7 反推 / A4 视频 / A10 一致性 ——
+// 这些动作都收敛为「把指令+目标附件发工作台执行」，产物经 onResult 自动落布+溯源。
+// —— N10 Frame 分区 ——
+function addFrameAt(wx, wy) {
+  beforeChange()
+  objects.value.push({
+    id: 'f' + Date.now(),
+    type: 'frame',
+    x: wx - 200,
+    y: wy - 140,
+    width: 400,
+    height: 280,
+    name: t('canvasFrameDefault'),
+  })
+  closeCtxMenu()
+  saveSoon()
+}
+const frameObjects = computed(() => withCull((o) => o.type === 'frame'))
+// Frame/Shot 配置：纯函数版见 nodeConfigs.js（fix 注释原样保留在那）
+function frameConfig(o) {
+  return cfgFrameConfig(cfgCtx.value, o)
+}
+function frameLabelConfig(o) {
+  return cfgFrameLabelConfig(cfgCtx.value, o)
+}
+function shotRectConfig(o) {
+  return cfgShotRectConfig(cfgCtx.value, o)
+}
+function shotSeqConfig(o) {
+  return cfgShotSeqConfig(cfgCtx.value, o)
+}
+function shotTextConfig(o) {
+  return cfgShotTextConfig(cfgCtx.value, o)
+}
+
+// —— N5 分镜帧（storyboard shot 卡：镜号+画面+描述；A5 批量生成） ——
+function addShotAt(wx, wy) {
+  beforeChange()
+  objects.value.push({
+    id: 's' + Date.now(),
+    type: 'shot',
+    x: wx - 110,
+    y: wy - 80,
+    width: 220,
+    height: 160,
+    seq: shotSeqNext(),
+    text: '',
+    src: '',
+  })
+  closeCtxMenu()
+  saveSoon()
+}
+function shotSeqNext() {
+  return objects.value.filter((o) => o.type === 'shot').length + 1
+}
+const shotObjects = computed(() =>
+  withCull((o) => o.type === 'shot').sort((a, b) => (a.seq || 0) - (b.seq || 0)),
+)
+
+// —— A5 分镜批量：把 shot 的 text 逐条发工作台，产物按列网格落布 ——
+function batchShots() {
+  const shots = shotObjects.value.filter((s) => (s.text || '').trim())
+  if (!shots.length) return
+  const seqs = shots.map((s) => s.seq)
+  emitPrompt(
+    t('canvasBatchShotsPrompt').replace('{n}', String(shots.length)) +
+      '\n' +
+      shots.map((s) => `#${s.seq}: ${s.text.trim()}`).join('\n'),
+    { autoSend: true, attachments: [] },
+  )
+  message.info(t('canvasBatchShotsQueued').replace('{n}', String(shots.length)))
+}
+
+function fitAll() {
+  if (!objects.value.length) return resetView()
+  const b = bboxOf(objects.value)
+  const pad = 60
+  const scale = clamp(
+    Math.min((size.w - pad * 2) / b.width, (size.h - pad * 2) / b.height),
+    MIN_SCALE,
+    MAX_SCALE,
+  )
+  viewport.value = centerViewport({ x: b.x + b.width / 2, y: b.y + b.height / 2 }, size, scale)
+  applyViewport()
+  saveSoon()
+}
+
+/**
+ * 重置视图 = 缩放回 100%，**保持你当前看的位置不动**（Figma `Ctrl+0` 口径）。
+ *
+ * 此前是 `viewport = {scale:1, x:0, y:0}` —— 等于把世界原点钉在画布**左上角**。
+ * 内容一旦不在原点附近（平移后新建的节点常带大负坐标，例如 -2691,-1756），点它
+ * 画布就只剩网格，看着像内容丢了（用户报障：「重置视图看起来不太对」）。
+ * 也试过"锚到内容包围盒中心"，但内容散布很开时（例如两节点相距 3340）包围盒中心
+ * 恰是**空白区**，看着还是空——所以最稳的口径是**不改变视口中心**：
+ * 只重置缩放，绝不把你挪走；要找内容用「全部适配视图」。
+ */
+function resetView() {
+  const center = screenToWorld(viewport.value, size.w / 2, size.h / 2)
+  viewport.value = centerViewport(center, size, 1)
+  applyViewport()
+  // 视图改动要落盘（与滚轮缩放同口径，见 onWheel 的 C-H8 修复）：
+  // 否则刷新后视图又跳回旧值，「重置」等于没生效。
+  saveSoon()
+}
+
+function applyViewport() {
+  const st = stageEl.value?.getStage?.()
+  if (!st) return
+  st.scale({ x: viewport.value.scale, y: viewport.value.scale })
+  st.position({ x: viewport.value.x, y: viewport.value.y })
+  st.batchDraw()
+}
+
+function deleteSelected() {
+  if (!selection.value.length) return
+  if (ctxMenu.value) ctxMenu.value = null
+  beforeChange()
+  const gone = new Set(selection.value)
+  objects.value = objects.value.filter((o) => !gone.has(o.id))
+  // 级联：删除物件上的连线、所在组
+  links.value = links.value.filter((l) => !gone.has(l.from) && !gone.has(l.to))
+  groups.value = groups.value
+    .map((g) => ({ ...g, members: g.members.filter((m) => !gone.has(m)) }))
+    .filter((g) => g.members.length > 1)
+  selection.value = []
+  saveSoon()
+  // C-H19 删除 toast 内嵌撤销(Figma 式):快捷键存在但不可见,给一键恢复
+  message.info({
+    content: h('span', null, [
+      `已删除 ${gone.size} 个对象 `,
+      h(
+        'a',
+        {
+          style: 'margin-left:8px;text-decoration:underline;cursor:pointer',
+          onClick: () => {
+            undoLast()
+            message.destroy('canvas-delete-undo')
+          },
+        },
+        '撤销',
+      ),
+    ]),
+    key: 'canvas-delete-undo',
+    duration: 5,
+  })
+}
+
+// —— 组合与解组 ——
+function groupSelected() {
+  if (selection.value.length < 2) return
+  const members = [...selection.value]
+  beforeChange()
+  // 已在其他组的成员先从原组移除
+  groups.value = groups.value
+    .map((g) => ({ ...g, members: g.members.filter((m) => !members.includes(m)) }))
+    .filter((g) => g.members.length > 1)
+  groups.value.push({ id: 'g' + Date.now(), members })
+  message.success(t('canvasGrouped').replace('{n}', String(members.length)))
+  saveSoon()
+}
+function ungroupSelection() {
+  const sel = new Set(selection.value)
+  const before = groups.value.length
+  beforeChange()
+  groups.value = groups.value
+    .map((g) => ({ ...g, members: g.members.filter((m) => !sel.has(m)) }))
+    .filter((g) => g.members.length > 1)
+  if (groups.value.length < before) {
+    message.success(t('canvasUngrouped'))
+    saveSoon()
+  }
+}
+function groupOf(id) {
+  return groups.value.find((g) => g.members.includes(id))
+}
+
+// —— 连线点选/右键（参考 infinite-canvas ConnectionPath onSelect/onContextMenu）——
+function onLinkDown(e) {
+  const id = e.target.id()
+  // 仅左键选中；e.evt.button === 2 右键走 contextmenu
+  if (e.evt && e.evt.button !== undefined && e.evt.button !== 0) return
+  selectedLinkId.value = id
+  selection.value = [] // 连线与物件互斥选中（参考 setSelectedConnectionId + setSelectedNodeIds(new Set())）
+}
+function onLinkContextMenu(evt, id) {
+  selectedLinkId.value = id
+  // Konva 事件对象不兼容 Vue .prevent 修饰符，代理到原生 evt
+  const native = evt?.evt || evt
+  native?.preventDefault?.()
+  native?.stopPropagation?.()
+  ctxMenu.value = {
+    kind: 'link',
+    id,
+    x: (native.clientX ?? 0) + 2,
+    y: (native.clientY ?? 0) + 2,
+    wx: 0,
+    wy: 0,
+    targetIds: [],
+  }
+}
+function deleteSelectedLink() {
+  if (!selectedLinkId.value) return
+  if (reconnectDrag.active) cancelReconnectDrag()
+  if (ctxMenu.value) ctxMenu.value = null
+  beforeChange()
+  links.value = links.value.filter((l) => l.id !== selectedLinkId.value)
+  selectedLinkId.value = null
+  saveSoon()
+}
+
+// —— 复制/粘贴（Ctrl+C/V；剪贴板 = 序列化物件数组，粘贴时重生成 id + 偏移 24px） ——
+const clipboard = ref([]) // 深拷贝的物件数组
+function copySelection() {
+  if (!selection.value.length) return
+  clipboard.value = selection.value
+    .map((id) => objects.value.find((o) => o.id === id))
+    .filter(Boolean)
+    .map((o) => JSON.parse(JSON.stringify(o)))
+  if (clipboard.value.length)
+    message.info(t('canvasCopied').replace('{n}', String(clipboard.value.length)))
+}
+function pasteClipboard() {
+  if (!clipboard.value.length) return
+  beforeChange()
+  const idMap = new Map()
+  const fresh = clipboard.value.map((o) => {
+    const nid = 'n' + Date.now() + Math.random().toString(36).slice(2, 6)
+    idMap.set(o.id, nid)
+    return { ...JSON.parse(JSON.stringify(o)), id: nid, x: o.x + 24, y: o.y + 24 }
+  })
+  objects.value.push(...fresh)
+  selection.value = fresh.map((o) => o.id)
+  // 物件内部的连线一并复制（两端都在剪贴板内的）
+  const innerLinks = links.value.filter((l) => idMap.has(l.from) && idMap.has(l.to))
+  for (const l of innerLinks) {
+    links.value.push({
+      id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5),
+      from: idMap.get(l.from),
+      to: idMap.get(l.to),
+    })
+  }
+  saveSoon()
+}
+
+// —— 圈选裁剪：把 crop 矩形与所压图片的交集裁下来，作为新图发工作台 ——
+// 取图走同源 /view 代理（express GET 代理 / vite dev proxy）：直接用 ComfyUI
+// 绝对 URL 画 canvas 会被污染（ComfyUI 不带 CORS 头）→ toBlob 抛 SecurityError。
+async function fetchImageForCrop(src) {
+  const qIndex = src.indexOf('?')
+  const query = qIndex >= 0 ? src.slice(qIndex + 1) : ''
+  const candidates = []
+  if (query && !/^(data|blob):/.test(src)) candidates.push('/view?' + query)
+  if (!/^(data|blob):/.test(src)) candidates.push(src)
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url, { mode: 'cors' })
+      if (!res.ok) continue
+      const blob = await res.blob()
+      if (!blob.type.startsWith('image/')) continue
+      return await createImageBitmap(blob)
+    } catch (e) {
+      /* 试下一个候选 */
+    }
+  }
+  return loadImage(src)
+}
+
+async function cropAndSend(r) {
+  beforeChange()
+  const hits = hitTestRect(objects.value, r.x, r.y, r.w, r.h).filter(
+    (i) => objects.value[i].type === 'image',
+  )
+  if (!hits.length) {
+    message.warning(t('canvasCropNoImage'))
+    return
+  }
+  // 按面积取最大相交图片（圈多图时取最主要的一张，避免多附件歧义）
+  let best = null
+  for (const i of hits) {
+    const o = objects.value[i]
+    const c = cropRectFor(naturalOf(o), r.x, r.y, r.w, r.h)
+    if (c && (!best || c.width * c.height > best.area)) best = { o, c, area: c.width * c.height }
+  }
+  if (!best) return
+  const o = naturalOf(best.o)
+  const c = best.c
+  let srcImg
+  try {
+    srcImg = await fetchImageForCrop(o.src)
+  } catch (e) {
+    message.warning(t('canvasCropNoImage'))
+    return
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(c.sw))
+  canvas.height = Math.max(1, Math.round(c.sh))
+  const ctx = canvas.getContext('2d')
+  ctx.drawImage(srcImg, c.sx, c.sy, c.sw, c.sh, 0, 0, canvas.width, canvas.height)
+  // toBlob 在 canvas 被污染时会同步抛 SecurityError，这里兜住降级为提示
+  const blob = await new Promise((resolve) => {
+    try {
+      canvas.toBlob(resolve, 'image/png')
+    } catch (e) {
+      resolve(null)
+    }
+  })
+  if (!blob) {
+    message.warning(t('canvasCropNoImage'))
+    return
+  }
+  const f = new File([blob], 'crop-' + Date.now() + '.png', { type: 'image/png' })
+  // 裁剪图走附件通道 file 字段，工作台侧复用 uploadFiles 上传落地（可执行附件）
+  if (wbOpen.value) emitAttachments([{ filename: f.name, file: f }])
+  else pushAttachments([{ filename: f.name, file: f }])
+  message.success(t('workbenchCardAttached').replace('{n}', '1'))
+  // 同时在画布上落一个小缩略物（可删），紧贴原裁剪区右下角
+  const thumb = document.createElement('canvas')
+  const tw = 180
+  thumb.width = tw
+  thumb.height = Math.max(1, Math.round((canvas.height / canvas.width) * tw))
+  thumb.getContext('2d').drawImage(canvas, 0, 0, thumb.width, thumb.height)
+  thumb.toBlob((tb) => {
+    if (!tb) return
+    const turl = URL.createObjectURL(tb)
+    const probe = new Image()
+    probe.onload = () => {
+      objects.value.push({
+        id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+        type: 'image',
+        x: c.x + c.width + 12,
+        y: c.y + c.height - probe.height,
+        width: probe.width,
+        height: probe.height,
+        src: turl,
+      })
+      saveSoon()
+    }
+    probe.src = turl
+  })
+}
+
+function clamp(v, a, b) {
+  return Math.min(b, Math.max(a, v))
+}
+
+// —— 画布 → 侧栏工作台感知条（选区/物件摘要，与 C 宿主 embed 感知条同构）——
+let canvasSeq = 0
+const canvasDigest = computed(() => {
+  const imgs = objects.value.filter((o) => o.type === 'image').length
+  const notes = objects.value.filter((o) => o.type === 'note').length
+  const apps = appNodesDigest(objects.value)
+  return {
+    seq: 0, // 实例序号在 emit 时自增（computed 本身无副作用）
+    workflowName: t('canvasDigestName'),
+    nodeCount: objects.value.length,
+    models: [],
+    // 选区项结构化:LLM 工具读 digest 时可寻址(后续 wb_canvas_ops/get_state
+    // 接入摘要注入的前置;UI 感知条用 label 拼单行)。app 节点 status 单独
+    // 通过 queue.running 展示,不重复进 label。
+    selection: selection.value
+      .map((id) => {
+        const o = objects.value.find((x) => x.id === id)
+        if (!o) return null
+        const size = o.width && o.height ? `${o.width}×${o.height}` : null
+        if (o.type === 'app') {
+          return { id, kind: 'app', label: o.name || o.appId || 'app', status: o.status || 'idle' }
+        }
+        if (o.type === 'image') {
+          let label = 'image'
+          try {
+            if (o.src) {
+              const u = new URL(o.src)
+              label =
+                u.searchParams.get('filename') ||
+                decodeURIComponent(u.pathname.split('/').pop() || '') ||
+                label
+            }
+          } catch {
+            /* blob:/data: 等 fallback 'image' */
+          }
+          return { id, kind: 'image', label, size }
+        }
+        if (o.type === 'note') {
+          const t = (o.text || '').replace(/\s+/g, ' ').slice(0, 24)
+          return { id, kind: 'note', label: t || 'note' }
+        }
+        return { id, kind: o.type, label: o.name || o.type, size }
+      })
+      .filter(Boolean),
+    counts: {
+      images: imgs,
+      notes,
+      apps: apps.length,
+      links: links.value.length,
+      groups: groups.value.length,
+    },
+    appNodes: apps, // P3：AI 感知画布上的 app 节点（id/名称/状态/参数摘要）
+    queue: { running: apps.filter((a) => a.status === 'running').length, pending: 0 },
+    ts: Date.now(),
+    // D2：A 画布标记 + 全量物件可寻址清单（wb_canvas_ops 寻址：真实物件 id）
+    surface: 'a-canvas',
+    links: links.value.length,
+    objects: objects.value.map((o) => {
+      let label = o.name || o.type
+      if (o.type === 'image') {
+        // /view 引用取 filename；blob:/data: 无可读名 → 「图片 #id尾」
+        label = o.name || ''
+        if (!label && o.src && o.src.startsWith('http')) {
+          try {
+            const u = new URL(o.src)
+            label =
+              u.searchParams.get('filename') ||
+              decodeURIComponent(u.pathname.split('/').pop() || '') ||
+              ''
+          } catch {
+            /* 异常 URL 保持空 */
+          }
+        }
+        if (!label) label = '图片 #' + String(o.id).slice(-4)
+      } else if (o.type === 'note') {
+        label = (o.text || '').replace(/\s+/g, ' ').slice(0, 24) || 'note'
+      }
+      const size = o.width && o.height ? `${o.width}×${o.height}` : undefined
+      return { id: o.id, kind: o.type, label: label.slice(0, 40), size }
+    }),
+  }
+})
+watch(
+  () => [
+    selection.value.slice(),
+    objects.value.length,
+    links.value.length,
+    groups.value.length,
+    JSON.stringify(appNodesDigest(objects.value)),
+  ],
+  () => {
+    // D2：digest 除总线推 UI 外，同步 POST 服务端 snapshot（AI 决策层
+    // fetchCanvasState 读 /api/canvas/state —— 不落服务端 AI 看不到 A 画布）
+    const d = { ...canvasDigest.value, seq: ++canvasSeq }
+    emitCanvasState(d)
+    pushDigestSnapshot(d)
+  },
+  { deep: false },
+)
+/** digest → 服务端（节流 2s；内容序列化一致时跳过；失败静默重试下轮） */
+let digestSnapLast = ''
+let digestSnapTimer = 0
+// fix(404 刷屏): 旧版 server（或路由未挂）对 /api/canvas/snapshot 回 404 时，
+// Chromium 每次请求都往控制台打一条黄色 Failed to load resource——digest
+// 一变就 POST，控制台被 404 淹没。失败（网络错/非 2xx）后冷却 60s，
+// 期间不重试；成功才恢复常态推送。
+let digestSnapCooldownUntil = 0
+function pushDigestSnapshot(d) {
+  clearTimeout(digestSnapTimer)
+  digestSnapTimer = setTimeout(() => {
+    if (Date.now() < digestSnapCooldownUntil) return
+    // fix(推送风暴): digest 含 ts:Date.now()，任何重算 JSON 必变——去重
+    // 形同虚设，每次 watch 触发都 POST。去重时剥离 ts（服务端不需要）。
+    const { ts: _ts, ...rest } = d
+    const json = JSON.stringify(rest)
+    if (json === digestSnapLast) return
+    digestSnapLast = json
+    // A 画布页无注入桥全局：主窗 3008 同源代理 API server（ComfyUI iframe
+    // 侧才用 __ARTIFY_LAB_API__）；都取不到时放弃本轮（下轮重试）
+    const api = window.__ARTIFY_LAB_API__ || window.location.origin
+    void fetch(`${api}/api/canvas/snapshot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: json,
+    })
+      .then((r) => {
+        if (!r.ok) digestSnapCooldownUntil = Date.now() + 60_000
+      })
+      .catch(() => {
+        digestSnapCooldownUntil = Date.now() + 60_000
+      })
+  }, 2000)
+}
+
+// —— 持久化（localStorage 防抖 500ms）——
+let saveTimer = null
+function saveSoon() {
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(saveNow, 500)
+}
+function saveNow() {
+  // 项目集为唯一事实源；旧 key 继续双写（迁移兼容，外部工具可读）
+  syncActiveDocToStore()
+  persistProjects()
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      serializeDoc(objects.value, viewport.value, 'Untitled', links.value, groups.value),
+    )
+  } catch {
+    /* 容量满时静默，画布仍可用 */
+  }
+}
+function loadNow() {
+  // S1 起以项目集为准（bootProjects 已迁移并装载 activeProject）
+  if (activeProject.value) {
+    loadProjectIntoCanvas()
+    return
+  }
+  const raw = localStorage.getItem(STORAGE_KEY)
+  if (!raw) return
+  const doc = parseDoc(raw)
+  objects.value = doc.objects
+  links.value = doc.links
+  groups.value = doc.groups
+  viewport.value = doc.viewport
+  history.value = createHistory(60) // 载入即新基线
+}
+
+// 键盘：Delete 删除选中；空格按住=平移；Esc=退工具；Ctrl+G/Ctrl+Shift+G=组
+function onKey(e) {
+  const tag = document.activeElement?.tagName
+  const inEditor = tag === 'INPUT' || tag === 'TEXTAREA'
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (inEditor) return
+    if (selectedLinkId.value) {
+      // 连线与物件选中互斥，这里单独收（此前 Delete 对连线失效）
+      e.preventDefault()
+      deleteSelectedLink()
+    } else if (selection.value.length) {
+      e.preventDefault()
+      deleteSelected()
+    }
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+    // Ctrl+A 全选画布物件（编辑态保留浏览器默认全选文本）
+    if (inEditor) return
+    e.preventDefault()
+    if (ctxMenu.value) ctxMenu.value = null
+    if (connectCreate.open) closeConnectCreate()
+    selection.value = objects.value.map((o) => o.id)
+    selectedLinkId.value = null
+  } else if (e.code === 'Space' && !e.repeat) {
+    spaceDown.value = true
+    if (!inEditor) e.preventDefault()
+  } else if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+    if (inEditor) return
+    shortcutsOpen.value = !shortcutsOpen.value
+  } else if (e.key === 'Escape') {
+    if (reconnectDrag.active) {
+      // 重连拖拽中：取消本次拖拽，保留连线选中（锚点仍可再拖）
+      e.preventDefault()
+      cancelReconnectDrag()
+      drag.mode = null
+      drag.last = null
+    } else if (ctxMenu.value) {
+      ctxMenu.value = null
+    } else if (shortcutsOpen.value) {
+      shortcutsOpen.value = false
+    } else if (guideOpen.value) {
+      guideOpen.value = false
+    } else if (tool.value) {
+      tool.value = null
+      syncDraggables()
+    } else if (!inEditor) selection.value = []
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'g' || e.key === 'G')) {
+    if (inEditor) return
+    e.preventDefault()
+    if (e.shiftKey) ungroupSelection()
+    else groupSelected()
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+    if (inEditor) return
+    e.preventDefault()
+    if (e.shiftKey) redoLast()
+    else undoLast()
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
+    if (inEditor) return
+    e.preventDefault()
+    redoLast()
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+    if (inEditor) return
+    copySelection()
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V')) {
+    if (inEditor) return
+    pasteClipboard()
+  }
+}
+function onKeyUp(e) {
+  if (e.code === 'Space') spaceDown.value = false
+}
+
+// —— 图片落画布：文件拖入 + 剪贴板粘贴 ——
+// —— 节点悬浮工具栏（S4a）：悬停物件上方快捷动作条 ——
+/** 工具栏“停留”保护：鼠标移入工具栏本身时不算离开节点（参考 onKeep/onLeave） */
+const toolbarKeep = ref(false)
+/**
+ * 悬停收起延迟：鼠标移出节点后延时再清 hoverNodeId，途中移入工具栏可取消。
+ * 原逻辑为 mousemove 命中空白即立刻清空，鼠标从节点走向工具栏必然途经
+ * 10px 间隙（工具栏 y = 节点顶 - 10），工具栏先于鼠标到达而消失 —— 表现为
+ * “菜单无法停留”。延迟 + 桥接热区共同解决。
+ */
+const HOVER_HIDE_DELAY = 220
+let hoverHideTimer = null
+function cancelHoverHide() {
+  if (hoverHideTimer) {
+    clearTimeout(hoverHideTimer)
+    hoverHideTimer = null
+  }
+}
+/** 排一次收起；delay<=0 为立即（如指针移出整个画布区）。同时复位 toolbarKeep，
+ *  避免工具栏被 v-if 摘掉后 mouseleave 不触发、toolbarKeep 残留 true 卡住后续悬停 */
+function scheduleHoverHide(delay = HOVER_HIDE_DELAY) {
+  cancelHoverHide()
+  const hide = () => {
+    hoverHideTimer = null
+    toolbarKeep.value = false
+    hoverNodeId.value = null
+    // 弹层挂在 hoverToolbar 内部（v-if 于工具栏节点树中），工具栏收起即成孤儿
+    if (tbSettings.open) tbSettings.open = false
+  }
+  if (delay > 0) hoverHideTimer = setTimeout(hide, delay)
+  else hide()
+}
+/** 鼠标进出工具栏：进 = 钉住（取消待收起），出 = 延时收起 */
+function keepToolbar(on) {
+  toolbarKeep.value = on
+  if (on) cancelHoverHide()
+  else scheduleHoverHide()
+}
+/**
+ * 字号微调（P3 undo 合并）：同 note 连续 bump 在 800ms 窗口内合并为一条
+ * 历史——undo 一步回到连续微调前，而非每 ±1px 一条。
+ * coalesce 窗口过期后新起一条。属性/对象变了也新起一条。
+ */
+let bumpCoalesce = null // { id, dir, until }
+function nodeBumpFont(id, delta) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || o.type !== 'note') return
+  const now = Date.now()
+  const canMerge =
+    bumpCoalesce &&
+    bumpCoalesce.id === id &&
+    bumpCoalesce.dir === (delta > 0 ? 1 : -1) &&
+    now < bumpCoalesce.until
+  if (!canMerge) {
+    beforeChange()
+    bumpCoalesce = { id, dir: delta > 0 ? 1 : -1, until: now + 800 }
+  } else {
+    bumpCoalesce.until = now + 800 // 仍在窗口内：续窗
+  }
+  o.fontSize = clamp((o.fontSize || 13) + delta, 9, 48)
+  saveSoon()
+}
+function nodeDownloadImage(id) {
+  const o = objects.value.find((x) => x.id === id)
+  if (!o) return
+  const url = o.persist || o.src
+  if (!url) return
+  fetch(url)
+    .then((r) => r.blob())
+    .then((b) => {
+      const u = URL.createObjectURL(b)
+      const a = document.createElement('a')
+      a.href = u
+      a.download = `canvas-${o.id}.png`
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(u), 5000)
+    })
+    .catch(() => message.error(t('canvasDownloadFailed')))
+}
+function nodeCopyObj(id) {
+  selection.value = [id]
+  copySelection()
+}
+function nodeDeleteObj(id) {
+  selection.value = [id]
+  deleteSelected()
+}
+/** 悬浮工具栏高度（h-9），用于贴顶时翻转到节点下方的判定 */
+const TOOLBAR_H = 36
+/** 悬停节点 → 工具栏屏幕坐标 + 按类型装配动作 */
+/** E2：节点参考条 —— 悬停/选中节点的上游引用（缩略图横排 + 断开 + 预览 + 加引用） */
+/** 软渲提示条（一次性）：window.__SOFT_RENDER__ 由 main.js 检测写入 */
+const softRenderTip = ref(false)
+function dismissSoftRenderTip() {
+  softRenderTip.value = false
+  try {
+    localStorage.setItem('artify.canvas.softRenderTipDismissed', '1')
+  } catch {
+    /* 忽略 */
+  }
+}
+if (window.__SOFT_RENDER__ && !localStorage.getItem('artify.canvas.softRenderTipDismissed')) {
+  softRenderTip.value = true
+}
+const refBarPreview = reactive({ id: null, x: 0, y: 0 }) // 悬停预览大图
+const refBarHover = ref(null) // 锁定显示（防缩略图 hover 抖动）
+const nodeRefBar = computed(() => {
+  // 优先锁定 hover 的缩略图，其次当前悬停/选中节点
+  const id = refBarHover.value || hoverNodeId.value || selection.value[selection.value.length - 1]
+  if (!id || selection.value.length > 1) return null
+  const o = objects.value.find((x) => x.id === id)
+  if (!o || o.type === 'frame') return null
+  const ups = links.value
+    .filter((l) => l.to === id)
+    .map((l) => ({ link: l, obj: objects.value.find((x) => x.id === l.from) }))
+    .filter((r) => r.obj)
+  // 无上游也显示（仅 + 按钮）——否则「添加引用」入口不可达
+  const tl = worldToScreen(viewport.value, o.x, o.y)
+  return {
+    id,
+    x: tl.x,
+    y: tl.y + o.height * viewport.value.scale + 6,
+    refs: ups.slice(0, 12).map((r) => ({
+      linkId: r.link.id,
+      fromId: r.obj.id,
+      kind: r.obj.type,
+      label: refLabelOf(r.obj),
+      src: r.obj.type === 'image' ? r.obj.src : r.obj.type === 'video' ? r.obj.src : null,
+      text: r.obj.type === 'note' ? String(r.obj.text || '') : '',
+    })),
+  }
+})
+/** 引用条缩略图 label（与 digest 口径一致） */
+function refLabelOf(o) {
+  if (o.type === 'note')
+    return (
+      String(o.text || '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 20) || t('canvasKindNote')
+    )
+  if (o.type === 'image' || o.type === 'video') {
+    if (o.name) return o.name
+    try {
+      if (o.src && o.src.startsWith('http')) {
+        const u = new URL(o.src)
+        return (
+          u.searchParams.get('filename') ||
+          decodeURIComponent(u.pathname.split('/').pop() || '') ||
+          t(o.type === 'image' ? 'canvasKindImage' : 'canvasKindVideo')
+        )
+      }
+    } catch {
+      /* blob:/data: */
+    }
+    return (
+      t(o.type === 'image' ? 'canvasKindImage' : 'canvasKindVideo') + ' #' + String(o.id).slice(-4)
+    )
+  }
+  return o.name || o.type
+}
+/** E2：断开引用连线（X 按钮） */
+function refBarDisconnect(linkId) {
+  links.value = links.value.filter((l) => l.id !== linkId)
+  saveSoon()
+}
+/** E2：悬停缩略图 → 锁定条 + 大图预览浮层 */
+function refBarEnter(item, ev) {
+  refBarHover.value = nodeRefBar.value?.id ?? null
+  if (!item.src) return
+  const r = ev.currentTarget.getBoundingClientRect()
+  refBarPreview.id = item.fromId
+  refBarPreview.x = r.right + 8
+  refBarPreview.y = Math.max(8, r.top - 80)
+}
+function refBarLeave() {
+  refBarHover.value = null
+  refBarPreview.id = null
+}
+/** E2：+ 按钮 → 以本节点为 target 发起连线拖拽（把新上游拉进来） */
+function refBarStartLink(toId, ev) {
+  // UX 诉求：点 + 直接弹「创建节点」菜单（选中类型即建 + 自动连线），
+  // 不再进入拖线手势（原行为要求拖到目标上，落空还得再点一次才见菜单）。
+  const o = objects.value.find((x) => x.id === toId)
+  if (!o) return
+  const src = ev?.currentTarget
+  const r = src?.getBoundingClientRect?.()
+  const wrap = wrapEl.value?.getBoundingClientRect?.()
+  // 屏幕坐标：优先按钮下方；取不到（键盘等无事件源）则节点左下角
+  const sx = r && wrap ? clamp(r.left - wrap.left, 8, Math.max(8, size.w - 180)) : 8
+  const sy = r && wrap ? clamp(r.bottom - wrap.top + 4, 8, Math.max(8, size.h - 210)) : 8
+  // 世界坐标：菜单里选类型后新节点落点（节点正下方一卡位）
+  const wx = o.x
+  const wy = o.y + o.height + 24
+  connectCreate.open = true
+  connectCreate.x = sx
+  connectCreate.y = sy
+  connectCreate.wx = wx
+  connectCreate.wy = wy
+  connectCreate.to = toId
+  connectCreate.from = null
+}
+
+/** E2：预览浮层对应的引用源物件 */
+const refBarPreviewObj = computed(() => {
+  if (!refBarPreview.id) return null
+  const bar = nodeRefBar.value
+  return bar?.refs.find((r) => r.fromId === refBarPreview.id) ?? null
+})
+
+// —— 工具栏显隐自定义（P1：参考 image-quick-tools 设置弹窗）——
+// 偏好按「工具标题 key」隐藏（跨类型共享 title 自动同步，如「删除」）。
+// 存 localStorage artify.canvas.tbHidden.v1 = [title, ...]
+const TB_HIDDEN_KEY = 'artify.canvas.tbHidden.v1'
+const tbHidden = ref(new Set(JSON.parse(localStorage.getItem(TB_HIDDEN_KEY) || '[]')))
+const tbSettings = reactive({ open: false, x: 0, y: 0 })
+function tbResetHidden() {
+  tbHidden.value = new Set()
+  localStorage.setItem(TB_HIDDEN_KEY, '[]')
+}
+function tbToggleHidden(title) {
+  const next = new Set(tbHidden.value)
+  if (next.has(title)) next.delete(title)
+  else next.add(title)
+  tbHidden.value = next
+  localStorage.setItem(TB_HIDDEN_KEY, JSON.stringify([...next]))
+}
+
+/** 类型化装配悬浮工具栏动作（P1 重构：供 hoverToolbar 与 tbCandidates 共用） */
+function buildToolbarItems(o, id) {
+  const items = []
+  if (o.type === 'note') {
+    items.push(
+      {
+        icon: 'fas fa-palette',
+        title: t('canvasTbNoteColor'),
+        action: () => openNotePalette(id),
+      },
+      { icon: 'fas fa-pen', title: t('canvasTbEditNote'), action: () => startNoteEdit(id) },
+      { icon: 'fas fa-minus', title: t('canvasTbFontDown'), action: () => nodeBumpFont(id, -1) },
+      { icon: 'fas fa-plus', title: t('canvasTbFontUp'), action: () => nodeBumpFont(id, 1) },
+      {
+        icon: 'fas fa-image',
+        title: t('canvasTbGenImage'),
+        action: () => startGenerateFromNote(id),
+      },
+      {
+        icon: 'fas fa-wand-magic-sparkles',
+        title: t('canvasTbRewrite'),
+        action: () => startNoteRewrite(id),
+      },
+      {
+        icon: 'fas fa-bookmark',
+        title: t('canvasTbSavePrompt'),
+        action: () => {
+          const o = objects.value.find((x) => x.id === id)
+          const text = String(o?.text || '').trim()
+          if (!text) {
+            message.warning(t('canvasGenNeedText'))
+            return
+          }
+          addCustomPrompt(text)
+          message.success(t('canvasPromptSaved'))
+        },
+      },
+    )
+  } else if (o.type === 'image') {
+    items.push(
+      {
+        icon: 'fas fa-download',
+        title: t('canvasTbDownload'),
+        action: () => nodeDownloadImage(id),
+      },
+      {
+        icon: 'fas fa-paper-plane',
+        title: t('canvasSendToWorkbench'),
+        action: () => {
+          selection.value = [id]
+          sendSelectionToWorkbench()
+        },
+      },
+      { sep: true },
+      {
+        icon: 'fas fa-rotate-left',
+        title: t('canvasTbRotL'),
+        action: () => rotateImageNode(id, -90),
+      },
+      {
+        icon: 'fas fa-rotate-right',
+        title: t('canvasTbRotR'),
+        action: () => rotateImageNode(id, 90),
+      },
+      { icon: 'fas fa-table-cells', title: t('canvasTbSplit'), action: () => splitImageNode(id) },
+      { icon: 'fas fa-crop-simple', title: t('canvasTbCrop'), action: () => cropImageNode(id) },
+      {
+        icon: 'fas fa-camera-rotate',
+        title: t('canvasTbAngle'),
+        action: () => {
+          angleDlg.id = id
+          angleDlg.deg = 0
+          angleDlg.flipH = false
+          angleDlg.flipV = false
+          angleDlg.open = true
+        },
+      },
+      { sep: true },
+      {
+        icon: 'fas fa-magnifying-glass-plus',
+        title: t('canvasTbUpscale'),
+        action: () => {
+          upscaleDlg.id = id
+          upscaleDlg.target = 2048
+          upscaleDlg.algo = 'high'
+          upscaleDlg.open = true
+        },
+      },
+      {
+        icon: 'fas fa-repeat',
+        title: t('canvasTbReplaceImage'),
+        action: () => uploadMediaFor(id),
+      },
+      { sep: true },
+      {
+        icon: 'fas fa-quote-left',
+        title: t('canvasTbCopyPrompt'),
+        action: () => copyImagePrompt(id),
+      },
+    )
+  } else if (o.type === 'video' || o.type === 'audio') {
+    items.push({
+      icon: 'fas fa-upload',
+      title: o.src ? t('canvasMediaReplace') : t('canvasMediaUpload'),
+      action: () => uploadMediaFor(id),
+    })
+    if (o.type === 'video' && o.src) {
+      items.push(
+        {
+          icon: 'fas fa-backward-step',
+          title: t('canvasFrameFirst'),
+          action: () => captureVideoFrameAt(id, 'first'),
+        },
+        {
+          icon: 'fas fa-forward-step',
+          title: t('canvasFrameLast'),
+          action: () => captureVideoFrameAt(id, 'last'),
+        },
+        {
+          icon: 'fas fa-camera',
+          title: t('canvasFrameCurrent'),
+          action: () => captureVideoFrameAt(id, 'current'),
+        },
+      )
+    }
+  } else if (o.type === 'app') {
+    items.push(
+      { icon: 'fas fa-play', title: t('canvasRunAppNodes'), action: () => runAppNode(id) },
+      {
+        icon: 'fas fa-rotate-right',
+        title: t('canvasRerunFrom'),
+        action: () => rerunFrom(id),
+      },
+      {
+        icon: 'fas fa-sliders',
+        title: t('canvasCtxAppPanel'),
+        action: () => {
+          appPanel.id = appPanel.id === id ? null : id
+        },
+      },
+    )
+  } else if (o.type === 'frame') {
+    items.push({
+      icon: 'fas fa-pen',
+      title: t('canvasRenameFrame'),
+      action: () => startFrameRename(id),
+    })
+  }
+  items.push(
+    { icon: 'fas fa-copy', title: t('canvasTbCopy'), action: () => nodeCopyObj(id) },
+    {
+      icon: 'fas fa-trash',
+      title: t('canvasTbDelete'),
+      danger: true,
+      action: () => nodeDeleteObj(id),
+    },
+  )
+  return items
+}
+
+const hoverToolbar = computed(() => {
+  const id = hoverNodeId.value
+  if (!id) return { x: 0, y: 0, items: [], below: false }
+  const o = objects.value.find((x) => x.id === id)
+  if (!o) return { x: 0, y: 0, items: [], below: false }
+  const tl = worldToScreen(viewport.value, o.x, o.y)
+  const x = tl.x + (o.width * viewport.value.scale) / 2
+  const below = tl.y - 10 < TOOLBAR_H + 12
+  const y = below ? tl.y + o.height * viewport.value.scale + 34 : tl.y - 10
+  const all = buildToolbarItems(o, id)
+  // 用户偏好过滤（标题 key）+ 压缩多余分隔线 + 尾部「…」设置按钮
+  const vis = all.filter((b) => b.sep || !tbHidden.value.has(b.title))
+  const squeezed = []
+  for (const b of vis) {
+    if (b.sep && (squeezed.length === 0 || squeezed[squeezed.length - 1].sep)) continue
+    squeezed.push(b)
+  }
+  while (squeezed.length && squeezed[squeezed.length - 1].sep) squeezed.pop()
+  squeezed.push({
+    icon: 'fas fa-ellipsis',
+    title: t('canvasTbSettings'),
+    action: () => {
+      const el = document.querySelector('.node-hover-toolbar')
+      if (el) {
+        const r = el.getBoundingClientRect()
+        const wrap = wrapEl.value?.getBoundingClientRect()
+        tbSettings.x = r.left - (wrap?.left || 0) + r.width / 2
+        tbSettings.y = r.bottom - (wrap?.top || 0) + 8
+      }
+      // 打开时快照候选工具（popover 显示期间鼠标离开节点会让 hoverNodeId
+      // 清空，实时 computed 会变空列表）——快照保住列表
+      tbSettings.items = all.filter((b) => !b.sep).map((b) => ({ title: b.title, icon: b.icon }))
+      tbSettings.open = true
+    },
+  })
+  return { x, y, items: squeezed, below }
+})
+/** 工具栏被摘掉（节点删除/类型无动作）时 DOM 消失，mouseleave 不再触发 —— 兜底复位 keep，
+ *  否则 toolbarKeep 残留 true 会让后续悬停永远收不起来 */
+watch(
+  () => hoverToolbar.value.items.length,
+  (n) => {
+    if (!n) {
+      toolbarKeep.value = false
+      cancelHoverHide()
+      closeNotePalette() // 工具栏消失（hover 移开/节点删除）时一并收起色板
+    }
+  },
+)
+
+const miniOpen = ref(true) // 小地图开关（缩放控件条内切换）
+const shortcutsOpen = ref(false) // 快捷键面板
+const guideOpen = ref(false) // 用法指南弹窗（节点类型 × 场景玩法）
+/** 滑杆缩放：以画布中心为锚（与滚轮一致的锚点语义） */
+function onZoomSlider(e) {
+  const target = Number(e.target.value) / 100
+  const cur = viewport.value.scale
+  if (!target || target === cur) return
+  viewport.value = zoomAtPoint(
+    viewport.value,
+    target / cur,
+    size.w / 2,
+    size.h / 2,
+    MIN_SCALE,
+    MAX_SCALE,
+  )
+  applyViewport()
+}
+const shortcutList = computed(() => [
+  { label: t('canvasScWheelK'), desc: t('canvasScWheel') },
+  { label: t('canvasScSpaceDragK'), desc: t('canvasScSpaceDrag') },
+  { label: 'Ctrl/⌘ + ' + t('canvasScDragK'), desc: t('canvasScCtrlDrag') },
+  { label: 'Shift + ' + t('canvasScClickK'), desc: t('canvasScShiftClick') },
+  { label: 'Ctrl/⌘ + A', desc: t('canvasScSelectAll') },
+  { label: 'Ctrl/⌘ + C / V', desc: t('canvasScCopyPaste') },
+  { label: 'Ctrl/⌘ + Z / ⇧Z / Y', desc: t('canvasScUndoRedo') },
+  { label: 'Ctrl/⌘ + G / ⇧G', desc: t('canvasScGroup') },
+  { label: 'Delete / Backspace', desc: t('canvasScDelete') },
+  { label: t('canvasScDblNoteK'), desc: t('canvasScNoteEdit') },
+  { label: t('canvasScDblFrameK'), desc: t('canvasScFrameRename') },
+  { label: t('canvasScLinkDragK'), desc: t('canvasScLinkReconnect') },
+  { label: t('canvasScHandleK'), desc: t('canvasScResize') },
+  { label: 'Esc', desc: t('canvasScEscape') },
+])
+
+const dragOver = ref(false)
+
+// 项目下拉外点关闭（capture 阶段判定；项目栏自身 mousedown.stop 不影响 document 捕获）
+onMounted(() => {
+  // C-H17 视口 sanity：打开画布时若缩放异常(过小/过大)或对象完全不在视野，
+  // 自动 fitAll 一次——用户上次会话的离谱缩放不该由下一次会话继承(真机 UX 走查 P0-2)
+  setTimeout(() => {
+    if (!objects.value.length) return
+    const v = viewport.value
+    const b = bboxOf(objects.value)
+    // 对象集合中心是否在可视范围(以可视宽高的 1.5 倍为容差)
+    const cx = v.x + (b.x + b.width / 2) * v.scale
+    const cy = v.y + (b.y + b.height / 2) * v.scale
+    const offscreen =
+      cx < -size.w * 0.75 || cx > size.w * 1.75 || cy < -size.h * 0.75 || cy > size.h * 1.75
+    if (v.scale < 0.3 || v.scale > 3 || offscreen) fitAll()
+  }, 600)
+  // D1c：Shift/Ctrl 全局键态追踪（resize 比例锁实时切换；capture 确保先于组件逻辑）
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key === 'Shift') shiftDown.value = true
+      if (e.key === 'Control' || e.key === 'Meta') ctrlDown.value = true
+    },
+    { capture: true },
+  )
+  window.addEventListener(
+    'keyup',
+    (e) => {
+      if (e.key === 'Shift') shiftDown.value = false
+      if (e.key === 'Control' || e.key === 'Meta') ctrlDown.value = false
+    },
+    { capture: true },
+  )
+  window.addEventListener('blur', () => {
+    shiftDown.value = false
+    ctrlDown.value = false
+  })
+  document.addEventListener(
+    'mousedown',
+    (e) => {
+      if (!projectMenuOpen.value) return
+      const bar = wrapEl.value?.querySelector?.('[data-project-bar]')
+      if (bar && !bar.contains(e.target)) projectMenuOpen.value = false
+    },
+    { capture: true },
+  )
+  // 工具栏显隐设置浮层：点外部关闭（浮层自身 mousedown.stop 不冒泡）
+  document.addEventListener('mousedown', (e) => {
+    if (!tbSettings.open) return
+    const pop = wrapEl.value?.querySelector?.('[data-tb-settings]')
+    if (pop && !pop.contains(e.target)) tbSettings.open = false
+  })
+})
+// blob 图持久化：降采样到最长边 640 转 JPEG dataURL 存进文档（画布显示用原 blob
+// URL 保持清晰；存档用 persist dataURL，刷新/重开仍在）。
+function persistImage(o) {
+  const probe = new Image()
+  probe.onload = () => {
+    const MAX = 640
+    const s = Math.min(1, MAX / Math.max(probe.naturalWidth, probe.naturalHeight))
+    const cv = document.createElement('canvas')
+    cv.width = Math.max(1, Math.round(probe.naturalWidth * s))
+    cv.height = Math.max(1, Math.round(probe.naturalHeight * s))
+    cv.getContext('2d').drawImage(probe, 0, 0, cv.width, cv.height)
+    try {
+      o.persist = cv.toDataURL('image/jpeg', 0.72)
+    } catch {
+      return // 跨域图无法导出（/view 同源时不会发生）：只留会话内
+    }
+    saveSoon()
+  }
+  probe.src = o.src
+}
+/**
+ * 拖放/粘贴落点 → 世界坐标（坐标来源优先级：拖放事件坐标 → Konva 指针 → 画布中心）
+ *
+ * ⚠️ 必须优先用拖放事件自带的 `clientX/clientY`：原生/H5 拖拽期间浏览器**不派发 pointermove**，
+ * 而 Konva 的 `pointerPos` 只由 pointermove/pointerdown 更新 —— 只读 `getPointerPosition()`
+ * 会把图放到**拖动开始前指针所在的位置**（实测：真指针@200,200 + drop 坐标@900,600 →
+ * 落在 200,199.6；连指针都没动过时落在上一次点击遗留的陈旧位置）。
+ *
+ * `clientX/clientY` 双双为 0 视为"事件没带坐标"（合成事件、ClipboardEvent 无此字段），
+ * 此时回落到 Konva 指针 → 画布中心。画布区域不贴窗口左上角（左侧栏 + 顶部工具条），
+ * 所以真实落在画布上的拖放不会是 (0,0)。
+ */
+function dropWorld(e) {
+  const st = stageEl.value?.getStage?.()
+  const cx = Number(e?.clientX)
+  const cy = Number(e?.clientY)
+  const hasPoint = cx > 0 || cy > 0
+  if (hasPoint) {
+    const rect = st?.container()?.getBoundingClientRect?.()
+    if (rect) return screenToWorld(viewport.value, cx - rect.left, cy - rect.top)
+  }
+  const p = st?.getPointerPosition() || { x: size.w / 2, y: size.h / 2 }
+  return screenToWorld(viewport.value, p.x, p.y)
+}
+function filesToObjects(files, world) {
+  const made = []
+  // world = 首个节点的**中心**；多文件竖直递推（每个 cursorY 都是该节点的中心）
+  let cursorY = world.y
+  for (const f of files) {
+    if (f.type.startsWith('video/') || f.type.startsWith('audio/')) {
+      made.push(f.name)
+      addMediaFromFile(f, world.x, cursorY, (h) => (cursorY += h + 16))
+      continue
+    }
+    if (!f.type.startsWith('image/')) continue
+    const url = URL.createObjectURL(f)
+    const probe = new Image()
+    probe.onload = () => {
+      const scale = Math.min(1, 260 / probe.naturalWidth)
+      const w = Math.round(probe.naturalWidth * scale)
+      const h = Math.round(probe.naturalHeight * scale)
+      const o = {
+        id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+        type: 'image',
+        x: Math.round(world.x - w / 2),
+        y: Math.round(cursorY - h / 2),
+        width: w,
+        height: h,
+        src: url,
+        persist: null,
+      }
+      objects.value.push(o)
+      persistImage(o)
+      cursorY += h + 16
+      saveSoon()
+    }
+    probe.src = url
+    made.push(f.name)
+  }
+  return made
+}
+function onDrop(e) {
+  dragOver.value = false
+  // 素材库拖出（P2）：优先于文件拖入
+  const assetId = e.dataTransfer?.getData('application/x-artify-asset')
+  if (assetId) {
+    const a = assets.value.find((x) => x.id === assetId)
+    if (a) {
+      const w = dropWorld(e)
+      insertAsset(a, w.x, w.y)
+    }
+    return
+  }
+  // 资产库拖出：携带完整图 URL，直接按 URL 建节点（insertAsset 内部 probe 探尺寸）
+  const assetUrl = e.dataTransfer?.getData('application/x-artify-asset-url')
+  if (assetUrl) {
+    const w = dropWorld(e)
+    insertAsset({ persist: assetUrl }, w.x, w.y)
+    return
+  }
+  const files = [...(e.dataTransfer?.files || [])]
+  if (!files.length) return
+  filesToObjects(files, dropWorld(e))
+}
+function onPaste(e) {
+  const items = [...(e.clipboardData?.items || [])]
+  const files = items
+    .filter((it) => it.kind === 'file')
+    .map((it) => it.getAsFile())
+    .filter(Boolean)
+  if (!files.length) return
+  // ClipboardEvent 无 clientX/clientY → dropWorld 自动回落到 Konva 指针（贴着鼠标粘贴）
+  filesToObjects(files, dropWorld(e))
+}
+
+// —— 工作台产物落画布（公共通道）——
+// 文件引用是 ComfyUI /view 参数（filename/subfolder/type），URL 直出常驻。
+// 起点 = 当前视野中心，横向往右排布；加载失败的文件跳过不落破图。
+// 溯源：落布时与「发送参考图时记下的来源物件」自动连线。
+let lastSourceIds = [] // sendSelectionToWorkbench 记录，供产物回落后连线
+function placeFiles(files) {
+  if (!files?.length) return
+  const origin = appStore.config?.comfyHost || 'http://127.0.0.1:8188'
+  const c = viewportCenterWorld()
+  let cursorX = c.x - 130
+  const at = c.y
+  const sourceIds = lastSourceIds.filter((id) => objects.value.some((o) => o.id === id))
+  for (const f of files) {
+    const url = `${origin}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? '')}&type=${encodeURIComponent(f.type ?? 'output')}`
+    const probe = new Image()
+    probe.onload = () => {
+      const scale = Math.min(1, 260 / probe.naturalWidth)
+      const id = 'n' + Date.now() + Math.random().toString(36).slice(2, 6)
+      objects.value.push({
+        id,
+        type: 'image',
+        x: cursorX,
+        y: at,
+        width: Math.round(probe.naturalWidth * scale),
+        height: Math.round(probe.naturalHeight * scale),
+        src: url,
+      })
+      // 溯源连线：参考图 → 产物
+      for (const srcId of sourceIds) {
+        links.value.push({
+          id: 'l' + Date.now() + Math.random().toString(36).slice(2, 5),
+          from: srcId,
+          to: id,
+        })
+      }
+      cursorX += Math.round(probe.naturalWidth * scale) + 16
+      saveSoon()
+    }
+    probe.onerror = () => {
+      // 产物已被清理/实例换目录：跳过，不落破图
+    }
+    probe.src = url
+  }
+  lastSourceIds = []
+}
+function viewportCenterWorld() {
+  return screenToWorld(viewport.value, size.w / 2, size.h / 2)
+}
+/** 窗口级 mouseup 兜底：缩放等 stage 拖拽若指针移出画布松手，Konva mouseup 不触发，这里收尾 */
+function onWindowMouseUp() {
+  if (drag.mode === 'resize') onResizeEnd()
+}
+function drainPinned() {
+  placeFiles(drainFiles())
+}
+
+let ro = null
+// vue-konva 3.4 的 template @事件 绑定在小组件初始化时序下不稳（监听偶发丢失）
+// ——所有 Konva 节点事件统一在这里手动绑定，可靠：
+function bindNodeEvents() {
+  const st = stageEl.value?.getStage?.()
+  if (!st) return
+  st.find('Group').forEach((g) => {
+    if (g._boundWb) return
+    g._boundWb = true
+    const idx = () => objects.value.findIndex((o) => o.id === g.id())
+    g.on('mousedown.wb', (e) => onItemDown(idx(), e))
+    g.on('dragmove.wb', onNodeDrag)
+    g.on('dragend.wb', onNodeDragEnd)
+    // 双击：App 节点 = 展开参数面板；note = 就地编辑文本；frame = 重命名
+    g.on('dblclick.wb', (e) => {
+      const o = objects.value.find((x) => x.id === g.id())
+      if (o?.type === 'app') {
+        e.evt?.preventDefault?.()
+        openAppNodePanel(o.id)
+      } else if (o?.type === 'note') {
+        e.evt?.preventDefault?.()
+        startNoteEdit(o.id)
+      } else if (o?.type === 'frame') {
+        e.evt?.preventDefault?.()
+        startFrameRename(o.id)
+      }
+    })
+    // Ctrl/⌘/Alt+拖拽克隆：注册在 onNodeDragEnd 之后，保证 dragend 顺序 = 先同步数据再对齐克隆
+    g.on('dragstart.wb', onNodeDragStartSnap)
+    g.on('dragstart.wb', onNodeCloneStart)
+    g.on('dragend.wb', commitCloneDrag)
+  })
+}
+onMounted(() => {
+  loadNow()
+  // 兜底：loadNow 恢复的 id 集合若与上个会话相同，id-watch 不触发，
+  // 但 Konva group 是新实例（无 _boundWb）—— 延迟一轮幂等补绑
+  setTimeout(() => nextTick(bindNodeEvents), 600)
+  setTimeout(() => nextTick(bindNodeEvents), 1800)
+  // 工作台「贴到画布」的排队产物落布（SPA 内跨路由）
+  nextTick(drainPinned)
+  const el = wrapEl.value
+  const measure = () => {
+    size.w = el.clientWidth
+    size.h = el.clientHeight
+  }
+  measure()
+  ro = new ResizeObserver(measure)
+  ro.observe(el)
+  window.addEventListener('keydown', onKey)
+  window.addEventListener('keyup', onKeyUp)
+  window.addEventListener('mouseup', onWindowMouseUp)
+  window.addEventListener('paste', onPaste)
+  // stage 初始变换
+  requestAnimationFrame(applyViewport)
+  // 侧边栏工作台：产物生成 → 自动落画布（window 总线，见 canvasMode.js）
+  const offResult = onResult(placeFiles)
+  // 注：旧的 layersFocusAnim（图层定位 rAF 句柄）已随 edee87be 一并移除，
+  // 这里残留的引用会让卸载抛 ReferenceError → 路由切走失败，故删。
+  onBeforeUnmount(() => {
+    offResult()
+  })
+})
+watch(
+  // id 序列变化触发（bindNodeEvents 以 _boundWb 标记幂等，多调无副作用）。
+  // 另：页面重载/路由回访后 Konva group 全量重建但 id 集合可能与上个会话相同
+  // （watch 不触发）→ onMounted 里延迟兜底补绑一轮，确保新实例拿到事件。
+  () => objects.value.map((o) => o.id).join(','),
+  () => nextTick(bindNodeEvents),
+  { immediate: true },
+)
+onBeforeUnmount(() => {
+  ro?.disconnect()
+  window.removeEventListener('keydown', onKey)
+  window.removeEventListener('keyup', onKeyUp)
+  window.removeEventListener('mouseup', onWindowMouseUp)
+  window.removeEventListener('paste', onPaste)
+  clearTimeout(saveTimer)
+  cancelHoverHide()
+  // app 节点轮询清场
+  for (const nodeId of [...nodePolls.keys()]) stopNodePoll(nodeId)
+  // AI ops 订阅清场
+  offOps?.()
+})
+
+// —— S5a 编排的 late 绑定（A2-3）：useCanvasAiActions 挂在本域之后（需要
+// runAppNode/appPicker），而 useAppNodes 的 onAppPicked 回调运行时才需要
+// maybeRunGenFromNote/genFromNote——holder 在此声明、挂载后回填，回调按需晚取。
+const lateGen = {
+  // getter 转发对象：useAppNodes 解构捕获的是这个壳，读 .value 时才晚取真 ref
+  fromNote: {
+    get value() {
+      return lateGen.__ref?.value ?? null
+    },
+  },
+  maybeRun: (node) => lateGen.__maybeRun?.(node),
+  __ref: null,
+  __maybeRun: null,
+}
+
+// —— App 节点域（composable 拆分，第五批）——
+const {
+  appNodeObjects,
+  appPanel,
+  appPanelApp,
+  appPanelFed,
+  appPanelNode,
+  appPanelPos,
+  appPicker,
+  // 以下 6 个是 Konva 配置函数，模板 v-rect/v-text 直接用，漏解构会渲染报错
+  appNodeRectConfig,
+  appNodeTitleConfig,
+  appNodeSubConfig,
+  appNodeStatusConfig,
+  appNodeRunBtnConfig,
+  appNodeExpandBtnConfig,
+  openAppNodePanel,
+  openAppNodePanelFromKonva,
+  openAppPicker,
+  openAppPickerAtCtx,
+  onAppPicked,
+  onPanelParamUpdate,
+  openFullApp,
+  runAppNode,
+  runAppNodeFromKonva,
+  runAppNodes,
+  rerunFrom,
+  spotlightId,
+  pickCanvasImageFor,
+  pendingAgentOps,
+  pendingAgentOpsAt,
+  agentOpsDiffLines,
+  confirmAgentOps,
+  aiSnapshots,
+  restoreAiSnapshot,
+  removeAiSnapshot,
+  refreshFed,
+  stopNodePoll,
+  nodePolls,
+  offOps, // onBeforeUnmount 里订阅清场；漏解构会让卸载抛 ReferenceError
+  placeNodeArtifacts,
+  extractStatusFiles,
+  ensureAppDetail,
+  serverOrigin,
+} = useAppNodes({
+  objects,
+  selection,
+  viewport,
+  links,
+  groups,
+  size,
+  saveSoon: () => saveSoon(),
+  beforeChange,
+  message,
+  ctxMenu,
+  t,
+  worldToScreen,
+  clamp,
+  appStore,
+  emitPrompt,
+  onOps,
+  viewportCenterWorld,
+  closeCtxMenu,
+  setTool,
+  refOf,
+  withCull,
+  isHighlightedOf,
+  stopKonvaEvent,
+  linkFromConnect,
+  // late-bound：useCanvasAiActions 挂在下方（需要本域的 runAppNode/appPicker），
+  // 回调运行时才求值，避免 setup 期 TDZ
+  maybeRunGenFromNote: lateGen.maybeRun,
+  // 页级状态（本轮修复）：composable 里 onAppPicked 需要读/写它们——
+  // connectCreate.pickLink（拖线新建 app 时的待连线）与 genFromNote（note→生图编排请求）。
+  // 此前 composable 直接引用这两个标识符但从未注入 → ReferenceError，
+  // 「选完 app 不落节点」的根因。
+  connectCreate,
+  genFromNote: lateGen.fromNote,
+})
+
+// —— A2-3：AI 指令编排抽 useCanvasAiActions（选区指令/note 生图改写/溯源/
+// 截帧/旋转/放大）；fetch /api/optimize-prompt 收口为 optimizePromptFn 注入 ——
+const {
+  selPrompt,
+  runSelPrompt,
+  composeSelection,
+  genNode,
+  genFromNote,
+  startGenerateFromNote,
+  maybeRunGenFromNote,
+  noteRewriteInput,
+  noteRewrite,
+  noteRewritePos,
+  startNoteRewrite,
+  runNoteRewrite,
+  copyImagePrompt,
+  showImageGenInfo,
+  captureVideoFrameAt,
+  angleDlg,
+  applyAngle,
+  upscaleDlg,
+  applyUpscale,
+} = useCanvasAiActions({
+  objects,
+  links,
+  selection,
+  viewport,
+  size,
+  refOf,
+  t,
+  beforeChange,
+  saveSoon,
+  persistImage,
+  emitPrompt,
+  runAppNode,
+  appPicker,
+  serverOrigin,
+  appStore,
+  closeCtxMenu,
+  fetchImageForCrop,
+  videoFrameTime,
+  upscaleSize,
+  optimizePromptFn: async (prompt) => {
+    const res = await fetch(`${serverOrigin.value}/api/optimize-prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt,
+        language: 'zh',
+        api_key: appStore.config?.api_key || undefined,
+        base_url: appStore.config?.base_url || undefined,
+        model: appStore.config?.model || undefined,
+      }),
+    })
+    return await res.json().catch(() => null)
+  },
+})
+
+// late 绑定回填（onAppPicked 回调运行时经 lateGen 转发壳晚取，TDZ 安全）
+lateGen.__ref = genFromNote
+lateGen.__maybeRun = maybeRunGenFromNote
+// —— 多画布项目集（composable 拆分，第一批①c）——
+// 位置约束：deps 里的 viewport/objects/links/groups/selection/selectedLinkId/history
+// 与本块上方 useAppNodes 返回的 appPanel 都必须已初始化，故放在 App 节点域之后。
+const projectStore = reactive({ version: 1, activeId: null, projects: [] })
+const {
+  exportCurrentProject,
+  activeProject,
+  projectMenuOpen,
+  syncDoc: syncActiveDocToStore,
+  openProjectById,
+  createNewProject,
+  renameActiveProject,
+  persistProjects,
+  prjBatchMode,
+  prjChecked,
+  prjRenameId,
+  prjRenameInput,
+  prjStats,
+  prjRelTime,
+  togglePrjCheck,
+  startPrjRename,
+  commitPrjRename,
+  exportProjectById,
+  deleteProjectById,
+  exitPrjBatch,
+  deleteCheckedProjects,
+  deleteActiveProject,
+} = useCanvasProjects({
+  projectStore,
+  t,
+  viewport,
+  objects,
+  links,
+  groups,
+  selection,
+  selectedLinkId,
+  appPanel,
+  beforeChange,
+  resetHistory: () => {
+    history.value = createHistory(60)
+  },
+  afterProjectSwitch: () => nextTick(() => syncDraggables()),
+  loadProjectIntoCanvas: () => loadProjectIntoCanvas(),
+  engine: {
+    psUpdateProjectDoc,
+    psSwitchProject,
+    psAddProject,
+    psRenameProject,
+    psDeleteProject,
+    psCloneProject,
+    bootProjectStore,
+    persistProjectStore,
+    normalizeStore,
+    projectCardStats,
+    buildExportPayload,
+    packExportZip,
+    makeViewport,
+  },
+})
+// 启动迁移：旧单画布档升格首个项目（幂等）
+;(function bootProjects() {
+  const { store, migrated } = bootProjectStore()
+  Object.assign(projectStore, store)
+  if (migrated) persistProjects()
+})()
+
+// —— 媒体节点（composable 拆分，第五批）——
+const { mediaObjects, mediaPosOf, addMediaFromFile, uploadMediaFor } = useMediaNodes({
+  objects,
+  viewport,
+  size,
+  worldToScreen,
+  saveSoon: () => saveSoon(),
+  beforeChange,
+  message,
+  t,
+  persistImage,
+  withCull,
+})
+
+// —— 节点级图像编辑（composable 拆分，第五批）——
+const { splitDlg, imageToCanvasEl, rotateImageNode, splitImageNode, applySplit, cropImageNode } =
+  useImageEdit({
+    objects,
+    selection,
+    links,
+    saveSoon: () => saveSoon(),
+    beforeChange,
+    message,
+    t,
+    persistImage,
+    fetchImageForCrop,
+    setTool,
+  })
+
+// —— 蒙版编辑对话框（composable 拆分，第五批）——
+const {
+  maskDlg,
+  maskStageSize,
+  maskImageScale,
+  maskCanvasEl,
+  maskPreviewEl,
+  openMaskDialog,
+  maskFitViewport,
+  onMaskWheel,
+  maskZoom,
+  onMaskPanDown,
+  onMaskPanMove,
+  onMaskPanUp,
+  onMaskKeydown,
+  onMaskKeyup,
+  onMaskPointerDown,
+  onMaskPointerMove,
+  onMaskPointerUp,
+  undoMaskStroke,
+  redoMaskStroke,
+  resetMaskDialog,
+  startOutpaint,
+  imageToVideo,
+  setConsistencyAsset,
+  reversePrompt,
+  enhanceImage,
+  onWrapContext,
+} = useMaskDialog({
+  objects,
+  selection,
+  viewport,
+  size,
+  saveSoon: () => saveSoon(),
+  emitPrompt,
+  message,
+  ctxMenu,
+  t,
+  screenToWorld,
+  clamp,
+  refOf,
+  // 页级状态/写入点（本轮修复）：composable 里 onWrapContext 要读容器 ref，
+  // 五个右键 runner 要写「溯源 id」供产物回落后连线（lastSourceIds 的 `let`
+  // 在本文件 5593 行，composable 无法跨模块赋值 → 用 setter 回写）。
+  // 此前两者都没注入，onWrapContext 每次右键必抛 ReferenceError。
+  wrapEl,
+  setLastSourceIds: (ids) => {
+    lastSourceIds = ids
+  },
+})
+
+// —— 提示词库（composable 拆分，第四批③）——
+const {
+  promptLib,
+  customPrompts,
+  promptLibView,
+  promptTarget,
+  applyPrompt,
+  addCustomPrompt,
+  removeCustomPrompt,
+  importPromptsFile,
+} = usePromptLibrary({
+  t,
+  objects,
+  selection,
+  hoverNodeId,
+  genNode,
+  noteRewrite,
+  noteEdit,
+  beforeChange,
+  saveSoon: () => saveSoon(),
+})
+
+// —— 素材库 + 图层面板（composable 拆分，第四批③）——
+const {
+  assetsOpen,
+  assets,
+  assetAdded,
+  assetRemoved,
+  centerWorld,
+  insertAsset,
+  hoverFromPanel,
+  focusObject,
+} = useCanvasAssets({
+  objects,
+  selection,
+  viewport,
+  size,
+  screenToWorld,
+  beforeChange,
+  saveSoon: () => saveSoon(),
+  applyViewport: () => applyViewport(),
+  selectedLinkId,
+  ctxMenu,
+})
+
+// —— 句柄 hit graph 重绘（依赖项 hoverFromPanel 来自上方 useCanvasAssets）——
+watch(
+  [
+    hoverNodeId,
+    hoverFromPanel,
+    selectedLinkId,
+    () => [connectDrag.active, connectDrag.targetId],
+    () => [reconnectDrag.active, reconnectDrag.targetId],
+    () => drag.mode,
+  ],
+  redrawHandleHits,
+  { deep: false },
+)
+
+// —— minimap（composable 拆分，第四批③）——
+const { mini, miniItems, miniView, miniJump } = useCanvasMinimap({
+  objects,
+  viewport,
+  size,
+  applyViewport: () => applyViewport(),
+  saveSoon: () => saveSoon(),
+})
+</script>
+
+<style scoped>
+/* 拖动画布/节点/框选时避免选中界面文本：包装层整体禁选（Tailwind select-none
+   已加在 wrapEl），输入类控件豁免恢复——note 就地编辑/项目名/画布重命名。 */
+input,
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+.agent-ops-card {
+  position: absolute;
+  z-index: 35;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 360px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--wb-accent);
+  background: var(--wb-surface);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+.ops-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.ops-line {
+  font-size: 11px;
+  color: var(--wb-text-2);
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.2);
+}
+/* 悬浮工具栏底部透明桥接区：工具栏定位在节点顶边上方 10px（top: tl.y - 10 + -translate-y-full），
+   鼠标从节点移向工具栏必经过这段空白，那里命中 canvas 空地 → 悬停被清 → 工具栏消失。
+   桥接区把这段空白（+10px 余量）纳入工具栏 DOM，鼠标中途不会“掉出”。 */
+.node-hover-toolbar .tb-bridge {
+  position: absolute;
+  /* 两角各让 28px：桥接热区只护中段，不盖角柄热区（E5fix） */
+  left: 28px;
+  right: 28px;
+  height: 20px;
+}
+.node-hover-toolbar:not(.is-below) .tb-bridge {
+  top: 100%;
+}
+/* 翻转到节点下方时，桥接区改挂顶部（工具栏上沿 → 节点底边） */
+.node-hover-toolbar.is-below .tb-bridge {
+  bottom: 100%;
+}
+/* note 就地编辑框：与便签底色/字号对齐（底色由 inline style 随便签色注入），
+   CSS 仅兜底默认色 + 高亮边框提示编辑中 */
+.note-editor {
+  padding: 10px;
+  line-height: 1.4;
+  background: var(--wb-bg-base);
+  color: #e2e8f0;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.note-editor::placeholder {
+  color: rgba(226, 232, 240, 0.45);
+}
+/* E3 提及高亮 mirror：与 textarea 同排版参数（padding/行高/字号由 inline
+   style 带出），承担底色；textarea 背景透明只显光标与选区 */
+.note-editor-mirror {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+/* frame 名称重命名框：不透明底遮住下方 Konva 标签，Enter/blur 提交、Esc 取消 */
+.frame-editor {
+  padding: 1px 6px;
+  line-height: 1.5;
+  color: var(--wb-text-1);
+  background: var(--wb-surface);
+  box-shadow:
+    0 0 0 1px var(--wb-stroke),
+    0 8px 24px rgba(0, 0, 0, 0.4);
+  box-sizing: border-box;
+}
+.frame-editor::placeholder {
+  color: var(--wb-text-2);
+  opacity: 0.6;
+}
+</style>

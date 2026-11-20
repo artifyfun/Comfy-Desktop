@@ -5,6 +5,7 @@ import type { FirstUseMode } from '../../shared/firstUseMode'
 import { isLocalInstall } from './localInstall'
 import { normaliseCategory, viewKindFor } from '../../shared/viewKind'
 import type { ViewKind } from '../../shared/viewKind'
+import { visibleSurfaceOf } from '../../shared/visibleSurface'
 
 export const hostInstallEvents = new EventEmitter()
 
@@ -17,6 +18,14 @@ export type ComfyPanelKey =
   | 'track'
   | 'load-snapshot'
   | 'progress'
+  /** Single-window mode: the panel body hosts the A UI / install picker
+   *  ("Comfy pill → chooser" is the install-less mapping; this is the same
+   *  surface as an explicit panel key so `setActivePanel` can flip back to
+   *  the A UI from an install-backed window). */
+  | 'chooser'
+  /** Overlay mode (like `'feedback'`): the MCP setup modal mounts over the live
+   *  canvas, which stays visible underneath and dimmed. Set programmatically. */
+  | 'mcp-setup'
 
 export const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set([
   'comfy',
@@ -26,8 +35,27 @@ export const VALID_PANELS: ReadonlySet<ComfyPanelKey> = new Set([
   'new-install',
   'track',
   'load-snapshot',
-  'progress'
+  'progress',
+  'chooser',
+  'mcp-setup'
 ])
+
+/**
+ * Overlay bodies (feedback / mcp-setup / announcement) are rendered by the
+ * native panel app (PanelApp.vue), never by the A UI frontend. Single source
+ * of truth for that set — panelView's loadPanelContent / setActivePanel /
+ * isOverlayPanel call sites all read this predicate so a new overlay key
+ * can't be added to the type without this decision point lighting up.
+ */
+export const OVERLAY_PANELS: ReadonlySet<string> = new Set([
+  'feedback',
+  'mcp-setup',
+  'announcement'
+])
+
+export function isOverlayPanel(p: string): boolean {
+  return OVERLAY_PANELS.has(p)
+}
 
 export type BodyMode =
   | 'comfy'
@@ -40,6 +68,7 @@ export type BodyMode =
   | 'new-install'
   | 'track'
   | 'load-snapshot'
+  | 'mcp-setup'
 
 export interface ComfyWindowEntry {
   windowKey: number
@@ -63,7 +92,34 @@ export interface ComfyWindowEntry {
   coldStartPendingReveal: boolean
   maximizeOnReveal?: boolean
   _installCleanup: (() => void) | null
+  /** What the panelView currently hosts: the A UI (artifylab frontend, single-
+   *  window mode) or the native chooser/panel app. `setPanelSurface` navigates
+   *  between them; `ensurePanelView` (re)builds to whichever is current. */
+  panelSurface: 'artify' | 'chooser'
+  /** While an overlay modal (feedback / mcp-setup / announcement) is open over
+   *  the A UI surface, remembers the surface so `setActivePanel` can navigate
+   *  the panelView back to the A UI when the overlay closes. `null` when the
+   *  panel is hosting the native chooser/panel app or no overlay is pending. */
+  surfaceBeforeOverlay: 'artify' | null
+  /** While an overlay is open, records which body the user was on when it
+   *  opened ('chooser' = A UI visible, 'comfy' = C canvas visible). Drives
+   *  closeCurrentPanel (restore to the right surface) and layoutViews (whether
+   *  the C canvas stays visible under the overlay). `undefined` when no overlay
+   *  is pending. `surfaceBeforeOverlay` alone can't tell these apart: the C
+   *  canvas with a hidden A UI panel also carries panelSurface='artify'. */
+  overlayFromChooser?: boolean
   detachInstall: () => void
+}
+
+/**
+ * 用户实际看到的表面（'comfy' = C 画布可见，'artify' = panelView 可见）。
+ * 单一判定源（src/shared/visibleSurface.ts）：titlebar 高亮语义、set-surface
+ * backstop、devtools 路由都必须走这里，禁止再手写 `activePanel==='comfy'
+ * && panelSurface!==…` 式的局部公式——2026-08 的 A/C 倒挂死锁正是公式
+ * 分裂的产物。
+ */
+export function visibleSurface(entry: ComfyWindowEntry): 'artify' | 'comfy' | 'chooser' {
+  return visibleSurfaceOf({ panelSurface: entry.panelSurface, activePanel: entry.activePanel })
 }
 
 export const comfyWindows = new Map<number, ComfyWindowEntry>()

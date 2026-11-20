@@ -222,8 +222,8 @@ export async function confirmCloseInstanceWindow(
 ): Promise<CloseWindowChoice> {
   const message = quitsDesktop
     ? stopsLocalComfy
-      ? 'Close this window? This stops ComfyUI and quits Comfy Desktop.'
-      : 'Close this window? This quits Comfy Desktop.'
+      ? 'Close this window? This stops ComfyUI and quits Artify.'
+      : 'Close this window? This quits Artify.'
     : stopsLocalComfy
       ? 'Close this window? This stops the running ComfyUI instance.'
       : 'Close this window?'

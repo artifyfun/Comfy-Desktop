@@ -1,0 +1,759 @@
+/**
+ * 服务端 ComfyUI 执行器（自写 TS，不复用 @artifyfun/comfy-ui-client）。
+ * 移植自 artifylab-frontend/src/controller/useWorkflow.js 与 src/utils/comfyui-utils/api.js。
+ *
+ * 审核修复：H2(失败状态读 status.status_str) M1(seed 检测/赋值一致)
+ *  M2(extractOutputs 接入，prompt_id→app 映射) M3(404/5xx 区分) M4(上传文件名扩展名 + subfolder) L4(fetch 超时)。
+ *
+ * 依赖 Node 22 全局 fetch / FormData / Blob / structuredClone / AbortController。
+ */
+import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
+import { basename, extname } from 'node:path'
+import type { App, ComfyPrompt, ParamNode } from '../appStore'
+import { logger } from '../utils/logger'
+import {
+  clearQueueDiagnostics,
+  fetchAbsoluteMedia,
+  formatQueueNodeErrors,
+  freeMemory as comfyFreeMemory,
+  getHistory as comfyGetHistory,
+  getQueueDiagnostics,
+  interrupt as comfyInterrupt,
+  queuePrompt as comfyQueuePrompt,
+  randomSeed,
+  uploadImage
+} from '../comfyClient'
+import { previewHub, startPreviewFeed } from '../workbench/previewFeed'
+import { extractFiles } from '../workbench/executionLog'
+
+export interface ExecutionResult {
+  prompt_id: string
+  status: 'queued' | 'running' | 'success' | 'error'
+  outputs?: unknown
+  error?: string
+  /** 执行完成但被降级的告警（如部分输出分支被 ComfyUI 校验丢弃） */
+  warnings?: string[]
+}
+
+/** 提交后记录 prompt_id → app，供 getExecutionStatus 做输出过滤（M2） */
+const promptAppMap = new Map<string, ParamNode[]>()
+const MAX_PROMPT_ENTRIES = 500
+
+/** 生成过程预览总开关（#5）：默认开；失败静默，绝不影响执行与终态产物 */
+let previewEnabled = true
+
+/** 仅测试可见：开关预览采集 */
+export function setPreviewEnabledForTest(v: boolean): void {
+  previewEnabled = v
+}
+
+/**
+ * 提交执行后开始采集 ComfyUI 预览帧（#5）。帧写入 previewHub，由
+ * service.pollExecution 顺带取走——执行发生在 run 结束之后，跑不回原 SSE，
+ * 复用前端既有轮询（2–3s）是最小改动，与帧速匹配。
+ */
+function startPreviewCapture(origin: string, clientId: string, promptId: string): void {
+  if (!previewEnabled) return
+  try {
+    startPreviewFeed({
+      origin,
+      clientId,
+      promptId,
+      onFrame: (frame) => previewHub.set(frame.promptId || promptId, frame.dataUrl)
+    })
+  } catch (e) {
+    logger.warn('preview capture start failed', e)
+  }
+}
+
+/** 15 位随机整数（首位非 0）——实现已收口 comfyClient.randomSeed（候选 ④）。 */
+export function getSeed(n = 15): number {
+  return randomSeed(n)
+}
+
+/** 从 workflow prompt 推断输出节点 id（无 paramsNodes 的裸工作流执行用）：
+ *  输出类节点（Save 系列 / Preview / Video / Audio）即产物出口。
+ *  加载节点（LoadImage、LoadVideo、LoadAudio、LoadImageFromPath 等 Load 开头的
+ *  类名）显式排除——否则「含 Video/Audio 字样」的加载器会被误判为产物出口，
+ *  产物提取落到输入节点上。 */
+export function inferOutputNodeIds(prompt: ComfyPrompt): string[] {
+  return Object.entries(prompt)
+    .filter(([, n]) => {
+      const cls = n.class_type ?? ''
+      if (/^load/i.test(cls)) return false
+      return /Save|Preview|Video|Audio/i.test(cls)
+    })
+    .map(([id]) => id)
+}
+
+/**
+ * 从 workflow prompt 推断产物提取白名单（paramsNodes 形态）。
+ * executePrompt / publishWorkflow 共用此推断（此前两处逐字段复制，且各自
+ * 维护输出节点过滤——抽取后单一事实源）。
+ *
+ * 注意：ComfyUI 节点 id 是字符串键，这里的 ParamNode.id 承载原节点 id
+ * （数字键直通；非数字键折叠为 0，selectedWidget.name 保留原始 id 供
+ * extractOutputs 按 key 匹配）。
+ */
+export function inferOutputParamNodes(prompt: ComfyPrompt): ParamNode[] {
+  return inferOutputNodeIds(prompt).map((id) => ({
+    id: Number(id) || 0,
+    category: 'output' as const,
+    type: 'output',
+    name: 'result',
+    renderComponent: 'image-uploader',
+    selectedWidget: { id, name: 'images' }
+  }))
+}
+
+/**
+ * 找 workflow prompt 里第一个「媒体加载槽」：Load* 节点的首个字符串输入字段
+ * （当前值不是上游链接的），返回 {nodeId, inputKey}；找不到返回 null。
+ * 链式执行（usePreviousOutput）用：把上一次执行的产物文件名写进该槽。
+ * 与 inferOutputNodeIds 的 Load* 判定同源——加载器才吃媒体文件输入。
+ */
+export function inferFirstMediaSlot(prompt: ComfyPrompt): {
+  nodeId: string
+  inputKey: string
+} | null {
+  for (const [id, n] of Object.entries(prompt)) {
+    if (!/^load/i.test(n.class_type ?? '')) continue
+    for (const [k, v] of Object.entries(n.inputs ?? {})) {
+      if (typeof v === 'string') return { nodeId: id, inputKey: k }
+    }
+  }
+  return null
+}
+
+/**
+ * seed 处理（M2 语义）：显式 seed 生效（未强制 randomize 时用 seed；NaN 拒绝），
+ * 否则全图 seed 字段随机化。对 prompt 原地修改。
+ */
+function applySeed(prompt: ComfyPrompt, args: Record<string, unknown>): void {
+  const hasSeed = args.seed != null
+  const randomize = args.randomize_seed ?? !hasSeed
+  const seedArg = hasSeed ? Number(args.seed) : null
+  if (seedArg != null && !Number.isFinite(seedArg)) throw new Error('seed must be a finite number')
+  for (const node of Object.values(prompt)) {
+    for (const k of Object.keys(node.inputs)) {
+      const isSeedField = k.toLowerCase().includes('seed') && typeof node.inputs[k] === 'number'
+      if (!isSeedField) continue
+      if (randomize) node.inputs[k] = randomSeed()
+      else if (seedArg != null) node.inputs[k] = seedArg
+    }
+  }
+}
+
+/**
+ * 节点级参数覆盖的单一规则源（P1）：按 nodeId 逐条检查，返回结构化错误列表。
+ * 规则：节点存在 → class_type 匹配 → 字段存在 → 非链接引用 → 值可序列化。
+ * 校验层（plan.validateNodeOverridesLocal）与执行层（applyNodeOverrides）
+ * 都基于此函数——此前同一套规则双写靠注释纪律同步，已收敛到这里。
+ */
+export function checkNodeOverrides(
+  prompt: ComfyPrompt,
+  nodeOverrides?: Record<string, { class_type?: string; widgetOverrides?: Record<string, unknown> }>
+): Array<{ field: string; message: string }> {
+  const issues: Array<{ field: string; message: string }> = []
+  if (!nodeOverrides) return issues
+  for (const [nodeId, cfg] of Object.entries(nodeOverrides)) {
+    const node = prompt[nodeId]
+    if (!node) {
+      issues.push({ field: `nodeOverrides.${nodeId}`, message: `节点不存在: ${nodeId}` })
+      continue
+    }
+    if (cfg.class_type && node.class_type !== cfg.class_type) {
+      issues.push({
+        field: `nodeOverrides.${nodeId}.class_type`,
+        message: `节点 ${nodeId} 类型不匹配：期望 ${cfg.class_type}，实际 ${node.class_type}`
+      })
+    }
+    for (const [k, v] of Object.entries(cfg.widgetOverrides ?? {})) {
+      if (!(k in node.inputs)) {
+        issues.push({
+          field: `nodeOverrides.${nodeId}.${k}`,
+          message: `节点 ${nodeId} 无输入 ${k}`
+        })
+        continue
+      }
+      if (Array.isArray(node.inputs[k])) {
+        issues.push({
+          field: `nodeOverrides.${nodeId}.${k}`,
+          message: `字段 ${k} 是链接引用（["nodeId", slot]），不能直接赋值——请改它的上游节点`
+        })
+        continue
+      }
+      // 值可 JSON 序列化（防函数/undefined 混入）
+      if (typeof v === 'function' || v === undefined) {
+        issues.push({ field: `nodeOverrides.${nodeId}.${k}`, message: `值不可序列化` })
+      }
+    }
+  }
+  return issues
+}
+
+/**
+ * 节点级参数覆盖合并（P1）：按 nodeId 覆盖任意节点的 widget 直接值。
+ * 只接受"直接值"字段；链接引用（["nodeId", slot]）拒绝。返回无法合并的错误
+ * 列表（可读），成功项原地写入 prompt。规则统一走 checkNodeOverrides
+ * （单一事实源），这里在提交前兜底执行（防止绕过校验层直接调 executePrompt）。
+ */
+export function applyNodeOverrides(
+  prompt: ComfyPrompt,
+  nodeOverrides?: Record<string, { class_type?: string; widgetOverrides?: Record<string, unknown> }>
+): string[] {
+  // 校验与错误文案统一走单一规则源；有错就返回，不带病写入
+  const errors = checkNodeOverrides(prompt, nodeOverrides).map((i) => `${i.field}: ${i.message}`)
+  if (errors.length > 0 || !nodeOverrides) return errors
+  for (const [nodeId, cfg] of Object.entries(nodeOverrides)) {
+    const node = prompt[nodeId]
+    if (!node) continue
+    if (cfg.class_type && node.class_type !== cfg.class_type) continue
+    for (const [k, v] of Object.entries(cfg.widgetOverrides ?? {})) {
+      if (!(k in node.inputs) || Array.isArray(node.inputs[k])) continue
+      node.inputs[k] = v
+    }
+  }
+  return errors
+}
+
+function isMediaRender(rc?: string): boolean {
+  return rc === 'image-uploader' || rc === 'audio-uploader' || rc === 'video-uploader'
+}
+
+/**
+ * 「媒体值 vs 文本」判定（校验层与执行层共用的单一事实源）：
+ * - looksLikeMediaValue：data:/http(s) URL 或常见素材扩展名结尾
+ * - looksLikeTextBlob：含中文，或长文本（>40 且带空格/逗号/顿号/句号）
+ * 校验层（plan.validateParams）据此提前拦截「提示词被塞进媒体槽」；
+ * 执行层（executeApp）据此在提交前兜底。两边正则曾各自漂移，已收敛。
+ */
+export function looksLikeMediaValue(v: string): boolean {
+  if (/^(data:|https?:)/i.test(v)) return true
+  return /\.(png|jpe?g|webp|gif|bmp|mp4|webm|mov|mp3|wav|flac|safetensors|bin)$/i.test(v)
+}
+
+export function looksLikeTextBlob(v: string): boolean {
+  if (/[\u4e00-\u9fff]/.test(v)) return true
+  if (v.length <= 40) return false
+  return /[\s,，、。]/.test(v)
+}
+
+/** 媒体来源白名单（H1：阻断 SSRF）——仅 data: URL 或本机 http(s) */
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+const MAX_MEDIA_BYTES = 200 * 1024 * 1024
+
+export function assertSafeMediaUrl(url: string): void {
+  if (url.startsWith('data:')) return
+  if (/^https?:/i.test(url)) {
+    let u: URL
+    try {
+      u = new URL(url)
+    } catch {
+      throw new Error('invalid media URL')
+    }
+    if (!LOCAL_HOSTS.has(u.hostname)) throw new Error(`media URL host not allowed: ${u.hostname}`)
+    return
+  }
+  throw new Error('media must be a data: URL or a localhost http(s) URL')
+}
+
+function mimeToExt(mime: string): string {
+  if (mime.includes('png')) return 'png'
+  if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg'
+  if (mime.includes('webp')) return 'webp'
+  if (mime.includes('gif')) return 'gif'
+  if (mime.includes('audio')) return 'wav'
+  if (mime.includes('video')) return 'mp4'
+  return 'bin'
+}
+
+/** 扩展名 → MIME（本地路径上传时补类型；ComfyUI 主要按扩展名校验） */
+function extToMime(ext: string): string {
+  switch (ext) {
+    case 'png':
+      return 'image/png'
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg'
+    case 'webp':
+      return 'image/webp'
+    case 'gif':
+      return 'image/gif'
+    case 'bmp':
+      return 'image/bmp'
+    case 'mp4':
+      return 'video/mp4'
+    case 'webm':
+      return 'video/webm'
+    case 'mov':
+      return 'video/quicktime'
+    case 'mp3':
+      return 'audio/mpeg'
+    case 'wav':
+      return 'audio/wav'
+    case 'flac':
+      return 'audio/flac'
+    default:
+      return 'application/octet-stream'
+  }
+}
+
+/** POST /prompt → prompt_id（IO 已收口 comfyClient.queuePrompt，候选 ④） */
+export async function queuePrompt(
+  comfyOrigin: string,
+  prompt: ComfyPrompt,
+  clientId: string
+): Promise<string> {
+  return comfyQueuePrompt(prompt, clientId, { origin: comfyOrigin })
+}
+
+/**
+ * GET /history/{prompt_id}（IO 已收口 comfyClient.getHistory，候选 ④）。
+ * 404 / 无 entry → null（仍排队/运行中）；5xx → throw（M3：避免永远误判 running）。
+ */
+export async function getHistory(
+  comfyOrigin: string,
+  promptId: string
+): Promise<Record<string, unknown> | null> {
+  return comfyGetHistory(promptId, { origin: comfyOrigin })
+}
+
+/**
+ * 解析媒体槽取值 → ComfyUI 侧引用（`{ name(含 subfolder 前缀), subfolder, type }`）。
+ *
+ * 支持四种形态（**这是媒体槽唯一的事实源**，`uploadMedia` 与 `executeApp` 共用）：
+ *   1. `data:` URL            → 解码字节 → POST /upload/image
+ *   2. 本机 `http(s)` URL     → 取字节（SSRF 白名单校验）→ POST /upload/image
+ *   3. 磁盘上**真实存在**的绝对路径 → 读盘 → POST /upload/image
+ *   4. 已上传的裸文件名（无路径分隔符）→ 原样返回，交给 ComfyUI 按 input 目录解析
+ *
+ * 返回 null 表示「不是可用的媒体取值」，由调用方决定报错文案（不再静默忽略）。
+ *
+ * 修复背景（2026-09-16 真机验证）：旧实现把 `data:`/`http(s)` 交给
+ * `comfyFetch(url, {}, { origin: '' })` 取字节，而 comfyFetch 无条件拼
+ * `${origin}${path}` 且空 origin 回落 comfyHost → URL 变成
+ * `http://localhost:8188data:image/jpeg;base64,…`，媒体槽传 data:/http(s) 必 500。
+ */
+async function resolveMediaValue(
+  comfyOrigin: string,
+  value: string
+): Promise<{ name: string; subfolder: string; type: string } | null> {
+  const v = value.trim()
+  if (!v) return null
+
+  // 1/2：data: / 本机 http(s) —— 字节来自外部绝对地址，显式不拼 comfy origin
+  if (/^(data:|https?:)/i.test(v)) {
+    assertSafeMediaUrl(v)
+    const blob = await fetchAbsoluteMedia(v)
+    if (blob.size > MAX_MEDIA_BYTES)
+      throw new Error(`media too large: ${blob.size} bytes (max ${MAX_MEDIA_BYTES})`)
+    return uploadMediaBlob(comfyOrigin, blob, `upload.${mimeToExt(blob.type)}`)
+  }
+
+  // 3：磁盘上真实存在的绝对路径（应用参数描述里就是「图片路径」）
+  if (/^[a-zA-Z]:[\\/]/.test(v) || v.startsWith('\\\\') || v.startsWith('/')) {
+    if (!existsSync(v)) return null
+    const buf = readFileSync(v)
+    const ext = extname(v).replace(/^\./, '').toLowerCase()
+    return uploadMediaBuffer(comfyOrigin, buf, basename(v), extToMime(ext))
+  }
+
+  // 4：已上传的裸文件名
+  if (!/[\\/]/.test(v)) return v ? { name: v, subfolder: '', type: 'input' } : null
+
+  return null
+}
+
+/** POST /upload/image → { name(含 subfolder 前缀), subfolder, type }（M4：文件名扩展名 + subfolder） */
+export async function uploadMedia(
+  comfyOrigin: string,
+  dataUrl: string
+): Promise<{ name: string; subfolder: string; type: string }> {
+  const r = await resolveMediaValue(comfyOrigin, dataUrl)
+  if (!r) throw new Error(`无法解析媒体取值：${dataUrl.slice(0, 60)}`)
+  return r
+}
+
+/**
+ * 工作台附件上传：Buffer 直传 ComfyUI，保留原始文件名（LoadImage/VHS 等
+ * widget 按文件名引用）。图/视频/音频统一走 /upload/image——ComfyUI 依据
+ * 已注册的输入扩展名白名单校验（装了 VHS 后 mp4/webm 等均可），不支持
+ * 的环境会收到 400 并向上抛。
+ */
+export async function uploadMediaBuffer(
+  comfyOrigin: string,
+  data: Buffer,
+  filename: string,
+  mime = 'application/octet-stream'
+): Promise<{ name: string; subfolder: string; type: string }> {
+  if (data.length > MAX_MEDIA_BYTES)
+    throw new Error(`media too large: ${data.length} bytes (max ${MAX_MEDIA_BYTES})`)
+  return uploadMediaBlob(comfyOrigin, new Blob([new Uint8Array(data)], { type: mime }), filename)
+}
+
+async function uploadMediaBlob(
+  comfyOrigin: string,
+  blob: Blob,
+  filename: string
+): Promise<{ name: string; subfolder: string; type: string }> {
+  return uploadImage(blob, filename, { origin: comfyOrigin })
+}
+
+/**
+ * 提交 app 执行（异步，决策 #7）。返回 { prompt_id, status:'queued' }。
+ * 步骤：seed 处理 → media 上传 → 普通 input 合并 → 节点覆盖 → queuePrompt。
+ * @param nodeOverrides 节点级参数覆盖（P1），校验失败会 throw（绕过校验层时的兜底）
+ */
+export async function executeApp(
+  app: App,
+  args: Record<string, unknown>,
+  comfyOrigin: string,
+  nodeOverrides?: Record<string, { class_type?: string; widgetOverrides?: Record<string, unknown> }>
+): Promise<ExecutionResult> {
+  const template = app.template
+  if (!template?.prompt)
+    throw new Error(`app ${app.id} (${app.name}) 缺少 template.prompt，无法执行`)
+  const prompt: ComfyPrompt = structuredClone(template.prompt)
+  const clientId = randomUUID()
+  const inputs: ParamNode[] = (template.paramsNodes ?? []).filter((n) => n.category === 'input')
+
+  // 0. 工作流切换前置清理：与上一次执行的 app 不同（或首次/外部残留）时先 /free
+  //    清显存，防止不同模型叠加 OOM。free 失败不阻断本次执行。
+  try {
+    await freeIfWorkflowChanged(comfyOrigin, resolveWorkflowKey(app.id, prompt))
+  } catch (e) {
+    logger.warn('free before app execution failed', e)
+  }
+
+  // 1. seed（M2：显式 seed 生效——传了 seed 且未强制 randomize 时用 seed；NaN 拒绝）
+  applySeed(prompt, args)
+
+  // 2. media 参数：data:/http(s)/本地存在的绝对路径 → 上传后填回 widget；
+  //    已上传的裸文件名原样写入；**无法解析的值明确报错**（不再静默忽略）
+  for (const n of inputs) {
+    if (!isMediaRender(n.renderComponent)) continue
+    const v = args[n.name]
+    if (v == null || typeof v !== 'string' || !v.trim()) continue
+    const widget = n.selectedWidget?.name
+    if (!widget || !prompt[n.id]?.inputs) continue
+    const resolved = await resolveMediaValue(comfyOrigin, v)
+    if (!resolved) {
+      // 旧行为是 continue（值被丢弃、节点沿用模板默认素材、UI 上却记着你传的值 ——
+      // 静默降级）。真机验证据此误判过一次「参数已生效」，故改为显式失败。
+      throw new Error(
+        `参数「${n.name}」是媒体槽（${n.renderComponent}），但取值无法解析：${v.slice(0, 80)}。` +
+          `可接受：data: URL、本机 http(s) URL、磁盘上存在的绝对路径，或已上传到 ComfyUI input 目录的文件名。`
+      )
+    }
+    prompt[n.id]!.inputs[widget] = resolved.name
+  }
+
+  // 3. 普通 input 参数：按 node id + widget name 合并（Object.assign 语义，移植 useWorkflow.js:221-225）
+  for (const n of inputs) {
+    if (isMediaRender(n.renderComponent)) continue
+    const v = args[n.name]
+    if (v == null) continue
+    const widget = n.selectedWidget?.name
+    if (widget != null && prompt[n.id]?.inputs) {
+      // 兜底：目标 widget 属于图片/音视频「加载」类节点，但该参数未被
+      // 识别为媒体上传（自定义节点元数据缺 renderComponent）——文本形态值
+      // 原样写进去就是 No such file。提交前拦截并给出可操作提示，让恢复轮
+      // 知道是「把提示词传进了图片输入」，而不是盲目换模板重试。
+      const cls = String(prompt[n.id]!.class_type ?? '').toLowerCase()
+      const isLoader =
+        cls.includes('loadimage') || cls.includes('loadaudio') || cls.includes('loadvideo')
+      if (isLoader && typeof v === 'string' && !looksLikeMediaValue(v) && looksLikeTextBlob(v)) {
+        throw new Error(
+          `参数 "${n.name}" 对应节点 ${prompt[n.id]!.class_type}（图片/音视频加载），` +
+            `期望素材文件名或 data:/http(s) URL，却收到提示词文本：${v.slice(0, 60)}${
+              v.length > 60 ? '…' : ''
+            }。请改用文生图模板，或把素材先上传。`
+        )
+      }
+      prompt[n.id]!.inputs[widget] = v
+    }
+  }
+
+  // 3.5 节点级覆盖（P1）：只在本次执行副本上生效，不污染模板
+  if (nodeOverrides) {
+    const errors = applyNodeOverrides(prompt, nodeOverrides)
+    if (errors.length > 0) throw new Error(`nodeOverrides 校验失败：\n${errors.join('\n')}`)
+  }
+
+  // 4. 提交 + 记录 app 映射（只存 paramsNodes，带上限淘汰最旧条目；H2）
+  const promptId = await queuePrompt(comfyOrigin, prompt, clientId)
+  // 生成过程预览（#5）：订阅该 clientId 的 latent 预览帧
+  startPreviewCapture(comfyOrigin, clientId, promptId)
+  promptAppMap.set(promptId, template.paramsNodes ?? [])
+  if (promptAppMap.size > MAX_PROMPT_ENTRIES) {
+    const oldest = promptAppMap.keys().next().value
+    if (oldest != null) promptAppMap.delete(oldest)
+  }
+  return { prompt_id: promptId, status: 'queued' }
+}
+
+/**
+ * 裸工作流执行（P1 创作能力）：直接提交任意 API 格式 prompt JSON，不依赖
+ * 固化模板。seed/节点覆盖/输出节点推断与 executeApp 同一套语义。
+ * @param paramsNodes 可选（产物提取白名单）；缺省时按 Save/Preview 类节点推断输出。
+ */
+export async function executePrompt(
+  comfyOrigin: string,
+  rawPrompt: ComfyPrompt,
+  opts: {
+    seed?: number | null
+    randomizeSeed?: boolean
+    nodeOverrides?: Record<
+      string,
+      { class_type?: string; widgetOverrides?: Record<string, unknown> }
+    >
+    paramsNodes?: ParamNode[]
+    workflowKey?: string
+  } = {}
+): Promise<ExecutionResult> {
+  const prompt: ComfyPrompt = structuredClone(rawPrompt)
+  const clientId = randomUUID()
+
+  try {
+    await freeIfWorkflowChanged(
+      comfyOrigin,
+      resolveWorkflowKey(opts.workflowKey ?? 'session:custom', prompt)
+    )
+  } catch (e) {
+    logger.warn('free before prompt execution failed', e)
+  }
+
+  applySeed(prompt, {
+    seed: opts.seed,
+    randomize_seed: opts.randomizeSeed
+  })
+  if (opts.nodeOverrides) {
+    const errors = applyNodeOverrides(prompt, opts.nodeOverrides)
+    if (errors.length > 0) throw new Error(`nodeOverrides 校验失败：\n${errors.join('\n')}`)
+  }
+
+  const promptId = await queuePrompt(comfyOrigin, prompt, clientId)
+  // 生成过程预览（#5）
+  startPreviewCapture(comfyOrigin, clientId, promptId)
+  // 产物提取白名单：显式 paramsNodes 优先，缺省按输出节点推断
+  const outputNodes: ParamNode[] = opts.paramsNodes?.length
+    ? opts.paramsNodes
+    : inferOutputParamNodes(prompt)
+  promptAppMap.set(promptId, outputNodes)
+  if (promptAppMap.size > MAX_PROMPT_ENTRIES) {
+    const oldest = promptAppMap.keys().next().value
+    if (oldest != null) promptAppMap.delete(oldest)
+  }
+  return { prompt_id: promptId, status: 'queued' }
+}
+
+/**
+ * 从 ComfyUI history 的 status.messages 事件数组提取可读错误摘要：
+ * `[["execution_start",…],["execution_error",{"node_type":"KSampler","node_id":"16",
+ * "exception_message":"…","exception_type":"…","traceback":"…"}],…]`。
+ * 直接 JSON.stringify 整数组会把执行过程噪音全倒进错误文案（前端 500 字符截断后
+ * 只剩残缺 JSON）；这里只取出错节点 + 异常消息。
+ *
+ * 两类终态都要认（2026-09-16 真机验证补）：
+ * - `execution_error`：节点抛异常；
+ * - `execution_interrupted`：**取消/中断**，ComfyUI 只发这个事件、没有 execution_error。
+ *   旧实现只认前者，取不到就回落到整数组 JSON —— 用户点取消后看到的是一坨原始 JSON
+ *   而不是「已取消」。找不到任何可读事件才返回 null。
+ */
+export function extractExecutionError(messages: unknown[]): string | null {
+  for (const entry of messages) {
+    if (!Array.isArray(entry)) continue
+    const kind = entry[0]
+    if (kind === 'execution_interrupted') {
+      const info = (entry[1] ?? {}) as { node_id?: string; node_type?: string }
+      const where = [info.node_type, info.node_id ? `#${info.node_id}` : '']
+        .filter(Boolean)
+        .join(' ')
+      return where ? `执行已中断（取消）：${where}` : '执行已中断（取消）'
+    }
+    if (kind !== 'execution_error') continue
+    const d = entry[1]
+    if (!d || typeof d !== 'object') continue
+    const err = d as {
+      node_type?: string
+      node_id?: string
+      exception_message?: string
+      exception_type?: string
+    }
+    const where = [err.node_type, err.node_id ? `#${err.node_id}` : ''].filter(Boolean).join(' ')
+    const what = err.exception_message || err.exception_type
+    if (what) return where ? `${where}: ${what}` : what
+    return JSON.stringify(entry)
+  }
+  return null
+}
+
+/** 过程事件名清单（无可读错误事件时的兜底摘要，避免倒原始 JSON 数组）。
+ * 容错两种形状：事件元组 `[name, payload]` 与裸字符串（旧数据/自定义节点可能直传文本）。 */
+function messageKinds(messages: unknown[]): string {
+  const kinds: string[] = []
+  for (const entry of messages) {
+    if (Array.isArray(entry) && typeof entry[0] === 'string') kinds.push(entry[0])
+    else if (typeof entry === 'string' && entry.trim()) kinds.push(entry.trim().slice(0, 120))
+  }
+  return [...new Set(kinds)].join(' → ')
+}
+
+/**
+ * 轮询状态（H2 + M2 + M3）：
+ * 404/无 entry → running；entry.status.status_str==='error' → error；
+ * 否则 success（M2：用 extractOutputs 过滤为 app 声明的输出节点）。
+ */
+export async function getExecutionStatus(
+  comfyOrigin: string,
+  promptId: string
+): Promise<ExecutionResult> {
+  // H3：本进程未提交过的 prompt_id（拼错/重启后历史丢失）直接报错，避免永久 running 轮询死循环
+  const paramsNodes = promptAppMap.get(promptId)
+  if (!paramsNodes) {
+    return {
+      prompt_id: promptId,
+      status: 'error',
+      error: 'unknown prompt_id: not submitted by this process (ComfyUI may have restarted)'
+    }
+  }
+  const entry = await getHistory(comfyOrigin, promptId)
+  if (!entry) return { prompt_id: promptId, status: 'running' }
+  const status = entry.status as { status_str?: string; messages?: unknown[] } | undefined
+  if (status?.status_str === 'error') {
+    const msgs = status.messages ?? []
+    // 优先提取 execution_error / execution_interrupted 的可读摘要；
+    // 都取不到时给「过程事件清单」兜底（不再把整个事件数组 stringify 倒给用户）
+    const readable = extractExecutionError(msgs)
+    return {
+      prompt_id: promptId,
+      status: 'error',
+      error:
+        readable ??
+        (msgs.length
+          ? `ComfyUI 执行失败（未提供可解析的错误事件；过程事件：${messageKinds(msgs)}）`
+          : 'ComfyUI execution error')
+    }
+  }
+  const rawOutputs = (entry.outputs as Record<string, unknown>) ?? {}
+  const outputs = extractOutputs(paramsNodes, rawOutputs)
+
+  // 提交时被 ComfyUI 丢弃的输出分支：到这里才谈得上「有没有影响」。
+  // - 一个产物都没有（history.outputs 全空）→ 这次执行实质上什么都没产出，报 error；
+  // - 有产物 → 保持 success，但把丢弃项作为 warnings 如实上报（旧行为是完全不提，
+  //   表现为「success 却拿不到正式产物」的静默降级）。
+  const diags = getQueueDiagnostics(promptId)
+  if (diags.length) {
+    clearQueueDiagnostics(promptId)
+    const detail = formatQueueNodeErrors(diags)
+    if (Object.keys(rawOutputs).length === 0) {
+      return {
+        prompt_id: promptId,
+        status: 'error',
+        error:
+          `执行结束但没有任何产物：${diags.length} 个节点未通过 ComfyUI 校验，其输出分支已被丢弃 → ` +
+          `${detail}。请检查这些节点的必填输入（模板可能缺少 widget 值或与当前节点版本不匹配）。`
+      }
+    }
+    const warnings = [
+      `${diags.length} 个节点未通过 ComfyUI 校验，其输出分支已被丢弃（本次执行已被降级）→ ${detail}`
+    ]
+    const files = extractFiles(paramsNodes, rawOutputs)
+    if (files.length && files.every((f) => f.type === 'temp')) {
+      warnings.push(
+        '产物全部是 ComfyUI 临时文件（type=temp，重启/清理即失效），没有任何正式保存产物（type=output）'
+      )
+    }
+    return { prompt_id: promptId, status: 'success', outputs, warnings }
+  }
+  return { prompt_id: promptId, status: 'success', outputs }
+}
+
+/** POST /interrupt（移植 handlers.ts:34-45；IO 已收口 comfyClient.interrupt，候选 ④） */
+export async function stopExecution(comfyOrigin: string): Promise<void> {
+  await comfyInterrupt({ origin: comfyOrigin })
+}
+
+/** 抽取 app 声明的 output 节点结果（移植 useWorkflow.js:189-207 handleResult；M6：回退分支不再 join 对象数组） */
+export function extractOutputs(
+  paramsNodes: ParamNode[],
+  outputs: Record<string, unknown> = {}
+): Record<string, unknown> {
+  const outputIds = paramsNodes.filter((n) => n.category === 'output').map((n) => String(n.id))
+  const response: Record<string, unknown> = {}
+  for (const key of Object.keys(outputs)) {
+    if (!outputIds.includes(key)) continue
+    const nodeOut = outputs[key] as Record<string, unknown>
+    for (const item of Object.values(nodeOut)) {
+      if (Array.isArray(item)) {
+        const hit = item.find(
+          (it) =>
+            typeof it === 'object' && it !== null && (it as { type?: string }).type === 'output'
+        )
+        if (hit) {
+          response[key] = hit
+          break
+        }
+      }
+    }
+    if (response[key] == null) {
+      const arr = Object.values(nodeOut).find((v) => Array.isArray(v)) as unknown[] | undefined
+      if (arr) {
+        response[key] = arr
+          .map((it) => (typeof it === 'string' ? it : JSON.stringify(it)))
+          .join('\n')
+      }
+    }
+  }
+  return response
+}
+
+/** POST /free：卸载模型 + 释放显存（工作流切换前调用，避免不同模型叠加 OOM；IO 已收口 comfyClient.freeMemory） */
+export async function freeModels(comfyOrigin: string): Promise<void> {
+  await comfyFreeMemory({ origin: comfyOrigin })
+}
+
+/**
+ * 最近一次执行的工作流指纹（批量任务与单次执行共享同一份跟踪）：
+ * - 从 C 界面（ComfyUI 原生）跑完的工作流无法感知，lastWorkflowKey 保持旧值/空，
+ *   因此下一次任意来源执行都会触发一次防御性 free，避免残留模型占显存。
+ * - 批量任务之间、批量与单次之间、单次与单次之间都能互相感知"上一个工作流"。
+ */
+let lastWorkflowKey: string | null = null
+
+/** 工作流指纹：优先 appId（同一 app 一定是同一模板），否则退化为 prompt 结构 */
+export function resolveWorkflowKey(appId: string | undefined, prompt?: ComfyPrompt): string {
+  if (appId) return `app:${appId}`
+  return `prompt:${JSON.stringify(prompt ?? {})}`
+}
+
+/**
+ * 工作流切换前置清理：若上次执行的工作流与本次不同（含首次执行/外部残留），
+ * 先 POST /free 清显存并记录本次指纹，返回 true；同工作流直接跳过返回 false。
+ * free 失败会抛出，由调用方决定容错策略。
+ */
+export async function freeIfWorkflowChanged(
+  comfyOrigin: string,
+  workflowKey: string
+): Promise<boolean> {
+  if (lastWorkflowKey === workflowKey) return false
+  await freeModels(comfyOrigin)
+  lastWorkflowKey = workflowKey
+  return true
+}
+
+/**
+ * 无条件清理：不判断上次工作流，直接 POST /free 并记录本次指纹。
+ * 用于"队列会话首个任务"等需要防御外部残留（如 C 界面跑过其他模型）的场景。
+ */
+export async function forceFreeAndTrack(comfyOrigin: string, workflowKey: string): Promise<void> {
+  await freeModels(comfyOrigin)
+  lastWorkflowKey = workflowKey
+}
+
+/** 重置工作流跟踪（测试用 / 显存状态异常时兜底） */
+export function resetWorkflowKey(): void {
+  lastWorkflowKey = null
+}

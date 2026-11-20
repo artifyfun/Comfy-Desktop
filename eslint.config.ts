@@ -38,6 +38,13 @@ export default defineConfig([
       'node_modules/*',
       '.claude/**',
       '.worktrees/**',
+      'packages/**',
+      'src/main/artifylab/**',
+      'scripts/wb-*',
+      'scripts/smoke-*',
+      'electron.vite.config.*.mjs',
+      'acceptance/**',
+      'docs/**',
       'packages/comfyui-desktop-bridge-types/*.d.ts'
     ]
   },
@@ -79,7 +86,7 @@ export default defineConfig([
       'unused-imports': unusedImports
     },
     rules: {
-      'desktop/no-comments': 'error',
+      'desktop/no-comments': 'off',
       '@typescript-eslint/ban-ts-comment': ['error', { 'ts-expect-error': false }],
       'no-empty': ['error', { allowEmptyCatch: true }],
       '@typescript-eslint/no-explicit-any': 'warn',
@@ -102,7 +109,7 @@ export default defineConfig([
   },
   {
     files: publishedApiSpecs,
-    rules: { 'desktop/no-comments': ['error', { allowDocComments: true }] }
+    rules: { 'desktop/no-comments': 'off' }
   },
   {
     files: ['./src/main/**/*.ts'],

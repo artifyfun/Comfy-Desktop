@@ -28,6 +28,8 @@ export type PanelKey =
   | 'track'
   | 'load-snapshot'
   | 'progress'
+  /** Overlay mode: the MCP setup modal mounts over the live canvas. */
+  | 'mcp-setup'
 
 const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'comfy',
@@ -39,7 +41,8 @@ const VALID_PANELS: ReadonlySet<PanelKey> = new Set([
   'new-install',
   'track',
   'load-snapshot',
-  'progress'
+  'progress',
+  'mcp-setup'
 ])
 
 const FLOW_PANELS: ReadonlySet<PanelKey> = new Set(['new-install', 'track', 'load-snapshot'])

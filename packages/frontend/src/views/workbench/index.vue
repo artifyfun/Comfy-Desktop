@@ -1,0 +1,2837 @@
+<template>
+  <div
+    class="page-container h-full flex flex-col min-w-0 overflow-hidden"
+    style="background: var(--wb-bg-base)"
+  >
+    <div
+      id="app"
+      class="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden"
+      :style="isCanvasEmbedded ? 'width:100%;max-width:100%' : ''"
+    >
+      <!-- 顶导航由 AppLayout 统一挂载：独立窗口路由形态才显示（iframe/query 嵌入时隐藏） -->
+      <!-- embed 回填提示条（画布卡片 → 工作台） -->
+      <div
+        v-if="canvasAttachNotice"
+        class="fixed top-3 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full bg-[var(--wb-accent)]/90 text-white text-xs shadow-lg"
+      >
+        <i class="fas fa-thumbtack mr-1"></i>{{ canvasAttachNotice }}
+      </div>
+
+      <!-- embed 画布感知条（M1：实时感知宿主 ComfyUI 画布） -->
+      <div
+        v-if="isNarrow && canvasState"
+        class="mx-2 mt-2 px-3 py-1.5 flex items-center gap-3 text-[11px] rounded-lg shrink-0 overflow-hidden"
+        style="
+          border: 1px solid var(--wb-stroke);
+          background: var(--wb-surface-deep);
+          color: var(--wb-text-2);
+        "
+        :title="t('workbenchCanvasSense')"
+      >
+        <span class="flex items-center gap-1 shrink-0" style="color: var(--wb-accent)">
+          <i class="fas fa-circle-nodes"></i>
+          <span class="max-w-[140px] truncate inline-block">{{ canvasState.workflowName }}</span>
+        </span>
+        <span class="shrink-0">{{
+          t('workbenchCanvasNodes').replace('{n}', String(canvasState.nodeCount))
+        }}</span>
+        <!-- 无限画布侧栏：物件计数（图片/便签/连线）——与 C 宿主 digest 的 counts 同构 -->
+        <span v-if="canvasState.counts" class="shrink-0" style="color: var(--wb-text-2)">
+          <i class="fas fa-image mr-1"></i>{{ canvasState.counts.images }}
+          <i class="fas fa-sticky-note mx-1"></i>{{ canvasState.counts.notes }}
+          <i class="fas fa-link mx-1"></i>{{ canvasState.counts.links }}
+        </span>
+        <span v-if="canvasState.selection?.length" class="truncate" style="color: var(--wb-accent)">
+          <i class="fas fa-vector-square mr-1"></i
+          >{{ canvasState.selection.map((s) => s.label || s || '').join(' · ') }}
+        </span>
+        <span v-if="canvasState.models?.length" class="truncate" style="color: var(--wb-text-1)">
+          {{ canvasState.models[0] }}
+        </span>
+        <span
+          v-if="canvasState.queue?.running || canvasState.queue?.pending"
+          class="ml-auto shrink-0 px-2 py-0.5 rounded-full"
+          style="background: var(--wb-accent) / 15; color: var(--wb-accent)"
+        >
+          <i class="fas fa-spinner fa-spin-mr-1"></i>
+          {{ canvasState.queue.running }}/{{
+            canvasState.queue.running + canvasState.queue.pending
+          }}
+        </span>
+      </div>
+
+      <!-- embed 写回 diff 确认卡（M2：LLM ops → 人审 → 下发注入桥） -->
+      <div
+        v-if="isNarrow && pendingOps"
+        class="mx-2 mt-2 px-3 py-2 rounded-lg shrink-0 text-[11px]"
+        style="border: 1px solid var(--wb-accent); background: var(--wb-surface-deep)"
+      >
+        <div class="flex items-center gap-2 mb-1.5" style="color: var(--wb-accent)">
+          <i class="fas fa-pen-to-square"></i>
+          <span class="font-medium">{{ t('workbenchOpsTitle') }}</span>
+          <span v-if="opsApplying" class="ml-auto" style="color: var(--wb-text-2)">
+            <i class="fas fa-spinner fa-spin mr-1"></i>{{ t('workbenchOpsApplying') }}
+          </span>
+        </div>
+        <div class="space-y-0.5 mb-2" style="color: var(--wb-text-1)">
+          <div v-for="(line, i) in opsDiffLines" :key="i" class="truncate" :title="line">
+            <span style="color: var(--wb-text-2)">·</span> {{ line }}
+          </div>
+        </div>
+        <div
+          v-if="opsResultMsg"
+          class="mb-2"
+          :style="{ color: opsResultOk ? 'var(--wb-accent)' : 'var(--wb-danger)' }"
+        >
+          {{ opsResultMsg }}
+        </div>
+        <div class="flex items-center gap-2">
+          <button
+            class="px-3 py-1 rounded-md font-medium disabled:opacity-50"
+            style="background: var(--wb-accent); color: #fff"
+            :disabled="opsApplying"
+            @click="confirmApplyOps"
+          >
+            <i class="fas fa-check mr-1"></i>{{ t('workbenchOpsApply') }}
+          </button>
+          <button
+            class="px-3 py-1 rounded-md"
+            style="border: 1px solid var(--wb-stroke); color: var(--wb-text-2)"
+            :disabled="opsApplying"
+            @click="discardPendingOps"
+          >
+            {{ t('workbenchOpsDiscard') }}
+          </button>
+          <span
+            v-if="canvasState"
+            class="ml-auto truncate"
+            style="color: var(--wb-text-2)"
+            :title="t('workbenchOpsBase')"
+          >
+            {{ t('workbenchOpsBase') }}: {{ canvasState.workflowName }} ·
+            {{ canvasState.nodeCount }}
+          </span>
+        </div>
+      </div>
+
+      <div
+        class="flex flex-1 min-h-0 mx-auto mt-2 gap-4 w-full relative"
+        :class="isNarrow ? 'px-2' : 'px-4 max-w-[1600px] sm:px-6 lg:px-8'"
+      >
+        <!-- 左：会话侧栏（桌面常驻列） -->
+        <SessionSidebar
+          v-if="!isNarrow"
+          :sessions="sidebarSessions"
+          :current-id="sessionId"
+          :collapsed="sidebarCollapsed"
+          :show-archived="showArchived"
+          :archived-count="archivedCount"
+          @select="selectSession"
+          @new-session="newDialogOpen = true"
+          @collapse="sidebarCollapsed = !sidebarCollapsed"
+          @rename="onRename"
+          @archive="(s) => setArchived(s, true)"
+          @export-session="exportSession"
+          @import-session="importSession"
+          @unarchive="(s) => setArchived(s, false)"
+          @delete="onDelete"
+          @update:show-archived="(v) => (showArchived = v)"
+          @manage-presets="presetMgrOpen = true"
+          @manage-skills="skillMgrOpen = true"
+          @manage-assets="assetLibOpen = true"
+          @show-env="showEnvDialog"
+          @show-guide="guideOpen = true"
+        />
+
+        <!-- 窄容器（embed 画布侧栏）会话历史浮层：会话头「展开」按钮唤出，覆盖对话区左上 -->
+        <div
+          v-if="isNarrow"
+          class="absolute inset-y-0 left-0 z-30 transition-all"
+          :class="sidebarCollapsed ? 'w-0 overflow-hidden pointer-events-none' : 'w-64'"
+        >
+          <div
+            v-if="!sidebarCollapsed"
+            class="absolute inset-0 -z-10 bg-black/30"
+            @click="sidebarCollapsed = true"
+          ></div>
+          <SessionSidebar
+            :sessions="sidebarSessions"
+            :current-id="sessionId"
+            :collapsed="sidebarCollapsed"
+            :show-archived="showArchived"
+            :archived-count="archivedCount"
+            float
+            @select="selectSession"
+            @new-session="newDialogOpen = true"
+            @collapse="sidebarCollapsed = !sidebarCollapsed"
+            @rename="onRename"
+            @archive="(s) => setArchived(s, true)"
+            @export-session="exportSession"
+            @import-session="importSession"
+            @unarchive="(s) => setArchived(s, false)"
+            @delete="onDelete"
+            @update:show-archived="(v) => (showArchived = v)"
+            @manage-presets="presetMgrOpen = true"
+            @manage-skills="skillMgrOpen = true"
+            @manage-assets="assetLibOpen = true"
+            @show-env="showEnvDialog"
+            @show-guide="guideOpen = true"
+          />
+        </div>
+
+        <!-- 中：会话区（三种形态统一 flex 内滚：外层布局壳已按 meta scrollable:false
+             锁高 overflow-hidden，这里占满剩余高度，消息列表在内部滚动，杜绝双重滚动条） -->
+        <section
+          class="flex-1 min-w-0 min-h-0 flex flex-col"
+          style="border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-card)"
+        >
+          <!-- 会话头 -->
+          <div
+            class="flex items-center gap-2 px-4 h-12 border-b border-[var(--wb-stroke)] shrink-0"
+          >
+            <!-- 侧栏折叠时:展开入口收进本面板左上角（侧栏 0 宽,不再占位） -->
+            <button
+              v-if="sidebarCollapsed"
+              class="w-7 h-7 rounded-lg text-[var(--wb-text-2)] hover:text-white hover:bg-[var(--wb-surface-deep)] flex items-center justify-center transition shrink-0"
+              :title="t('workbenchExpandSidebar')"
+              @click="sidebarCollapsed = false"
+            >
+              <i class="fas fa-bars-staggered text-sm"></i>
+            </button>
+            <!-- 预设 chip：点击切换（dsh preset 模式）；窄容器(embed)缩为纯图标省横向空间 -->
+            <a-dropdown :trigger="['click']">
+              <button
+                class="flex items-center rounded-full text-xs transition"
+                :class="[
+                  isNarrow ? 'w-7 h-7 justify-center' : 'gap-1.5 px-2.5 py-1',
+                  sessionPreset
+                    ? 'preset-chip-on text-[var(--wb-accent)]'
+                    : 'text-[var(--wb-text-2)]',
+                ]"
+                style="border: 1px solid var(--wb-stroke-strong)"
+                :title="sessionPreset ? presetName(sessionPreset) : t('workbenchPresetSwitch')"
+              >
+                <i :class="sessionPreset ? presetIcon(sessionPreset) : 'fas fa-bolt'"></i>
+                <template v-if="!isNarrow">
+                  {{ sessionPreset ? presetName(sessionPreset) : t('workbenchPresetPick') }}
+                  <i class="fas fa-chevron-down text-[9px] opacity-60"></i>
+                </template>
+              </button>
+              <template #overlay>
+                <a-menu @click="onPresetMenu">
+                  <a-menu-item v-for="p in sortedPresets" :key="p.id">
+                    <span class="flex items-center gap-2">
+                      <i :class="presetIcon(p)" class="w-4 text-[var(--wb-accent)]"></i>
+                      <span>{{ presetName(p) }}</span>
+                      <i
+                        v-if="currentSession?.presetId === p.id"
+                        class="fas fa-check text-[var(--wb-accent)] ml-auto"
+                      ></i>
+                    </span>
+                    <div
+                      class="text-[11px] text-[var(--wb-text-2)] whitespace-normal leading-snug mt-0.5"
+                    >
+                      {{ p.description?.[lang] || p.description?.zh }}
+                    </div>
+                  </a-menu-item>
+                </a-menu>
+              </template>
+            </a-dropdown>
+            <div
+              class="flex-1 text-white text-sm truncate font-medium"
+              :class="isNarrow ? 'hidden' : ''"
+            >
+              {{ currentSession?.title || t('workbench') }}
+            </div>
+            <div v-if="isNarrow" class="flex-1"></div>
+            <!-- 高级参数（节点级覆盖）：粘贴 nodeOverrides JSON → 预检/执行。
+                 窄容器（C 侧边栏/画布侧栏）隐藏——画布执行由 agent 驱动 nodeOverrides，
+                 手填是 A 工作台（模板工厂）职责 -->
+            <a-button
+              v-if="!isNarrow"
+              size="small"
+              :title="t('workbenchAdvParams')"
+              :disabled="!sessionId || busy"
+              @click="openAdvDrawer"
+            >
+              <i class="fas fa-sliders"></i>
+            </a-button>
+            <!-- 导入工作流执行：A 工作台专属（窄容器是画布协同形态，职责外） -->
+            <a-button
+              v-if="!isNarrow"
+              size="small"
+              :title="t('workbenchImportWorkflow')"
+              :disabled="!sessionId || busy"
+              @click="importOpen = true"
+            >
+              <i class="fas fa-file-import"></i>
+            </a-button>
+            <!-- 复制调试信息：spec 提示词 + 模型原始输出(含思考) + PLAN + 校验 + 执行（三形态可用） -->
+            <a-button
+              size="small"
+              :title="t('workbenchCopyDebug')"
+              :disabled="!sessionId"
+              @click="copyDebugInfo"
+            >
+              <i class="fas fa-bug"></i>
+            </a-button>
+            <!-- 产物面板开关：仅独立工作台页显示（embed 画布侧栏 isNarrow 恒真，
+                 面板 v-if="panelOpen && !isNarrow" 永不渲染，按钮是死按钮） -->
+            <a-button v-if="!isNarrow" size="small" @click="panelOpen = !panelOpen">
+              <i class="fas fa-table-columns"></i>
+            </a-button>
+          </div>
+
+          <!-- 会话切换加载指示（纯视觉 #11：不改动 selectSession 的 await/竞态守卫） -->
+          <div
+            v-if="sessionLoading"
+            class="mx-4 mt-2 shrink-0 flex items-center gap-2 self-start rounded-md border border-[var(--wb-stroke)] bg-[var(--wb-surface)] px-3 py-1 text-xs text-[var(--wb-text-2)]"
+          >
+            <a-spin size="small" />
+          </div>
+
+          <!-- 对话流（含执行卡内联） -->
+          <div ref="messagesEl" class="flex-1 overflow-y-auto p-4 space-y-6">
+            <div v-if="messages.length === 0" class="text-center text-[var(--wb-text-2)] mt-10">
+              <i class="fas fa-wand-magic-sparkles text-4xl mb-3 opacity-40"></i>
+              <p>{{ t('workbenchIntro') }}</p>
+            </div>
+            <template v-for="(m, i) in msgsWithTurn" :key="m._key ?? i">
+              <div v-if="showDateDivider(i)" class="w-full pt-1 pb-2 text-center shrink-0">
+                <span
+                  class="text-[11px] text-[var(--wb-text-3)] bg-[var(--wb-bg-base)] rounded-full px-3 py-1"
+                >
+                  {{ dateDividerLabel(m.createdAt) }}
+                </span>
+              </div>
+              <!-- 回合卡片：agent 同 turn 组首——过程(推理/工具)折叠 + 计划 + 正文 markdown + 产物图 -->
+              <div v-if="m.__turnFirst" class="flex justify-start">
+                <div class="max-w-[85%] w-full space-y-1 group/msg">
+                  <div
+                    class="rounded-[var(--wb-r-card)] px-3 py-2 text-sm break-words bg-[var(--wb-surface-deep)] text-[var(--wb-text)] border border-[var(--wb-stroke-strong)]"
+                  >
+                    <!-- P1-B3 合成兜底活动卡:turn 在途时置顶(turnActCover 同步隐藏
+                         重复的过程折叠行);全完成自动回落「过程(N 步)」→ 历史零新增 -->
+                    <ProgressCard
+                      v-if="turnProgressModel(i)?.mode === 'activity'"
+                      :mode="'activity'"
+                      :title="turnProgressModel(i).title"
+                      :running="true"
+                      :steps="turnProgressModel(i).steps"
+                    />
+                    <template v-for="{ m: tm, i: tmi } in turnGroupItems(i)" :key="tm._key ?? tmi">
+                      <!-- 产物缩略图（file part） -->
+                      <div
+                        v-if="tm.kind === 'artifact' && tm.outputFiles?.length"
+                        class="flex gap-2 flex-wrap pt-1 pb-1"
+                      >
+                        <div
+                          v-for="(f, fj) in tm.outputFiles"
+                          :key="fj"
+                          class="w-24 h-24 rounded-lg overflow-hidden bg-black/30 border border-[var(--wb-stroke)] cursor-zoom-in hover:border-[var(--wb-accent)] transition flex items-center justify-center"
+                          @click="lightboxFile = f"
+                        >
+                          <img
+                            :src="viewUrl(f)"
+                            class="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        </div>
+                      </div>
+                      <!-- P1-B3 原生 todo 清单 → 任务进度卡(独立渲染,不折叠进过程组) -->
+                      <div v-if="isTodoMsg(tm)" class="py-0.5">
+                        <ProgressCard
+                          mode="todo"
+                          :title="t('workbenchTaskProgress')"
+                          :running="todoCardRunning(tm.toolItem)"
+                          :items="tm.toolItem.items || []"
+                        />
+                      </div>
+                      <!-- 过程（reasoning/tool part）：同 turn tool_item 聚合折叠 -->
+                      <div
+                        v-else-if="
+                          isActivityMsg(tm) && !processGroupSkipped(tmi) && !turnActCover(tmi)
+                        "
+                        class="py-0.5"
+                      >
+                        <template v-if="processGroupAt(tmi)">
+                          <div
+                            class="flex items-center gap-2 min-w-0 cursor-pointer"
+                            @click.stop="toggleProcessGroup(tmi)"
+                          >
+                            <a-spin v-if="processGroupRunning(processGroupAt(tmi))" size="small" />
+                            <i
+                              v-else-if="processGroupFailed(processGroupAt(tmi))"
+                              class="fas fa-triangle-exclamation text-[var(--wb-danger)] shrink-0"
+                            ></i>
+                            <i v-else class="fas fa-check text-[var(--wb-success)] shrink-0"></i>
+                            <span class="font-mono text-xs truncate flex-1">{{
+                              t('workbenchProcessSteps').replace(
+                                '{n}',
+                                String(processGroupAt(tmi).count),
+                              )
+                            }}</span>
+                            <i
+                              :class="`fas fa-chevron-${expandedProcessGroups.has(tmi) ? 'down' : 'right'} text-[10px] opacity-60`"
+                            ></i>
+                          </div>
+                          <div v-if="expandedProcessGroups.has(tmi)" class="mt-1 space-y-0.5">
+                            <div
+                              v-for="tm2 in processGroupItems(processGroupAt(tmi))"
+                              :key="tm2._key"
+                              class="flex items-center gap-2 min-w-0"
+                              @click.stop="toggleToolItem(tm2)"
+                            >
+                              <a-spin v-if="toolItemRunning(tm2.toolItem)" size="small" />
+                              <i
+                                v-else-if="toolItemFailed(tm2.toolItem)"
+                                class="fas fa-triangle-exclamation text-[var(--wb-danger)] shrink-0"
+                              ></i>
+                              <i v-else class="fas fa-check text-[var(--wb-success)] shrink-0"></i>
+                              <span class="font-mono text-xs truncate flex-1">{{
+                                toolItemSummary(tm2.toolItem).label
+                              }}</span>
+                              <i
+                                v-if="toolItemDetail(tm2.toolItem)"
+                                :class="`fas fa-chevron-${expandedToolIds.has(tm2.toolItem.id) ? 'down' : 'right'} text-[10px] opacity-60`"
+                              ></i>
+                            </div>
+                            <pre
+                              v-for="tm2 in processGroupItems(processGroupAt(tmi)).filter(
+                                (x) =>
+                                  expandedToolIds.has(x.toolItem?.id) && toolItemDetail(x.toolItem),
+                              )"
+                              :key="'d' + tm2._key"
+                              class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-[var(--wb-surface)] border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
+                              >{{ toolItemDetail(tm2.toolItem) }}</pre
+                            >
+                            <!-- 编排路径生成预览（#5）：服务端经 SSE 推帧挂在工具
+                                 消息上，这里最多渲染一张（组内任一工具带 preview） -->
+                            <div
+                              v-for="pv in processGroupItems(processGroupAt(tmi))
+                                .filter((x) => x.preview && x.preview.dataUrl)
+                                .slice(0, 1)"
+                              :key="'pv' + pv._key"
+                              class="mt-1.5"
+                            >
+                              <img
+                                :src="pv.preview.dataUrl"
+                                data-testid="exec-preview"
+                                alt=""
+                                class="rounded border border-[var(--wb-stroke)] max-h-52 w-auto"
+                              />
+                            </div>
+                          </div>
+                        </template>
+                        <!-- 单条目/旧数据：原标题行 -->
+                        <template v-else>
+                          <div
+                            class="flex items-center gap-2 min-w-0"
+                            @click.stop="toggleToolItem(tm)"
+                          >
+                            <a-spin v-if="toolItemRunning(tm.toolItem)" size="small" />
+                            <i
+                              v-else-if="toolItemFailed(tm.toolItem)"
+                              class="fas fa-triangle-exclamation text-[var(--wb-danger)] shrink-0"
+                            ></i>
+                            <i v-else class="fas fa-check text-[var(--wb-success)] shrink-0"></i>
+                            <span class="font-mono text-xs truncate flex-1">{{
+                              toolItemSummary(tm.toolItem).label
+                            }}</span>
+                            <i
+                              v-if="toolItemDetail(tm.toolItem)"
+                              :class="`fas fa-chevron-${expandedToolIds.has(tm.toolItem.id) ? 'down' : 'right'} text-[10px] opacity-60`"
+                            ></i>
+                          </div>
+                          <pre
+                            v-if="
+                              expandedToolIds.has(tm.toolItem.id) && toolItemDetail(tm.toolItem)
+                            "
+                            class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-[var(--wb-surface)] border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
+                            >{{ toolItemDetail(tm.toolItem) }}</pre
+                          >
+                          <!-- 编排路径生成预览（#5）：单条工具卡 -->
+                          <div v-if="tm.preview && tm.preview.dataUrl" class="mt-1.5">
+                            <img
+                              :src="tm.preview.dataUrl"
+                              data-testid="exec-preview"
+                              alt=""
+                              class="rounded border border-[var(--wb-stroke)] max-h-52 w-auto"
+                            />
+                          </div>
+                        </template>
+                      </div>
+                      <!-- 计划摘要（plan part） -->
+                      <div
+                        v-if="tm.kind === 'card' && tm.plan"
+                        class="my-1 py-1 border-l-[3px] border-l-[var(--wb-accent)] pl-2"
+                      >
+                        <div class="font-semibold mb-0.5 text-xs">
+                          <i class="fas fa-diagram-project mr-1"></i>{{ t('workbenchPlan') }}
+                        </div>
+                        <div class="text-xs opacity-80">{{ tm.plan.reason }}</div>
+                        <div
+                          v-if="batchSummaryText(tm.plan)"
+                          class="text-xs"
+                          style="color: var(--wb-accent)"
+                        >
+                          <i class="fas fa-layer-group mr-1"></i>{{ batchSummaryText(tm.plan) }}
+                        </div>
+                        <div class="text-xs">{{ cardText(tm.plan) }}</div>
+                      </div>
+                      <!-- HITL 审批卡（C15，灰度 ng=1）：pending 三操作 → 桥转发 interaction-response -->
+                      <div v-if="tm.kind === 'approval'" class="py-1">
+                        <InteractionApprovalCard
+                          :approval="tm.approval"
+                          :status="tm.approvalStatus || 'pending'"
+                          @respond="(p) => onApprovalRespond(tm, p)"
+                        />
+                      </div>
+                      <!-- C-H4 计划步骤卡：步骤树 + 拍板选项 -->
+                      <div v-if="tm.kind === 'plan'" class="py-1">
+                        <PlanProposalCard
+                          :plan="tm.plan"
+                          :status="tm.planStatus || 'done'"
+                          :request-id="tm.requestId || ''"
+                          @choose="(p) => onPlanChoose(tm, p)"
+                        />
+                      </div>
+                      <!-- 决策/执行占位（progress part） -->
+                      <div v-if="tm.kind === 'progress'" class="py-0.5">
+                        <a-spin size="small" />
+                        <span class="ml-2 text-xs">{{ tm.text }}</span>
+                        <!-- 生成过程预览（#5）：本地 ComfyUI latent 帧经轮询带回 -->
+                        <div v-if="tm.preview && tm.preview.dataUrl" class="mt-1.5">
+                          <img
+                            :src="tm.preview.dataUrl"
+                            data-testid="exec-preview"
+                            alt=""
+                            class="rounded border border-[var(--wb-stroke)] max-h-52 w-auto"
+                          />
+                        </div>
+                      </div>
+                      <!-- 正文（text part）：markdown 渲染；error 红显 -->
+                      <div
+                        v-if="
+                          (tm.kind === 'chat' || tm.kind === 'error' || tm.budgetExhausted) &&
+                          tm.role === 'agent'
+                        "
+                        class="pt-0.5"
+                        :class="tm.kind === 'error' ? 'text-[var(--wb-danger)]' : ''"
+                      >
+                        <WbMarkdown :source="tm.text" :streaming="busy && tm._streaming" />
+                      </div>
+                      <!-- C-H20 预算触顶引导卡：一键延续到新会话 -->
+                      <div
+                        v-if="tm.budgetExhausted"
+                        class="mt-2 flex items-center gap-2 rounded-lg border border-[var(--wb-accent)]/40 bg-[var(--wb-accent)]/10 px-2.5 py-2"
+                      >
+                        <i class="fas fa-forward text-[var(--wb-accent)]"></i>
+                        <span class="text-xs text-[var(--wb-text-1)]"
+                          >画布、资产与模板会完整保留</span
+                        >
+                        <button
+                          class="ml-auto rounded bg-[var(--wb-accent)] px-2.5 py-1 text-xs text-white hover:opacity-90"
+                          data-testid="budget-new-session"
+                          @click="newSessionFromBudget"
+                        >
+                          延续到新会话
+                        </button>
+                      </div>
+                      <!-- 断线重试（D 线）：中断错误气泡携带原文时提供一键重发（用户触发，
+                           后端断连即杀 run，自动重发有双跑风险） -->
+                      <div v-if="tm.kind === 'error' && tm.retryInput && !busy" class="pt-1">
+                        <button
+                          class="text-xs px-2 py-1 rounded border border-[var(--wb-danger)]/40 text-[var(--wb-danger)] hover:bg-[var(--wb-danger)]/10 flex items-center gap-1"
+                          :title="t('workbenchRetryRoundTip')"
+                          @click="retryRoundFrom(tm)"
+                        >
+                          <i class="fas fa-rotate-right"></i>
+                          {{ t('workbenchRetryRound') }}
+                        </button>
+                      </div>
+                    </template>
+                  </div>
+                  <!-- 回合卡片操作行：组尾时间/token + 复制正文 -->
+                  <div
+                    class="flex items-center gap-3 text-[11px] text-[var(--wb-text-3)] h-5 opacity-0 group-hover/msg:opacity-100 transition pl-1"
+                  >
+                    <button
+                      v-if="turnCopyText(i)"
+                      class="hover:text-[var(--wb-text)] flex items-center gap-1"
+                      :title="t('workbenchCopyMessage')"
+                      @click="copyMessage(turnTailInfo(i).m, i)"
+                    >
+                      <i
+                        :class="
+                          copiedIdx === i ? 'fas fa-check text-[var(--wb-success)]' : 'far fa-copy'
+                        "
+                      ></i>
+                    </button>
+                    <span class="text-[var(--wb-text-3)]">{{
+                      timeLabel(turnTailInfo(i).m?.createdAt)
+                    }}</span>
+                    <span
+                      v-if="usageFor(turnTailInfo(i).m)"
+                      class="text-[var(--wb-text-3)] tabular-nums"
+                      :title="usageTitle(usageFor(turnTailInfo(i).m))"
+                    >
+                      <i class="fas fa-arrow-up text-[9px]"></i
+                      >{{ fmtTokens(usageFor(turnTailInfo(i).m).inputTokens) }}
+                      <i class="fas fa-arrow-down text-[9px] ml-1"></i
+                      >{{ fmtTokens(usageFor(turnTailInfo(i).m).outputTokens) }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <!-- 单消息：用户 / 独立 agent（原样渲染） -->
+              <div
+                v-else-if="!m.__inTurn"
+                class="flex"
+                :class="[m.role === 'user' ? 'justify-end' : 'justify-start', turnGapClass(i)]"
+              >
+                <div class="max-w-[85%] space-y-1 group/msg">
+                  <!-- 附件缩略图（用户消息）：上传完成附件走 /view 直出；本地预览
+                       仅 draft 期存在，发送后 revoke 失效 → 用 viewUrl 兜底 -->
+                  <div v-if="m.attachments?.length" class="flex gap-1.5 flex-wrap justify-end">
+                    <div
+                      v-for="(a, j) in m.attachments"
+                      :key="j"
+                      class="w-12 h-12 rounded bg-[var(--wb-surface-deep)] border border-[var(--wb-stroke-strong)] flex items-center justify-center overflow-hidden cursor-zoom-in"
+                      @click.stop="a.kind === 'image' && (lightboxFile = a)"
+                    >
+                      <img
+                        v-if="a.kind === 'image'"
+                        :src="a._preview || viewUrl(a)"
+                        class="w-full h-full object-cover"
+                      />
+                      <i v-else :class="kindIcon(a.kind)" class="text-[var(--wb-text-2)]"></i>
+                    </div>
+                  </div>
+                  <!-- 产物缩略图（artifact 消息内联，点击 lightbox） -->
+                  <div
+                    v-if="m.kind === 'artifact' && m.outputFiles?.length"
+                    class="flex gap-2 flex-wrap"
+                  >
+                    <div
+                      v-for="(f, j) in m.outputFiles"
+                      :key="j"
+                      class="w-24 h-24 rounded-lg overflow-hidden bg-[var(--wb-surface-deep)] border border-[var(--wb-stroke-strong)] cursor-zoom-in hover:border-[var(--wb-accent)] transition flex items-center justify-center"
+                      @click="lightboxFile = f"
+                    >
+                      <img :src="viewUrl(f)" class="w-full h-full object-cover" loading="lazy" />
+                    </div>
+                  </div>
+                  <div
+                    class="px-3 py-2 text-sm break-words"
+                    :class="[
+                      messageClass(m),
+                      bubbleRadius(m, i),
+                      m.kind === 'chat' || m.kind === 'error' ? '' : 'whitespace-pre-wrap',
+                    ]"
+                  >
+                    <template v-if="m.kind === 'card' && m.plan">
+                      <div class="font-semibold mb-1">
+                        <i class="fas fa-diagram-project mr-1"></i>{{ t('workbenchPlan') }}
+                      </div>
+                      <div class="text-xs opacity-80 mb-2">{{ m.plan.reason }}</div>
+                      <!-- 批量摘要行：仅 batch 计划渲染（空串时连图标也不该出现） -->
+                      <div
+                        v-if="batchSummaryText(m.plan)"
+                        class="text-xs mb-2"
+                        style="color: var(--wb-accent)"
+                      >
+                        <i class="fas fa-layer-group mr-1"></i>{{ batchSummaryText(m.plan) }}
+                      </div>
+                      <div class="text-xs">{{ cardText(m.plan) }}</div>
+                    </template>
+                    <template v-else-if="m.kind === 'progress'">
+                      <a-spin size="small" />
+                      <span class="ml-2">{{ m.text }}</span>
+                      <!-- 生成过程预览（#5） -->
+                      <div v-if="m.preview && m.preview.dataUrl" class="mt-1.5">
+                        <img
+                          :src="m.preview.dataUrl"
+                          data-testid="exec-preview"
+                          alt=""
+                          class="rounded border border-[var(--wb-stroke)] max-h-52 w-auto"
+                        />
+                      </div>
+                    </template>
+                    <!-- P1-B3 原生 todo 清单(独立消息,无 turn 归属的旧数据/兜底) -->
+                    <ProgressCard
+                      v-else-if="isTodoMsg(m)"
+                      mode="todo"
+                      :title="t('workbenchTaskProgress')"
+                      :running="todoCardRunning(m.toolItem)"
+                      :items="m.toolItem.items || []"
+                    />
+                    <!-- codex 工具条目：同 turn 相邻条目聚合为一行「过程（N 步）」，点击展开；
+                         单条目/旧数据保持原标题行（processGroupAt 返回 null 时） -->
+                    <template
+                      v-else-if="isActivityMsg(m) && !processGroupSkipped(i) && !turnActCover(i)"
+                    >
+                      <template v-if="processGroupAt(i)">
+                        <div
+                          class="flex items-center gap-2 min-w-0 cursor-pointer"
+                          @click.stop="toggleProcessGroup(i)"
+                        >
+                          <a-spin v-if="processGroupRunning(processGroupAt(i))" size="small" />
+                          <i
+                            v-else-if="processGroupFailed(processGroupAt(i))"
+                            class="fas fa-triangle-exclamation text-[var(--wb-danger)] shrink-0"
+                          ></i>
+                          <i v-else class="fas fa-check text-[var(--wb-success)] shrink-0"></i>
+                          <span class="font-mono text-xs truncate flex-1">{{
+                            t('workbenchProcessSteps').replace(
+                              '{n}',
+                              String(processGroupAt(i).count),
+                            )
+                          }}</span>
+                          <i
+                            :class="`fas fa-chevron-${expandedProcessGroups.has(i) ? 'down' : 'right'} text-[10px] opacity-60`"
+                          ></i>
+                        </div>
+                        <template v-if="expandedProcessGroups.has(i)">
+                          <div
+                            v-for="tm in processGroupItems(processGroupAt(i))"
+                            :key="tm._key"
+                            class="mt-1"
+                          >
+                            <div
+                              class="flex items-center gap-2 min-w-0"
+                              @click.stop="toggleToolItem(tm)"
+                            >
+                              <a-spin v-if="toolItemRunning(tm.toolItem)" size="small" />
+                              <i
+                                v-else-if="toolItemFailed(tm.toolItem)"
+                                class="fas fa-triangle-exclamation text-[var(--wb-danger)] shrink-0"
+                              ></i>
+                              <i v-else class="fas fa-check text-[var(--wb-success)] shrink-0"></i>
+                              <span class="font-mono text-xs truncate flex-1">{{
+                                toolItemSummary(tm.toolItem).label
+                              }}</span>
+                              <i
+                                v-if="toolItemDetail(tm.toolItem)"
+                                :class="`fas fa-chevron-${expandedToolIds.has(tm.toolItem.id) ? 'down' : 'right'} text-[10px] opacity-60`"
+                              ></i>
+                            </div>
+                            <pre
+                              v-if="
+                                expandedToolIds.has(tm.toolItem.id) && toolItemDetail(tm.toolItem)
+                              "
+                              class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-[var(--wb-surface)] border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
+                              >{{ toolItemDetail(tm.toolItem) }}</pre
+                            >
+                          </div>
+                        </template>
+                      </template>
+                      <!-- 单条目/旧数据：原标题行 -->
+                      <div
+                        v-else
+                        class="flex items-center gap-2 min-w-0"
+                        @click.stop="toggleToolItem(m)"
+                      >
+                        <a-spin v-if="toolItemRunning(m.toolItem)" size="small" />
+                        <i
+                          v-else-if="toolItemFailed(m.toolItem)"
+                          class="fas fa-triangle-exclamation text-[var(--wb-danger)] shrink-0"
+                        ></i>
+                        <i v-else class="fas fa-check text-[var(--wb-success)] shrink-0"></i>
+                        <span class="font-mono text-xs truncate flex-1">{{
+                          toolItemSummary(m.toolItem).label
+                        }}</span>
+                        <i
+                          v-if="toolItemDetail(m.toolItem)"
+                          :class="`fas fa-chevron-${expandedToolIds.has(m.toolItem.id) ? 'down' : 'right'} text-[10px] opacity-60`"
+                        ></i>
+                      </div>
+                      <pre
+                        v-if="expandedToolIds.has(m.toolItem.id) && toolItemDetail(m.toolItem)"
+                        class="mt-1.5 max-h-48 overflow-y-auto text-[11px] leading-relaxed rounded bg-[var(--wb-surface)] border border-[var(--wb-stroke)] p-2 whitespace-pre-wrap break-all text-[var(--wb-text-2)] font-mono"
+                        >{{ toolItemDetail(m.toolItem) }}</pre
+                      >
+                    </template>
+                    <!-- agent 文本走 markdown（dsh 同款 marked+DOMPurify）；用户消息保持纯文本 -->
+                    <WbMarkdown
+                      v-else-if="(m.kind === 'chat' || m.kind === 'error') && m.role === 'agent'"
+                      :source="m.text"
+                      :streaming="busy && m._streaming"
+                    />
+                    <!-- HITL 审批卡（C15，灰度 ng=1,非 turn-first 分支） -->
+                    <div v-else-if="m.kind === 'approval'" class="py-1">
+                      <InteractionApprovalCard
+                        :approval="m.approval"
+                        :status="m.approvalStatus || 'pending'"
+                        @respond="(p) => onApprovalRespond(m, p)"
+                      />
+                    </div>
+                    <template v-else>{{ m.text }}</template>
+                  </div>
+                  <!-- dsh 式操作行:hover 浮出,贴气泡下方 -->
+                  <div
+                    class="flex items-center gap-3 text-[11px] text-[var(--wb-text-3)] h-5 opacity-0 group-hover/msg:opacity-100 transition"
+                    :class="m.role === 'user' ? 'justify-end pr-1' : 'pl-1'"
+                  >
+                    <button
+                      v-if="copyableText(m)"
+                      class="hover:text-[var(--wb-text)] flex items-center gap-1"
+                      :title="t('workbenchCopyMessage')"
+                      @click="copyMessage(m, i)"
+                    >
+                      <i
+                        :class="
+                          copiedIdx === i ? 'fas fa-check text-[var(--wb-success)]' : 'far fa-copy'
+                        "
+                      ></i>
+                    </button>
+                    <span class="text-[var(--wb-text-3)]">{{ timeLabel(m.createdAt) }}</span>
+                    <!-- token 用量:仅该会话最后一轮 AI 回复显示(↑输入 ↓输出) -->
+                    <span
+                      v-if="usageFor(m)"
+                      class="text-[var(--wb-text-3)] tabular-nums"
+                      :title="usageTitle(usageFor(m))"
+                    >
+                      <i class="fas fa-arrow-up text-[9px]"></i
+                      >{{ fmtTokens(usageFor(m).inputTokens) }}
+                      <i class="fas fa-arrow-down text-[9px] ml-1"></i
+                      >{{ fmtTokens(usageFor(m).outputTokens) }}
+                    </span>
+                    <!-- 分支导航:该消息存在兄弟变体时显示 ‹ v/N › -->
+                    <span v-if="m._variants > 1" class="flex items-center gap-1">
+                      <button
+                        class="hover:text-[var(--wb-text)] px-0.5"
+                        :disabled="m._variant <= 0"
+                        :class="{ 'opacity-30 cursor-default': m._variant <= 0 }"
+                        :title="t('workbenchPrevVariant')"
+                        @click="switchVariant(m, -1)"
+                      >
+                        <i class="fas fa-chevron-left text-[9px]"></i>
+                      </button>
+                      <span class="tabular-nums">{{ m._variant + 1 }}/{{ m._variants }}</span>
+                      <button
+                        class="hover:text-[var(--wb-text)] px-0.5"
+                        :disabled="m._variant >= m._variants - 1"
+                        :class="{ 'opacity-30 cursor-default': m._variant >= m._variants - 1 }"
+                        :title="t('workbenchNextVariant')"
+                        @click="switchVariant(m, 1)"
+                      >
+                        <i class="fas fa-chevron-right text-[9px]"></i>
+                      </button>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- invalid issues -->
+          <div v-if="pendingIssues.length" class="px-4 pb-2">
+            <a-alert type="warning" show-icon>
+              <template #message>{{ t('workbenchPlanInvalid') }}</template>
+              <template #description>
+                <ul class="list-disc pl-4 text-xs">
+                  <li v-for="(issue, i) in pendingIssues" :key="i">
+                    {{ issue.field }}: {{ issue.message }}
+                  </li>
+                </ul>
+              </template>
+            </a-alert>
+          </div>
+
+          <!-- 富输入框 -->
+          <Composer
+            ref="composerEl"
+            v-model="input"
+            :busy="busy || executingCount > 0"
+            :stopping="stopping"
+            :uploading="uploading"
+            :attachments="draftAttachments"
+            :templates="advTemplates"
+            :model-override="modelOverride"
+            :approval-mode="approvalMode"
+            :reasoning-effort="reasoningEffort"
+            @send="send"
+            @stop="stopChat"
+            @upload-files="uploadFiles"
+            @reference-files="referenceLocalFiles"
+            @remove-attachment="removeAttachment"
+            @update:model-override="saveModelOverride"
+            @update:approval-mode="saveApprovalMode"
+            @update:reasoning-effort="saveReasoningEffort"
+          />
+        </section>
+
+        <!-- 右：产物面板（可折叠；embed 模式产物自动上墙，右栏收起；高度由主列 flex stretch 撑满） -->
+        <section
+          v-if="panelOpen && !isNarrow"
+          class="w-72 shrink-0 flex flex-col min-h-0"
+          style="border: 1px solid var(--wb-stroke); border-radius: var(--wb-r-card)"
+        >
+          <div
+            class="p-3 border-b border-[var(--wb-stroke)] text-white font-semibold flex items-center justify-between"
+          >
+            <span
+              ><i class="fas fa-photo-film mr-2 text-[var(--wb-accent)]"></i
+              >{{ t('workbenchArtifacts') }}</span
+            >
+          </div>
+          <div class="flex-1 overflow-y-auto p-3 space-y-3">
+            <div
+              v-if="artifacts.length === 0"
+              class="text-center text-[var(--wb-text-2)] mt-8 text-sm"
+            >
+              {{ t('workbenchNoArtifacts') }}
+            </div>
+            <div
+              v-for="(a, i) in artifacts"
+              :key="i"
+              class="rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface-deep)] p-2"
+            >
+              <div class="flex items-center justify-between mb-1">
+                <a-tag
+                  :color="
+                    a.status === 'success'
+                      ? 'green'
+                      : a.status === 'error'
+                        ? 'red'
+                        : a.status === 'stopped'
+                          ? 'default'
+                          : 'processing'
+                  "
+                >
+                  {{ a.status }}
+                </a-tag>
+                <span class="flex items-center gap-1 min-w-0">
+                  <span class="text-xs text-[var(--wb-text-2)] truncate max-w-[140px]">{{
+                    a.templateName
+                  }}</span>
+                  <!-- 复制执行 ID：排查/反馈时贴给 AI 或开发者 -->
+                  <button
+                    class="shrink-0 text-[var(--wb-text-3)] hover:text-[var(--wb-text)] text-xs px-1"
+                    :title="t('workbenchCopyPromptId')"
+                    @click="copyPromptId(a)"
+                  >
+                    <i class="far fa-copy"></i>
+                  </button>
+                </span>
+              </div>
+              <!-- 批量任务进度条 -->
+              <div v-if="a.batchStatus && a.batchStatus !== 'completed'" class="mb-2">
+                <div class="flex justify-between text-xs text-[var(--wb-text-2)] mb-1">
+                  <span>{{ t('workbenchBatchProgress') }}</span>
+                  <span
+                    >{{ a.batchSuccess ?? 0 }}/{{ a.batchTotal ?? '?' }}（失败
+                    {{ a.batchFailed ?? 0 }}）</span
+                  >
+                </div>
+                <div class="h-1.5 rounded bg-[var(--wb-surface-hover)] overflow-hidden">
+                  <div
+                    class="h-full bg-[var(--wb-accent)] transition-all"
+                    :style="{ width: (a.batchPercent ?? 0) + '%' }"
+                  ></div>
+                </div>
+              </div>
+              <!-- 产物缩略图网格（ComfyUI /view 直出，点击 lightbox） -->
+              <div v-if="a.files?.length" class="grid grid-cols-3 gap-1 mb-1">
+                <div
+                  v-for="(f, j) in a.files"
+                  :key="j"
+                  class="group/file relative aspect-square rounded overflow-hidden bg-[var(--wb-surface-deep)] border border-[var(--wb-stroke-strong)] cursor-zoom-in hover:border-[var(--wb-accent)] transition"
+                  @click="lightboxFile = f"
+                >
+                  <img :src="viewUrl(f)" class="w-full h-full object-cover" loading="lazy" />
+                  <!-- hover 操作:单入口「⋯」dropdown,避免平铺 -->
+                  <a-dropdown
+                    :trigger="['click']"
+                    class="absolute right-1 top-1 hidden group-hover/file:block"
+                  >
+                    <button
+                      class="w-6 h-6 flex items-center justify-center rounded bg-black/70 text-[var(--wb-text)] hover:text-white"
+                      :title="t('workbenchFileActions')"
+                      @click.stop
+                    >
+                      <i class="fas fa-ellipsis-h text-xs"></i>
+                    </button>
+                    <template #overlay>
+                      <a-menu @click="({ key }) => onFileAction(key, a, f)">
+                        <a-menu-item key="save" v-if="isElectron">
+                          <span class="flex items-center gap-2"
+                            ><i class="fas fa-download w-4"></i>{{ t('workbenchSaveAs') }}</span
+                          >
+                        </a-menu-item>
+                        <a-menu-item key="favorite">
+                          <span class="flex items-center gap-2"
+                            ><i class="fas fa-star w-4"></i>{{ t('workbenchFavorite') }}</span
+                          >
+                        </a-menu-item>
+                        <a-menu-item key="pin">
+                          <span class="flex items-center gap-2"
+                            ><i class="fas fa-thumbtack w-4"></i
+                            >{{ t('workbenchPinToCanvas') }}</span
+                          >
+                        </a-menu-item>
+                        <a-menu-item key="publish" v-if="a.status === 'success'">
+                          <span class="flex items-center gap-2"
+                            ><i class="fas fa-bolt w-4"></i>{{ t('workbenchPublish') }}</span
+                          >
+                        </a-menu-item>
+                        <a-menu-item key="open" v-if="isElectron">
+                          <span class="flex items-center gap-2"
+                            ><i class="fas fa-folder-open w-4"></i
+                            >{{ t('workbenchOpenInFolder') }}</span
+                          >
+                        </a-menu-item>
+                      </a-menu>
+                    </template>
+                  </a-dropdown>
+                </div>
+              </div>
+              <div v-else-if="a.outputs.length" class="text-xs text-[var(--wb-text-2)] break-all">
+                {{ a.outputs.join(' · ') }}
+              </div>
+              <!-- 执行失败：错误摘要 + 复制全文（完整错误在轮询回填的 a.error） -->
+              <div
+                v-if="a.status === 'error' && a.error"
+                class="mt-2 flex items-center justify-between gap-2 rounded bg-[var(--wb-danger)]/10 border border-[var(--wb-danger)]/30 px-2 py-1.5"
+              >
+                <span class="text-xs text-[var(--wb-danger)] truncate flex-1" :title="a.error">{{
+                  a.error
+                }}</span>
+                <button
+                  class="shrink-0 text-xs text-[var(--wb-danger)] hover:text-white flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-[var(--wb-danger)]/15"
+                  @click="copyArtifactError(a)"
+                >
+                  <i class="far fa-copy"></i>{{ t('workbenchCopyError') }}
+                </button>
+              </div>
+              <!-- M4 调试路由：失败后自动分类的诊断卡（分类徽标 + 建议 + 一键修复） -->
+              <div
+                v-if="a.status === 'error' && diagnosisOf(a)"
+                class="mt-2 rounded border px-2 py-1.5 text-xs"
+                style="border-color: var(--wb-stroke); background: rgba(255, 255, 255, 0.03)"
+              >
+                <div class="flex items-center gap-2 mb-1">
+                  <span
+                    class="px-1.5 py-0.5 rounded font-mono text-[10px]"
+                    style="
+                      background: var(--wb-accent-bg, rgba(56, 189, 248, 0.15));
+                      color: var(--wb-accent);
+                    "
+                    >{{ t('workbenchDiagCat_' + diagnosisOf(a).category) }}</span
+                  >
+                  <span v-if="diagnosisOf(a).nodeType" class="opacity-70 font-mono">
+                    {{ diagnosisOf(a).nodeType
+                    }}<template v-if="diagnosisOf(a).nodeId">
+                      #{{ diagnosisOf(a).nodeId }}</template
+                    >
+                  </span>
+                </div>
+                <div class="opacity-90 mb-1.5">{{ diagnosisOf(a).suggestion.text }}</div>
+                <button
+                  v-if="diagnosisOf(a).suggestion.fixOps && isNarrow"
+                  class="text-[11px] px-2 py-0.5 rounded hover:opacity-80"
+                  style="background: var(--wb-accent); color: #fff"
+                  @click="applyDiagnosisFix(a)"
+                >
+                  <i class="fas fa-wrench mr-1"></i>{{ t('workbenchDiagFix') }}
+                </button>
+              </div>
+              <!-- 卡级操作收敛到每文件 dropdown;此处仅保留批量终态徽标 -->
+              <div
+                v-if="a.batchStatus && ['completed', 'stopped', 'failed'].includes(a.batchStatus)"
+                class="mt-2 text-xs text-[var(--wb-text-2)]"
+              >
+                {{ a.batchStatus }} · {{ a.batchSuccess ?? 0 }}/{{ a.batchTotal ?? '?' }}
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- 新建会话（预设 chip） -->
+    <NewSessionDialog
+      v-model:open="newDialogOpen"
+      :presets="presets"
+      :default-preset-id="defaultPresetId"
+      @create="createSession"
+    />
+
+    <!-- 技能/预设管理 -->
+    <PresetManager
+      v-model:open="presetMgrOpen"
+      :presets="presets"
+      :default-id="defaultPresetId"
+      @changed="loadPresets"
+    />
+
+    <!-- 技能库（SKILL.md 知识技能管理） -->
+    <SkillManager v-model:open="skillMgrOpen" />
+    <a-modal v-model:open="assetLibOpen" :title="t('assetLibTitle')" :footer="null" :width="420">
+      <AssetLibrary :t="t" />
+    </a-modal>
+
+    <!-- 使用指南（场景速览/模式/预设/模板/技能/提示词与素材库） -->
+    <UsageGuide v-model:open="guideOpen" @start="startScenario" />
+
+    <!-- 工作台能力/环境说明（自我认知可视化） -->
+    <a-modal v-model:open="envOpen" :title="t('workbenchEnvInfo')" :footer="null" width="560px">
+      <div v-if="envLoading" class="py-8 text-center"><a-spin /></div>
+      <div
+        v-else-if="envSnapshot && envSnapshot.appNames && envSnapshot.modelsByType"
+        class="space-y-3 py-2"
+      >
+        <div>
+          <div class="text-xs text-[var(--wb-text-2)] mb-1">{{ t('workbenchEnvSkills') }}</div>
+          <div class="flex flex-wrap gap-1.5">
+            <a-tag v-for="n in envSnapshot.appNames" :key="n" color="blue">{{ n }}</a-tag>
+            <span v-if="!envSnapshot.appNames.length" class="text-xs text-[var(--wb-text-3)]"
+              >—</span
+            >
+          </div>
+        </div>
+        <div>
+          <div class="text-xs text-[var(--wb-text-2)] mb-1">{{ t('workbenchEnvModels') }}</div>
+          <div v-for="(names, type) in envSnapshot.modelsByType" :key="type" class="text-xs mb-1">
+            <span class="text-tech-cyan font-mono">{{ type }}</span
+            >：
+            <span class="text-[var(--wb-text-2)]"
+              >{{ names.slice(0, 12).join('、')
+              }}{{ names.length > 12 ? ` 等 ${names.length} 个` : '' }}</span
+            >
+          </div>
+          <div
+            v-if="!Object.keys(envSnapshot.modelsByType).length"
+            class="text-xs text-[var(--wb-text-3)]"
+          >
+            —（未配置 modelsDirs 或目录为空）
+          </div>
+        </div>
+        <div class="flex gap-4 text-xs">
+          <span class="text-[var(--wb-text-2)]"
+            >{{ t('workbenchEnvVram') }}:
+            <b class="text-white">{{
+              envSnapshot.vramGb ? `约 ${Math.round(envSnapshot.vramGb)}GB` : '—'
+            }}</b></span
+          >
+          <span class="text-[var(--wb-text-2)]"
+            >{{ t('workbenchEnvNodes') }}:
+            <b class="text-white">{{ envSnapshot.customNodes.length }}</b></span
+          >
+        </div>
+        <a-collapse ghost>
+          <a-collapse-panel
+            key="nodes"
+            :header="`${t('workbenchEnvNodes')} (${envSnapshot.customNodes.length})`"
+          >
+            <div class="text-xs text-[var(--wb-text-2)] break-all leading-relaxed">
+              {{ envSnapshot.customNodes.join('、') || '—' }}
+            </div>
+          </a-collapse-panel>
+        </a-collapse>
+        <p
+          class="text-xs text-[var(--wb-text-3)] leading-relaxed border-t border-[var(--wb-stroke)] pt-2"
+        >
+          {{ t('workbenchEnvHint') }}
+        </p>
+      </div>
+      <div v-else-if="!envLoading" class="py-8 text-center text-xs text-[var(--wb-text-3)]">
+        —（环境快照不可用）
+      </div>
+    </a-modal>
+
+    <!-- Lightbox：产物大图/视频预览 -->
+    <div
+      v-if="lightboxFile"
+      class="fixed inset-0 z-[100] bg-black/85 flex items-center justify-center"
+      @click="lightboxFile = null"
+    >
+      <video
+        v-if="isVideoFile(lightboxFile)"
+        :src="viewUrl(lightboxFile)"
+        controls
+        autoplay
+        class="max-w-[90vw] max-h-[90vh] rounded-lg shadow-2xl"
+        @click.stop
+      ></video>
+      <img
+        v-else
+        :src="viewUrl(lightboxFile)"
+        class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+      />
+      <button
+        class="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/10 text-white text-xl hover:bg-white/20 flex items-center justify-center"
+        @click.stop="lightboxFile = null"
+      >
+        <i class="fas fa-xmark"></i>
+      </button>
+    </div>
+
+    <!-- 归档/删除 确认弹窗（破坏性操作统一二次确认） -->
+    <a-modal
+      :open="!!confirmState"
+      :title="
+        confirmState?.kind === 'delete'
+          ? t('workbenchDeleteConfirmTitle')
+          : t('workbenchArchiveConfirmTitle')
+      "
+      :ok-text="confirmState?.kind === 'delete' ? t('delete') : t('workbenchArchive')"
+      :cancel-text="t('cancel')"
+      :ok-button-props="{ danger: confirmState?.kind === 'delete' }"
+      @ok="onConfirmOk"
+      @cancel="confirmState = null"
+    >
+      <p class="text-sm text-[var(--wb-text-2)]">
+        {{
+          confirmState?.kind === 'delete'
+            ? t('workbenchDeleteConfirmBody', { title: confirmState?.session?.title || '' })
+            : t('workbenchArchiveConfirmBody', { title: confirmState?.session?.title || '' })
+        }}
+      </p>
+    </a-modal>
+
+    <!-- 固化弹窗 -->
+    <a-modal
+      v-model:open="publishOpen"
+      :title="t('workbenchPublishTitle')"
+      @ok="doPublish"
+      :ok-text="t('confirm')"
+      :cancel-text="t('cancel')"
+      :ok-button-props="{ loading: publishing }"
+    >
+      <a-form layout="vertical">
+        <a-form-item :label="t('appName')">
+          <a-input
+            v-model:value="publishName"
+            :placeholder="t('workbenchPublishNamePlaceholder')"
+            class="wb-tech-input"
+          />
+        </a-form-item>
+        <a-form-item :label="t('workbenchPublishUi')">
+          <a-switch v-model:checked="publishBuildUi" />
+          <span class="ml-2 text-xs text-[var(--wb-text-2)]">{{
+            t('workbenchPublishUiHint')
+          }}</span>
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
+    <!-- 导入工作流：粘贴 API 格式 workflow JSON 直接执行（L2 用户侧入口） -->
+    <a-modal
+      v-model:open="importOpen"
+      :title="t('workbenchImportWorkflow')"
+      :confirm-loading="importing"
+      :ok-text="t('workbenchRunNow')"
+      :cancel-text="t('cancel')"
+      @ok="runImportedWorkflow"
+    >
+      <div class="space-y-3">
+        <a-input v-model:value="importName" :placeholder="t('workbenchImportNamePlaceholder')" />
+        <textarea
+          v-model="importJson"
+          rows="10"
+          class="w-full wb-tech-input font-mono text-xs"
+          :placeholder="t('workbenchImportJsonPlaceholder')"
+        ></textarea>
+        <div v-if="importError" class="text-xs text-[var(--wb-danger)]">{{ importError }}</div>
+      </div>
+    </a-modal>
+
+    <!-- 高级参数：节点级 nodeOverrides 覆盖（模板未暴露的任意直值字段） -->
+    <a-modal v-model:open="advOpen" :title="t('workbenchAdvParams')" :footer="null">
+      <div class="space-y-3">
+        <a-select
+          v-model:value="advTemplateId"
+          show-search
+          option-filter-prop="label"
+          :options="advTemplateOptions"
+          :placeholder="t('workbenchAdvPickTemplate')"
+          class="w-full"
+        />
+        <textarea
+          v-model="advJson"
+          rows="8"
+          class="w-full wb-tech-input font-mono text-xs"
+          :placeholder="t('workbenchAdvJsonPlaceholder')"
+        ></textarea>
+        <div v-if="advIssues.length" class="space-y-1">
+          <div v-for="(issue, i) in advIssues" :key="i" class="text-xs text-[var(--wb-danger)]">
+            {{ issue.field }}: {{ issue.message }}
+          </div>
+        </div>
+        <div v-else-if="advValidated" class="text-xs text-[var(--wb-success)]">
+          {{ t('workbenchAdvOk') }}
+        </div>
+        <div class="flex gap-2 justify-end">
+          <a-button size="small" :loading="advChecking" @click="checkAdvOverrides">
+            {{ t('workbenchAdvValidate') }}
+          </a-button>
+          <a-button
+            size="small"
+            type="primary"
+            :loading="advRunning"
+            :disabled="!advTemplateId || !advOk"
+            @click="runAdvOverrides"
+          >
+            {{ t('workbenchRunNow') }}
+          </a-button>
+        </div>
+      </div>
+    </a-modal>
+    <!-- 导入进度浮条（右下角；sessionImporting.active 驱动） -->
+    <Teleport to="body">
+      <div
+        v-if="sessionImporting.active"
+        class="fixed bottom-6 right-6 z-50 rounded-lg border border-[var(--wb-stroke)] bg-[var(--wb-surface)] px-4 py-3 shadow-xl flex items-center gap-3 text-sm text-[var(--wb-text-1)]"
+      >
+        <i class="fas fa-circle-notch fa-spin text-[var(--wb-text-2)]"></i>
+        <span>{{ sessionImporting.label }}</span>
+        <div
+          v-if="sessionImporting.percent > 0 && sessionImporting.percent < 100"
+          class="w-32 h-1.5 rounded bg-[var(--wb-surface-hover)] overflow-hidden"
+        >
+          <div
+            class="h-full bg-[var(--wb-accent)] transition-all"
+            :style="{ width: sessionImporting.percent + '%' }"
+          ></div>
+        </div>
+        <span v-else-if="sessionImporting.percent >= 100" class="text-[var(--wb-success)]"
+          ><i class="fas fa-check"></i
+        ></span>
+      </div>
+    </Teleport>
+  </div>
+</template>
+
+<script setup>
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { message, Modal } from 'ant-design-vue'
+import { useI18n } from '@/utils/i18n'
+import { useAppStore } from '@/stores/appStore'
+import SessionSidebar from './components/SessionSidebar.vue'
+import WbMarkdown from './components/WbMarkdown.vue'
+import InteractionApprovalCard from './components/InteractionApprovalCard.vue'
+import PlanProposalCard from './components/PlanProposalCard.vue'
+import AssetLibrary from './components/AssetLibrary.vue'
+import ProgressCard from './components/ProgressCard.vue'
+import Composer from './components/Composer.vue'
+import NewSessionDialog from './components/NewSessionDialog.vue'
+import PresetManager from './components/PresetManager.vue'
+import SkillManager from './components/SkillManager.vue'
+import UsageGuide from './components/UsageGuide.vue'
+import { scenarioByPreset } from './demoScenarios'
+import { canApplyFix } from './diagnosis'
+import { callBridge } from './bridgeCall'
+import { ARTIFY_MSG } from '@/inject/protocol'
+import {
+  setWorkbenchOrigin,
+  sessionsApi,
+  presetsApi,
+  templatesApi,
+  executeApi,
+  runtimeApi,
+  miscApi,
+} from './workbenchApi'
+import { pushFiles, drainAttachments, drainFiles } from '@/utils/canvasBridge'
+import { useCanvasMode } from '@/utils/canvasMode'
+import { createAguiBridge } from './aguiBridge'
+import {
+  useTranscriptModel,
+  toolItemSummary as _toolItemSummary,
+  toolItemDetail as _toolItemDetail,
+  toolItemRunning as _toolItemRunning,
+  toolItemFailed as _toolItemFailed,
+} from './useTranscriptModel'
+import { useExecutionPolling, extractFiles } from './useExecutionPolling'
+import { useCanvasIntegration, isVideoFile } from './useCanvasIntegration'
+const { t, getCurrentLanguage } = useI18n()
+const { onResult, emitResult, onAttachments, onCanvasState, onPrompt, emitOps } = useCanvasMode()
+// 画布侧栏模式：store 模式由画布页设置；这里只需把产物经 emitResult 推给宿主
+const appStore = useAppStore()
+const route = useRoute()
+const router = useRouter()
+
+// API origin：electron 走配置 serverHost；embed（画布 sidebar iframe，无
+// electronAPI 桥）走 URL 上的 server_origin 参数（注入脚本拼好）；普通
+// browser 兜底同源。route.query 响应式优先，location 快照兜底（同 isEmbed）。
+const origin = computed(
+  () =>
+    appStore.config?.serverHost ||
+    route.query.server_origin ||
+    new URLSearchParams(window.location.search).get('server_origin') ||
+    window.location.origin,
+)
+// HTTP 层（workbenchApi）从这里取 origin——单一来源，URL 拼接不再散落 26 处
+setWorkbenchOrigin(() => origin.value)
+const lang = computed(() => (getCurrentLanguage?.() === 'en' ? 'en' : 'zh'))
+
+// ---------- 会话状态 ----------
+// embed 模式下宿主（ComfyUI sidebar tab）重建 iframe 会丢 route.query.session，
+// 用 localStorage 记住最近会话 id，重载后自动恢复而不是新建空会话
+const LAST_SESSION_KEY = 'wb:lastSessionId'
+const sessions = ref([])
+const sessionId = ref('')
+const messages = ref([])
+const artifacts = ref([])
+const pendingIssues = ref([])
+const input = ref('')
+const busy = ref(false)
+const stopping = ref(false)
+const uploading = ref(false)
+// AG-UI 唯一管线:send/stop/history 全部走桥;桥通过页面适配器回调
+// pushMsg/nextTurn/messages 等把结构化事件映射进现有消息模型(本文件改动仅此)
+// curSession 必须在 createAguiBridge 之前声明——桥注入直接引用该 ref,
+// 声明滞后会踩 TDZ(setup 抛 ReferenceError → 整页白屏,2026-08 实测)。
+const curSession = ref(null)
+// B1 工具审批模式(会话级偏好,低危自动放行策略):localStorage 持久化,
+// 每轮 run 随请求透传 → 后端 gate per-thread 生效。同样须在桥前声明——
+// 桥经 getApprovalMode 每轮自取,自动恢复/画布嵌入链路同源生效。
+const APPROVAL_MODE_UI = ['ask', 'conservative', 'standard']
+const storedApprovalMode =
+  typeof localStorage !== 'undefined' ? localStorage.getItem('wb.approvalMode') : null
+const approvalMode = ref(
+  APPROVAL_MODE_UI.includes(storedApprovalMode) ? storedApprovalMode : 'standard',
+)
+// E1 决策推理强度(会话级偏好,思考投入档位):localStorage 持久化(UI 偏好而非
+// 会话数据——不开历史会话联动),每轮 run 随请求透传 → 后端 codex 引擎
+// model_reasoning_effort。同样须在桥前声明——桥经 getReasoningEffort 每轮自取。
+const REASONING_EFFORT_UI = ['auto', 'low', 'medium', 'high', 'xhigh']
+const storedEffort =
+  typeof localStorage !== 'undefined' ? localStorage.getItem('wb.reasoningEffort') : null
+const reasoningEffort = ref(
+  storedEffort && REASONING_EFFORT_UI.includes(storedEffort) ? storedEffort : 'auto',
+)
+// aguiBridge 创建已下移至 useExecutionPolling 之后（依赖其返回的
+// applyExecutionSideEffect，提前引用会踩 TDZ → setup 抛错整页白屏）
+/** HITL 审批应答转发（C15）：卡片 emit → 桥 POST interaction-response */
+function onApprovalRespond(msg, payload) {
+  aguiBridge.respondApproval(msg, payload)
+}
+/** C-H4 计划拍板转发：卡片 emit choose → 桥 POST interaction-response(edit) */
+function onPlanChoose(msg, payload) {
+  aguiBridge.respondPlan(msg, payload)
+}
+// 执行失败自动恢复：单会话最多自动重试 N 次（防死循环烧 token），切会话清零
+const recoverCount = ref(0)
+const recovering = ref(false)
+const MAX_AUTO_RECOVERS = 2
+// 单次执行占位气泡：promptId → 消息 _key；poll 终态原位更新，避免
+// 「已提交」「生成完成」「执行失败」各占一个气泡把对话流切碎。
+// 存稳定 key 而非数组下标——dismissDecidingProgress 的 splice 会使下标整体
+// 前移，下标寻址会打错行；key 寻址不受影响。
+const execProgressIndex = new Map()
+// 渲染层稳定 key：客户端推送/服务端加载的每条消息都有，:key 与原位更新共用
+let msgKeySeq = 0
+function nextMsgKey() {
+  return `k${++msgKeySeq}`
+}
+
+// 回合分组：一轮 decide（用户消息→agent 过程/计划/回复/产物）共享 turnId，
+// 前端据此把多个气泡合并为一个 AI 回复块（服务端持久化消息也带 turnId）。
+let turnSeq = 0
+function nextTurn() {
+  return ++turnSeq
+}
+
+/**
+ * 统一推消息入口：自动注入稳定 _key。原位更新（tool_item / 执行占位气泡）
+ * 按 _key 寻址而不是数组下标——splice 删除占位气泡后下标会整体前移，
+ * 下标寻址会更新到错误的行。agent 消息自动继承当前回合 turnId（用户消息
+ * 由 runChat 显式 nextTurn 开新回合）。
+ */
+function pushMsg(m) {
+  const msg = { ...m, _key: nextMsgKey() }
+  if (msg.role === 'agent' && msg.turnId === undefined) msg.turnId = turnSeq
+  messages.value.push(msg)
+  return msg
+}
+
+// ---------- codex 条目转录模型 + 执行轮询（composable 拆分，第一批①a）----------
+const {
+  isTodoMsg,
+  isActivityMsg,
+  expandedToolIds,
+  expandedProcessGroups, // 模板过程组折叠态（漏解构会让含思考块的气泡渲染报错）
+  toggleToolItem,
+  processGroupAt,
+  processGroupSkipped,
+  processGroupItems,
+  turnProgressModel,
+  turnActCover,
+  todoCardRunning,
+  processGroupRunning,
+  processGroupFailed,
+  toggleProcessGroup,
+  dismissDecidingProgress,
+  turnGroupItems,
+} = useTranscriptModel({ messages, busy, t, pushMsg })
+// 展示模型工具函数（模板直接用）
+const toolItemSummary = _toolItemSummary
+const toolItemDetail = _toolItemDetail
+const toolItemRunning = _toolItemRunning
+const toolItemFailed = _toolItemFailed
+// 执行中计数（响应式）：SSE 结束后 ComfyUI 仍在跑（轮询阶段），停止按钮要持续显示
+const executingCount = ref(0)
+const draftAttachments = ref([])
+const presets = ref([])
+const defaultPresetId = ref('standard')
+const modelOverride = ref({})
+const sidebarCollapsed = ref(false)
+const showArchived = ref(false)
+const confirmState = ref(null) // { kind:'archive'|'delete', session }
+const panelOpen = ref(true)
+const messagesEl = ref(null)
+const composerEl = ref(null)
+const pollTimers = new Map()
+// 画布页右侧栏嵌入模式：画布页以组件形式渲染本视图并传 prop
+// （此时 route.query 是 /canvas 的，不能靠 query 识别）
+// 位置约束：useExecutionPolling 依赖 isCanvasEmbedded，故这两行须在其之前。
+const props = defineProps({ canvasEmbedded: { type: Boolean, default: false } })
+const isCanvasEmbedded = computed(() => props.canvasEmbedded || route.query.canvas === '1')
+
+// —— A4：画布集成 seam 抽 useCanvasIntegration（产物落布三路分岔/状态感知/
+// 回填/ops 人审/模板同步执行）；isEmbed 判定随迁（原内联块首行） ——
+const isEmbed = computed(
+  () =>
+    route.query.embed === '1' ||
+    new URLSearchParams(window.location.search).get('embed') === '1' ||
+    // 兜底：宿主 iframe 内运行即视为 embed——URL 参被外部改写/重定向抹掉时，
+    // 窄栏不可塌回桌面布局
+    (typeof window !== 'undefined' && window.parent && window.parent !== window),
+)
+const isNarrow = computed(() => isEmbed.value || isCanvasEmbedded.value)
+
+const {
+  deliverArtifact: pushCardsToCanvas,
+  canvasState,
+  canvasAttachNotice,
+  attachFiles: pushCanvasAttachments,
+  pendingOps,
+  opsApplying,
+  opsResultMsg,
+  opsResultOk,
+  opsDiffLines,
+  proposeCanvasOps,
+  discardPendingOps,
+  confirmApplyOps,
+  syncWorkflowToCanvas,
+  runCanvasOnHost,
+  attachHostListeners,
+} = useCanvasIntegration({
+  isEmbed,
+  isCanvasEmbedded,
+  t,
+  draftAttachments,
+  input,
+  send,
+  uploadFiles,
+  pushFiles,
+  emitResult,
+  onCanvasState,
+  onAttachments,
+  onPrompt,
+  callBridge,
+  ARTIFY_MSG,
+})
+// 订阅装配（embed message / 侧栏总线 / 首屏状态拉取）；send/uploadFiles 均为
+// hoisted 函数声明，ctx 求值时已可引用。onBeforeUnmount 统一退订。
+let detachCanvasHost = attachHostListeners()
+const { applyExecutionSideEffect, startPoll, stopPoll, startBatchPoll, stopBatchPoll } =
+  useExecutionPolling({
+    messages,
+    artifacts,
+    sessionId,
+    executingCount,
+    execProgressIndex,
+    pollTimers,
+    t,
+    pushMsg,
+    scrollToBottom: () => scrollToBottom(),
+    loadSessions,
+    sessions,
+    autoRecover: (err) => autoRecover(err),
+    diagnoseArtifact: (a) => diagnoseArtifact(a),
+    pushCardsToCanvas: (files) => pushCardsToCanvas(files),
+    executeApi,
+    pendingIssues,
+    isCanvasEmbedded,
+    emitOps,
+    dismissDecidingProgress,
+    syncWorkflowToCanvas,
+    runCanvasOnHost,
+  })
+const aguiBridge = createAguiBridge({
+  origin,
+  t,
+  messages,
+  pushMsg,
+  nextTurn,
+  scrollToBottom,
+  busy,
+  stopping,
+  isStopCancelled,
+  getThreadId: () => sessionId.value,
+  getApprovalMode: () => approvalMode.value,
+  getReasoningEffort: () => reasoningEffort.value,
+  curSession, // STATE_DELTA /tokenUsage 兜底同步进会话用量(aguiBridge.applyTokenUsage)
+  // 执行类副作用(审查修复 C1):wb_artifact/wb_sync/wb_canvas_exec/wb_invalid
+  // 四类 CUSTOM 走同一分派,产物卡/画布同步/执行轮询/pendingIssues 语义完整
+  applyExecutionSideEffect,
+})
+const newDialogOpen = ref(false)
+const presetMgrOpen = ref(false)
+const skillMgrOpen = ref(false)
+// 创作资产库弹窗。此前**只**在模板里引用（@manage-assets 赋值 + a-modal v-model），
+// script 里从未声明 → 赋值落到渲染 ctx 上不触发重渲染，于是「点资产库不弹、
+// 点技能库时才随那次重渲染一起冒出来、关闭也关不掉」。声明在此即可。
+const assetLibOpen = ref(false)
+const guideOpen = ref(false)
+// 首次进入自动弹出使用指南（只弹一次；localStorage 标记）
+const GUIDE_SEEN_KEY = 'artify.workbench.guideSeen.v1'
+
+const currentSession = computed(() => sessions.value.find((s) => s.id === sessionId.value))
+const sessionPreset = computed(() =>
+  currentSession.value?.presetId
+    ? presets.value.find((p) => p.id === currentSession.value.presetId)
+    : null,
+)
+const sidebarSessions = computed(() =>
+  sessions.value.map((s) => ({
+    ...s,
+    _running: (s.executions ?? []).some((e) => e.status === 'queued' || e.status === 'running'),
+  })),
+)
+
+// ---------- 初始化 ----------
+onMounted(async () => {
+  // 窄容器（embed 画布侧栏）会话栏默认收起，点会话头「展开」按钮唤出浮层
+  if (isNarrow.value) sidebarCollapsed.value = true
+  // loadSkills 已移除：全项目无此函数定义（ea9358bf 引入后被删），保留会让
+  // Promise.all reject 并中断下方「恢复上次会话」逻辑；技能列表现由
+  // components/PresetManager.vue 内部 loadSkillsList 自加载。
+  await Promise.all([loadSessions(), loadPresets(), loadAdvTemplates()])
+  // 恢复优先级：URL 显式 session > 上次会话（localStorage，embed iframe 重建后 URL 丢失靠它找回）
+  // > 最近活跃会话（服务端兜底）。**恢复失败绝不无条件新建**：canvas 侧栏每次打开 AI 面板都
+  // 重挂本组件（v-if 切换 → onMounted 重跑），而 localStorage 在多窗口/多宿主（ComfyUI 侧栏
+  // iframe、独立窗口、画布页）间并非总是同域共享，一旦 key 失效/会话被删，旧逻辑就会每次
+  // 进入都叠一个空会话（实测单日堆积 6 个）。只有列表真空（首次使用/全部归档）才自动建。
+  const sid = route.query.session || localStorage.getItem(LAST_SESSION_KEY)
+  const target =
+    (sid && sessions.value.find((s) => s.id === sid)) ||
+    // loadSessions 服务端已按 updatedAt 倒序且只含未归档 → 首项即最近活跃会话
+    sessions.value[0]
+  if (target) {
+    // 兜底命中时顺手回写 localStorage，修复域失效/竞态导致的 key 空洞
+    localStorage.setItem(LAST_SESSION_KEY, target.id)
+    await selectSession({ id: target.id })
+  } else {
+    // 首次自动建会话失败不打断初始化：无会话时预设 chip 会引导用所选预设开会话
+    try {
+      await createSession({ presetId: defaultPresetId.value })
+    } catch (e) {
+      console.error('[workbench] auto create session failed', e)
+    }
+  }
+  document.addEventListener('keydown', onGlobalKey)
+  // 开箱引导：首次进入自动展开使用指南（创建会话等初始化完成后再弹，避免打断）
+  if (!localStorage.getItem(GUIDE_SEEN_KEY)) {
+    localStorage.setItem(GUIDE_SEEN_KEY, '1')
+    guideOpen.value = true
+  }
+})
+
+onBeforeUnmount(() => {
+  for (const timer of pollTimers.values()) clearInterval(timer)
+  pollTimers.clear()
+  document.removeEventListener('keydown', onGlobalKey)
+  detachCanvasHost?.()
+})
+
+function onGlobalKey(e) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+    e.preventDefault()
+    newDialogOpen.value = true
+  } else if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    // 聚焦输入框（对话主场景）
+    e.preventDefault()
+    composerEl.value?.querySelector('textarea')?.focus()
+  }
+}
+
+async function loadSessions() {
+  const { json } = await sessionsApi.list(showArchived.value)
+  sessions.value = json?.data ?? []
+}
+
+async function loadPresets() {
+  const { json } = await presetsApi.list()
+  presets.value = json?.data?.presets ?? []
+  defaultPresetId.value = json?.data?.default ?? 'standard'
+}
+
+// 模板清单（高级参数抽屉的模板选择 + Composer「/」模板快捷方式数据源）
+const advTemplates = ref([])
+async function loadAdvTemplates() {
+  const { json } = await templatesApi.list()
+  advTemplates.value = json?.data ?? []
+}
+
+/** #11 会话切换视觉加载态：只包一层 loading 标记，内层逻辑/竞态守卫原样不动 */
+const sessionLoading = ref(false)
+async function selectSession(s) {
+  sessionLoading.value = true
+  try {
+    await selectSessionImpl(s)
+  } finally {
+    sessionLoading.value = false
+  }
+}
+
+async function selectSessionImpl(s) {
+  sessionId.value = s.id
+  localStorage.setItem(LAST_SESSION_KEY, s.id)
+  execProgressIndex.clear() // 执行占位下标同样 per-render，切会话清
+  recoverCount.value = 0 // 恢复计数是会话级的，切会话清零
+  recovering.value = false
+  // 只替换 session 字段并保留其余 query——embed 模式的 embed=1/server_origin
+  // 一旦被抹掉，isEmbed 判定失效，页面会按桌面布局渲染（会话栏挤爆窄侧栏）
+  router.replace({ query: { ...route.query, session: s.id } })
+  const { ok, json } = await sessionsApi.get(s.id)
+  if (!ok || !json?.success) return
+  // 竞态守卫：await 期间又切了会话 → 本次结果弃（旧 session 数据覆盖新会话）
+  if (sessionId.value !== s.id) return
+  const session = json.data
+  curSession.value = session
+  // 服务端消息补稳定 key（存储序下标作 key 种子，切会话重载时保持稳定）
+  messages.value = (session.messages ?? []).map((m, i) => ({ ...m, _key: m._key ?? `s${i}` }))
+  // AG-UI 回放：该会话有管线记录则回放覆盖（session.messages 清空），记录为
+  // 空/回放失败时静默降级到 session.messages 历史展示
+  await aguiBridge.loadHistoryIntoPage(sessionId.value)
+  // 回放后又切走 → 后续 turnSeq/artifacts 写入全是旧会话的，弃
+  if (sessionId.value !== s.id) return
+  // 回合序号对齐历史最大 turnId：新回合编号继续递增，避免与旧消息误合并
+  turnSeq = messages.value.reduce((mx, m) => Math.max(mx, m.turnId ?? 0), 0)
+  artifacts.value = [...(session.executions ?? [])].reverse().map((e) => ({
+    promptId: e.promptId,
+    templateId: e.templateId,
+    templateName: e.templateId,
+    status: e.status,
+    error: e.error ?? '',
+    outputs: (e.outputs ?? []).map((f) => (typeof f === 'string' ? f : f.filename)),
+    // v2 outputs 为完整引用对象；旧数据字符串只有 filename（lightbox 降级直开）
+    files: (e.outputs ?? []).filter((f) => typeof f === 'object'),
+  }))
+  modelOverride.value = session.modelOverride ?? {}
+  pendingIssues.value = []
+  for (const e of session.executions ?? []) {
+    if (e.batchJobId && (e.status === 'queued' || e.status === 'running'))
+      startBatchPoll(e.promptId)
+    else if (e.status === 'queued' || e.status === 'running') startPoll(e.promptId)
+  }
+  scrollToBottom()
+}
+
+async function createSession({ presetId, title }) {
+  // 会话入口标记（P1 感知）：画布侧栏组件嵌入 > C 宿主 iframe > 独立工作台
+  const entry = isCanvasEmbedded.value ? 'a-canvas' : isEmbed.value ? 'comfy-sidebar' : 'workbench'
+  const { json } = await sessionsApi.create({ presetId, title, entry })
+  await loadSessions()
+  await selectSession({ id: json.data.id })
+}
+
+/**
+ * 使用指南「一键开始」：建对应预设的会话 + 预填示例提示词。
+ * 图生图场景（seedImage）自动把内置示例参考图转 File 走 uploadFiles 附上。
+ * 传入 presetId 而无匹配场景（如 standard）时仅开一个该预设的空会话。
+ */
+async function startScenario(sc) {
+  guideOpen.value = false
+  try {
+    const presetId = sc?.presetId || 'standard'
+    await createSession({ presetId })
+    const demo = sc?.prompt ? sc : scenarioByPreset(presetId)
+    if (demo?.seedImage) {
+      try {
+        const res = await fetch(demo.seedImage)
+        if (res.ok) {
+          const blob = await res.blob()
+          await uploadFiles([new File([blob], 'demo-reference.jpg', { type: 'image/jpeg' })])
+        }
+      } catch (e) {
+        console.warn('[workbench] scenario seed image attach failed', e)
+      }
+    }
+    if (demo?.prompt) {
+      // prompt 是 {zh,en} 字典（UsageGuide 渲染时取 [lang]），这里必须同样按语言取串——
+      // 直接把对象赋给输入框会污染 v-model 并打挂后续渲染
+      input.value =
+        typeof demo.prompt === 'string' ? demo.prompt : (demo.prompt[lang.value] ?? demo.prompt.zh)
+    }
+  } catch (e) {
+    console.error('[workbench] start scenario failed', e)
+  }
+}
+
+async function onRename({ id, title }) {
+  await sessionsApi.update({ id, title })
+  await loadSessions()
+}
+
+// 归档走确认弹窗（dsh/Codex 惯例：破坏性视图操作需二次确认；单会话级操作）
+// 会话导出：浏览器原生下载。kind='bundle' 时走完整包（session.json + 产物 ZIP）
+function exportSession(s, kind = 'json') {
+  const path = kind === 'bundle' ? 'export-bundle' : 'export'
+  const a = document.createElement('a')
+  a.href = `${origin.value}/api/workbench/sessions/${s.id}/${path}`
+  a.download = ''
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+// 会话导入：文件选择 → JSON/ZIP 分流 → POST（XHR 带进度）→ 409 重复确认 → 选中新会话
+// sessionImporting 状态驱动底部提示条（进度百分比/结果统计），message 仅终态弹一次
+const sessionImporting = ref({ active: false, percent: 0, label: '' })
+function postImport(url, body, isZip, force) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', force ? url + (url.includes('?') ? '&' : '?') + 'force=1' : url)
+    xhr.responseType = 'json'
+    if (isZip) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          sessionImporting.value = {
+            active: true,
+            percent: Math.round((e.loaded / e.total) * 100),
+            label: t('workbenchImportUploading'),
+          }
+        }
+      }
+    }
+    xhr.onload = () => resolve({ status: xhr.status, data: xhr.response })
+    xhr.onerror = () => reject(new Error('network'))
+    if (isZip) xhr.send(body)
+    else {
+      xhr.setRequestHeader('Content-Type', 'application/json')
+      xhr.send(JSON.stringify(body))
+    }
+  })
+}
+async function doImport(file, force = false) {
+  const isZip = file.name.toLowerCase().endsWith('.zip')
+  try {
+    sessionImporting.value = {
+      active: true,
+      percent: isZip ? 0 : 100,
+      label: t('workbenchImportUploading'),
+    }
+    let res
+    if (isZip) {
+      const fd = new FormData()
+      fd.append('file', file)
+      res = await postImport(
+        `${origin.value}/api/workbench/sessions/import-bundle`,
+        fd,
+        true,
+        force,
+      )
+    } else {
+      const text = await file.text()
+      res = await postImport(
+        `${origin.value}/api/workbench/sessions/import`,
+        JSON.parse(text),
+        false,
+        force,
+      )
+    }
+    if (res.status === 409) {
+      // 同源已导入：确认后 force 重导（Modal.confirm 回调风格，ant-design-vue 不返回 promise）
+      const existing = res.data?.existing
+      sessionImporting.value = { active: false, percent: 0, label: '' }
+      Modal.confirm({
+        title: t('workbenchImportDupTitle'),
+        content: t('workbenchImportDupBody').replace('{title}', existing?.title ?? ''),
+        okText: t('workbenchImportDupOk'),
+        cancelText: t('workbenchCancel'),
+        onOk: () => doImport(file, true),
+      })
+      return
+    }
+    if (res.status !== 201) throw new Error('import http ' + res.status)
+    const imported = res.data?.data
+    sessionImporting.value = { active: true, percent: 100, label: t('workbenchImportDone') }
+    await loadSessions()
+    if (imported?.id) selectSession(imported.id)
+    const stats =
+      imported?.filesRestored != null
+        ? `（${t('workbenchImportFiles')}: ${imported.filesRestored}）`
+        : ''
+    message.success(t('workbenchImportSuccess') + stats)
+    setTimeout(() => (sessionImporting.value = { active: false, percent: 0, label: '' }), 1500)
+  } catch (e) {
+    console.warn('workbench import failed', e)
+    message.error(t('workbenchImportFailed'))
+    sessionImporting.value = { active: false, percent: 0, label: '' }
+  }
+}
+async function importSession() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'application/json,.json,.zip,application/zip'
+  input.onchange = async () => {
+    const file = input.files?.[0]
+    if (!file) return
+    await doImport(file)
+  }
+  input.click()
+}
+
+function setArchived(s, archived) {
+  if (!archived) return doSetArchived(s, false)
+  const running = (s.executions ?? []).some((e) => e.status === 'queued' || e.status === 'running')
+  if (!running) return doSetArchived(s, true)
+  confirmState.value = { kind: 'archive', session: s }
+}
+
+async function onConfirmOk() {
+  const st = confirmState.value
+  confirmState.value = null
+  if (!st) return
+  if (st.kind === 'archive') await doSetArchived(st.session, true)
+  else await doDelete(st.session)
+}
+
+async function doSetArchived(s, archived) {
+  await sessionsApi.update({ id: s.id, archived })
+  await loadSessions()
+  if (sessionId.value === s.id && archived) {
+    const first = sessions.value.find((x) => !x.archived)
+    if (first) await selectSession(first)
+  }
+}
+
+function onDelete(s) {
+  confirmState.value = { kind: 'delete', session: s }
+}
+
+async function doDelete(s) {
+  await sessionsApi.remove(s.id)
+  await loadSessions()
+  if (sessionId.value === s.id) {
+    const first = sessions.value[0]
+    if (first) await selectSession(first)
+    else await createSession({})
+  }
+}
+
+async function saveModelOverride(v) {
+  modelOverride.value = v
+  if (!sessionId.value) return
+  await sessionsApi.update({ id: sessionId.value, modelOverride: v })
+}
+
+/**
+ * B1 审批模式切换(标准/保守):前端 localStorage 持久化(人机信任档,属 UI 偏好
+ * 而非会话数据——不开历史会话联动),每轮 run 由桥 getApprovalMode 自取透传,
+ * 后端 gate per-thread 生效(run 结束即失效,无跨会话泄漏)。
+ */
+function saveApprovalMode(v) {
+  const mode = APPROVAL_MODE_UI.includes(v) ? v : 'standard'
+  approvalMode.value = mode
+  try {
+    localStorage.setItem('wb.approvalMode', mode)
+  } catch {
+    /* localStorage 不可用(隐私模式等)不影响本轮生效 */
+  }
+}
+
+/**
+ * E1 推理强度切换(auto/low/medium/high/xhigh):前端 localStorage 持久化
+ * (UI 偏好而非会话数据),每轮 run 由桥 getReasoningEffort 自取透传,后端
+ * exec 通道改 threadOptions 下轮即时生效(auto=撤销回引擎默认)。
+ */
+function saveReasoningEffort(v) {
+  const effort = REASONING_EFFORT_UI.includes(v) ? v : 'auto'
+  reasoningEffort.value = effort
+  try {
+    localStorage.setItem('wb.reasoningEffort', effort)
+  } catch {
+    /* localStorage 不可用(隐私模式等)不影响本轮生效 */
+  }
+}
+
+// ---------- 附件 ----------
+// silent: 裁剪图等自动通道上传时免 toast（uploadFiles 也被画布附件分支复用）
+async function uploadFiles(files, { silent = false } = {}) {
+  uploading.value = true
+  for (const f of files) {
+    const preview = f.type.startsWith('image/') ? URL.createObjectURL(f) : null
+    const kind = f.type.startsWith('image/')
+      ? 'image'
+      : f.type.startsWith('video/')
+        ? 'video'
+        : f.type.startsWith('audio/')
+          ? 'audio'
+          : 'file'
+    if (kind === 'file' && !silent) {
+      // 文档类：不参与工作流媒体槽位（ComfyUI 不吃文档），仅作为 AI 决策上下文。
+      // 明示给用户，避免"传了却没被用"的困惑。
+      message.info(t('workbenchDocAsContext', { name: f.name }))
+    }
+    draftAttachments.value.push({
+      kind,
+      filename: f.name,
+      size: f.size,
+      mime: f.type,
+      uploading: true,
+      _preview: preview,
+    })
+    const idx = draftAttachments.value.length - 1
+    try {
+      const form = new FormData()
+      form.append('file', f)
+      const { ok, json } = await miscApi.upload(sessionId.value, form)
+      if (!ok || !json?.success) throw new Error(json?.message || 'upload failed')
+      Object.assign(draftAttachments.value[idx], json.data, { uploading: false })
+    } catch (e) {
+      if (!silent) message.error(`${f.name}: ${e.message}`)
+      draftAttachments.value.splice(idx, 1)
+    }
+  }
+  uploading.value = false
+}
+
+// B 权限:引用本地文件(不复制)。登记为附件,localPath 供执行链路同机直通;
+// 上限 200MB 与上传一致。
+function referenceLocalFiles(items) {
+  for (const it of items) {
+    if (it.size > 200 * 1024 * 1024) {
+      message.error(`${it.filename}: 文件超过 200MB 上限`)
+      continue
+    }
+    const ext = (it.filename.split('.').pop() || '').toLowerCase()
+    const kind = ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)
+      ? 'image'
+      : ['mp4', 'webm', 'mov'].includes(ext)
+        ? 'video'
+        : ['mp3', 'wav', 'ogg', 'flac'].includes(ext)
+          ? 'audio'
+          : 'file'
+    draftAttachments.value.push({
+      kind,
+      filename: it.filename,
+      size: it.size,
+      mime: '',
+      localPath: it.path,
+      uploading: false,
+      _preview: kind === 'image' ? null : null,
+    })
+  }
+}
+
+function removeAttachment(i) {
+  const a = draftAttachments.value[i]
+  if (a?._preview) URL.revokeObjectURL(a._preview)
+  draftAttachments.value.splice(i, 1)
+}
+
+function kindIcon(kind) {
+  if (kind === 'video') return 'fas fa-film'
+  if (kind === 'audio') return 'fas fa-music'
+  if (kind === 'file') return 'fas fa-file'
+  return 'fas fa-image'
+}
+
+// ---------- 发送 ----------
+/**
+ * 执行一轮 chat（decide → 校验 → 执行）。用户发送与「执行失败自动恢复」共用，
+ * 避免恢复轮复制一份 SSE 消费逻辑。
+ * @param inputText 发给后端 decide 的输入
+ * @param attachments 附件元信息
+ * @param opts.userBubble 用户气泡文案；null 时不 push 用户气泡（自动恢复场景）
+ * @param opts.progressText deciding 占位气泡文案
+ */
+async function runChat(inputText, attachments, opts = {}) {
+  // AG-UI 唯一管线(legacy /api/workbench/chat SSE 已删除):整轮走桥。
+  // 附件下行与错误收尾语义由桥内实现。
+  return aguiBridge.runAgentTurn(inputText, attachments, opts)
+}
+
+/** 断线重试（D 线）：从中断错误气泡重发本轮原文（去重：同一条只允许一次） */
+function retryRoundFrom(errMsg) {
+  if (busy.value || !errMsg?.retryInput) return
+  // 防重复点击：清掉该气泡的 retryInput（按钮随 v-if 消失）
+  const text = errMsg.retryInput
+  errMsg.retryInput = null
+  runChat(text, [], {
+    userBubble: null, // 原用户气泡还在，不重复
+    progressText: t('workbenchRetrying'),
+  })
+}
+
+/** 用户停止导致的流中断：reader.cancel() 的 TypeError / fetch 的 AbortError 都不算错误 */
+function isStopCancelled(e) {
+  return (
+    stopping.value && (e?.name === 'AbortError' || /cancel|abort/i.test(String(e?.message || e)))
+  )
+}
+
+/**
+ * 停止当前轮：桥内发 /agent/cancel（中断决策流 + ComfyUI /interrupt）并
+ * abort 本地流，收尾（进度气泡/已停止气泡）由桥完成。
+ */
+async function stopChat() {
+  return aguiBridge.stopAgentRun()
+}
+
+/**
+ * 执行失败自动恢复：把失败原因喂回 decide，让 AI 自行分析并继续（修复参数重试 /
+ * 换模板 / 说明原因）。只对快路径（PLAN 直接执行）的单次执行生效——编排模式
+ * （wb_execute_template）失败本就以工具结果回到模型，不需要此通道。单会话限
+ * MAX_AUTO_RECOVERS 次，防死循环；恢复轮再次失败会继续递减余量。
+ */
+async function autoRecover(errorText) {
+  // 用户刚主动停止的轮次不自动恢复（恢复=违背用户停止意图，且可能与下一轮并发）
+  if (stopping.value) return
+  if (recovering.value || busy.value || recoverCount.value >= MAX_AUTO_RECOVERS) return
+  recoverCount.value++
+  recovering.value = true
+  try {
+    const err = errorText || ''
+    // 媒体路径类失败（No such file / LoadImageFromPath 等）几乎都是「把
+    // 提示词文本传进了素材文件槽」——给模型明确的诊断方向，别再盲目重试。
+    const pathErr =
+      /No such file|LoadImageFromPath|LoadVideoFromPath|LoadAudioFromPath|ENOENT|is not a file/i.test(
+        err,
+      )
+        ? `\n\n诊断提示：该失败是「文件/路径不存在」，通常是模板的某个参数是素材文件槽（rc=*-uploader，节点 LoadImage/LoadVideo 等），却收到了提示词文本。先想清楚这个模板到底接不接文本——若它只接图片/视频素材，就换一个真正的文生图模板；若没有合适模板，用 wb_list_nodes 查节点图 + node_overrides 改造，或 wb_run_workflow 自组工作流，不要重试同样的传参。`
+        : ''
+    const hint =
+      `${t('workbenchAutoRecoverIntro')}\n\n` +
+      `上次执行失败信息：${err.slice(0, 800)}\n\n` +
+      t('workbenchAutoRecoverAsk') +
+      pathErr
+    await runChat(hint, [], {
+      userBubble: null,
+      progressText: t('workbenchAutoRecovering'),
+    })
+  } finally {
+    recovering.value = false
+  }
+}
+
+// A1/A2(吸收参考项目引用注入 + agent-instructions 规约):
+// canvas-embedded 且本轮带画布引用附件时,给 LLM 的 input 拼「行为规约头 + 引用清单尾」。
+// 页面可见气泡(userBubble)保持纯用户文本;注入只进模型上下文。
+// 取舍:input 即服务端落库的用户消息,历史回放该轮会显示注入段——按块引用排版,
+// 视觉可读,且仅发生在"从画布附图"这类本就该交代图源的轮次,可接受。
+function buildCanvasInjection(text, refs) {
+  const lines = refs.map((a) => `1. @${a.cardId} · 「${a.cardTitle || a.filename}」(画布图片)`)
+  const rule = [
+    '【画布规则】本次附带的图片均来自用户画布,回答与生成以它们为事实依据;',
+    '需要动画面布时先产出操作方案交用户确认,禁止声称已执行未发生的改动;无法完成就如实说明。',
+  ].join('')
+  const block = `\n\n${rule}\n\n【画布引用】\n${lines.join('\n')}\n`
+  return text ? text + block : block.trim()
+}
+
+async function send() {
+  const text = input.value.trim()
+  const readyAttachments = draftAttachments.value.filter((a) => !a.uploading)
+  // 文本或已上传附件至少其一即可发送（dsh 语义：附件可作为唯一输入）
+  if ((!text && readyAttachments.length === 0) || busy.value) return
+  const attachments = readyAttachments.map((a) => ({
+    name: a.name,
+    subfolder: a.subfolder,
+    type: a.type,
+    kind: a.kind,
+    filename: a.filename,
+    size: a.size,
+    mime: a.mime,
+    localPath: a.localPath,
+  }))
+  // A1:画布引用清单注入(仅无限画布侧栏模式;独立页/A 画布 embed 不改变行为)
+  const canvasRefs = isCanvasEmbedded.value
+    ? readyAttachments.filter((a) => a.fromCanvas && a.cardId)
+    : []
+  const inputText = canvasRefs.length ? buildCanvasInjection(text, canvasRefs) : text
+  input.value = ''
+  for (const a of draftAttachments.value) if (a._preview) URL.revokeObjectURL(a._preview)
+  draftAttachments.value = []
+  await runChat(inputText, attachments, { userBubble: text })
+}
+
+const comfyOrigin = computed(() => appStore.config?.comfyHost || 'http://127.0.0.1:8188')
+const lightboxFile = ref(null)
+
+// 每文件操作 dropdown 分发
+function onFileAction(key, artifact, f) {
+  if (key === 'save') saveArtifactAs(f)
+  else if (key === 'favorite') favoriteArtifact(artifact, f)
+  else if (key === 'publish') openPublish(artifact)
+  else if (key === 'open') openInFolder(artifact, f)
+  else if (key === 'pin') pushCardsToCanvas([f])
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    message.success(t('workbenchCopied'))
+  } catch (e) {
+    message.error(String(e?.message || e))
+  }
+}
+
+/** 复制执行失败错误全文（对话气泡只截断 500 字符，产物卡保存完整 2000 字符） */
+async function copyArtifactError(a) {
+  await copyText(a.error || '')
+}
+
+/** 复制执行 ID：反馈/排查时把卡片信息贴给 AI 或开发者 */
+async function copyPromptId(a) {
+  await copyText(a.promptId || '')
+}
+
+/** 把一轮调试快照格式化为可读文本（markdown 风格，粘贴后可直接贴给开发者） */
+function formatDebugLog(log) {
+  const planJson = JSON.stringify(log.plan ?? null, null, 2)
+  const lines = [
+    `# 工作台调试信息（第 ${log.seq} 轮）`,
+    `时间：${new Date(log.ts).toLocaleString()}`,
+    `模型：${log.model || '（默认）'}`,
+    '',
+    '## 决策输入',
+    log.effectiveInput || '（空）',
+    log.presetId ? `预设：${log.presetId}` : '',
+    log.templateShortcut ? `模板快捷方式：${log.templateShortcut}` : '',
+    '',
+    '## 决策提示词（spec，前端不可见）',
+    log.spec || '（空）',
+    '',
+    '## 模型原始输出（raw，含思考过程）',
+    log.rawOutput || '（空）',
+    '',
+    '## 解析后的 PLAN',
+    planJson,
+    '',
+    '## 校验问题',
+    log.issues?.length ? log.issues.map((i) => `- [${i.field}] ${i.message}`).join('\n') : '（无）',
+    log.remoteIssues?.length
+      ? '远端校验：\n' + log.remoteIssues.map((i) => `- [${i.field}] ${i.message}`).join('\n')
+      : '',
+    '',
+    '## 执行',
+    `promptId: ${log.promptId || '（未执行）'}`,
+    `templateId: ${log.templateId || '—'}`,
+    `status: ${log.executionStatus || '—'}`,
+    log.executionError ? `error: ${log.executionError}` : '',
+  ]
+  return lines.filter(Boolean).join('\n')
+}
+
+/** 复制最近一轮完整调试信息（服务端记录的 decide 快照） */
+async function copyDebugInfo() {
+  if (!sessionId.value) {
+    message.warning(t('workbenchNoSession'))
+    return
+  }
+  try {
+    const { ok, status, json } = await runtimeApi.debugLast(sessionId.value)
+    if (!ok) {
+      throw new Error(json?.message || `HTTP ${status}`)
+    }
+    const log = json?.data
+    if (!log) {
+      message.warning(t('workbenchNoDebugLog'))
+      return
+    }
+    await copyText(formatDebugLog(log))
+  } catch (e) {
+    message.error(String(e?.message || e))
+  }
+}
+
+// 在系统文件管理器中定位产物(同机 ComfyUI)
+async function openInFolder(artifact, f) {
+  try {
+    const outDir = outputDirInfo.value?.outputDir
+    if (!outDir) {
+      message.warning(t('workbenchSaveAsUnavailable'))
+      return
+    }
+    const api = window.electronAPI?.ArtifyLab
+    const full = `${outDir}/${f.subfolder ? f.subfolder + '/' : ''}${f.filename}`
+    if (api?.revealInFolder) await api.revealInFolder({ path: full })
+    else if (api?.openPath) await api.openPath(full)
+    else message.info(full)
+  } catch (e) {
+    message.error(String(e?.message || e))
+  }
+}
+
+// 收藏产物:跨会话收藏夹,缩略图区星星按钮
+async function favoriteArtifact(artifact, f) {
+  try {
+    const { json } = await miscApi.favorite({
+      sessionId: sessionId.value,
+      promptId: artifact.promptId,
+      file: f,
+    })
+    if (json?.ok) message.success(t('workbenchFavorited'))
+    else message.error(json?.message || 'favorite failed')
+  } catch (e) {
+    message.error(String(e?.message || e))
+  }
+}
+
+// A 权限:产物另存为(系统保存对话框)。仅同机 ComfyUI(settings.outputDir)可用;
+// sourcePath 校验在主进程侧(白名单 outputDir/inputDir)。
+async function saveArtifactAs(f) {
+  try {
+    const outDir = outputDirInfo.value?.outputDir
+    const sourcePath = outDir
+      ? `${outDir}/${f.subfolder ? f.subfolder + '/' : ''}${f.filename}`
+      : null
+    if (!sourcePath) {
+      message.warning(t('workbenchSaveAsUnavailable'))
+      return
+    }
+    const r = await window.electronAPI.ArtifyLab.saveArtifact({
+      sourcePath,
+      suggestedName: f.filename,
+    })
+    if (r?.ok) message.success(t('workbenchSavedTo') + r.savedTo)
+    else if (r?.error !== 'canceled') message.error(r?.error || 'save failed')
+  } catch (e) {
+    message.error(String(e?.message || e))
+  }
+}
+
+// 同机 ComfyUI 的产物磁盘根(/view 只能给 URL,另存为需要真实路径)
+const outputDirInfo = ref(null)
+async function loadOutputDir() {
+  try {
+    const { json } = await runtimeApi.info()
+    outputDirInfo.value = json?.data ?? null
+  } catch {
+    /* info 接口失败不影响主流程：另存为功能降级 */
+  }
+}
+
+function viewUrl(f) {
+  // ComfyUI /view 拒绝浏览器跨源请求（带 Origin 头 → 403，图加载失败）。
+  // 改走 express 同源代理（服务端 fetch 转发，无 Origin 头 → 200）——
+  // 与画布圈选裁剪共用同一代理通道（routes/proxy.ts GET /view）。
+  return `${origin.value}/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? '')}&type=${encodeURIComponent(f.type ?? 'output')}`
+}
+
+// ---------- 画布 embed 模式（ComfyUI sidebar tab iframe） ----------
+// ?embed=1：收起 AppHeader/会话侧栏/产物右栏，只留对话区；同时开通
+// 「产物 → 画布陈列卡片」上墙（postMessage 给父窗口的注入脚本）与
+// 「卡片 → 工作台」回填接收。
+// 以响应式 route.query 为准（router.replace 改写 URL 后仍正确），
+// window.location 一次性快照兜底（初始导航前的极早调用）。
+
+// ---------------- M4 调试路由：失败自动分类 + 一键修复 ----------------
+// 纯函数层在 ./diagnosis.js（可单测）；副作用（fetch/proposeCanvasOps）留在本文件
+const diagnosisMap = new Map() // artifact.promptId → 分类结果
+
+async function diagnoseArtifact(artifact) {
+  try {
+    const { ok, json } = await runtimeApi.canvasDebug({
+      error: artifact.error || '',
+      // embed 模式工作台寄生在 ComfyUI 页面内：同源即 comfy origin，
+      // 供服务端反查 /object_info 补全被截断的枚举清单
+      comfyOrigin: isEmbed.value ? window.location.origin : undefined,
+    })
+    if (!ok) return
+    if (json?.data?.category) diagnosisMap.set(artifact.promptId, json.data)
+  } catch {
+    /* 诊断失败不影响错误展示主路径 */
+  }
+}
+
+function diagnosisOf(artifact) {
+  return diagnosisMap.get(artifact.promptId) || null
+}
+
+/** 一键修复：把诊断建议的 fixOps 送进 M2 人审确认卡（不直接执行） */
+function applyDiagnosisFix(artifact) {
+  const d = diagnosisOf(artifact)
+  if (!canApplyFix(d, isEmbed.value)) return
+  proposeCanvasOps(d.suggestion.fixOps, { source: 'diagnosis', promptId: artifact.promptId })
+}
+
+// ---------- 固化 ----------
+const publishOpen = ref(false)
+const publishName = ref('')
+const publishBuildUi = ref(true)
+
+// ---------- 导入工作流（L2 用户侧入口） ----------
+const importOpen = ref(false)
+const importing = ref(false)
+const importName = ref('')
+const importJson = ref('')
+const importError = ref('')
+
+async function runImportedWorkflow() {
+  if (!sessionId.value) return
+  let workflow
+  try {
+    workflow = JSON.parse(importJson.value)
+  } catch {
+    importError.value = t('workbenchImportBadJson')
+    return
+  }
+  if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow)) {
+    importError.value = t('workbenchImportBadJson')
+    return
+  }
+  importing.value = true
+  importError.value = ''
+  try {
+    const { ok, status, json } = await templatesApi.runWorkflow({
+      sessionId: sessionId.value,
+      workflow,
+      name: importName.value.trim() || undefined,
+    })
+    if (!ok || !json?.success) {
+      importError.value = json?.message || json?.error || `HTTP ${status}`
+      return
+    }
+    importOpen.value = false
+    importJson.value = ''
+    importName.value = ''
+    pushMsg({
+      role: 'agent',
+      kind: 'progress',
+      text: t('workbenchExecuting'),
+      createdAt: Date.now(),
+    })
+    execProgressIndex.set(json.data.promptId, messages.value[messages.value.length - 1]._key)
+    executingCount.value++
+    startPoll(json.data.promptId)
+    scrollToBottom()
+  } catch (e) {
+    importError.value = String(e?.message || e)
+  } finally {
+    importing.value = false
+  }
+}
+
+// ---------- 高级参数（节点级 nodeOverrides 覆盖） ----------
+const advOpen = ref(false)
+const advTemplateId = ref('')
+const advJson = ref('')
+const advIssues = ref([])
+const advValidated = ref(false)
+const advChecking = ref(false)
+const advRunning = ref(false)
+
+const advTemplateOptions = computed(() =>
+  advTemplates.value.map((tpl) => ({ value: tpl.id, label: tpl.name || tpl.id })),
+)
+
+const advOk = computed(() => advValidated.value && advIssues.value.length === 0)
+
+function openAdvDrawer() {
+  advOpen.value = true
+  advIssues.value = []
+  advValidated.value = false
+  if (!advJson.value) {
+    advJson.value = JSON.stringify(
+      { 6: { class_type: 'KSampler', widgetOverrides: { steps: 40, cfg: 7 } } },
+      null,
+      2,
+    )
+  }
+}
+
+async function checkAdvOverrides() {
+  if (!sessionId.value || !advTemplateId.value) return
+  advValidated.value = false
+  try {
+    const { ok, status, json } = await templatesApi.clone({
+      sessionId: sessionId.value,
+      templateId: advTemplateId.value,
+      nodeOverrides: JSON.parse(advJson.value || '{}'),
+      validateOnly: true,
+    })
+    if (!ok || !json?.success) {
+      advIssues.value = [{ field: 'request', message: json?.message || `HTTP ${status}` }]
+      return
+    }
+    advIssues.value = json.data.issues ?? []
+    advValidated.value = true
+  } catch (e) {
+    advIssues.value = [{ field: 'request', message: String(e?.message || e) }]
+  }
+}
+
+async function runAdvOverrides() {
+  if (!sessionId.value || !advOk.value) return
+  advRunning.value = true
+  try {
+    // 1) 克隆出会话级变体（固化 nodeOverrides）
+    const { ok, status, json } = await templatesApi.clone({
+      sessionId: sessionId.value,
+      templateId: advTemplateId.value,
+      nodeOverrides: JSON.parse(advJson.value || '{}'),
+    })
+    if (!ok || !json?.success) {
+      advIssues.value = [{ field: 'request', message: json?.message || `HTTP ${status}` }]
+      return
+    }
+    // 2) 直接执行变体（与 chat 执行同一链路，产物落会话）
+    const runRes = await executeApi.execute({
+      sessionId: sessionId.value,
+      templateId: json.data.templateId,
+      params: {},
+    })
+    const runJson = runRes.json
+    if (!runRes.ok || !runJson?.success) {
+      advIssues.value = [{ field: 'execute', message: runJson?.message || `HTTP ${runRes.status}` }]
+      return
+    }
+    advOpen.value = false
+    pushMsg({
+      role: 'agent',
+      kind: 'progress',
+      text: t('workbenchExecuting'),
+      createdAt: Date.now(),
+    })
+    execProgressIndex.set(runJson.data.promptId, messages.value[messages.value.length - 1]._key)
+    executingCount.value++
+    startPoll(runJson.data.promptId)
+    scrollToBottom()
+  } catch (e) {
+    advIssues.value = [{ field: 'request', message: String(e?.message || e) }]
+  } finally {
+    advRunning.value = false
+  }
+}
+const publishing = ref(false)
+const publishTarget = ref(null)
+
+function openPublish(artifact) {
+  publishTarget.value = artifact
+  publishName.value = `App ${new Date().toLocaleString()}`
+  publishOpen.value = true
+}
+
+async function doPublish() {
+  if (!publishTarget.value || !publishName.value.trim()) return
+  publishing.value = true
+  try {
+    const { ok, json } = await miscApi.publish({
+      sessionId: sessionId.value,
+      promptId: publishTarget.value.promptId,
+      name: publishName.value.trim(),
+      buildUi: publishBuildUi.value,
+    })
+    if (!ok || !json?.success) throw new Error(json?.message || 'publish failed')
+    publishOpen.value = false
+    pushMsg({
+      role: 'agent',
+      kind: 'chat',
+      text: t('workbenchPublished'),
+      createdAt: Date.now(),
+    })
+    router.push('/')
+  } catch (e) {
+    message.error(e.message)
+  } finally {
+    publishing.value = false
+  }
+}
+
+function presetName(p) {
+  return p?.name?.[lang.value] || p?.name?.zh || p?.id
+}
+
+// ---------- 能力/环境说明（自我认知可视化） ----------
+const envOpen = ref(false)
+const envLoading = ref(false)
+const envSnapshot = ref(null)
+
+async function showEnvDialog() {
+  envOpen.value = true
+  envLoading.value = true
+  envSnapshot.value = null
+  try {
+    // 能力/环境快照走 /env（appNames/modelsByType/vramGb/customNodes）。
+    // 勿改回 /runtime：那上面只有 outputDir（另存为白名单用），拿到后
+    // 模板访问缺失字段会渲染崩，弹窗卡在 loading。
+    const { json } = await runtimeApi.env()
+    envSnapshot.value = json?.data ?? null
+  } catch {
+    envSnapshot.value = null
+  } finally {
+    envLoading.value = false
+  }
+}
+
+// dsh order 语义：预设列表按 order 升序
+const sortedPresets = computed(() =>
+  [...presets.value].sort((a, b) => (a.order ?? 100) - (b.order ?? 100)),
+)
+
+function presetIcon(p) {
+  if (p?.intentHint === 'video') return 'fas fa-film'
+  if (p?.intentHint === 'image') return 'fas fa-image'
+  return 'fas fa-bolt'
+}
+
+// 预设点击切换（dsh 模式）：会话级 presetId 立即生效
+async function onPresetMenu({ key }) {
+  // 无会话（首次进入自动建会话未完成的兜底）：点击预设 = 用它开会话，
+  // 避免会话头预设 chip 成为死区
+  if (!sessionId.value) {
+    await createSession({ presetId: key })
+    return
+  }
+  // 已选中同一预设则不重复写回
+  if (currentSession.value?.presetId === key) return
+  await sessionsApi.update({ id: sessionId.value, presetId: key })
+  await loadSessions()
+  // 本地会话对象同步（selectSession 会重新拉详情）
+  const s = sessions.value.find((x) => x.id === sessionId.value)
+  if (s) Object.assign(currentSession.value ?? {}, { presetId: key })
+}
+
+function messageClass(m) {
+  if (m.role === 'user')
+    return 'bg-[var(--wb-surface-deep)] text-[var(--wb-text)] border border-[var(--wb-stroke)] border-l-[3px] border-l-[var(--wb-accent)]'
+  if (m.kind === 'error')
+    return 'bg-[rgba(245,108,108,0.12)] text-[var(--wb-danger)] border border-[var(--wb-danger)]/30'
+  if (m.kind === 'card')
+    return 'bg-[var(--wb-surface-deep)] text-[var(--wb-text)] border border-[var(--wb-stroke-strong)]'
+  return 'bg-[var(--wb-surface-deep)] text-[var(--wb-text)] border border-[var(--wb-stroke)] border-l-[3px] border-l-[var(--wb-stroke-strong)]'
+}
+
+// 回合合并：同 turn 相邻 agent 消息间距抵消（外层 space-y-6 → 组内紧凑）
+function turnGapClass(i) {
+  const m = messages.value[i]
+  const prev = messages.value[i - 1]
+  if (
+    m &&
+    prev &&
+    m.role === 'agent' &&
+    prev.role === 'agent' &&
+    m.turnId != null &&
+    m.turnId === prev.turnId
+  )
+    return '-mt-5' // 组内保留 ~4px 缝隙
+  return ''
+}
+
+/**
+ * 回合分组渲染（协议对齐：parts 语义的消费层）：
+ * agent 同 turn 的连续消息聚合为一个「AI 回复卡片」——过程(推理/工具)折叠区 +
+ * 计划摘要 + markdown 正文 + 产物图。用户消息与无 turn 的独立 agent 消息原样渲染。
+ * 组首消息挂 __turnFirst，组内非首挂 __inTurn（跳过占行）。
+ */
+const msgsWithTurn = computed(() => {
+  const msgs = messages.value
+  return msgs.map((m, i) => {
+    if (m.role !== 'agent' || m.turnId == null) return { ...m, __inTurn: false }
+    const prev = msgs[i - 1]
+    const samePrev = prev && prev.role === 'agent' && prev.turnId === m.turnId
+    return { ...m, __inTurn: true, __turnFirst: !samePrev }
+  })
+})
+
+/** 返回组首 index 起同 turn 的全部消息（带真实 index，供 processGroupAt 复用） */
+/** 回合卡片操作行数据：取组尾消息（时间/token 归属） */
+function turnTailInfo(i) {
+  const items = turnGroupItems(i)
+  const tail = items[items.length - 1]
+  return tail ? { m: tail.m, i: tail.i } : { m: null, i }
+}
+
+/** 回合正文（组内全部 chat 文本拼接，供复制） */
+function turnCopyText(i) {
+  return turnGroupItems(i)
+    .map(({ m }) => ((m.kind === 'chat' || m.kind === 'error') && m.role === 'agent' ? m.text : ''))
+    .filter(Boolean)
+    .join('\n')
+}
+
+// 回合合并：圆角只留组头/组尾，组内直角拼接，视觉上是一个回复块（10px 卡片语义）
+function bubbleRadius(m, i) {
+  const prev = messages.value[i - 1]
+  const next = messages.value[i + 1]
+  const same = (a, b) =>
+    !!a &&
+    !!b &&
+    a.role === 'agent' &&
+    b.role === 'agent' &&
+    a.turnId != null &&
+    a.turnId === b.turnId
+  const withPrev = same(prev, m)
+  const withNext = same(m, next)
+  if (withPrev && withNext) return ''
+  if (withPrev) return 'rounded-b-[10px]'
+  if (withNext) return 'rounded-t-[10px]'
+  return 'rounded-[10px]'
+}
+
+// ---------- token 用量展示 ----------
+// （curSession 已在 aguiBridge 注入处声明——TDZ 约束）
+
+function usageFor(m) {
+  if (m.kind !== 'chat' || m.role !== 'agent') return null
+  const u = curSession.value?.turnUsages ?? []
+  return u.length ? u[u.length - 1] : null
+}
+
+function usageTitle(u) {
+  return `输入 ${u.inputTokens}（缓存 ${u.cachedInputTokens}）· 输出 ${u.outputTokens}（思考 ${u.reasoningOutputTokens}）`
+}
+
+function fmtTokens(n) {
+  if (n >= 10000) return (n / 1000).toFixed(0) + 'k'
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k'
+  return String(n)
+}
+
+// ---------- 日期分隔与时间标签（dsh 同款） ----------
+function sameDay(a, b) {
+  const da = new Date(a)
+  const db = new Date(b)
+  if (isNaN(da.getTime()) || isNaN(db.getTime())) return false
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  )
+}
+
+function showDateDivider(i) {
+  if (i === 0) return true
+  return !sameDay(messages.value[i - 1].createdAt, messages.value[i].createdAt)
+}
+
+function dateDividerLabel(ts) {
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return ''
+  const now = new Date()
+  const yest = new Date(now)
+  yest.setDate(now.getDate() - 1)
+  if (sameDay(ts, now)) return t('today')
+  if (sameDay(ts, yest)) return t('yesterday')
+  return `${d.getMonth() + 1}月${d.getDate()}日`
+}
+
+function timeLabel(ts) {
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return ''
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// ---------- 会话分支（dsh ‹ n/N › 语义） ----------
+async function switchVariant(m, delta) {
+  const target = m._variant + delta
+  if (target < 0 || target >= m._variants) return
+  // 分叉父的下标按存储序:当前消息的 parentId 就是分叉父的 _idx
+  const parentIdx = m._idx !== undefined ? (m.parentId ?? -1) : -1
+  if (parentIdx < 0) return
+  const { ok } = await sessionsApi.branch(sessionId.value, {
+    messageIdx: parentIdx,
+    variant: target,
+  })
+  if (!ok) return
+  await selectSession({ id: sessionId.value })
+}
+
+// ---------- 气泡复制 ----------
+const copiedIdx = ref(-1)
+let copiedTimer = null
+
+/** 该气泡的可复制数据:文本取原文,card/artifact 取结构化摘要,tool_item 取详情 */
+function copyableText(m) {
+  if (m.kind === 'progress') return ''
+  if (m.kind === 'tool_item') return m.toolItem ? JSON.stringify(m.toolItem, null, 2) : ''
+  if (m.kind === 'card' && m.plan) return JSON.stringify(m.plan, null, 2)
+  if (m.kind === 'artifact')
+    return [m.text, ...(m.outputFiles ?? []).map((f) => f.filename)].filter(Boolean).join('\n')
+  return m.text || ''
+}
+
+async function copyMessage(m, i) {
+  const text = copyableText(m)
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    // 非 https/权限拒绝兜底:隐藏 textarea 方案
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  }
+  copiedIdx.value = i
+  if (copiedTimer) clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => (copiedIdx.value = -1), 1500)
+}
+
+function cardText(plan) {
+  if (!plan) return ''
+  const p = plan.params ?? {}
+  const ps = Object.entries(p)
+    .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
+    .join('，')
+  return `${plan.intent} · ${plan.templateId ?? ''}${ps ? ' · ' + ps : ''}`
+}
+
+/** 计划卡批量摘要行：无 batch 返回空串（行不渲染） */
+function batchSummaryText(plan) {
+  const n = plan?.batch?.items?.length ?? 0
+  if (!n) return ''
+  const shared = Object.keys(plan.batch?.sharedParams ?? {}).length
+  return t('workbenchBatchPlan').replace('{n}', String(n)).replace('{shared}', String(shared))
+}
+
+function scrollToBottom() {
+  nextTick(() => {
+    if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+  })
+}
+
+// 归档徽章计数独立于当前过滤视图
+const allCounts = ref({ total: 0, archived: 0 })
+async function loadArchiveCount() {
+  try {
+    const { json } = await sessionsApi.list()
+    const list = json?.data ?? []
+    allCounts.value = { total: list.length, archived: list.filter((x) => x.archived).length }
+  } catch {
+    /* 列表拉取失败时保留上次计数 */
+  }
+}
+const archivedCount = computed(() => allCounts.value.archived)
+watch(showArchived, () => {
+  loadSessions()
+  loadArchiveCount()
+})
+onMounted(() => {
+  loadArchiveCount()
+  loadOutputDir()
+  // A 画布「发送到工作台」的排队参考图（SPA 内跨路由；C 宿主 embed 走 card-attach postMessage，不经此）
+  if (!isEmbed.value) {
+    const files = drainAttachments()
+    pushCanvasAttachments(files)
+  }
+})
+</script>
+
+<style>
+/* 工作台全局小样式（modal 传送 body，需非 scoped） */
+@import './workbench.css';
+</style>
