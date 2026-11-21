@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
+import { ipcMain } from 'electron'
 
 import type * as SystemModalModule from '../popups/systemModal'
 import type * as SettingsModule from '../settings'
@@ -63,6 +64,7 @@ import {
   closeAllHostWindows,
   confirmAndCloseAllHostWindows,
   confirmAndCloseHostWindow,
+  consultPanelRendererClose,
   detachOrphanedInstallHosts,
   preClearedClose,
   returnToDashboard
@@ -121,6 +123,75 @@ afterEach(() => {
   comfyWindows.clear()
   _runningSessions.clear()
   mocks.keepComfyRunning = undefined
+})
+
+describe('consultPanelRendererClose', () => {
+  function latestHandler(channel: string): ((...args: unknown[]) => void) | undefined {
+    const calls = vi.mocked(ipcMain.on).mock.calls
+    for (let i = calls.length - 1; i >= 0; i--) {
+      const call = calls[i]
+      if (call && call[0] === channel) return call[1] as (...args: unknown[]) => void
+    }
+    return undefined
+  }
+
+  function makePanel(): {
+    webContents: {
+      isDestroyed: () => boolean
+      send: ReturnType<typeof vi.fn>
+      on: ReturnType<typeof vi.fn>
+      off: ReturnType<typeof vi.fn>
+    }
+    sentRequest: () => { requestId: string }
+  } {
+    let lastRequest = { requestId: '' }
+    const webContents = {
+      isDestroyed: () => false,
+      send: vi.fn((_channel: string, payload: { requestId: string }) => {
+        lastRequest = payload
+      }),
+      on: vi.fn(),
+      off: vi.fn()
+    }
+    return { webContents, sentRequest: () => lastRequest }
+  }
+
+  beforeEach(() => {
+    vi.mocked(ipcMain.on).mockClear()
+    vi.mocked(ipcMain.off).mockClear()
+  })
+
+  it('falls back to defer after 2s even when the renderer acked but never responded', async () => {
+    vi.useFakeTimers()
+    try {
+      const panel = makePanel()
+      const pending = consultPanelRendererClose({ webContents: panel.webContents } as never)
+      const ackHandler = latestHandler('comfy-window:request-close-ack')
+      ackHandler?.({ sender: panel.webContents } as unknown as Electron.IpcMainEvent, {
+        requestId: panel.sentRequest().requestId
+      })
+      await vi.advanceTimersByTimeAsync(2000)
+      await expect(pending).resolves.toBe('defer')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('resolves immediately with the renderer response when it answers', async () => {
+    vi.useFakeTimers()
+    try {
+      const panel = makePanel()
+      const pending = consultPanelRendererClose({ webContents: panel.webContents } as never)
+      const responseHandler = latestHandler('comfy-window:request-close-response')
+      responseHandler?.({ sender: panel.webContents } as unknown as Electron.IpcMainEvent, {
+        requestId: panel.sentRequest().requestId,
+        cleared: true
+      })
+      await expect(pending).resolves.toBe('cleared')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('closeAllHostWindows', () => {

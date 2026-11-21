@@ -44,7 +44,12 @@ async function consultPanelRenderer(
     const ackChannel = `${requestPrefix}-ack`
     const responseChannel = `${requestPrefix}-response`
     let settled = false
-    let acked = false
+    const finish = (result: PanelConsultResult): void => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(result)
+    }
     const cleanup = (): void => {
       ipcMain.off(ackChannel, onAck)
       ipcMain.off(responseChannel, onResponse)
@@ -59,7 +64,10 @@ async function consultPanelRenderer(
     ): void => {
       if (event.sender !== panelView.webContents) return
       if (payload?.requestId !== requestId) return
-      acked = true
+      // An ack only means the renderer received the request; it does NOT mean
+      // the answer is coming.  Treat it as a keep-alive but keep the timeout
+      // armed — a renderer that acks then hangs on a modal must never pin the
+      // close promise forever.  The deadline below always falls back.
     }
     const onResponse = (
       event: Electron.IpcMainEvent,
@@ -67,16 +75,10 @@ async function consultPanelRenderer(
     ): void => {
       if (event.sender !== panelView.webContents) return
       if (payload?.requestId !== requestId) return
-      if (settled) return
-      settled = true
-      cleanup()
-      resolve(payload?.defer ? 'defer' : payload?.cleared ? 'cleared' : 'aborted')
+      finish(payload?.defer ? 'defer' : payload?.cleared ? 'cleared' : 'aborted')
     }
     const onCrash = (): void => {
-      if (settled) return
-      settled = true
-      cleanup()
-      resolve(fallback)
+      finish(fallback)
     }
     ipcMain.on(ackChannel, onAck)
     ipcMain.on(responseChannel, onResponse)
@@ -85,17 +87,12 @@ async function consultPanelRenderer(
     try {
       panelView.webContents.send(requestPrefix, { requestId })
     } catch {
-      settled = true
-      cleanup()
-      resolve(fallback)
+      finish(fallback)
       return
     }
-    setTimeout(() => {
-      if (settled || acked) return
-      settled = true
-      cleanup()
-      resolve(fallback)
-    }, 2000)
+    // Unconditional deadline: the renderer acked but never answered is the
+    // common hang (a modal that never resolves).  Fall back regardless of ack.
+    setTimeout(() => finish(fallback), 2000)
   })
 }
 

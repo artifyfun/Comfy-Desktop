@@ -490,7 +490,16 @@ onMounted(async () => {
   unsubCloseRequest = window.api.onCloseRequest(({ requestId }) => {
     window.api.ackCloseRequest({ requestId })
     void (async () => {
-      window.api.respondCloseRequest({ requestId, ...(await answerCloseRequest()) })
+      let answer: { cleared: boolean } | { defer: true }
+      try {
+        answer = await answerCloseRequest()
+      } catch (err) {
+        // Never leave main's close promise hanging on a renderer exception.
+        // A failed consult falls back to defer so main owns the decision.
+        console.error('answerCloseRequest failed', err)
+        answer = { defer: true }
+      }
+      window.api.respondCloseRequest({ requestId, ...answer })
     })()
   })
 

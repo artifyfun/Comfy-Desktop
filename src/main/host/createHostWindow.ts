@@ -590,6 +590,13 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
     e.preventDefault()
     if (closingInFlight) return
     closingInFlight = true
+    // Last-resort deadline. Every awaited step below (renderer consult,
+    // system-modal confirmation) has its own timeout, but a stuck promise in
+    // any of them used to pin closingInFlight forever and swallow every later
+    // click on the × — the window simply would not close. Force-destroy here.
+    const forceCloseTimer = setTimeout(() => {
+      if (!comfyWindow.isDestroyed()) comfyWindow.destroy()
+    }, 5000)
     void (async () => {
       try {
         const entry = comfyWindows.get(windowKey)
@@ -634,6 +641,7 @@ export function createHostWindow(opts: CreateHostWindowOpts): CreateHostWindowRe
         })
         comfyWindow.destroy()
       } finally {
+        clearTimeout(forceCloseTimer)
         closingInFlight = false
       }
     })()
