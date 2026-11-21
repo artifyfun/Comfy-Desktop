@@ -38,6 +38,9 @@ interface MockBridgeState {
     version: string | null
   }) => void)[]
   downloadsChangedCallbacks: ((state: MockDownloadsTrayState) => void)[]
+  surfaceChangedCallbacks: ((surface: 'artify' | 'chooser') => void)[]
+  bodyModeChangedCallbacks: ((mode: string) => void)[]
+  setSurfaceCalls: string[]
   setPanelCalls: string[]
   newWindowCalls: number
   fileMenuAnchors: { x: number; y: number }[]
@@ -89,6 +92,9 @@ function installMockBridge(
     appUpdateStateCallbacks: [],
     installUpdateAvailableCallbacks: [],
     downloadsChangedCallbacks: [],
+    surfaceChangedCallbacks: [],
+    bodyModeChangedCallbacks: [],
+    setSurfaceCalls: [],
     setPanelCalls: [],
     newWindowCalls: 0,
     fileMenuAnchors: [],
@@ -117,6 +123,16 @@ function installMockBridge(
     getInstallationId: () => installationId,
     isMac: () => !!opts.isMac,
     isLinux: () => !!opts.isLinux,
+    getSurface: () => 'chooser',
+    setSurface: (surface: string) => state.setSurfaceCalls.push(surface),
+    onSurfaceChanged: (cb: (surface: 'artify' | 'chooser') => void) => {
+      state.surfaceChangedCallbacks.push(cb)
+      return () => {}
+    },
+    onBodyModeChanged: (cb: (mode: string) => void) => {
+      state.bodyModeChangedCallbacks.push(cb)
+      return () => {}
+    },
     setPanel: (panel: string) => state.setPanelCalls.push(panel),
     openNewWindow: () => {
       state.newWindowCalls += 1
@@ -272,7 +288,7 @@ describe('TitleBarApp', () => {
     vi.resetModules()
   })
 
-  it('renders the app menu button and leaves the middle of a build window empty', async () => {
+  it('renders the app menu button and the A/C switch in a build window', async () => {
     const { default: TitleBarApp } = await import('./TitleBarApp.vue')
     const wrapper = mount(TitleBarApp)
     await flushPromises()
@@ -280,8 +296,50 @@ describe('TitleBarApp', () => {
     expect(fileBtn.exists()).toBe(true)
     expect(fileBtn.attributes('aria-label')).toBe('Menu')
     expect(fileBtn.classes()).toContain('title-menu-button--icon')
-    expect(wrapper.find('.title-center').element.children.length).toBe(0)
+    expect(wrapper.find('[role="tablist"][aria-label="Artify / ComfyUI"]').exists()).toBe(true)
     expect(wrapper.find('.title-install-pill').exists()).toBe(false)
+  })
+
+  describe('the A/C surface switch', () => {
+    it('shows on an instance window, where both sides can do something', async () => {
+      bridgeState = installMockBridge({ installationId: 'inst-1' })
+      vi.resetModules()
+      const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+      const wrapper = mount(TitleBarApp)
+      await flushPromises()
+      expect(wrapper.find('[role="tablist"][aria-label="Artify / ComfyUI"]').exists()).toBe(true)
+      expect(wrapper.findAll('[role="tab"]').length).toBe(2)
+    })
+
+    it('hides on the chooser/Home window, which hosts no ComfyUI instance', async () => {
+      bridgeState = installMockBridge({ installationId: null })
+      vi.resetModules()
+      const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+      const wrapper = mount(TitleBarApp)
+      await flushPromises()
+      expect(wrapper.find('[role="tablist"]').exists()).toBe(false)
+      expect(wrapper.find('.title-center').element.children.length).toBe(0)
+    })
+
+    it('appears when a chooser window attaches an instance in place, and A stays gated until the canvas is live', async () => {
+      bridgeState = installMockBridge({ installationId: null })
+      vi.resetModules()
+      const { default: TitleBarApp } = await import('./TitleBarApp.vue')
+      const wrapper = mount(TitleBarApp)
+      await flushPromises()
+      expect(wrapper.find('[role="tablist"]').exists()).toBe(false)
+
+      bridgeState.installationIdChangedCallbacks.forEach((cb) => cb('inst-started-here'))
+      await flushPromises()
+      const tabs = wrapper.findAll('[role="tab"]')
+      expect(tabs.length).toBe(2)
+      expect(tabs[0]!.attributes('disabled')).toBeDefined()
+      expect(tabs[1]!.attributes('aria-selected')).toBe('true')
+
+      bridgeState.bodyModeChangedCallbacks.forEach((cb) => cb('comfy'))
+      await flushPromises()
+      expect(wrapper.findAll('[role="tab"]')[0]!.attributes('disabled')).toBeUndefined()
+    })
   })
 
   it('signals readiness so main can push initial state', async () => {

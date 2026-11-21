@@ -497,11 +497,14 @@ onUnmounted(() => {
       <!-- A/C surface switch (segmented). Native title-bar replacement for
            the page-embedded float buttons: left segment flips the panel body
            to the Artify A UI, right segment to the ComfyUI view. Hidden on
-           first-use lockdown (chrome is locked down during bootstrap).
+           first-use lockdown (chrome is locked down during bootstrap) and on
+           install-less hosts (the chooser/Home window is a navigation page,
+           not a ComfyUI instance — neither side of the switch can do anything
+           there, so showing it is a dead control).
            Active side = azure fill + white text; inactive = muted fill on a
            transparent tray, matching the title bar's token language. -->
       <div
-        v-if="!isFirstUseLockdown"
+        v-if="!isFirstUseLockdown && !isInstallLess"
         class="mr-2.5 inline-flex items-center gap-0.5 rounded-lg border border-solid border-[rgba(255,255,255,0.14)] p-0.5 [-webkit-app-region:no-drag] [.title-bar.is-light_&]:border-[rgba(0,0,0,0.14)]"
         role="tablist"
         aria-label="Artify / ComfyUI"
