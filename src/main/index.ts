@@ -62,9 +62,11 @@ import { waitForPort, COMFY_BOOT_TIMEOUT_MS } from './lib/process'
 import {
   clearQuitReason,
   isQuitInProgress,
+  isUpdateInstallQuit,
   setQuitReason,
   setSessionEnding
 } from './lib/quit-state'
+import { createWillQuitHandler } from './lib/quitWork'
 import {
   postponeQuitWhileDestroyedWindowsHaveLiveWebContents,
   trackWindowWebContents
@@ -140,8 +142,19 @@ import { startServer } from './artifylab/server'
 import { setArtifyPanelMode, setArtifyPanelPort } from './artifylab/panelMode'
 import { setArtifyLabFocusHandler, setComfyUIFocusHandler } from './artifylab'
 import { initEmbeddedSessionFlag } from './lib/embeddedSessionFlag'
-import { initAppsFlag } from './apps/appsFlag'
-import { appsEnabledAtStart } from './apps/appsConfig'
+import { runningAppCount, runningApps } from './apps/appPageView'
+import { appsQuitPrompt, QUIT_BUTTON } from './apps/appsQuitPrompt'
+import { DRAFT_LINK_SCHEME, findDraftLink } from './apps/draftApps'
+import { openDraftLink } from './apps/draftLinks'
+import {
+  DEV_SERVER_START_DATA,
+  devCopyLockDir,
+  isDevServerStart,
+  LOCK_RETRY_INTERVAL_MS,
+  planDraftLinkStartup,
+  retryLock,
+  type DraftLinkStartup
+} from './apps/draftLinkStartup'
 import { runningPortOf } from './apps/localBuild'
 import {
   isRunningForAppsOnly,
@@ -273,7 +286,21 @@ function updateTrayMenu(): void {
   tray.setContextMenu(contextMenu)
 }
 
+function confirmQuitStopsAppRuns(): boolean {
+  const [only] = Array.from(comfyWindows.keys()).flatMap((windowKey) => runningApps(windowKey))
+  const prompt = appsQuitPrompt(
+    {
+      running: runningAppCount(),
+      onlyTitle: only?.title ?? null,
+      downloading: hasActiveTemplateDownloads()
+    },
+    i18n.t
+  )
+  return prompt === null || dialog.showMessageBoxSync(prompt) === QUIT_BUTTON
+}
+
 function quitApp(): void {
+  if (!confirmQuitStopsAppRuns()) return
   setQuitReason('user-quit')
   ipc.cancelAll()
   for (const [, entry] of comfyWindows) {
@@ -288,6 +315,7 @@ function quitApp(): void {
 }
 
 const STARTUP_INSTALL_QUIT_BACKSTOP_MS = 4_000
+const STOP_STAMP_QUIT_WAIT_MS = 2_000
 
 async function openStartupSurface(): Promise<void> {
   const autoStartBuild = await pinAutoStartToALocalBuild().catch((err: unknown) => {
@@ -903,17 +931,110 @@ function findInstallationIdForWindow(win: BrowserWindow): string | undefined {
 
 const hostReentryGate = createStartupReentryGate()
 
-if (app.isPackaged && !app.requestSingleInstanceLock()) {
+const draftLinkStartup = planDraftLinkStartup({
+  isPackaged: app.isPackaged,
+  platform: process.platform,
+  env: process.env,
+  startupLink: findDraftLink(process.argv)
+})
+
+function requestDevCopyLock(additionalData: Record<string, unknown> | undefined): boolean {
+  const userData = app.getPath('userData')
+  app.setPath('userData', devCopyLockDir(userData, app.getAppPath(), process.platform))
+  try {
+    return app.requestSingleInstanceLock(additionalData)
+  } finally {
+    app.setPath('userData', userData)
+  }
+}
+
+function holdsInstanceLockAtStart({ lock, lockTiming }: DraftLinkStartup): boolean {
+  if (lock === 'none' || lockTiming === 'ready') return true
+  if (lock === 'app') return app.requestSingleInstanceLock()
+  return requestDevCopyLock(undefined)
+}
+
+function takeDevCopyLockWhenReady({ lock, lockTiming, lockWaitMs }: DraftLinkStartup): void {
+  if (lock !== 'dev-copy' || lockTiming !== 'ready') return
+  void app.whenReady().then(() =>
+    retryLock({
+      tryLock: () => requestDevCopyLock(DEV_SERVER_START_DATA),
+      waitMs: lockWaitMs,
+      intervalMs: LOCK_RETRY_INTERVAL_MS,
+      now: Date.now,
+      schedule: (attempt, ms) => void setTimeout(attempt, ms),
+      onDone: (held) => {
+        if (held) return
+        console.warn(
+          `Another Comfy Desktop started from ${app.getAppPath()} is running, so ${DRAFT_LINK_SCHEME}:// links clicked now go to it, not to this copy.`
+        )
+      }
+    })
+  )
+}
+
+function registerDraftLinkScheme({ registration, desktopEntry }: DraftLinkStartup): void {
+  const commandArgs = [path.resolve(process.argv[1] ?? '.')]
+  let registered = true
+  if (registration === 'scheme') {
+    registered = app.setAsDefaultProtocolClient(DRAFT_LINK_SCHEME)
+  } else if (registration === 'scheme-with-command') {
+    registered = app.setAsDefaultProtocolClient(DRAFT_LINK_SCHEME, process.execPath, commandArgs)
+  } else if (registration === 'desktop-entry' && desktopEntry) {
+    app.setDesktopName(desktopEntry)
+    registered = app.setAsDefaultProtocolClient(DRAFT_LINK_SCHEME)
+  } else if (
+    registration === 'remove-own-command' &&
+    app.isDefaultProtocolClient(DRAFT_LINK_SCHEME, process.execPath, commandArgs)
+  ) {
+    app.removeAsDefaultProtocolClient(DRAFT_LINK_SCHEME, process.execPath, commandArgs)
+  }
+  if (!registered) {
+    console.warn(
+      `Could not register ${DRAFT_LINK_SCHEME}:// links for this copy (${registration}).`
+    )
+  }
+}
+
+async function explainDevCopyNotRunning(): Promise<void> {
+  app.releaseSingleInstanceLock()
+  await app.whenReady()
+  await dialog.showMessageBox({
+    type: 'info',
+    buttons: ['OK'],
+    message: 'Comfy Desktop is not running from source',
+    detail: `This link opens the development copy in ${app.getAppPath()}. Start it there with pnpm run dev, then open the link again.`
+  })
   app.quit()
+}
+
+if (!holdsInstanceLockAtStart(draftLinkStartup)) {
+  app.quit()
+} else if (draftLinkStartup.linkWithoutDevServer) {
+  void explainDevCopyNotRunning()
 } else {
   if (process.platform === 'win32') startMachineIdLookup()
   const sacStateRead = readSmartAppControlState()
 
-  if (app.isPackaged) {
-    app.on('second-instance', () => {
-      hostReentryGate.runOrQueue(() => openOrFocusAnyHostWindow())
+  registerDraftLinkScheme(draftLinkStartup)
+  takeDevCopyLockWhenReady(draftLinkStartup)
+  if (draftLinkStartup.lock !== 'none') {
+    app.on('second-instance', (_event, argv, _workingDirectory, additionalData) => {
+      if (isDevServerStart(additionalData)) return
+      const draftLink = findDraftLink(argv)
+      if (draftLink) hostReentryGate.runEachWhenOpen(() => void openDraftLink(draftLink))
+      else hostReentryGate.runOrQueue(() => openOrFocusAnyHostWindow())
     })
   }
+
+  app.on('open-url', (event, url) => {
+    if (!findDraftLink([url])) return
+    event.preventDefault()
+    hostReentryGate.runEachWhenOpen(() => void openDraftLink(url))
+  })
+
+  const startupDraftLink = findDraftLink(process.argv)
+  if (startupDraftLink) hostReentryGate.runEachWhenOpen(() => void openDraftLink(startupDraftLink))
 
   app.on('browser-window-created', (_event, window) => {
     trackWindowWebContents(window)
@@ -986,14 +1107,12 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     } catch (err) {
       console.warn('[comfy-procs] startup scan failed:', err)
     }
-    const appsEnabled = appsEnabledAtStart()
     mainTelemetry.initTelemetry({
       appVersion: APP_VERSION,
       appEnv: app.isPackaged ? 'prod-v2' : 'dev',
       isPackaged: app.isPackaged,
       sessionStartProps: {
-        prior_session_unclean: priorSessionUnclean,
-        ...(appsEnabled === undefined ? {} : { apps_enabled: appsEnabled })
+        prior_session_unclean: priorSessionUnclean
       }
     })
     mainTelemetry.setConsentState(initialConsent)
@@ -1047,8 +1166,6 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     }).then(prefetchEnrolledAgents)
 
     void initEmbeddedSessionFlag({ distinctId: installationId })
-
-    void initAppsFlag({ distinctId: installationId })
 
     void initWorkspaceMintSwitchFlag({ distinctId: installationId })
 
@@ -1766,7 +1883,12 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
   })
 
   app.on('before-quit', (event) => {
-    if (!isQuitInProgress() && hasActiveTemplateDownloads()) {
+    const asksAboutRuns = !isQuitInProgress() && runningAppCount() > 0
+    if (asksAboutRuns && !confirmQuitStopsAppRuns()) {
+      event.preventDefault()
+      return
+    }
+    if (!isQuitInProgress() && !asksAboutRuns && hasActiveTemplateDownloads()) {
       const choice = dialog.showMessageBoxSync({
         type: 'warning',
         buttons: [i18n.t('templateQuit.quit'), i18n.t('templateQuit.cancel')],
@@ -1806,13 +1928,18 @@ if (app.isPackaged && !app.requestSingleInstanceLock()) {
     stopAgentPrefetches()
   })
 
-  let modelDownloadsSuspended = false
-  app.on('will-quit', (event) => {
-    if (modelDownloadsSuspended || !hasActiveModelTransfers()) return
-    modelDownloadsSuspended = true
-    event.preventDefault()
-    void suspendActiveModelDownloadsForQuit().finally(() => app.quit())
-  })
+  app.on(
+    'will-quit',
+    createWillQuitHandler({
+      quit: () => app.quit(),
+      hasActiveModelTransfers,
+      suspendActiveModelDownloadsForQuit,
+      hasPendingStopStamps: ipc.hasPendingStopStamps,
+      settleStopStamps: ipc.settleStopStamps,
+      stopStampWaitMs: STOP_STAMP_QUIT_WAIT_MS,
+      isUpdateInstallQuit
+    })
+  )
 
   powerMonitor.on('suspend', () => {
     suspendActiveModelDownloadsForSleep()

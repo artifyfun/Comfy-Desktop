@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   shownOutputFile: vi.fn((_panel: unknown, _index: number) => mocks.shownFile),
   revealOutputFile: vi.fn(async (_file: string) => true),
   isAppsPage: true,
-  appsEnabled: true,
+  pageAdmitted: true,
   page: { appId: 'remove-background', document: 1 } as LoadedPage | null,
   showAppOutputs: vi.fn(
     (_contents: unknown, _sentFrom: unknown, _outputs: unknown, _files: unknown) => true
@@ -30,8 +30,10 @@ vi.mock('electron', () => ({
     on: (channel: string, listener: Listener) => mocks.listeners.set(channel, listener)
   }
 }))
-vi.mock('../../apps/appsConfig', () => ({ areAppsEnabled: async () => mocks.appsEnabled }))
-vi.mock('../../apps/appsPages', () => ({ isAppsPageSender: () => mocks.isAppsPage }))
+vi.mock('../../apps/appsPages', () => ({
+  appsPageAdmits: async () => mocks.pageAdmitted,
+  isAppsPageSender: () => mocks.isAppsPage
+}))
 vi.mock('../../apps/appPageView', () => ({
   loadedAppPage: () => mocks.page,
   showAppOutputs: mocks.showAppOutputs,
@@ -74,7 +76,7 @@ beforeEach(() => {
   mocks.shownFile = null
   mocks.findFile.mockResolvedValue(null)
   mocks.isAppsPage = true
-  mocks.appsEnabled = true
+  mocks.pageAdmitted = true
   mocks.page = { appId: 'remove-background', document: 1 }
   mocks.showAppOutputs.mockReturnValue(true)
   registerAppsOutputsHandlers()
@@ -168,15 +170,15 @@ describe('showOutput from the hosted Apps page', () => {
     expect(mocks.showAppOutputs).not.toHaveBeenCalled()
   })
 
-  it('shows nothing for a sender that is not the hosted Apps page, or while Apps is off', async () => {
+  it('shows nothing for a sender that is not the hosted Apps page, a page it does not admit, or no loaded app', async () => {
     mocks.isAppsPage = false
     expect(await showOutput()).toBe(false)
 
     mocks.isAppsPage = true
-    mocks.appsEnabled = false
+    mocks.pageAdmitted = false
     expect(await showOutput()).toBe(false)
 
-    mocks.appsEnabled = true
+    mocks.pageAdmitted = true
     mocks.page = null
     expect(await showOutput()).toBe(false)
 

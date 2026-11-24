@@ -48,7 +48,12 @@ const mocks = vi.hoisted(() => ({
   translate: vi.fn((key: string) => key),
   endViewGrants: vi.fn(),
   allowDesktopWorkspace: vi.fn(),
-  creditBalanceAuthChanged: vi.fn()
+  creditBalanceAuthChanged: vi.fn(),
+  cloudAuthChanged: vi.fn()
+}))
+
+vi.mock('../cloudAuthEvents', () => ({
+  cloudAuthEvents: { emit: mocks.cloudAuthChanged }
 }))
 
 vi.mock('./registerCreditBalanceHandlers', () => ({
@@ -62,7 +67,10 @@ vi.mock('../viewWorkspaceGrants', () => ({
   })
 }))
 
-vi.mock('../../apps/appsConfig', () => ({ areAppsEnabled: async () => false }))
+vi.mock(import('../../apps/appsPages'), async (importOriginal) => ({
+  ...(await importOriginal()),
+  liveAppsPages: () => []
+}))
 
 vi.mock('electron', () => ({
   BrowserWindow: { getAllWindows: mocks.getAllWindows },
@@ -361,6 +369,16 @@ describe('registerDevPlatformHandlers', () => {
     expect(mocks.creditBalanceAuthChanged).toHaveBeenCalledTimes(2)
   })
 
+  it('tells the rest of main the sign-in changed, on sign-in and on sign-out', async () => {
+    mocks.login.mockResolvedValue({ signedIn: true, workspaceId: 'ws-1' })
+
+    await handler('comfybuilder:signIn')({})
+    expect(mocks.cloudAuthChanged).toHaveBeenCalledExactlyOnceWith('changed')
+
+    await handler('comfybuilder:signOut')({})
+    expect(mocks.cloudAuthChanged).toHaveBeenCalledTimes(2)
+  })
+
   it('signOut clears the session and broadcasts signed-out', async () => {
     const win = { webContents: { isDestroyed: () => false, send: vi.fn() } }
     mocks.getAllWindows.mockReturnValue([win])
@@ -395,7 +413,7 @@ describe('registerDevPlatformHandlers', () => {
         spec: expect.objectContaining({
           cancelLabel: 'common.close',
           confirmLabel: 'devPlatform.account.cancelInstallationAndSignOut',
-          confirmStyle: 'danger'
+          confirmStyle: 'primary'
         })
       })
     )
@@ -1378,6 +1396,15 @@ describe('registerDevPlatformHandlers', () => {
     expect(mocks.add).not.toHaveBeenCalled()
   })
 
+  it('installBuild marks a bad install location so the alert can offer Change location', async () => {
+    mocks.isSignedIn.mockReturnValue(true)
+
+    const result = await handler('comfybuilder:installBuild')({}, { buildId: 'd1', installRoot: 7 })
+
+    expect(result).toEqual({ ok: false, message: 'Invalid install location.', reason: 'location' })
+    expect(mocks.listBuilds).not.toHaveBeenCalled()
+  })
+
   it('installBuild rejects the legacy string request shape', async () => {
     mocks.isSignedIn.mockReturnValue(true)
 
@@ -1419,6 +1446,32 @@ describe('registerDevPlatformHandlers', () => {
     const result = await handler('comfybuilder:installBuild')({}, { buildId: 'd1' })
 
     expect(result).toEqual({ ok: false, message: 'The active workspace changed. Try again.' })
+    expect(mocks.add).not.toHaveBeenCalled()
+  })
+
+  it('installBuild marks a folder another build already uses as a location problem', async () => {
+    mocks.isSignedIn.mockReturnValue(true)
+    mocks.resolveHostArtifact.mockResolvedValue({
+      version: 7,
+      artifact: {
+        id: 'art-9',
+        os: 'linux',
+        gpu: 'nvidia',
+        accelVariant: 'cu128',
+        status: 'ready',
+        archiveSha256: 'deadbeef'
+      }
+    })
+    mocks.listBuilds.mockResolvedValue([{ id: 'd1', name: 'Image Baseline' }])
+    mocks.findDuplicatePath.mockResolvedValueOnce({ name: 'Studio' } as never)
+
+    const result = await handler('comfybuilder:installBuild')({}, { buildId: 'd1' })
+
+    expect(result).toEqual({
+      ok: false,
+      message: 'That directory is already used by "Studio".',
+      reason: 'location'
+    })
     expect(mocks.add).not.toHaveBeenCalled()
   })
 

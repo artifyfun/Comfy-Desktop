@@ -69,6 +69,10 @@ asarUnpack:
 afterPack: ./scripts/afterPack.mjs
 # 注：打包前的历史产物清理走 npm 脚本 clean:dist-resources（见 package.json 的 build:unpack/build:win 等），
 # 不用 beforeBuild 钩子——钩子的输出会被打包日志吞掉，成败不可见。
+protocols:
+  - name: Comfy Desktop
+    schemes:
+      - comfy
 publish:
   provider: github
   owner: artifyfun
@@ -109,10 +113,10 @@ dmg:
     height: 400
   contents:
     - x: 135
-      y: 195
+      y: 270
       type: file
     - x: 405
-      y: 195
+      y: 190
       type: link
       path: /Applications
 linux:

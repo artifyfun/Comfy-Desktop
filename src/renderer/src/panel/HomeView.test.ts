@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { userEvent } from 'vitest/browser'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
@@ -7,37 +8,43 @@ import { useDashboardScopeStore } from '../stores/dashboardScopeStore'
 import { useProgressStore } from '../stores/progressStore'
 import { useAuthStore } from '../stores/authStore'
 import { useSessionStore } from '../stores/sessionStore'
-import type { CatalogWorkflow, Installation } from '../types/ipc'
+import type { AppCard, Installation } from '../types/ipc'
 
-const listHomeWorkflows = vi.fn<() => Promise<CatalogWorkflow[]>>()
-const openCatalogWorkflow = vi.fn<(id: string) => Promise<boolean>>()
-const getAppsEnabled = vi.fn<() => Promise<boolean>>()
+const listApps = vi.fn<() => Promise<AppCard[]>>()
 const getInstallations = vi.fn<() => Promise<Installation[]>>()
 const getAuthStatus = vi.fn<() => Promise<{ signedIn: boolean }>>()
 
-function workflow(id: string, title: string, thumbnailUrl: string | null = null): CatalogWorkflow {
-  return { id, title, description: '', thumbnailUrl }
+function app(id: string, title: string): AppCard {
+  return { id, title, description: '', covers: [] }
+}
+
+function pictured(card: AppCard, url: string): AppCard {
+  return { ...card, covers: [{ url, stillUrl: url }] }
 }
 
 function build(over: Partial<Installation> & { id: string; name: string }): Installation {
   return { sourceLabel: 'Standalone', sourceCategory: 'local', status: 'installed', ...over }
 }
 
-const UPSCALE: CatalogWorkflow = {
+const UPSCALE_PICTURE = 'https://comfy.org/apps-media/upscale/v1'
+const UPSCALE: AppCard = {
   id: 'upscale',
   title: 'Upscale and restore detail',
   description: 'Enlarge an image and restore fine detail.',
-  thumbnailUrl: 'https://comfy.org/catalog-media/upscale/v1'
+  covers: [{ url: UPSCALE_PICTURE, stillUrl: UPSCALE_PICTURE }]
 }
-const TALK = workflow('talk', 'Make your character talk')
-const SEVEN_WORKFLOWS = Array.from({ length: 7 }, (_, index) =>
-  workflow(`workflow-${index}`, `Workflow ${index}`)
-)
+const TALK = app('talk', 'Make your character talk')
+const SEVEN_APPS = Array.from({ length: 7 }, (_, index) => app(`app-${index}`, `App ${index}`))
+
+const MINUTE_MS = 60_000
+const HOUR_MS = 60 * MINUTE_MS
+const DAY_MS = 24 * HOUR_MS
+const NOW = new Date(2026, 10, 20, 15, 0).getTime()
 
 const OLDEST = build({
   id: 'oldest',
   name: 'Flux Sandbox',
-  lastLaunchedAt: 100,
+  lastLaunchedAt: NOW - 3 * DAY_MS,
   version: 'v0.42.4',
   installPath: '/Users/pablo/ComfyUI-Installs/Flux'
 })
@@ -48,27 +55,25 @@ const CLOUD = build({
   sourceLabel: 'Cloud',
   sourceCategory: 'cloud',
   listPreview: 'https://cloud.comfy.org/',
-  lastLaunchedAt: 200
+  lastLaunchedAt: NOW - DAY_MS - HOUR_MS
 })
-const RUNNING = build({ id: 'running', name: 'Video Lab', lastLaunchedAt: 300 })
+const RUNNING = build({ id: 'running', name: 'Video Lab', lastLaunchedAt: NOW - 2 * HOUR_MS })
 const NEWEST = build({
   id: 'newest',
   name: 'My Local 1',
-  lastLaunchedAt: 400,
+  lastLaunchedAt: NOW - 5 * MINUTE_MS,
   statusTag: { style: 'update', label: 'Update available' }
 })
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(NOW)
   vi.clearAllMocks()
-  listHomeWorkflows.mockResolvedValue([])
-  openCatalogWorkflow.mockResolvedValue(true)
-  getAppsEnabled.mockResolvedValue(false)
+  listApps.mockResolvedValue([])
   getInstallations.mockResolvedValue([])
   getAuthStatus.mockResolvedValue({ signedIn: false })
   ;(window as unknown as { api: unknown }).api = {
-    listHomeWorkflows,
-    openCatalogWorkflow,
-    getAppsEnabled,
+    listApps,
     getInstallations,
     onInstallationsChanged: vi.fn(() => () => {}),
     onInstallationsVersionsUpdated: vi.fn(() => () => {}),
@@ -88,6 +93,7 @@ const mounted: VueWrapper[] = []
 afterEach(() => {
   while (mounted.length) mounted.pop()?.unmount()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 async function openHome() {
@@ -127,68 +133,53 @@ function buildOptions(): HTMLElement[] {
   return [...document.querySelectorAll<HTMLElement>('[data-testid="home-open-build-option"]')]
 }
 
-describe('Home example workflows', () => {
-  it('puts the first catalog workflow in front with its neighbours on either side', async () => {
-    listHomeWorkflows.mockResolvedValue(SEVEN_WORKFLOWS)
+describe('Home carousel', () => {
+  it('puts the first app in front with its neighbours on either side', async () => {
+    listApps.mockResolvedValue(SEVEN_APPS)
     const wrapper = await openHome()
 
-    expect(arc(wrapper)).toEqual([
-      '-2:Workflow 5',
-      '-1:Workflow 6',
-      '0:Workflow 0',
-      '1:Workflow 1',
-      '2:Workflow 2'
-    ])
+    expect(arc(wrapper)).toEqual(['-2:App 5', '-1:App 6', '0:App 0', '1:App 1', '2:App 2'])
   })
 
   it('brings a side card to the front when it is clicked, without opening it', async () => {
-    listHomeWorkflows.mockResolvedValue(SEVEN_WORKFLOWS)
+    listApps.mockResolvedValue(SEVEN_APPS)
     const wrapper = await openHome()
 
     await cardAt(wrapper, 1).trigger('click')
 
-    expect(cardAt(wrapper, 0).text()).toContain('Workflow 1')
-    expect(openCatalogWorkflow).not.toHaveBeenCalled()
+    expect(cardAt(wrapper, 0).text()).toContain('App 1')
+    expect(wrapper.emitted('open-app')).toBeUndefined()
   })
 
   it('slides a card two places away to the front as the same card, with the next ones already waiting off stage', async () => {
-    listHomeWorkflows.mockResolvedValue(SEVEN_WORKFLOWS)
+    listApps.mockResolvedValue(SEVEN_APPS)
     const wrapper = await openHome()
     const twoAway = cardAt(wrapper, 2).element
     const waitingOffStage = cardAt(wrapper, 3)
-    expect(waitingOffStage.text()).toBe('Workflow 3')
+    expect(waitingOffStage.text()).toBe('App 3')
     expect(waitingOffStage.attributes('aria-hidden')).toBe('true')
 
     await cardAt(wrapper, 2).trigger('click')
 
     expect(cardAt(wrapper, 0).element).toBe(twoAway)
     expect(cardAt(wrapper, 1).element).toBe(waitingOffStage.element)
-    expect(arc(wrapper)).toEqual([
-      '-2:Workflow 0',
-      '-1:Workflow 1',
-      '0:Workflow 2',
-      '1:Workflow 3',
-      '2:Workflow 4'
-    ])
-    expect(openCatalogWorkflow).not.toHaveBeenCalled()
+    expect(arc(wrapper)).toEqual(['-2:App 0', '-1:App 1', '0:App 2', '1:App 3', '2:App 4'])
+    expect(wrapper.emitted('open-app')).toBeUndefined()
   })
 
   it('keeps cards that are off stage out of reach of the keyboard and screen readers', async () => {
-    listHomeWorkflows.mockResolvedValue(SEVEN_WORKFLOWS)
+    listApps.mockResolvedValue(SEVEN_APPS)
     const wrapper = await openHome()
 
     const offStage = wrapper.findAll('[data-testid="home-carousel-card"][aria-hidden="true"]')
 
-    expect(offStage.map((card) => card.text())).toEqual(['Workflow 3', 'Workflow 4'])
+    expect(offStage.map((card) => card.text())).toEqual(['App 3', 'App 4'])
     expect(offStage.map((card) => card.attributes('tabindex'))).toEqual(['-1', '-1'])
   })
 
   it('loads every picture up front and fades each in once it has loaded', async () => {
-    listHomeWorkflows.mockResolvedValue(
-      SEVEN_WORKFLOWS.map((entry) => ({
-        ...entry,
-        thumbnailUrl: `https://comfy.org/catalog-media/${entry.id}/v1`
-      }))
+    listApps.mockResolvedValue(
+      SEVEN_APPS.map((entry) => pictured(entry, `https://comfy.org/apps-media/${entry.id}/v1`))
     )
     const wrapper = await openHome()
     const pictures = wrapper.findAll('[data-testid="home-carousel-card"] img')
@@ -202,51 +193,48 @@ describe('Home example workflows', () => {
     expect(pictures[5]!.attributes('data-loaded')).toBe('false')
   })
 
-  it('opens the workflow in front when it is clicked', async () => {
-    listHomeWorkflows.mockResolvedValue(SEVEN_WORKFLOWS)
+  it('opens the app in front when it is clicked', async () => {
+    listApps.mockResolvedValue(SEVEN_APPS)
     const wrapper = await openHome()
     await cardAt(wrapper, -1).trigger('click')
 
     await cardAt(wrapper, 0).trigger('click')
 
-    expect(openCatalogWorkflow).toHaveBeenCalledExactlyOnceWith('workflow-6')
+    expect(wrapper.emitted('open-app')).toEqual([[SEVEN_APPS[6]]])
   })
 
   it('turns the carousel with the arrow keys', async () => {
-    listHomeWorkflows.mockResolvedValue(SEVEN_WORKFLOWS)
+    listApps.mockResolvedValue(SEVEN_APPS)
     const wrapper = await openHome()
     const carousel = wrapper.get('[data-testid="home-carousel"]')
 
     await carousel.trigger('keydown', { key: 'ArrowRight' })
     await carousel.trigger('keydown', { key: 'ArrowRight' })
-    expect(cardAt(wrapper, 0).text()).toContain('Workflow 2')
+    expect(cardAt(wrapper, 0).text()).toContain('App 2')
 
     await carousel.trigger('keydown', { key: 'ArrowLeft' })
-    expect(cardAt(wrapper, 0).text()).toContain('Workflow 1')
+    expect(cardAt(wrapper, 0).text()).toContain('App 1')
   })
 
   it('turns the carousel with the previous and next arrows', async () => {
-    listHomeWorkflows.mockResolvedValue(SEVEN_WORKFLOWS)
+    listApps.mockResolvedValue(SEVEN_APPS)
     const wrapper = await openHome()
     const next = wrapper.get('[data-testid="home-carousel-next"]')
     const previous = wrapper.get('[data-testid="home-carousel-previous"]')
 
-    expect(next.attributes('aria-label')).toBe('Next workflow')
-    expect(previous.attributes('aria-label')).toBe('Previous workflow')
-
     await next.trigger('click')
     await next.trigger('click')
-    expect(cardAt(wrapper, 0).text()).toContain('Workflow 2')
+    expect(cardAt(wrapper, 0).text()).toContain('App 2')
 
     await previous.trigger('click')
     await previous.trigger('click')
     await previous.trigger('click')
-    expect(cardAt(wrapper, 0).text()).toContain('Workflow 6')
-    expect(openCatalogWorkflow).not.toHaveBeenCalled()
+    expect(cardAt(wrapper, 0).text()).toContain('App 6')
+    expect(wrapper.emitted('open-app')).toBeUndefined()
   })
 
   it('stops the arrows at the ends of a short list and leaves them out for a single card', async () => {
-    listHomeWorkflows.mockResolvedValue([UPSCALE, TALK])
+    listApps.mockResolvedValue([UPSCALE, TALK])
     const wrapper = await openHome()
     const next = wrapper.get('[data-testid="home-carousel-next"]')
     const previous = wrapper.get('[data-testid="home-carousel-previous"]')
@@ -259,14 +247,14 @@ describe('Home example workflows', () => {
     expect(next.attributes('disabled')).toBeDefined()
     expect(previous.attributes('disabled')).toBeUndefined()
 
-    listHomeWorkflows.mockResolvedValue([UPSCALE])
+    listApps.mockResolvedValue([UPSCALE])
     const single = await openHome()
     expect(single.find('[data-testid="home-carousel-next"]').exists()).toBe(false)
     expect(single.find('[data-testid="home-carousel-previous"]').exists()).toBe(false)
   })
 
   it('keeps keyboard focus on an arrow when the one in use reaches the end of a short list', async () => {
-    listHomeWorkflows.mockResolvedValue([UPSCALE, TALK])
+    listApps.mockResolvedValue([UPSCALE, TALK])
     const wrapper = await openHome()
     const next = wrapper.get<HTMLButtonElement>('[data-testid="home-carousel-next"]')
     const previous = wrapper.get<HTMLButtonElement>('[data-testid="home-carousel-previous"]')
@@ -280,24 +268,24 @@ describe('Home example workflows', () => {
   })
 
   it('turns with the arrow keys from an arrow button and moves card focus to the new front card', async () => {
-    listHomeWorkflows.mockResolvedValue(SEVEN_WORKFLOWS)
+    listApps.mockResolvedValue(SEVEN_APPS)
     const wrapper = await openHome()
 
     const next = wrapper.get('[data-testid="home-carousel-next"]')
     await next.trigger('keydown', { key: 'ArrowRight' })
-    expect(cardAt(wrapper, 0).text()).toContain('Workflow 1')
+    expect(cardAt(wrapper, 0).text()).toContain('App 1')
 
     const front = cardAt(wrapper, 0).element as HTMLButtonElement
     front.focus()
     await cardAt(wrapper, 0).trigger('keydown', { key: 'ArrowRight' })
     await flushPromises()
 
-    expect(cardAt(wrapper, 0).text()).toContain('Workflow 2')
+    expect(cardAt(wrapper, 0).text()).toContain('App 2')
     expect(document.activeElement).toBe(cardAt(wrapper, 0).element)
   })
 
-  it('shows the open arrow on hover of the front card only, and opens that workflow from it', async () => {
-    listHomeWorkflows.mockResolvedValue(SEVEN_WORKFLOWS)
+  it('shows the open arrow on hover of the front card only, and opens that app from it', async () => {
+    listApps.mockResolvedValue(SEVEN_APPS)
     const wrapper = await openHome()
     const front = cardAt(wrapper, 0).get('[data-testid="home-carousel-cta"]')
     const side = cardAt(wrapper, 1).get('[data-testid="home-carousel-cta"]')
@@ -308,55 +296,55 @@ describe('Home example workflows', () => {
 
     await front.trigger('click')
 
-    expect(openCatalogWorkflow).toHaveBeenCalledExactlyOnceWith('workflow-0')
+    expect(wrapper.emitted('open-app')).toEqual([[SEVEN_APPS[0]]])
   })
 
   it('turns the carousel when it is dragged, and does not open the card the drag ends on', async () => {
-    listHomeWorkflows.mockResolvedValue(SEVEN_WORKFLOWS)
+    listApps.mockResolvedValue(SEVEN_APPS)
     const wrapper = await openHome()
 
     pressCarouselAt(wrapper, 600)
     window.dispatchEvent(new PointerEvent('pointermove', { clientX: 290 }))
     await flushPromises()
 
-    expect(cardAt(wrapper, 0).text()).toContain('Workflow 2')
+    expect(cardAt(wrapper, 0).text()).toContain('App 2')
 
     window.dispatchEvent(new PointerEvent('pointerup', { clientX: 290 }))
     await cardAt(wrapper, 0).trigger('click')
 
-    expect(openCatalogWorkflow).not.toHaveBeenCalled()
+    expect(wrapper.emitted('open-app')).toBeUndefined()
 
     await new Promise((resolve) => setTimeout(resolve, 0))
     await cardAt(wrapper, 0).trigger('click')
 
-    expect(openCatalogWorkflow).toHaveBeenCalledExactlyOnceWith('workflow-2')
+    expect(wrapper.emitted('open-app')).toEqual([[SEVEN_APPS[2]]])
   })
 
   it('drags back the other way to earlier cards', async () => {
-    listHomeWorkflows.mockResolvedValue(SEVEN_WORKFLOWS)
+    listApps.mockResolvedValue(SEVEN_APPS)
     const wrapper = await openHome()
 
     pressCarouselAt(wrapper, 600)
     window.dispatchEvent(new PointerEvent('pointermove', { clientX: 760 }))
     await flushPromises()
 
-    expect(cardAt(wrapper, 0).text()).toContain('Workflow 6')
+    expect(cardAt(wrapper, 0).text()).toContain('App 6')
     window.dispatchEvent(new PointerEvent('pointerup'))
   })
 
   it('still opens the front card after a press that does not move', async () => {
-    listHomeWorkflows.mockResolvedValue(SEVEN_WORKFLOWS)
+    listApps.mockResolvedValue(SEVEN_APPS)
     const wrapper = await openHome()
 
     pressCarouselAt(wrapper, 600)
     window.dispatchEvent(new PointerEvent('pointerup', { clientX: 601 }))
     await cardAt(wrapper, 0).trigger('click')
 
-    expect(openCatalogWorkflow).toHaveBeenCalledExactlyOnceWith('workflow-0')
+    expect(wrapper.emitted('open-app')).toEqual([[SEVEN_APPS[0]]])
   })
 
   it('shows a short list once, without repeating cards around the arc', async () => {
-    listHomeWorkflows.mockResolvedValue([UPSCALE, TALK])
+    listApps.mockResolvedValue([UPSCALE, TALK])
     const wrapper = await openHome()
 
     expect(arc(wrapper)).toEqual([
@@ -369,72 +357,30 @@ describe('Home example workflows', () => {
     expect(cardAt(wrapper, 0).text()).toContain('Upscale and restore detail')
   })
 
-  it('shows the catalog picture when reduced motion is preferred', async () => {
+  it('shows the picture when reduced motion is preferred', async () => {
     vi.stubGlobal('matchMedia', (query: string) => ({
       matches: query === '(prefers-reduced-motion: reduce)',
       media: query,
       addEventListener: () => {},
       removeEventListener: () => {}
     }))
-    listHomeWorkflows.mockResolvedValue([UPSCALE])
+    listApps.mockResolvedValue([UPSCALE])
     const wrapper = await openHome()
 
-    expect(cardAt(wrapper, 0).get('img').attributes('src')).toBe(UPSCALE.thumbnailUrl)
+    expect(cardAt(wrapper, 0).get('img').attributes('src')).toBe(UPSCALE_PICTURE)
   })
 
-  it('shows the catalog picture on a card and a plain card when there is none', async () => {
-    listHomeWorkflows.mockResolvedValue([UPSCALE, TALK])
+  it('shows the picture on a card and a plain card when there is none', async () => {
+    listApps.mockResolvedValue([UPSCALE, TALK])
     const wrapper = await openHome()
 
-    expect(cardAt(wrapper, 0).get('img').attributes('src')).toBe(UPSCALE.thumbnailUrl)
+    expect(cardAt(wrapper, 0).get('img').attributes('src')).toBe(UPSCALE_PICTURE)
     expect(cardAt(wrapper, 1).find('img').exists()).toBe(false)
 
     await cardAt(wrapper, 0).get('img').trigger('error')
 
     expect(cardAt(wrapper, 0).find('img').exists()).toBe(false)
     expect(cardAt(wrapper, 0).text()).toContain('Upscale and restore detail')
-  })
-
-  it('tells screen readers which card opens and which only comes forward', async () => {
-    listHomeWorkflows.mockResolvedValue([UPSCALE, TALK])
-    const wrapper = await openHome()
-
-    expect(cardAt(wrapper, 0).attributes('aria-label')).toBe(
-      'Open Upscale and restore detail on Comfy Hub'
-    )
-    expect(cardAt(wrapper, 1).attributes('aria-label')).toBe('Show Make your character talk')
-  })
-
-  it('leaves out See all apps while Apps is turned off', async () => {
-    listHomeWorkflows.mockResolvedValue([UPSCALE])
-    const wrapper = await openHome()
-
-    expect(wrapper.find('[data-testid="home-see-all-apps"]').exists()).toBe(false)
-  })
-
-  it('shows placeholders while the catalog is loading', async () => {
-    listHomeWorkflows.mockReturnValue(new Promise(() => {}))
-    const wrapper = await openHome()
-
-    expect(wrapper.get('[data-testid="home-carousel-loading"]').attributes('aria-busy')).toBe(
-      'true'
-    )
-    expect(wrapper.find('[data-testid="home-carousel-card"]').exists()).toBe(false)
-  })
-
-  it('says the workflows could not be loaded and loads them when asked to try again', async () => {
-    listHomeWorkflows.mockRejectedValueOnce(new Error('offline'))
-    const wrapper = await openHome()
-
-    const unavailable = wrapper.get('[data-testid="home-workflows-unavailable"]')
-    expect(unavailable.text()).toContain("Example workflows couldn't be loaded")
-
-    listHomeWorkflows.mockResolvedValue([UPSCALE])
-    await unavailable.get('button').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.find('[data-testid="home-workflows-unavailable"]').exists()).toBe(false)
-    expect(wrapper.findAll('[data-testid="home-carousel-card"]')).toHaveLength(1)
   })
 })
 
@@ -451,13 +397,59 @@ describe('Home builds', () => {
     await flushPromises()
 
     expect(wrapper.findAll('[data-testid="home-build"]').map((card) => card.text())).toEqual([
-      'ReadyMy Local 1Standalone · Update',
+      'Used 5m agoMy Local 1Standalone · Update available',
       'RunningVideo LabStandalone',
-      'ReadyComfy CloudRTX 6000 Pro · 96 GB'
+      'Used yesterdayComfy CloudRTX 6000 Pro · 96 GB'
     ])
   })
 
-  it('shows an opened Comfy Cloud as Ready with no green dot, since it runs nothing here', async () => {
+  it('keeps a running build in the row after more recently stopped builds pass it', async () => {
+    getAuthStatus.mockResolvedValue({ signedIn: true })
+    const stillRunning = build({
+      id: 'still-running',
+      name: 'ComfyUI',
+      lastLaunchedAt: NOW - 3 * HOUR_MS
+    })
+    const stoppedNightly = build({
+      id: 'nightly',
+      name: 'ComfyUI Nightly',
+      lastLaunchedAt: NOW - 4 * HOUR_MS,
+      lastStoppedAt: NOW - 2 * MINUTE_MS
+    })
+    const stoppedPrivate = build({
+      id: 'private',
+      name: 'ComfyUI Private',
+      lastLaunchedAt: NOW - 4 * HOUR_MS,
+      lastStoppedAt: NOW - 1 * MINUTE_MS
+    })
+    getInstallations.mockResolvedValue([
+      stillRunning,
+      stoppedNightly,
+      stoppedPrivate,
+      { ...CLOUD, lastLaunchedAt: NOW - 10 * MINUTE_MS }
+    ])
+    const wrapper = await openHome()
+    useSessionStore().runningInstances.set(stillRunning.id, {
+      installationId: stillRunning.id,
+      installationName: stillRunning.name,
+      mode: 'window'
+    })
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-testid="home-build-name"]').map((name) => name.text())).toEqual([
+      'ComfyUI Private',
+      'ComfyUI Nightly',
+      'ComfyUI'
+    ])
+    const hiddenWhenNarrow = wrapper
+      .findAll('[data-narrow-hidden="true"]')
+      .map((card) => card.get('[data-testid="home-build-name"]').text())
+    expect(hiddenWhenNarrow, 'a narrow window still shows the running build').toEqual([
+      'ComfyUI Nightly'
+    ])
+  })
+
+  it('shows Running with the green dot while Comfy Cloud is open, like a local build', async () => {
     getAuthStatus.mockResolvedValue({ signedIn: true })
     getInstallations.mockResolvedValue([CLOUD])
     const wrapper = await openHome()
@@ -469,11 +461,34 @@ describe('Home builds', () => {
     await flushPromises()
 
     const status = wrapper.get('[data-testid="home-build-status"]')
-    expect(status.text()).toBe('Ready')
-    expect(status.find('.rounded-full').exists()).toBe(false)
+    expect(status.text()).toBe('Running')
+    expect(status.find('.rounded-full').exists()).toBe(true)
   })
 
-  it('asks a logged-out user to log in to use Comfy Cloud, with no check, while local builds stay Ready', async () => {
+  it('shows Running with the green dot while a remote build is connected', async () => {
+    const studio = build({
+      id: 'studio',
+      name: 'Studio server',
+      sourceId: 'remote',
+      sourceCategory: 'remote',
+      listPreview: 'http://studio.local:8188/',
+      lastLaunchedAt: NOW - 3 * HOUR_MS
+    })
+    getInstallations.mockResolvedValue([studio])
+    const wrapper = await openHome()
+    useSessionStore().runningInstances.set(studio.id, {
+      installationId: studio.id,
+      installationName: studio.name,
+      mode: 'window'
+    })
+    await flushPromises()
+
+    const status = wrapper.get('[data-testid="home-build-status"]')
+    expect(status.text()).toBe('Running')
+    expect(status.find('.rounded-full').exists()).toBe(true)
+  })
+
+  it('asks a logged-out user to log in to use Comfy Cloud, with no icon, while local builds say when they were last used', async () => {
     getInstallations.mockResolvedValue([OLDEST, CLOUD])
     const wrapper = await openHome()
 
@@ -484,12 +499,12 @@ describe('Home builds', () => {
         .get('[data-testid="home-build-status"]')
     const local = statusOn(OLDEST.name)
     const cloud = statusOn(CLOUD.name)
-    expect(local.text()).toBe('Ready')
+    expect(local.text()).toBe('Used 3d ago')
     expect(cloud.text()).toBe('Log in to use')
-    expect(cloud.find('svg').exists(), 'no check: Cloud is not ready to use').toBe(false)
+    expect(cloud.find('svg').exists(), 'no icon next to Log in to use').toBe(false)
   })
 
-  it('says Ready on Comfy Cloud once the user logs in', async () => {
+  it('says when Comfy Cloud was last used once the user logs in, with no check icon', async () => {
     getInstallations.mockResolvedValue([CLOUD])
     const wrapper = await openHome()
     expect(wrapper.get('[data-testid="home-build-status"]').text()).toBe('Log in to use')
@@ -498,8 +513,8 @@ describe('Home builds', () => {
     await flushPromises()
 
     const status = wrapper.get('[data-testid="home-build-status"]')
-    expect(status.text()).toBe('Ready')
-    expect(status.find('svg').exists()).toBe(true)
+    expect(status.text()).toBe('Used yesterday')
+    expect(status.find('svg').exists()).toBe(false)
   })
 
   it('keeps Running on top of a running build with an update, and names the update at the bottom', async () => {
@@ -514,7 +529,9 @@ describe('Home builds', () => {
 
     const card = wrapper.get('[data-testid="home-build"]')
     expect(card.get('[data-testid="home-build-status"]').text()).toBe('Running')
-    expect(card.get('[data-testid="home-build-detail"]').text()).toBe('Standalone · Update')
+    expect(card.get('[data-testid="home-build-detail"]').text()).toBe(
+      'Standalone · Update available'
+    )
     expect(card.get('[data-testid="home-build-open"]').attributes('aria-label')).toBe(
       'My Local 1, Running'
     )
@@ -530,18 +547,82 @@ describe('Home builds', () => {
     ])
     const wrapper = await openHome()
 
-    expect(wrapper.get('[data-testid="home-build-detail"]').text()).toBe('v0.3.68 · Update')
+    expect(wrapper.get('[data-testid="home-build-detail"]').text()).toBe(
+      'v0.3.68 · Update available'
+    )
   })
 
-  it('starts a build with an update from its card, saying Ready on top', async () => {
+  it('starts a build with an update from its card, saying when it was last used on top', async () => {
     getInstallations.mockResolvedValue([NEWEST])
     const wrapper = await openHome()
 
     const card = wrapper.get('[data-testid="home-build"]')
-    expect(card.get('[data-testid="home-build-status"]').text()).toBe('Ready')
+    expect(card.get('[data-testid="home-build-status"]').text()).toBe('Used 5m ago')
     await card.get('[data-testid="home-build-open"]').trigger('click')
 
     expect(wrapper.emitted('pick')?.[0]?.[0]).toMatchObject({ id: NEWEST.id })
+  })
+
+  it.each([
+    ['a click', (link: HTMLElement) => userEvent.click(link)],
+    [
+      'Enter',
+      async (link: HTMLElement) => {
+        link.focus()
+        await userEvent.keyboard('{Enter}')
+      }
+    ],
+    [
+      'Space',
+      async (link: HTMLElement) => {
+        link.focus()
+        await userEvent.keyboard(' ')
+      }
+    ]
+  ])(
+    "opens the build's Update tab from Update available with %s, without starting the build",
+    async (_how, activate) => {
+      const openInstancePicker = vi.fn()
+      Object.assign(window.api, { openInstancePicker })
+      getInstallations.mockResolvedValue([NEWEST])
+      const wrapper = await openHome()
+
+      const link = wrapper.get<HTMLButtonElement>('[data-testid="build-update-open"]')
+      expect(link.attributes('type')).toBe('button')
+      expect(link.attributes('aria-label')).toBe('Update available: open Update for My Local 1')
+      expect(link.text()).toBe('Update available')
+      expect(link.find('svg').exists()).toBe(false)
+      await activate(link.element)
+      await flushPromises()
+
+      expect(openInstancePicker).toHaveBeenCalledExactlyOnceWith({
+        installationId: NEWEST.id,
+        initialTab: 'update',
+        autoAction: null
+      })
+      expect(wrapper.emitted('pick')).toBeUndefined()
+    }
+  )
+
+  it('hides Update available while the build updates in place', async () => {
+    Object.assign(window.api, {
+      onInstallProgress: vi.fn(() => () => {}),
+      onComfyOutput: vi.fn(() => () => {})
+    })
+    getInstallations.mockResolvedValue([NEWEST])
+    const wrapper = await openHome()
+    expect(wrapper.find('[data-testid="build-update-open"]').exists()).toBe(true)
+
+    useProgressStore().startOperation({
+      installationId: NEWEST.id,
+      title: 'Updating',
+      opKind: 'update',
+      apiCall: () => new Promise(() => {})
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="build-update-open"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="build-update-note"]').exists()).toBe(false)
   })
 
   it('keeps only the latest build and Cloud when the window is narrow', async () => {
@@ -564,14 +645,15 @@ describe('Home builds', () => {
     expect(kept).toEqual(['My Local 1', 'Video Lab'])
   })
 
-  it('shows a stopped local build as ready, with its version and no folder path', async () => {
+  it('shows a stopped local build by when it was last used, with its version and no folder path', async () => {
     getInstallations.mockResolvedValue([OLDEST])
     const wrapper = await openHome()
 
-    expect(wrapper.get('[data-testid="home-build"]').text()).toBe('ReadyFlux Sandboxv0.42.4')
+    expect(wrapper.get('[data-testid="home-build"]').text()).toBe('Used 3d agoFlux Sandboxv0.42.4')
+    expect(wrapper.get('[data-testid="home-build-status"]').find('svg').exists()).toBe(false)
   })
 
-  it('shows the address of a remote ComfyUI instead of hardware', async () => {
+  it('shows the address of a remote ComfyUI instead of hardware, and Never used before it is opened', async () => {
     getInstallations.mockResolvedValue([
       build({
         id: 'studio',
@@ -584,8 +666,16 @@ describe('Home builds', () => {
     const wrapper = await openHome()
 
     expect(wrapper.get('[data-testid="home-build"]').text()).toBe(
-      'ReadyStudio serverstudio.local:8188'
+      'Never usedStudio serverstudio.local:8188'
     )
+  })
+
+  it('says No setup needed on a Comfy Cloud that was never opened, once signed in', async () => {
+    getAuthStatus.mockResolvedValue({ signedIn: true })
+    getInstallations.mockResolvedValue([{ ...CLOUD, lastLaunchedAt: undefined }])
+    const wrapper = await openHome()
+
+    expect(wrapper.get('[data-testid="home-build-status"]').text()).toBe('No setup needed')
   })
 
   it("lists only the builds of the workspace picked in the sidebar, and opens that workspace's latest", async () => {
@@ -682,14 +772,16 @@ describe('Home builds', () => {
     await vi.waitFor(() => expect(document.querySelector('.tooltip-bubble')).toBeNull())
   })
 
-  it('lists every build of the workspace in the Open ComfyUI menu, with a dot only on running builds', async () => {
+  it('lists every build of the workspace in the Open ComfyUI menu, with a dot on each open build, Comfy Cloud too', async () => {
     getInstallations.mockResolvedValue([OLDEST, CLOUD, RUNNING, NEWEST])
     const wrapper = await openHome()
-    useSessionStore().runningInstances.set(RUNNING.id, {
-      installationId: RUNNING.id,
-      installationName: RUNNING.name,
-      mode: 'window'
-    })
+    for (const open of [RUNNING, CLOUD]) {
+      useSessionStore().runningInstances.set(open.id, {
+        installationId: open.id,
+        installationName: open.name,
+        mode: 'window'
+      })
+    }
     await openBuildMenu(wrapper)
 
     expect(buildOptions().map((option) => option.textContent?.trim())).toEqual([
@@ -711,7 +803,7 @@ describe('Home builds', () => {
             .querySelector('[data-testid="home-open-build-status-dot"]')
             ?.getAttribute('data-tone') ?? null
       )
-    ).toEqual([null, 'live', null, null])
+    ).toEqual([null, 'live', 'live', null])
   })
 
   it('marks a broken build red and keeps it from opening, with the reason on hover', async () => {
@@ -949,7 +1041,7 @@ describe('Home build auto start', () => {
 
     expect(wrapper.find('[role="checkbox"]').exists()).toBe(false)
     expect(statusOf(wrapper, OLDEST.id)).toBe('Auto start')
-    expect(statusOf(wrapper, RUNNING.id)).toBe('Ready')
+    expect(statusOf(wrapper, RUNNING.id)).toBe('Used 2h ago')
     expect(startingWithDesktop(wrapper)).toEqual([OLDEST.id])
     expect(
       cardOf(wrapper, OLDEST.id).get('[data-testid="home-build-open"]').attributes('aria-label')
@@ -1026,28 +1118,28 @@ describe('Home build auto start', () => {
 
     expect(setSetting).toHaveBeenCalledWith('autoLaunchOnStartup', RUNNING.id)
     expect(startingWithDesktop(wrapper)).toEqual([RUNNING.id])
-    expect(statusOf(wrapper, OLDEST.id)).toBe('Ready')
+    expect(statusOf(wrapper, OLDEST.id)).toBe('Used 3d ago')
     expect(wrapper.emitted('open-build')).toBeUndefined()
   })
 
-  it('says Ready, never Always on, for Comfy Cloud when it is the one that starts with Desktop', async () => {
+  it('says when Comfy Cloud was last used, never Auto start, when it is the one that starts with Desktop', async () => {
     getAuthStatus.mockResolvedValue({ signedIn: true })
     saved = CLOUD.id
     getInstallations.mockResolvedValue([OLDEST, CLOUD])
     const wrapper = await openHome()
 
-    expect(statusOf(wrapper, CLOUD.id)).toBe('Ready')
-    expect(statusOf(wrapper, OLDEST.id)).toBe('Ready')
+    expect(statusOf(wrapper, CLOUD.id)).toBe('Used yesterday')
+    expect(statusOf(wrapper, OLDEST.id)).toBe('Used 3d ago')
     expect(startingWithDesktop(wrapper)).toEqual([])
   })
 
-  it('says Ready on every card when Settings says Last used build', async () => {
+  it('says when each build was last used on every card when Settings says Last used build', async () => {
     saved = 'last'
     getInstallations.mockResolvedValue([OLDEST, RUNNING])
     const wrapper = await openHome()
 
-    expect(statusOf(wrapper, OLDEST.id)).toBe('Ready')
-    expect(statusOf(wrapper, RUNNING.id)).toBe('Ready')
+    expect(statusOf(wrapper, OLDEST.id)).toBe('Used 3d ago')
+    expect(statusOf(wrapper, RUNNING.id)).toBe('Used 2h ago')
     expect(startingWithDesktop(wrapper)).toEqual([])
   })
 
@@ -1061,7 +1153,7 @@ describe('Home build auto start', () => {
     await flushPromises()
 
     expect(startingWithDesktop(wrapper)).toEqual([RUNNING.id])
-    expect(statusOf(wrapper, OLDEST.id)).toBe('Ready')
+    expect(statusOf(wrapper, OLDEST.id)).toBe('Used 3d ago')
   })
 
   it('shows the install status, not Auto start, while that build installs', async () => {

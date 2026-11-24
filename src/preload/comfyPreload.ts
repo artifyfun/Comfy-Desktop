@@ -325,6 +325,9 @@ const bridge = {
   cancelDownload: (url: string): Promise<boolean> => {
     return ipcRenderer.invoke('model-download-cancel', { url })
   },
+  listModelDownloads: (): Promise<ComfyDownloadProgress[]> => {
+    return ipcRenderer.invoke('desktop2-list-model-downloads')
+  },
   onDownloadProgress: (callback: (data: ComfyDownloadProgress) => void): (() => void) => {
     const handler = (_event: IpcRendererEvent, data: unknown) =>
       callback(data as ComfyDownloadProgress)
@@ -333,6 +336,9 @@ const bridge = {
   },
   reportTheme: (bg: string, text: string): void => {
     ipcRenderer.send('desktop2-theme-report', { bg, text })
+  },
+  setAttentionNeeded: (needed: boolean): void => {
+    ipcRenderer.send('desktop2-attention-needed', needed === true)
   },
   openTerminal,
   Terminal,

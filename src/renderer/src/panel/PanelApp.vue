@@ -57,7 +57,9 @@ import HomeTour from './home/HomeTour.vue'
 import { useDialogs } from '../composables/useDialogs'
 import { provideAutoStartBuild } from '../composables/useAutoStartBuild'
 import { focusRunningBuild } from '../lib/focusRunningBuild'
-import type { AppCard, DashboardPage, Installation } from '../types/ipc'
+import { runningAppIds, watchAppRuns } from './appRuns'
+import { useAppSwitchConfirm } from './useAppSwitchConfirm'
+import type { AppCard, DashboardPage, DraftAppRequest, Installation } from '../types/ipc'
 
 const { t } = useI18n()
 const { syncLocale } = useAppLocale(windowApiLocaleSource())
@@ -89,10 +91,18 @@ function showHomePage(): void {
 }
 
 let unsubShowHomePage: (() => void) | null = null
+let stopWatchingAppRuns: (() => void) | null = null
+let unsubOpenRunningApp: (() => void) | null = null
 onMounted(() => {
   unsubShowHomePage = window.api.onShowHomePage(showHomePage)
+  stopWatchingAppRuns = watchAppRuns()
+  unsubOpenRunningApp = window.api.onOpenRunningApp((appId) => void openRunningApp(appId))
 })
-onUnmounted(() => unsubShowHomePage?.())
+onUnmounted(() => {
+  unsubShowHomePage?.()
+  stopWatchingAppRuns?.()
+  unsubOpenRunningApp?.()
+})
 
 const installation = computed<Installation | null>(() =>
   installationId ? (installationStore.getById(installationId) ?? null) : null
@@ -119,7 +129,8 @@ const firstUseChain = useFirstUseChain({
   handleShowProgress: (showOpts) => overlays.handleShowProgress(showOpts),
   performChooserLaunch: (inst, onMissing) => chooserHandoff.performChooserLaunch(inst, onMissing),
   openFirstUseTakeover: () => overlays.openFirstUseTakeover(),
-  resetFirstUseSpinner: () => firstUseRef.value?.resetContinue()
+  resetFirstUseSpinner: () => firstUseRef.value?.resetContinue(),
+  changeInstallLocation: () => firstUseRef.value?.browseInstallLocation()
 })
 const {
   chainingFirstUseToNewInstall,
@@ -128,6 +139,7 @@ const {
   completeFirstUseAndDismiss,
   handleSetupInstall,
   handleSetupChange,
+  handleSetupLocationChange,
   handleNewInstallConsentChange,
   handleFirstUseChainMigrate,
   handleNewInstallTakeoverClose,
@@ -275,13 +287,82 @@ const appIsOpen = ref(false)
 const assetsFocusName = ref<string | null>(null)
 const appPickedOnHome = ref<AppCard | null>(null)
 const appInProgress = ref<AppCard | null>(null)
-const sidebarAppInProgress = computed(() =>
-  sidebarPage.value === 'apps' ? null : appInProgress.value
-)
+const listedApps = ref<AppCard[] | null>(null)
 
-function openAppFromHome(app: AppCard): void {
+const confirmAppSwitch = useAppSwitchConfirm()
+
+function showApp(app: AppCard): void {
   appPickedOnHome.value = app
   dashboardHomePage.value = 'apps'
+}
+
+let navigation = 0
+watch([sidebarPage, appInProgress, appsVisits], () => {
+  navigation += 1
+})
+
+async function switchStillWanted(app: AppCard): Promise<boolean> {
+  const started = ++navigation
+  const stillCurrent = () => started === navigation
+  const confirmed = await confirmAppSwitch(app, appInProgress.value?.id ?? null, stillCurrent)
+  return confirmed && stillCurrent()
+}
+
+async function openAppFromHome(app: AppCard): Promise<void> {
+  if (await switchStillWanted(app)) showApp(app)
+}
+
+async function openRunningApp(appId: string): Promise<void> {
+  const apps = listedApps.value ?? (await window.api.listApps().catch(() => []))
+  const app = apps.find((listed) => listed.id === appId)
+  if (!app || !(await switchStillWanted(app))) return
+  if (activePanel.value !== 'chooser') {
+    window.api.navigatePanel('apps')
+    await switchPanel('chooser', 'titlebar')
+    await nextTick()
+  }
+  closeBuildDetails()
+  assetsFocusName.value = null
+  showApp(app)
+}
+
+async function confirmLeavingRuns(): Promise<boolean> {
+  const running = [...runningAppIds.value]
+  if (running.length === 0) return true
+  const onlyApp =
+    running.length === 1 ? listedApps.value?.find((app) => app.id === running[0]) : null
+  const choice = await dialogs.confirm({
+    title: t('apps.closeWhileRunning.title'),
+    message: onlyApp
+      ? t('apps.closeWhileRunning.bodyOne', { app: onlyApp.title })
+      : t('apps.closeWhileRunning.bodyMany', { count: running.length }, running.length),
+    confirmLabel: t('apps.closeWhileRunning.close'),
+    cancelLabel: t('apps.closeWhileRunning.cancel')
+  })
+  return choice === 'primary'
+}
+
+async function answerDraftApp(request: DraftAppRequest): Promise<void> {
+  if (request.kind === 'refused') {
+    await dialogs.alert({ title: request.title, message: request.message })
+    return
+  }
+  if (request.kind === 'ask') {
+    const choice = await dialogs.confirm({
+      title: request.title,
+      message: request.message,
+      confirmLabel: 'Open',
+      cancelLabel: 'Cancel'
+    })
+    const accepted = choice === 'primary' ? await window.api.acceptDraftApp(request.token) : null
+    if (accepted) await answerDraftApp(accepted)
+    return
+  }
+  if (!(await switchStillWanted(request.card))) return
+  if (activePanel.value !== 'chooser') await switchPanel('chooser', 'install')
+  closeBuildDetails()
+  assetsFocusName.value = null
+  showApp(request.card)
 }
 
 const SIDEBAR_PAGE_OPENED_EVENT = 'comfy.desktop.sidebar.page_opened'
@@ -302,7 +383,7 @@ function returnToApp(app: AppCard): void {
   })
   closeBuildDetails()
   assetsFocusName.value = null
-  openAppFromHome(app)
+  void openAppFromHome(app)
 }
 
 function viewInAssets(name: string): void {
@@ -386,6 +467,7 @@ let unsubReturnToDashboardRequest: (() => void) | null = null
 let unsubAppUpdatePromptRestart: (() => void) | null = null
 let unsubAppUpdateUserActionFailed: (() => void) | null = null
 let unsubAppPageClosed: (() => void) | null = null
+let unsubOpenDraftApp: (() => void) | null = null
 const { confirmReturnToDashboard } = useReturnToDashboardConfirm()
 
 const { triggerAction: triggerInstallAction, viewError: viewBuildError } = useInstallContextMenu({
@@ -492,11 +574,14 @@ onMounted(async () => {
     void (async () => {
       let answer: { cleared: boolean } | { defer: true }
       try {
-        answer = await answerCloseRequest()
+        answer = (await confirmLeavingRuns())
+          ? await answerCloseRequest()
+          : { cleared: false }
       } catch (err) {
-        // Never leave main's close promise hanging on a renderer exception.
+        // Never leave main's close promise hanging on a renderer exception
+        // (e.g. the new confirmLeavingRuns dialog or answerCloseRequest fail).
         // A failed consult falls back to defer so main owns the decision.
-        console.error('answerCloseRequest failed', err)
+        console.error('close request consult failed', err)
         answer = { defer: true }
       }
       window.api.respondCloseRequest({ requestId, ...answer })
@@ -553,6 +638,8 @@ onMounted(async () => {
     appInProgress.value = null
   })
 
+  unsubOpenDraftApp = window.api.onOpenDraftApp((request) => void answerDraftApp(request))
+
   try {
     const shouldOpenFirstUse =
       urlFirstUsePending ||
@@ -596,6 +683,7 @@ onUnmounted(() => {
   unsubAppUpdatePromptRestart?.()
   unsubAppUpdateUserActionFailed?.()
   unsubAppPageClosed?.()
+  unsubOpenDraftApp?.()
   document.body.classList.remove('panel-overlay-mode')
   sessionStore.dispose()
   if (params.get('e2e') === '1') bindE2EPanelHooks(null)
@@ -615,9 +703,11 @@ onUnmounted(() => {
         :active-page="sidebarPage"
         :active-build-id="sidebarBuildId"
         :make-room="appIsOpen"
-        :app-in-progress="sidebarAppInProgress"
+        :app-in-progress="appInProgress"
+        :apps="listedApps"
         @navigate="handleSidebarClick"
         @open-app="returnToApp"
+        @switch-app="openAppFromHome"
         @open-build="openBuildFromSidebar"
         @new-build="handleChooserShowNewInstall"
       />
@@ -656,6 +746,7 @@ onUnmounted(() => {
               :revisit="appsVisits"
               @app-open-change="appIsOpen = $event"
               @current-app="appInProgress = $event"
+              @apps-loaded="listedApps = $event"
               @view-in-assets="viewInAssets"
             />
             <AssetsView
@@ -731,6 +822,7 @@ onUnmounted(() => {
         :saved-plan="savedSetup?.plan ?? null"
         @install="handleSetupInstall"
         @change="handleSetupChange"
+        @location-change="handleSetupLocationChange"
         @complete-skip="completeFirstUseAndDismiss"
         @chain-migrate="handleFirstUseChainMigrate"
       />

@@ -71,6 +71,7 @@ export interface FirstUseChainHooks {
 export interface SetupHandoff {
   needsConsent: boolean
   restore?: ChangeSetupDraft
+  installRoot?: string
 }
 
 export interface UsePanelOverlaysOpts {
@@ -336,7 +337,8 @@ export function usePanelOverlays(opts: UsePanelOverlaysOpts): UsePanelOverlaysAp
           ? {
               cameFromSetup: true,
               needsConsent: setupHandoff.needsConsent,
-              restore: setupHandoff.restore
+              restore: setupHandoff.restore,
+              installRoot: setupHandoff.installRoot
             }
           : {})
       })

@@ -2,7 +2,10 @@ import { ipcRenderer, webUtils } from 'electron'
 import type { IpcRendererEvent } from 'electron'
 import type {
   AppOutputs,
+  DraftAppRequest,
+  DraftClosingStop,
   AppPageStatus,
+  AppRun,
   ElectronApi,
   HomeTourReplayState,
   ResolvedTheme,
@@ -127,10 +130,21 @@ export function buildElectronApi(): ElectronApi {
     trashAsset: (source, assetId) => ipcRenderer.invoke('assets:trash', source, assetId),
     listHomeWorkflows: () => ipcRenderer.invoke('catalog:list-home-workflows'),
     openCatalogWorkflow: (id) => ipcRenderer.invoke('catalog:open-workflow', id),
-    getAppsEnabled: () => ipcRenderer.invoke('apps:get-enabled'),
     listApps: () => ipcRenderer.invoke('apps:list'),
     showAppPage: (appId, placement) => ipcRenderer.invoke('apps:show-page', appId, placement),
     captureAppPage: () => ipcRenderer.invoke('apps:capture-page'),
+    getAppRuns: () => ipcRenderer.invoke('apps:get-runs'),
+    appSwitchStopsRun: (appId) => ipcRenderer.invoke('apps:switch-stops-run', appId),
+    onAppRunsChanged: (callback) => {
+      const handler = (_event: IpcRendererEvent, runs: AppRun[]): void => callback(runs)
+      ipcRenderer.on('apps:runs-changed', handler)
+      return () => ipcRenderer.removeListener('apps:runs-changed', handler)
+    },
+    onOpenRunningApp: (callback) => {
+      const handler = (_event: IpcRendererEvent, appId: string): void => callback(appId)
+      ipcRenderer.on('apps:open-running-app', handler)
+      return () => ipcRenderer.removeListener('apps:open-running-app', handler)
+    },
     hideAppPage: () => ipcRenderer.send('apps:hide-page'),
     onAppPageStatusChanged: (callback) => {
       const handler = (
@@ -146,6 +160,25 @@ export function buildElectronApi(): ElectronApi {
       ipcRenderer.on('apps:page-closed', handler)
       return () => ipcRenderer.removeListener('apps:page-closed', handler)
     },
+    onAppBackToListAsked: (callback) => {
+      const handler = (_event: IpcRendererEvent, appId: string, stop: DraftClosingStop): void =>
+        callback(appId, stop)
+      ipcRenderer.on('apps:back-to-list-asked', handler)
+      return () => ipcRenderer.removeListener('apps:back-to-list-asked', handler)
+    },
+    closeAppPage: (appId) => ipcRenderer.send('apps:close-page', appId),
+    onAppsListChanged: (callback) => {
+      const handler = (): void => callback()
+      ipcRenderer.on('apps:list-changed', handler)
+      return () => ipcRenderer.removeListener('apps:list-changed', handler)
+    },
+    onOpenDraftApp: (callback) => {
+      const handler = (_event: IpcRendererEvent, request: DraftAppRequest): void =>
+        callback(request)
+      ipcRenderer.on('apps:open-draft', handler)
+      return () => ipcRenderer.removeListener('apps:open-draft', handler)
+    },
+    acceptDraftApp: (token) => ipcRenderer.invoke('apps:accept-draft', token),
     onAppOutputs: (callback) => {
       const handler = (_event: IpcRendererEvent, appId: string, outputs: AppOutputs | null): void =>
         callback(appId, outputs)

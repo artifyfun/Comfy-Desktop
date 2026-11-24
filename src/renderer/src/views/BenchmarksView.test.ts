@@ -5,6 +5,7 @@ import type { PerformanceTestBenchmark } from '../types/ipc'
 import type * as PerformanceTestResultsSvg from '../lib/performanceTestResultsSvg'
 import { useDialogs } from '../composables/useDialogs'
 import BenchmarksView from './BenchmarksView.vue'
+import { DESTRUCTIVE_MENU_ITEM_CLASS } from '../lib/destructiveStyles'
 import { setChecked } from './testHelpers'
 
 const createResultsPngMock = vi.hoisted(() =>
@@ -998,6 +999,16 @@ describe('BenchmarksView', () => {
     expect(rowIds(wrapper)).toEqual(['13', '12', '9'])
   })
 
+  it('paints Delete files with the shared red menu item class', async () => {
+    const wrapper = await mountPortrait4090()
+    await openMenu(wrapper, '[data-testid="benchmark-row-13"] .benchmarks__row-menu')
+    const del = document.body.querySelector<HTMLElement>('.benchmarks__delete-record')!
+    expect([...del.classList]).toEqual(
+      expect.arrayContaining(DESTRUCTIVE_MENU_ITEM_CLASS.split(' '))
+    )
+    await closeMenu()
+  })
+
   it('confirms before deleting all files for a session', async () => {
     const wrapper = await mountPortrait4090()
     const dialogs = useDialogs()
@@ -1054,6 +1065,15 @@ describe('BenchmarksView', () => {
     expect(wrapper.findAll('[data-testid^="benchmark-row-"]')).toHaveLength(1)
     expect(row(wrapper, '10').text()).toContain('Stable 0.3.60')
     expect(wrapper.find('.benchmarks__selection-bar').exists()).toBe(false)
+  })
+
+  it('labels the folder picker with text and no open-folder icon', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const picker = wrapper.get('.benchmarks__open-folder')
+    expect(picker.text()).toBe('Select folder')
+    expect(picker.find('svg[class*="lucide-folder-search"]').exists()).toBe(false)
   })
 
   it('shows a skeleton while loading', async () => {

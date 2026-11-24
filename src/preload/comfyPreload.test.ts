@@ -78,6 +78,18 @@ describe('comfyPreload model access bridge', () => {
     mocks.send.mockReset()
   })
 
+  it('tells Desktop whether the page is waiting on the user', () => {
+    const bridge = hostedBridge()
+
+    bridge.setAttentionNeeded(true)
+    bridge.setAttentionNeeded(false)
+
+    expect(mocks.send.mock.calls).toEqual([
+      ['desktop2-attention-needed', true],
+      ['desktop2-attention-needed', false]
+    ])
+  })
+
   it('forwards hosted frontend exceptions through the scrubbed Desktop telemetry channel', () => {
     const bridge = hostedBridge()
     const error = new Error('boom')
@@ -107,6 +119,15 @@ describe('comfyPreload model access bridge', () => {
 
     expect(mocks.exposeInMainWorld).toHaveBeenCalledWith('__comfyDesktop2', expect.any(Object))
     expect(mocks.invoke).toHaveBeenCalledWith('desktop2-open-model-access-page', { url })
+  })
+
+  it('lists the model download snapshot through the desktop2 IPC contract', async () => {
+    const snapshot = [downloadProgress('job-1', 'paused', 0.4)]
+    mocks.invoke.mockResolvedValueOnce(snapshot)
+
+    await expect(hostedBridge().listModelDownloads()).resolves.toEqual(snapshot)
+
+    expect(mocks.invoke).toHaveBeenCalledWith('desktop2-list-model-downloads')
   })
 
   it('exposes only a navigation request for the hosted terminal', async () => {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, toRef, useTemplateRef, watch } from 'vue'
 import { I18nT, useI18n } from 'vue-i18n'
-import { CircleAlert, FolderOpen, ImageDown, Play, Square, X } from '@lucide/vue'
+import { CircleAlert, FolderSearch, ImageDown, Play, Square, X } from '@lucide/vue'
 import Button from '@comfyorg/design-system/button/Button'
 import BrandBackground from '../components/BrandBackground.vue'
 import BrandedPageHeader from '../components/BrandedPageHeader.vue'
@@ -11,6 +11,7 @@ import Tooltip from '../components/ui/Tooltip.vue'
 import { usePerformanceTestRun } from '../composables/usePerformanceTestRun'
 import { usePerformanceTestWorkflow } from '../composables/usePerformanceTestWorkflow'
 import { useWorkspaceInstallScope } from '../composables/useWorkspaceInstallScope'
+import { useDialogs } from '../composables/useDialogs'
 import { useAuthStore } from '../stores/authStore'
 import { useInstallationStore } from '../stores/installationStore'
 import {
@@ -43,6 +44,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const dialogs = useDialogs()
 const revealFolderKey = revealInFolderKey(window.api?.platform)
 const authStore = useAuthStore()
 const installationStore = useInstallationStore()
@@ -151,6 +153,20 @@ function startRun(): void {
   })
 }
 
+async function removeWorkflow(): Promise<void> {
+  if (workflow.example.download) return workflow.remove()
+  const selectedPath = workflow.filePath
+  const choice = await dialogs.confirm({
+    title: t('performanceTest.deleteWorkflowTitle', { workflow: workflow.label }),
+    message: t('performanceTest.deleteWorkflowMessage'),
+    confirmLabel: t('performanceTest.deleteWorkflow'),
+    tone: 'danger'
+  })
+  if (choice === 'primary' && selectedPath === workflow.filePath) {
+    await workflow.remove(selectedPath)
+  }
+}
+
 function openResultsFolder(): void {
   if (resultsFolder.value) void window.api.openPath(resultsFolder.value)
 }
@@ -235,7 +251,7 @@ async function exportResultsImage(): Promise<void> {
               @choose-example="workflow.example.openPicker()"
               @import="workflow.importFrom()"
               @import-file="workflow.importFile"
-              @remove="workflow.remove()"
+              @remove="removeWorkflow()"
             />
             <section class="performance-test__step flex min-w-0">
               <h2 class="sr-only">{{ t('performanceTest.measurementSettings') }}</h2>
@@ -380,7 +396,7 @@ async function exportResultsImage(): Promise<void> {
                   :title="t(revealFolderKey)"
                   @click="openResultsFolder"
                 >
-                  <FolderOpen :size="15" aria-hidden="true" />
+                  <FolderSearch :size="15" aria-hidden="true" />
                   <span class="@max-[640px]:sr-only">{{ t(revealFolderKey) }}</span>
                 </Button>
                 <Button

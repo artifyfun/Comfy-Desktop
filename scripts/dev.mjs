@@ -9,16 +9,84 @@
  * 127.0.0.1:5100 with --strictPort (a collision fails loudly instead of
  * drifting), the port is injected via ARTIFY_DEV_PANEL_PORT, and panelMode
  * reads that env. DEV_PANEL_PORT=x overrides the port for debugging.
+ *
+ * Upstream v1.2.1 adds dev-app link registration (comfy:// scheme reaching
+ * this clone on macOS/Linux) before launching electron; kept below via the
+ * devAppEnv() merge with the Artify panel-vite orchestration.
  */
 import { spawn } from 'node:child_process'
 import http from 'node:http'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
+import {
+  DEV_APP,
+  DEV_APP_BUNDLE_ENV,
+  devAppLinksWanted,
+  ensureCloneDevApp,
+  unregisterDevApp
+} from './dev-app/devApp.mjs'
+import {
+  DEV_DESKTOP_ENTRY_ENV,
+  LINUX_DEV_ENTRY,
+  devSandboxOff,
+  ensureLinuxDevEntry,
+  removeLinuxDevEntry
+} from './dev-app/linuxEntry.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '..')
 const electronViteBin = resolve(root, 'node_modules/electron-vite/bin/electron-vite.js')
+const ELECTRON_VITE_ARGS = process.argv.slice(2)
+const SANDBOX_OFF = await devSandboxOff(process.env, ELECTRON_VITE_ARGS, root)
+
+function warn(message) {
+  console.warn(`\n\x1b[33m⚠ ${message}\x1b[0m\n`)
+}
+
+function linuxDevEntryEnv() {
+  if (process.env['COMFY_DRAFT_APP_LINKS'] === '0') {
+    try {
+      removeLinuxDevEntry(root)
+    } catch (err) {
+      warn(`Could not remove the ${LINUX_DEV_ENTRY.name} desktop entry: ${err.message}`)
+    }
+    return {}
+  }
+  if (process.env['E2E'] === '1') return {}
+  try {
+    return { [DEV_DESKTOP_ENTRY_ENV]: ensureLinuxDevEntry(root, process.env, SANDBOX_OFF) }
+  } catch (err) {
+    warn(
+      `Could not set up the ${LINUX_DEV_ENTRY.name} desktop entry, so ${LINUX_DEV_ENTRY.scheme}:// links will not reach this copy. ${err.message}`
+    )
+    return {}
+  }
+}
+
+function devAppEnv() {
+  if (process.platform === 'linux') return linuxDevEntryEnv()
+  if (process.platform !== 'darwin') return {}
+  if (process.env['COMFY_DRAFT_APP_LINKS'] === '0') {
+    try {
+      unregisterDevApp(join(root, DEV_APP.dir))
+    } catch (err) {
+      warn(`Could not unregister ${DEV_APP.name}: ${err.message}`)
+    }
+    return {}
+  }
+  if (!devAppLinksWanted(process.platform, process.env)) return {}
+  try {
+    const devApp = ensureCloneDevApp(root)
+    return { ELECTRON_EXEC_PATH: devApp.executable, [DEV_APP_BUNDLE_ENV]: devApp.bundle }
+  } catch (err) {
+    warn(
+      `Could not set up ${DEV_APP.name}, so ${DEV_APP.scheme}:// links will not reach this copy. Starting plain Electron. ${err.message}`
+    )
+    return {}
+  }
+}
 
 const viteOverride = Number(process.env.DEV_PANEL_PORT)
 const PANEL_PORT = Number.isInteger(viteOverride) && viteOverride > 0 ? viteOverride : 5100
@@ -45,7 +113,6 @@ function run(name, command, args, options = {}) {
 }
 
 // ---- 1) Frontend vite dev server, pinned to 127.0.0.1:PANEL_PORT ----
-// 直接 spawn vite bin：pnpm filter 的 `--` 透传会变成位置参数被 vite 忽略。
 const feDir = join(root, 'packages/frontend')
 const viteBin = join(feDir, 'node_modules/vite/bin/vite.js')
 const viteProc = run(
@@ -74,21 +141,28 @@ viteProc.stderr?.on('data', (chunk) => process.stderr.write(`[vite:err] ${chunk}
 async function waitForVite(port, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    const ok = await new Promise((resolve) => {
+    const ok = await new Promise((resolveWait) => {
       const req = http.get({ host: '127.0.0.1', port, path: '/', timeout: 1500 }, (res) => {
         res.resume()
-        resolve(res.statusCode === 200)
+        resolveWait(res.statusCode === 200)
       })
-      req.on('error', () => resolve(false))
+      req.on('error', () => resolveWait(false))
       req.on('timeout', () => {
         req.destroy()
-        resolve(false)
+        resolveWait(false)
       })
     })
     if (ok) return true
     await new Promise((r) => setTimeout(r, 500))
   }
   return false
+}
+
+function electronViteCli() {
+  const require = createRequire(join(root, 'package.json'))
+  const packageJson = require.resolve('electron-vite/package.json')
+  const { bin } = JSON.parse(readFileSync(packageJson, 'utf-8'))
+  return join(dirname(packageJson), bin['electron-vite'])
 }
 
 async function main() {
@@ -104,13 +178,17 @@ async function main() {
   const electronEnv = {
     ...process.env,
     DEV_MODE: 'true',
-    ARTIFY_DEV_PANEL_PORT: String(PANEL_PORT)
+    ARTIFY_DEV_PANEL_PORT: String(PANEL_PORT),
+    ...(SANDBOX_OFF ? { NO_SANDBOX: '1' } : {}),
+    ...devAppEnv()
   }
   // Some sandboxes (e.g. WorkBuddy) inject ELECTRON_RUN_AS_NODE=1 which makes
   // Electron run as a plain Node process (electron.app is undefined) — strip it
   // so the app window actually opens.
   delete electronEnv.ELECTRON_RUN_AS_NODE
-  run('electron', process.execPath, [electronViteBin, 'dev'], { env: electronEnv })
+  run('electron', process.execPath, [electronViteCli(), 'dev', ...ELECTRON_VITE_ARGS], {
+    env: electronEnv
+  })
 }
 
 main().catch((err) => {

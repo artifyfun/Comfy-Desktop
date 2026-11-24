@@ -11,16 +11,17 @@ const mocks = vi.hoisted(() => ({
   partnerMint: vi.fn(),
   current: 'ws-1' as string | null,
   entries: [] as unknown[],
-  appsEnabled: false,
-  appsPages: [] as unknown[]
+  appsPages: [] as unknown[],
+  refusedAppsPages: [] as unknown[]
 }))
 
 vi.mock('./telemetry', () => ({ emit: vi.fn() }))
 vi.mock('./embeddedSessionFlag', () => ({
   isEmbeddedSessionEnabled: async () => (mocks.flagRead ? mocks.flagRead : mocks.enabled)
 }))
-vi.mock('../apps/appsConfig', () => ({ areAppsEnabled: async () => mocks.appsEnabled }))
 vi.mock('../apps/appsPages', () => ({
+  appsPageAdmits: async (page: unknown) =>
+    mocks.appsPages.includes(page) && !mocks.refusedAppsPages.includes(page),
   isAppsPageSender: (sender: unknown) => mocks.appsPages.includes(sender),
   liveAppsPages: () => mocks.appsPages
 }))
@@ -55,6 +56,7 @@ vi.mock('../host/registry', () => ({
 
 import {
   billingHandoffForSender,
+  cloudOriginForSender,
   EMBEDDED_SESSION_CHANNELS,
   EMBEDDED_SESSION_DISABLED_EVENT,
   _resetForTest as resetEmbeddedSession,
@@ -131,8 +133,8 @@ beforeEach(() => {
   mocks.generation = 0
   mocks.flagRead = null
   mocks.entries = []
-  mocks.appsEnabled = false
   mocks.appsPages = []
+  mocks.refusedAppsPages = []
   mocks.getGrantAccessToken.mockReset().mockResolvedValue(ACCESS)
   mocks.mint.mockReset().mockImplementation(async (_grant: string, workspaceId: string) => ({
     kind: 'minted',
@@ -457,6 +459,14 @@ describe('embeddedSession', () => {
     expect(local.webContents.send).not.toHaveBeenCalled()
   })
 
+  it('reads no session for a change no local view or Apps page will hear', async () => {
+    mocks.enabled = false
+
+    await broadcastEmbeddedSessionChanged()
+
+    expect(mocks.getGrantAccessToken).not.toHaveBeenCalled()
+  })
+
   it('drops an older broadcast that finishes after a newer one', async () => {
     const local = view('http://127.0.0.1:8000')
     let finishOlder: (token: string | null) => void = () => {}
@@ -771,8 +781,7 @@ describe('the hosted Apps page', () => {
     workspaceId: 'ws-1'
   }
 
-  it('gets the session while Apps is on, whatever the local-view flag says', async () => {
-    mocks.appsEnabled = true
+  it('gets the session whatever the local-view flag says', async () => {
     mocks.enabled = false
     const { event } = appsPage()
 
@@ -782,17 +791,7 @@ describe('the hosted Apps page', () => {
     expect(disabledEvents()).toEqual([])
   })
 
-  it('gets nothing while Apps is switched off', async () => {
-    const { event } = appsPage()
-
-    await expect(stateForSender(event)).resolves.toEqual({ status: 'disabled' })
-    await expect(workspaceTokenForSender(event, 'ws-1')).resolves.toBeNull()
-    await expect(partnerNodeTokenForSender(event, 'ws-1')).resolves.toBeNull()
-    expect(mocks.getGrantAccessToken).not.toHaveBeenCalled()
-  })
-
   it('gets no token for a workspace Desktop is not in', async () => {
-    mocks.appsEnabled = true
     const { event } = appsPage()
 
     await expect(workspaceTokenForSender(event, 'ws-2')).resolves.toBeNull()
@@ -800,7 +799,6 @@ describe('the hosted Apps page', () => {
   })
 
   it('cannot move Desktop to another workspace', async () => {
-    mocks.appsEnabled = true
     const { event } = appsPage()
     const switchWorkspace = vi.fn()
 
@@ -811,7 +809,6 @@ describe('the hosted Apps page', () => {
   })
 
   it('gets no billing handoff, which only a local ComfyUI view may ask for', async () => {
-    mocks.appsEnabled = true
     vi.stubGlobal('fetch', vi.fn())
     const { event } = appsPage()
 
@@ -823,7 +820,6 @@ describe('the hosted Apps page', () => {
   })
 
   it('hears about a sign-in or sign-out, also while local views are left out', async () => {
-    mocks.appsEnabled = true
     mocks.enabled = false
     const page = appsPage()
     const local = view('http://127.0.0.1:8000')
@@ -834,13 +830,39 @@ describe('the hosted Apps page', () => {
     expect(local.webContents.send).not.toHaveBeenCalled()
   })
 
-  it('hears nothing while Apps is switched off', async () => {
+  it('gets nothing once its draft app is no longer allowed', async () => {
+    const { event, webContents } = appsPage()
+    mocks.refusedAppsPages.push(webContents)
+
+    await expect(stateForSender(event)).resolves.toEqual({ status: 'disabled' })
+    await expect(workspaceTokenForSender(event, 'ws-1')).resolves.toBeNull()
+    await expect(partnerNodeTokenForSender(event, 'ws-1')).resolves.toBeNull()
+    await expect(cloudOriginForSender(event)).resolves.toBeNull()
+    expect(mocks.mint).not.toHaveBeenCalled()
+    expect(mocks.partnerMint).not.toHaveBeenCalled()
+  })
+
+  it('hears nothing about the account once its draft app is no longer allowed', async () => {
+    const allowed = appsPage()
+    const refused = appsPage()
+    mocks.refusedAppsPages.push(refused.webContents)
+
+    await broadcastEmbeddedSessionChanged()
+
+    expect(allowed.webContents.send).toHaveBeenCalledWith(
+      EMBEDDED_SESSION_CHANNELS.changed,
+      SIGNED_IN
+    )
+    expect(refused.webContents.send).not.toHaveBeenCalled()
+  })
+
+  it('hears the same sign-in a local view hears', async () => {
     const page = appsPage()
     const local = view('http://127.0.0.1:8000')
 
     await broadcastEmbeddedSessionChanged()
 
-    expect(page.webContents.send).not.toHaveBeenCalled()
+    expect(page.webContents.send).toHaveBeenCalledWith(EMBEDDED_SESSION_CHANNELS.changed, SIGNED_IN)
     expect(local.webContents.send).toHaveBeenCalledWith(
       EMBEDDED_SESSION_CHANNELS.changed,
       SIGNED_IN

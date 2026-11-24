@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, toRef, watch } from 'vue'
+import { computed, onMounted, ref, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AppWindow, ArrowRight, ChevronRight } from '@lucide/vue'
+import { AppWindow, ArrowRight, ChevronRight, Plus } from '@lucide/vue'
 import Button from '@comfyorg/design-system/button/Button'
 import EmptyState from '../components/ui/EmptyState.vue'
+import Tooltip from '../components/ui/Tooltip.vue'
 import Skeleton from '@comfyorg/design-system/skeleton/Skeleton'
 import HomeBuildCard from './home/HomeBuildCard.vue'
 import HomeNewBuildTile from './home/HomeNewBuildTile.vue'
 import HomeOpenBuildButton from './home/HomeOpenBuildButton.vue'
 import HomeCarousel from './home/HomeCarousel.vue'
-import { homeBuildStatus, homeBuildTones, isBuildOpenBlocked, isCloudBuild } from './home/homeBuild'
+import { homeBuildStatus, isBuildOpenBlocked, isCloudBuild } from './home/homeBuild'
 import { useHomeApps } from './home/useHomeApps'
 import { useInstallList } from '../composables/useInstallList'
 import { useAutoStartBuild } from '../composables/useAutoStartBuild'
@@ -26,13 +27,13 @@ import { useAuthStore } from '../stores/authStore'
 import { useDashboardScopeStore } from '../stores/dashboardScopeStore'
 import { useInstallationStore } from '../stores/installationStore'
 import { useSessionStore } from '../stores/sessionStore'
-import type { AppCard, AppCover, CatalogWorkflow, Installation } from '../types/ipc'
+import type { AppCard, AppCover, Installation } from '../types/ipc'
 import { isInstallationInWorkspace } from '../../../shared/workspaces'
 import { SECTION_TITLE_CLASS } from '../lib/sectionTitle'
 
-type LoadState = 'loading' | 'ready' | 'unavailable'
-
 const HOME_BUILD_LIMIT = 3
+const BUILDS_TITLE_LINK_CLASS =
+  '-mx-2 -my-1 h-8 gap-1 rounded-lg px-2 text-muted-foreground hover:bg-secondary hover:text-foreground'
 const TEXT_LINK_CLASS =
   '-my-1 h-8 gap-1.5 rounded-lg px-3 text-[13px]/5 font-medium text-muted-foreground hover:bg-secondary hover:text-foreground'
 
@@ -64,20 +65,40 @@ const isInstalling = useInstallingBuilds()
 const progressStore = useProgressStore()
 const viewBuildLogs = useViewBuildLogs()
 const autoStart = useAutoStartBuild()
-const builds = computed(() =>
-  [
-    ...workspaceBuilds.value.filter((build) => isInstalling(build.id)),
-    ...workspaceBuilds.value.filter((build) => !isInstalling(build.id))
-  ].slice(0, HOME_BUILD_LIMIT)
-)
+function isInUse(build: Installation): boolean {
+  return (
+    sessionStore.isRunning(build.id) ||
+    sessionStore.isLaunching(build.id) ||
+    sessionStore.isStopping(build.id)
+  )
+}
+const builds = computed(() => {
+  const installing = workspaceBuilds.value.filter((build) => isInstalling(build.id))
+  const settled = workspaceBuilds.value.filter((build) => !isInstalling(build.id))
+  const shown = new Set(
+    [
+      ...installing,
+      ...settled.filter((build) => isInUse(build)),
+      ...settled.filter((build) => !isInUse(build))
+    ]
+      .slice(0, HOME_BUILD_LIMIT)
+      .map((build) => build.id)
+  )
+  return [...installing, ...settled].filter((build) => shown.has(build.id))
+})
 const showNewBuildSlot = computed(
-  () => !installationStore.loading && builds.value.every((build) => isCloudBuild(build))
+  () =>
+    !installationStore.loading &&
+    (builds.value.length < HOME_BUILD_LIMIT || builds.value.every((build) => isCloudBuild(build)))
 )
-const buildTones = computed(() => homeBuildTones(builds.value, installationStore.installations))
+const NARROW_BUILD_LIMIT = 2
+const newBuildTileFitsNarrow = computed(() => builds.value.length < NARROW_BUILD_LIMIT)
+const buildRowSize = computed(() => builds.value.length + (showNewBuildSlot.value ? 1 : 0))
 const narrowBuildIds = computed(() => {
   const [latest, ...rest] = builds.value
   if (!latest) return new Set<string>()
-  const second = rest.find((build) => isCloudBuild(build)) ?? rest[0]
+  const second =
+    rest.find((build) => isInUse(build)) ?? rest.find((build) => isCloudBuild(build)) ?? rest[0]
   return new Set([latest.id, ...(second ? [second.id] : [])])
 })
 const openableBuilds = computed(() =>
@@ -113,44 +134,10 @@ function buildStatus(build: Installation) {
 }
 
 const { state: appsState, apps, loadApps } = useHomeApps()
-const appsEnabled = computed(() => appsState.value !== 'checking' && appsState.value !== 'off')
-
-const state = ref<LoadState>('loading')
-const workflows = ref<CatalogWorkflow[]>([])
-const carouselIsLoading = computed(() =>
-  appsState.value === 'off'
-    ? state.value === 'loading'
-    : appsState.value === 'checking' || appsState.value === 'loading'
-)
 
 function coversOf(app: AppCard): readonly AppCover[] {
   return app.covers
 }
-
-function thumbnailOf(workflow: CatalogWorkflow): readonly AppCover[] {
-  return workflow.thumbnailUrl
-    ? [{ url: workflow.thumbnailUrl, stillUrl: workflow.thumbnailUrl }]
-    : []
-}
-
-async function loadWorkflows(): Promise<void> {
-  state.value = 'loading'
-  try {
-    workflows.value = await window.api.listHomeWorkflows()
-    state.value = workflows.value.length > 0 ? 'ready' : 'unavailable'
-  } catch {
-    workflows.value = []
-    state.value = 'unavailable'
-  }
-}
-
-function openWorkflow(workflow: CatalogWorkflow): void {
-  void window.api.openCatalogWorkflow(workflow.id)
-}
-
-watch(appsState, (now) => {
-  if (now === 'off') void loadWorkflows()
-})
 
 onMounted(() => {
   if (installationStore.installations.length === 0) void installationStore.fetchInstallations()
@@ -180,12 +167,9 @@ onMounted(() => {
         {{ t('home.title') }}
       </h1>
 
-      <section
-        class="mt-[74px]"
-        :aria-label="appsState === 'off' ? t('home.exampleWorkflows') : t('sidebar.apps')"
-      >
+      <section class="mt-[74px]" :aria-label="t('sidebar.apps')">
         <div
-          v-if="carouselIsLoading"
+          v-if="appsState === 'loading'"
           class="flex h-75 items-center justify-center gap-2.5"
           aria-busy="true"
           data-testid="home-carousel-loading"
@@ -221,27 +205,8 @@ onMounted(() => {
           :title="t('apps.emptyTitle')"
           :text="t('apps.emptyBody')"
         />
-        <HomeCarousel
-          v-else-if="state === 'ready'"
-          kind="workflows"
-          :cards="workflows"
-          :pictures-of="thumbnailOf"
-          @open="openWorkflow"
-        />
-        <div
-          v-else
-          class="flex h-75 flex-col items-center justify-center gap-3"
-          data-testid="home-workflows-unavailable"
-        >
-          <p class="m-0 text-[13px]/5 text-muted-foreground">
-            {{ t('home.workflowsUnavailable') }}
-          </p>
-          <Button type="button" variant="secondary" size="md" @click="loadWorkflows">
-            {{ t('home.retry') }}
-          </Button>
-        </div>
 
-        <div v-if="appsEnabled" class="mt-[30px] flex justify-center">
+        <div class="mt-[30px] flex justify-center">
           <Button
             type="button"
             variant="muted-textonly"
@@ -264,30 +229,50 @@ onMounted(() => {
         data-home-tour="home-builds"
       >
         <div class="mb-2.5 flex h-6 items-center justify-between">
-          <h2 id="home-builds" class="m-0" :class="SECTION_TITLE_CLASS">
-            {{ t('sidebar.builds') }}
+          <h2 id="home-builds" class="m-0">
+            <Tooltip :text="t('home.allBuilds')">
+              <Button
+                type="button"
+                variant="muted-textonly"
+                size="unset"
+                :class="[SECTION_TITLE_CLASS, BUILDS_TITLE_LINK_CLASS]"
+                data-testid="home-all-builds"
+                @click="emit('show-builds')"
+              >
+                {{ t('sidebar.builds') }}
+                <ChevronRight :size="13" aria-hidden="true" />
+              </Button>
+            </Tooltip>
           </h2>
-          <Button
-            type="button"
-            variant="muted-textonly"
-            size="unset"
-            :class="TEXT_LINK_CLASS"
-            data-testid="home-all-builds"
-            @click="emit('show-builds')"
+          <div
+            v-if="!installationStore.loading && (!showNewBuildSlot || !newBuildTileFitsNarrow)"
+            class="shrink-0"
+            :class="showNewBuildSlot && 'hidden @max-[56rem]/home-builds:block'"
           >
-            {{ t('home.allBuilds') }}
-            <ChevronRight :size="13" aria-hidden="true" />
-          </Button>
+            <Tooltip :text="t('sidebar.newBuild')">
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                class="size-8 rounded-lg"
+                :aria-label="t('sidebar.newBuild')"
+                data-testid="home-new-build-button"
+                @click="emit('new-build')"
+              >
+                <Plus :size="16" aria-hidden="true" />
+              </Button>
+            </Tooltip>
+          </div>
         </div>
         <ul
           class="m-0 grid list-none gap-[15px] p-0"
           :class="[
-            builds.length > 2 ? 'grid-cols-3 @max-[56rem]/home-builds:grid-cols-2' : 'grid-cols-2',
+            buildRowSize > 2 ? 'grid-cols-3 @max-[56rem]/home-builds:grid-cols-2' : 'grid-cols-2',
             '@max-[40rem]/home-builds:grid-cols-1'
           ]"
         >
           <li
-            v-for="(build, index) in builds"
+            v-for="build in builds"
             :key="build.id"
             class="min-w-0"
             :class="!narrowBuildIds.has(build.id) && '@max-[56rem]/home-builds:hidden'"
@@ -296,13 +281,16 @@ onMounted(() => {
             <HomeBuildCard
               :build="build"
               :status="buildStatus(build)"
-              :tone="buildTones[index]!"
               :auto-start="autoStart.startsOnOpen(build.id)"
               :logged-out="authStore.isSignedOut"
               @open="openBuild(build)"
             />
           </li>
-          <li v-if="showNewBuildSlot" class="min-w-0">
+          <li
+            v-if="showNewBuildSlot"
+            class="min-w-0"
+            :class="!newBuildTileFitsNarrow && '@max-[56rem]/home-builds:hidden'"
+          >
             <HomeNewBuildTile @open="emit('new-build')" />
           </li>
         </ul>

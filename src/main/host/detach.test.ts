@@ -8,7 +8,9 @@ const mocks = vi.hoisted(() => ({
   confirmBeforeClosing: false,
   appsBuildRunning: false,
   agrees: true,
-  asked: [] as { spec: { message: string; details?: { items: string[] }[] } }[],
+  asked: [] as {
+    spec: { message: string; confirmStyle?: string; details?: { items: string[] }[] }
+  }[],
   stopAppsBuilds: vi.fn(async () => {}),
   keepComfyRunning: undefined as boolean | undefined
 }))
@@ -343,6 +345,9 @@ describe('closing the last Desktop window while an app uses a ComfyUI Desktop st
     expect(mocks.asked.map((asked) => asked.spec.message)).toEqual([
       'Close this window? This stops ComfyUI and quits Artify.'
     ])
+    expect(mocks.asked[0]?.spec.confirmStyle, 'closing deletes nothing, so it is white').toBe(
+      'primary'
+    )
     expect(win.closed).toBe(false)
     expect(mocks.stopAppsBuilds).not.toHaveBeenCalled()
   })
@@ -529,6 +534,9 @@ describe('quitting while a ComfyUI runs with no window', () => {
         'Quit Desktop? This will close the running ComfyUI instance.'
       ])
       expect(mocks.asked[0]?.spec.details?.[0]?.items).toEqual(['Studio'])
+      expect(mocks.asked[0]?.spec.confirmStyle, 'Quit deletes nothing, so it is white').toBe(
+        'primary'
+      )
       expect(performQuit).toHaveBeenCalledTimes(1)
     })
 
