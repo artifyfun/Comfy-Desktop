@@ -574,9 +574,7 @@ onMounted(async () => {
     void (async () => {
       let answer: { cleared: boolean } | { defer: true }
       try {
-        answer = (await confirmLeavingRuns())
-          ? await answerCloseRequest()
-          : { cleared: false }
+        answer = (await confirmLeavingRuns()) ? await answerCloseRequest() : { cleared: false }
       } catch (err) {
         // Never leave main's close promise hanging on a renderer exception
         // (e.g. the new confirmLeavingRuns dialog or answerCloseRequest fail).
